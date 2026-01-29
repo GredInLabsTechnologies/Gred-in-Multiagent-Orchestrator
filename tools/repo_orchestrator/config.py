@@ -57,7 +57,7 @@ MAX_BYTES = 250000
 # CORS (default to local dashboard/dev origins; override with ORCH_CORS_ORIGINS)
 _cors_env = os.environ.get(
     "ORCH_CORS_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:6834,http://127.0.0.1:6834",
+    "https://localhost:5173,https://127.0.0.1:5173,https://localhost:4173,https://127.0.0.1:4173,https://localhost:6834,https://127.0.0.1:6834",
 )
 CORS_ORIGINS = [origin.strip() for origin in _cors_env.split(",") if origin.strip()]
 

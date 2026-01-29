@@ -9,6 +9,8 @@ import ctypes
 import time
 
 UI_FONT = "Segoe UI"
+HEADER_STYLE = "Header.TLabel"
+ICON_FILE = "orchestrator_icon.ico"
 
 def is_admin():
     try:
@@ -26,7 +28,7 @@ class InstallerWizard:
         # Style
         self.style = ttk.Style()
         self.style.configure("TButton", padding=5)
-        self.style.configure("Header.TLabel", font=(UI_FONT, 12, "bold"))
+        self.style.configure(HEADER_STYLE, font=(UI_FONT, 12, "bold"))
         self.style.configure("Action.TLabel", font=(UI_FONT, 10))
         
         self.install_dir = tk.StringVar(value=os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "GredRepoOrchestrator"))
@@ -39,7 +41,7 @@ class InstallerWizard:
     def create_frames(self):
         # Frame 0: Welcome
         f0 = ttk.Frame(self.root, padding=20)
-        ttk.Label(f0, text="Instalación Profesional de GIL Orchestrator", style="Header.TLabel").pack(pady=(0, 20))
+        ttk.Label(f0, text="Instalación Profesional de GIL Orchestrator", style=HEADER_STYLE).pack(pady=(0, 20))
         ttk.Label(f0, text="Este asistente realizará una instalación limpia y autocontenida.", font=(UI_FONT, 10, "italic")).pack(pady=5)
         ttk.Label(f0, text="Nueva Arquitectura Standalone:\n- Cero servicios en segundo plano.\n- Cero procesos 'zombie'.\n- Cierre total al salir.", wraplength=400).pack(pady=15)
         ttk.Label(f0, text="Haga clic en Siguiente para comenzar la purga e instalación.").pack(side="bottom", pady=20)
@@ -47,7 +49,7 @@ class InstallerWizard:
 
         # Frame 1: Directory Selection
         f1 = ttk.Frame(self.root, padding=20)
-        ttk.Label(f1, text="Carpeta de Destino", style="Header.TLabel").pack(pady=(0, 20))
+        ttk.Label(f1, text="Carpeta de Destino", style=HEADER_STYLE).pack(pady=(0, 20))
         ttk.Label(f1, text="Se recomienda mantener la ruta por defecto para actualizaciones:").pack(pady=5)
         
         dir_frame = ttk.Frame(f1)
@@ -61,7 +63,7 @@ class InstallerWizard:
 
         # Frame 2: Progress
         f2 = ttk.Frame(self.root, padding=20)
-        ttk.Label(f2, text="Instalando...", style="Header.TLabel").pack(pady=(0, 20))
+        ttk.Label(f2, text="Instalando...", style=HEADER_STYLE).pack(pady=(0, 20))
         self.progress = ttk.Progressbar(f2, length=400, mode='determinate')
         self.progress.pack(pady=20)
         self.status_label = ttk.Label(f2, text="Iniciando limpieza...")
@@ -70,7 +72,7 @@ class InstallerWizard:
 
         # Frame 3: Finish
         f3 = ttk.Frame(self.root, padding=20)
-        ttk.Label(f3, text="¡Listo para Usar!", style="Header.TLabel").pack(pady=(0, 20))
+        ttk.Label(f3, text="¡Listo para Usar!", style=HEADER_STYLE).pack(pady=(0, 20))
         ttk.Label(f3, text="GIL Orchestrator se ha instalado correctamente.", font=(UI_FONT, 10)).pack(pady=10)
         ttk.Label(f3, text="Use el acceso directo del escritorio para lanzar la aplicación.\nAl cerrarla, todos los procesos se detendrán sistemáticamente.", wraplength=400).pack(pady=20)
         self.frames.append(f3)
@@ -118,56 +120,16 @@ class InstallerWizard:
             self.install_dir.set(directory)
 
     def start_installation(self):
-        dest = Path(self.install_dir.get())
         try:
+            dest = self._get_safe_install_path()
+            
             # 1. PURGE PHASE
-            self.update_progress(10, "Terminando procesos antiguos...")
-            subprocess.run(["taskkill", "/F", "/IM", "Gred_Orchestrator.exe", "/T"], capture_output=True)
-            subprocess.run(["taskkill", "/F", "/IM", "uvicorn.exe", "/T"], capture_output=True)
-            
-            self.update_progress(20, "Eliminando servicios antiguos...")
-            subprocess.run(["sc.exe", "stop", "GILOrchestrator"], capture_output=True)
-            subprocess.run(["sc.exe", "delete", "GILOrchestrator"], capture_output=True)
-            
-            # Wait a bit for file locks to release
-            time.sleep(1)
-            
-            self.update_progress(30, "Limpiando archivos antiguos...")
-            # Save .env if it exists
-            env_content = None
-            env_file = dest / ".env"
-            if env_file.exists():
-                env_content = env_file.read_text()
-            
-            # Wipe directory (Try a few times if locked)
-            if dest.exists():
-                for _ in range(3):
-                    try:
-                        shutil.rmtree(dest)
-                        break
-                    except Exception:
-                        time.sleep(1)
-            
-            dest.mkdir(parents=True, exist_ok=True)
+            self._purge_old_version(dest)
             
             # 2. INSTALL PHASE
             self.update_progress(50, "Desplegando nuevos archivos...")
-            src_root = Path(__file__).parent.parent
+            self._copy_files(dest)
             
-            # Copy all bundled content
-            for folder in ["tools", "scripts"]:
-                if (src_root / folder).exists():
-                    shutil.copytree(src_root / folder, dest / folder)
-            
-            if (src_root / "orchestrator_icon.ico").exists():
-                shutil.copy2(src_root / "orchestrator_icon.ico", dest / "orchestrator_icon.ico")
-            
-            # Restore or create .env
-            if env_content:
-                (dest / ".env").write_text(env_content)
-            elif (src_root / ".env").exists():
-                shutil.copy2(src_root / ".env", dest / ".env")
-
             # 3. SHORTCUTS
             self.update_progress(80, "Creando accesos directos...")
             self.create_desktop_shortcut(dest)
@@ -175,9 +137,80 @@ class InstallerWizard:
             self.update_progress(100, "Instalación completada.")
             self.next_step()
             
+        except ValueError as ve:
+            messagebox.showwarning("Aviso", str(ve))
+            self.prev_step()
         except Exception as e:
             messagebox.showerror("Error Crítico", f"No se pudo completar la instalación:\n{str(e)}")
             self.root.quit()
+
+    def _get_safe_install_path(self) -> Path:
+        raw_path = self.install_dir.get().strip()
+        if not raw_path:
+            raise ValueError("La ruta de instalación no puede estar vacía.")
+            
+        # Resolve to absolute path to prevent traversal/injection tricks
+        dest = Path(raw_path).resolve()
+        
+        # Block dangerous system paths
+        forbidden_roots = ["C:\\", "C:\\Windows", "C:\\Users", "C:\\ProgramData"]
+        abs_str = str(dest).lower()
+        for root in forbidden_roots:
+            if abs_str == root.lower():
+                raise ValueError(f"No se permite instalar directamente en {root}.")
+        
+        if len(dest.parts) < 2:
+            raise ValueError("Ruta de instalación demasiado corta o inválida.")
+            
+        return dest
+
+    def _purge_old_version(self, dest: Path):
+        self.update_progress(10, "Terminando procesos antiguos...")
+        subprocess.run(["taskkill", "/F", "/IM", "Gred_Orchestrator.exe", "/T"], capture_output=True)
+        subprocess.run(["taskkill", "/F", "/IM", "uvicorn.exe", "/T"], capture_output=True)
+        
+        self.update_progress(20, "Eliminando servicios antiguos...")
+        subprocess.run(["sc.exe", "stop", "GILOrchestrator"], capture_output=True)
+        subprocess.run(["sc.exe", "delete", "GILOrchestrator"], capture_output=True)
+        
+        time.sleep(1)
+        self.update_progress(30, "Limpiando archivos antiguos...")
+        
+        # Safe handling of existing artifacts
+        env_content = None
+        env_file = dest / ".env"
+        if env_file.exists():
+            try:
+                env_content = env_file.read_text(encoding="utf-8")
+            except Exception: pass
+        
+        if dest.exists() and dest.is_dir():
+            for _ in range(3):
+                try:
+                    shutil.rmtree(dest)
+                    break
+                except Exception:
+                    time.sleep(1)
+        
+        dest.mkdir(parents=True, exist_ok=True)
+        if env_content:
+            (dest / ".env").write_text(env_content, encoding="utf-8")
+
+    def _copy_files(self, dest: Path):
+        src_root = Path(__file__).parent.parent
+        
+        for folder in ["tools", "scripts"]:
+            src_dir = src_root / folder
+            if src_dir.exists() and src_dir.is_dir():
+                shutil.copytree(src_dir, dest / folder)
+        
+        icon_src = src_root / ICON_FILE
+        if icon_src.exists():
+            shutil.copy2(icon_src, dest / ICON_FILE)
+            
+        # Fallback for .env if not restored from previous install
+        if not (dest / ".env").exists() and (src_root / ".env").exists():
+            shutil.copy2(src_root / ".env", dest / ".env")
 
     def update_progress(self, value, text):
         self.progress["value"] = value
@@ -199,7 +232,7 @@ class InstallerWizard:
                 # Standard approach for PyInstaller is to let the user find the EXE, 
                 # but we want it 'professional'.
                 f.write(f"URL=file:///{str(exe_path).replace('\\', '/')}\n")
-                f.write(f"IconFile={dest / 'orchestrator_icon.ico'}\n")
+                f.write(f"IconFile={dest / ICON_FILE}\n")
                 f.write("IconIndex=0\n")
         except Exception:
             pass

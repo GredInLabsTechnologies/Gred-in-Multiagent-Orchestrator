@@ -61,10 +61,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown: Cancel cleanup task
     cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
+    await cleanup_task
 
 app = FastAPI(title="Repo Orchestrator", version="1.0.0", lifespan=lifespan)
 
@@ -74,9 +71,9 @@ async def snapshot_cleanup_loop():
         try:
             await asyncio.sleep(60)
             SnapshotService.cleanup_old_snapshots()
-        except asyncio.CancelledError:
-            break
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.error(f"Error in snapshot cleanup: {str(e)}")
             await asyncio.sleep(10) # Avoid tight loop on errors
 
 
@@ -390,10 +387,15 @@ async def get_file(path: str, start_line: int = Query(1, ge=1), end_line: int = 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create snapshot: {str(e)}")
 
+    def read_snapshot(p: Path) -> list[str]:
+        with open(p, 'r', encoding='utf-8', errors='replace') as f_obj:
+            return f_obj.readlines()
+            
     try:
-        with open(snapshot_path, 'r', encoding='utf-8', errors='replace') as f:
-            lines = f.readlines()
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+        loop = asyncio.get_running_loop()
+        lines = await loop.run_in_executor(None, read_snapshot, snapshot_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
     if end_line - start_line + 1 > MAX_LINES:
         end_line = start_line + MAX_LINES - 1
@@ -410,28 +412,47 @@ async def get_file(path: str, start_line: int = Query(1, ge=1), end_line: int = 
     audit_log(path, f"{start_line}-{end_line}", hashlib.sha256(content.encode()).hexdigest(), operation="READ_SNAPSHOT", actor=token)
     return content
 
+def _should_skip_dir(d: str) -> bool:
+    return d.startswith('.') or d in ["node_modules", ".venv", ".git", *SEARCH_EXCLUDE_DIRS]
+
+def _perform_search(base_dir: Path, q: str, ext: Optional[str]) -> list[dict]:
+    hits = []
+    for root, dirs, files in os.walk(base_dir):
+        dirs[:] = [d for d in dirs if not _should_skip_dir(d)]
+        for f in files:
+            if ext and not f.endswith(ext):
+                continue
+            file_path = Path(root) / f
+            if file_path.suffix not in ALLOWED_EXTENSIONS:
+                continue
+            hits.extend(_search_in_file(file_path, base_dir, q))
+            if len(hits) >= 50:
+                return hits[:50]
+    return hits
+
+def _search_in_file(file_path: Path, base_dir: Path, q: str) -> list[dict]:
+    file_hits = []
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f_obj:
+            for i, line in enumerate(f_obj):
+                if q in line:
+                    file_hits.append({
+                        "file": str(file_path.relative_to(base_dir)),
+                        "line": i + 1,
+                        "content": redact_sensitive_data(line.strip())
+                    })
+                    if len(file_hits) >= 50:
+                        break
+    except Exception:
+        pass
+    return file_hits
+
 @app.get("/search")
 async def search(q: str = Query(..., min_length=3, max_length=128), ext: Optional[str] = None, token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
     base_dir = get_active_repo_dir()
-    hits = []
-    for root, dirs, files in os.walk(base_dir):
-        dirs[:] = [
-            d for d in dirs
-            if not d.startswith('.') and d not in ["node_modules", ".venv", ".git", *SEARCH_EXCLUDE_DIRS]
-        ]
-        for f in files:
-            if ext and not f.endswith(ext): continue
-            file_path = Path(root) / f
-            if file_path.suffix not in ALLOWED_EXTENSIONS: continue
-            try:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f_obj:
-                    for i, line in enumerate(f_obj):
-                        if q in line:
-                            hits.append({"file": str(file_path.relative_to(base_dir)), "line": i + 1, "content": redact_sensitive_data(line.strip())})
-                            if len(hits) >= 50: return {"results": hits, "truncated": True}
-            except Exception:
-                continue
-    return {"results": hits, "truncated": False}
+    loop = asyncio.get_running_loop()
+    hits = await loop.run_in_executor(None, _perform_search, base_dir, q, ext)
+    return {"results": hits, "truncated": len(hits) >= 50}
 
 @app.get("/diff", response_class=PlainTextResponse)
 async def get_diff(base: str = "main", head: str = "HEAD", token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
