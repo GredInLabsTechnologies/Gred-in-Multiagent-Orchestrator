@@ -1,69 +1,46 @@
 import os
 import time
-import hashlib
-import subprocess
-import re
-from typing import List, Optional
-import shutil
-from dataclasses import dataclass
-from pathlib import Path
-
-from fastapi import FastAPI, Depends, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse, Response, FileResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 import asyncio
+import logging
 from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
 
 from tools.repo_orchestrator.config import (
     BASE_DIR,
-    REPO_ROOT_DIR,
-    REPO_REGISTRY_PATH,
-    VITAMINIZE_PACKAGE,
-    MAX_LINES,
-    MAX_BYTES,
-    ALLOWED_EXTENSIONS,
-    ALLOWLIST_REQUIRE,
-    AUDIT_LOG_PATH,
     CORS_ORIGINS,
-    SUBPROCESS_TIMEOUT,
-    SEARCH_EXCLUDE_DIRS,
 )
-from tools.repo_orchestrator.security import (
-    verify_token,
-    validate_path,
-    redact_sensitive_data,
-    audit_log,
-    check_rate_limit,
-    load_security_db,
-    save_security_db,
-    load_repo_registry,
-    save_repo_registry,
-    get_active_repo_dir,
-)
-
-from tools.repo_orchestrator.services.git_service import GitService
 from tools.repo_orchestrator.services.snapshot_service import SnapshotService
-from tools.repo_orchestrator.services.system_service import SystemService
+from tools.repo_orchestrator.routes import register_routes
 
-# --- CONSTANTS ---
-ERR_REPO_NOT_FOUND = "Repo no encontrado"
-ERR_REPO_OUT_OF_BASE = "Repo fuera de la base permitida"
-ERR_PATH_NOT_FILE = "Path is not a file."
-ERR_FILE_TOO_LARGE = "File too large."
-TRUNCATED_MARKER = "\n# ... [TRUNCATED] ...\n"
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("orchestrator")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Ensure snapshot dir exists and start cleanup task
+    # Startup: Perform infrastructure checks and initialization without side-effects on import
+    logger.info("Starting Repo Orchestrator...")
+    
+    if not BASE_DIR.exists():
+        logger.error(f"BASE_DIR {BASE_DIR} does not exist!")
+        raise RuntimeError(f"BASE_DIR {BASE_DIR} does not exist!")
+
+    app.state.start_time = time.time()
+    
+    # Ensure snapshot dir exists
     SnapshotService.ensure_snapshot_dir()
+    
+    # Start background cleanup task
     cleanup_task = asyncio.create_task(snapshot_cleanup_loop())
+    
     yield
-    # Shutdown: Cancel cleanup task
+    
+    # Shutdown: Clean up resources
+    logger.info("Shutting down Repo Orchestrator...")
     cleanup_task.cancel()
     await cleanup_task
-
-app = FastAPI(title="Repo Orchestrator", version="1.0.0", lifespan=lifespan)
 
 async def snapshot_cleanup_loop():
     """Background task to delete old snapshots every minute."""
@@ -72,10 +49,14 @@ async def snapshot_cleanup_loop():
             await asyncio.sleep(60)
             SnapshotService.cleanup_old_snapshots()
         except Exception as e:
-            import logging
-            logging.error(f"Error in snapshot cleanup: {str(e)}")
-            await asyncio.sleep(10) # Avoid tight loop on errors
+            logger.error(f"Error in snapshot cleanup: {str(e)}")
+            await asyncio.sleep(10)
 
+app = FastAPI(
+    title="Repo Orchestrator", 
+    version="1.0.0", 
+    lifespan=lifespan
+)
 
 @app.middleware("http")
 async def allow_options_preflight(request: Request, call_next):
@@ -99,389 +80,24 @@ async def allow_options_preflight(request: Request, call_next):
         response.headers.setdefault("Access-Control-Allow-Credentials", "true")
     return response
 
-# CORS handled by middleware above to avoid preflight failures with auth
+# Register all API routes
+register_routes(app)
 
-# Startup check
-if not BASE_DIR.exists():
-    raise RuntimeError(f"BASE_DIR {BASE_DIR} does not exist!")
-
-start_time = time.time()
-
-@dataclass
-class RepoEntry:
-    name: str
-    path: str
-
-def _list_repos() -> list[RepoEntry]:
-    repos_data = GitService.list_repos(REPO_ROOT_DIR)
-    return [RepoEntry(name=r["name"], path=r["path"]) for r in repos_data]
-
-def _ensure_repo_registry(repos: list[RepoEntry]) -> dict:
-    registry = load_repo_registry()
-    registry_paths = {Path(r).resolve() for r in registry.get("repos", [])}
-    for repo in repos:
-        repo_path = Path(repo.path).resolve()
-        if repo_path not in registry_paths:
-            registry["repos"].append(str(repo_path))
-    if registry.get("active_repo"):
-        active = Path(registry["active_repo"]).resolve()
-        if active not in registry_paths:
-            registry["active_repo"] = str(active)
-    save_repo_registry(registry)
-    return registry
-
-def _vitaminize_repo(target_repo: Path) -> list[str]:
-    created = []
-    for rel in VITAMINIZE_PACKAGE:
-        source = BASE_DIR / rel
-        dest = target_repo / rel
-        if source.is_dir():
-            if dest.exists():
-                continue
-            shutil.copytree(source, dest)
-            created.append(str(dest))
-        elif source.is_file():
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if dest.exists():
-                continue
-            shutil.copy2(source, dest)
-            created.append(str(dest))
-    return created
-
-class VitaminizeResponse(BaseModel):
-    status: str
-    created_files: list[str]
-    active_repo: Optional[str] = None
-
-class StatusResponse(BaseModel):
-    version: str
-    uptime_seconds: float
-
-class UiStatusResponse(BaseModel):
-    version: str
-    uptime_seconds: float
-    allowlist_count: int
-    last_audit_line: Optional[str] = None
-    service_status: str
-
-# Helper functions
-class FileWriteRequest(BaseModel):
-    path: str
-    content: str
-
-def _get_service_status(service_name: str = "GILOrchestrator") -> str:
-    return SystemService.get_status(service_name)
-
-def _tail_audit_lines(limit: int = 200) -> list[str]:
-    if not AUDIT_LOG_PATH.exists():
-        return []
-    try:
-        lines = AUDIT_LOG_PATH.read_text(encoding="utf-8", errors="ignore").splitlines()
-        return lines[-limit:]
-    except Exception:
-        return []
-
-# Routes
-@app.get("/status", response_model=StatusResponse)
-async def get_status(token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    return {
-        "version": "1.0.0",
-        "uptime_seconds": time.time() - start_time
-    }
-
-@app.get("/ui/status", response_model=UiStatusResponse)
-async def get_ui_status(request: Request, token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    audit_lines = _tail_audit_lines(limit=1)
-    base_dir = get_active_repo_dir()
-    allowed_paths = get_allowed_paths(base_dir) if ALLOWLIST_REQUIRE else {}
-    
-    # Real Integrity Check
-    is_healthy = base_dir.exists() and os.access(base_dir, os.R_OK)
-    status_str = "RUNNING" if is_healthy else "DEGRADED"
-    
-    # Agent detection for the dashboard
-    user_agent = request.headers.get("User-Agent", "").lower()
-    agent_label = "ChatGPT" if "openai" in user_agent or "gpt" in user_agent else "Dashboard"
-    
-    return {
-        "version": "1.0.0",
-        "uptime_seconds": time.time() - start_time,
-        "allowlist_count": len(allowed_paths),
-        "last_audit_line": audit_lines[-1] if audit_lines else None,
-        "service_status": f"{status_str} ({agent_label})",
-    }
-
-@app.get("/ui/audit")
-async def get_ui_audit(limit: int = Query(200, ge=10, le=500), token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    return {
-        "lines": _tail_audit_lines(limit=limit),
-    }
-
-@app.get("/ui/allowlist")
-async def get_ui_allowlist(token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    base_dir = get_active_repo_dir()
-    allowed_paths = get_allowed_paths(base_dir)
-    items = serialize_allowlist(allowed_paths)
-    for item in items:
-        try:
-            item["path"] = str(Path(item["path"]).relative_to(base_dir))
-        except Exception:
-            continue
-    return {"paths": items}
-
-@app.get("/ui/repos")
-async def list_repos(token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    repos = _list_repos()
-    registry = _ensure_repo_registry(repos)
-    active_repo = registry.get("active_repo")
-    return {
-        "root": str(REPO_ROOT_DIR),
-        "active_repo": active_repo,
-        "repos": [r.__dict__ for r in repos],
-    }
-
-@app.get("/ui/repos/active")
-async def get_active_repo(token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    registry = load_repo_registry()
-    return {"active_repo": registry.get("active_repo")}
-
-@app.post("/ui/repos/open")
-async def open_repo(path: str = Query(...), token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    repo_path = Path(path).resolve()
-    if not str(repo_path).startswith(str(REPO_ROOT_DIR)):
-        raise HTTPException(status_code=400, detail=ERR_REPO_OUT_OF_BASE)
-    if not repo_path.exists():
-        raise HTTPException(status_code=404, detail=ERR_REPO_NOT_FOUND)
-    
-    # TD-004: Decoupled open_repo (Server-only/Agnostic)
-    # No longer attempts to spawn GUI processes like explorer.exe
-    audit_log("UI", "OPEN_REPO", str(repo_path), actor=token)
-    
-    return {"status": "success", "message": "Repo signaled for opening (server-agnostic)"}
-
-@app.post("/ui/repos/select")
-async def select_repo(path: str = Query(...), token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    repo_path = Path(path).resolve()
-    if not str(repo_path).startswith(str(REPO_ROOT_DIR)):
-        raise HTTPException(status_code=400, detail=ERR_REPO_OUT_OF_BASE)
-    if not repo_path.exists():
-        raise HTTPException(status_code=404, detail=ERR_REPO_NOT_FOUND)
-        
-    registry = load_repo_registry()
-    registry["active_repo"] = str(repo_path)
-    save_repo_registry(registry)
-    
-    audit_log("REPO", "SELECT", str(repo_path), actor=token)
-    return {"status": "success", "active_repo": str(repo_path)}
-
-@app.get("/ui/security/events")
-async def get_security_events(token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    db = load_security_db()
-    return {
-        "panic_mode": db.get("panic_mode", False),
-        "events": db.get("recent_events", [])
-    }
-
-@app.post("/ui/security/resolve")
-async def resolve_security(action: str = Query(...), token: str = Depends(verify_token)):
-    if action != "clear_panic":
-        raise HTTPException(status_code=400, detail="Invalid action")
-    
-    db = load_security_db()
-    db["panic_mode"] = False
-    for event in db.get("recent_events", []):
-        event["resolved"] = True
-    save_security_db(db)
-    
-    audit_log("SECURITY", "PANIC_CLEARED", "SUCCESS", actor=token)
-    return {"status": "panic cleared"}
-
-@app.get("/ui/service/status")
-async def get_service_status(token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    return {"status": SystemService.get_status()}
-
-@app.post("/ui/service/restart")
-async def restart_service(token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    success = SystemService.restart(actor=token)
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to restart service")
-    return {"status": "restarting"}
-
-@app.post("/ui/service/stop")
-async def stop_service(token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    success = SystemService.stop(actor=token)
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to stop service")
-    return {"status": "stopping"}
-
-@app.post("/ui/repos/vitaminize", response_model=VitaminizeResponse)
-async def vitaminize_repo(path: str = Query(...), token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    repo_path = Path(path).resolve()
-    if not str(repo_path).startswith(str(REPO_ROOT_DIR)):
-        raise HTTPException(status_code=400, detail=ERR_REPO_OUT_OF_BASE)
-    if not repo_path.exists():
-        raise HTTPException(status_code=404, detail=ERR_REPO_NOT_FOUND)
-        
-    created = _vitaminize_repo(repo_path)
-    
-    # Auto-activate after vitaminize
-    registry = load_repo_registry()
-    registry["active_repo"] = str(repo_path)
-    save_repo_registry(registry)
-    
-    audit_log("REPO", "VITAMINIZE", str(repo_path), actor=token)
-    return {
-        "status": "success",
-        "created_files": created,
-        "active_repo": str(repo_path)
-    }
-
-def _walk_tree(target: Path, max_depth: int) -> list[str]:
-    result = []
-    base_parts = len(target.parts)
-    for root, dirs, files in os.walk(target):
-        current_path = Path(root)
-        depth = len(current_path.parts) - base_parts
-        if depth > max_depth:
-            continue
-        dirs[:] = [
-            d for d in dirs
-            if not d.startswith('.') and d not in ["node_modules", ".venv", ".git", "dist", "build", *SEARCH_EXCLUDE_DIRS]
-        ]
-        for f in files:
-            file_path = current_path / f
-            if file_path.suffix in ALLOWED_EXTENSIONS:
-                result.append(str(file_path.relative_to(target)))
-                if len(result) >= 2000:
-                    return result
-    return result
-
-@app.get("/tree")
-async def get_tree(path: str = ".", max_depth: int = Query(3, le=6), token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    base_dir = get_active_repo_dir()
-    target = validate_path(path, base_dir)
-    if not target.is_dir():
-        raise HTTPException(status_code=400, detail="Path is not a directory.")
-
-    if ALLOWLIST_REQUIRE:
-        from tools.repo_orchestrator.security import get_allowed_paths, serialize_allowlist
-        allowed_paths = get_allowed_paths(base_dir)
-        files = [str(p.relative_to(target)) for p in allowed_paths if str(p).startswith(str(target))]
-        return {"files": sorted(set(files)), "truncated": False}
-    
-    # Use run_in_executor to avoid blocking the event loop with os.walk
-    loop = asyncio.get_running_loop()
-    files = await loop.run_in_executor(None, _walk_tree, target, max_depth)
-    return {"files": files, "truncated": len(files) >= 2000}
-
-@app.get("/file", response_class=PlainTextResponse)
-async def get_file(path: str, start_line: int = Query(1, ge=1), end_line: int = Query(MAX_LINES, ge=1), token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    base_dir = get_active_repo_dir()
-    target = validate_path(path, base_dir)
-    if not target.is_file(): raise HTTPException(status_code=400, detail="Path is not a file.")
-    if target.stat().st_size > 5 * 1024 * 1024: raise HTTPException(status_code=413, detail="File too large.")
-
-    # Snapshot mechanism: Copy file to temporary folder
-    try:
-        snapshot_path = SnapshotService.create_snapshot(target)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create snapshot: {str(e)}")
-
-    def read_snapshot(p: Path) -> list[str]:
-        with open(p, 'r', encoding='utf-8', errors='replace') as f_obj:
-            return f_obj.readlines()
-            
-    try:
-        loop = asyncio.get_running_loop()
-        lines = await loop.run_in_executor(None, read_snapshot, snapshot_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-    if end_line - start_line + 1 > MAX_LINES:
-        end_line = start_line + MAX_LINES - 1
-        truncated_marker = TRUNCATED_MARKER
-    else:
-        truncated_marker = ""
-    
-    content = "".join(lines[max(0, start_line-1):end_line])
-    content = redact_sensitive_data(content)
-    if len(content.encode('utf-8')) > MAX_BYTES:
-        content = content[:MAX_BYTES] + TRUNCATED_MARKER
-    else: content += truncated_marker
-    
-    audit_log(path, f"{start_line}-{end_line}", hashlib.sha256(content.encode()).hexdigest(), operation="READ_SNAPSHOT", actor=token)
-    return content
-
-def _should_skip_dir(d: str) -> bool:
-    return d.startswith('.') or d in ["node_modules", ".venv", ".git", *SEARCH_EXCLUDE_DIRS]
-
-def _perform_search(base_dir: Path, q: str, ext: Optional[str]) -> list[dict]:
-    hits = []
-    for root, dirs, files in os.walk(base_dir):
-        dirs[:] = [d for d in dirs if not _should_skip_dir(d)]
-        for f in files:
-            if ext and not f.endswith(ext):
-                continue
-            file_path = Path(root) / f
-            if file_path.suffix not in ALLOWED_EXTENSIONS:
-                continue
-            hits.extend(_search_in_file(file_path, base_dir, q))
-            if len(hits) >= 50:
-                return hits[:50]
-    return hits
-
-def _search_in_file(file_path: Path, base_dir: Path, q: str) -> list[dict]:
-    file_hits = []
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f_obj:
-            for i, line in enumerate(f_obj):
-                if q in line:
-                    file_hits.append({
-                        "file": str(file_path.relative_to(base_dir)),
-                        "line": i + 1,
-                        "content": redact_sensitive_data(line.strip())
-                    })
-                    if len(file_hits) >= 50:
-                        break
-    except Exception:
-        pass
-    return file_hits
-
-@app.get("/search")
-async def search(q: str = Query(..., min_length=3, max_length=128), ext: Optional[str] = None, token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    base_dir = get_active_repo_dir()
-    loop = asyncio.get_running_loop()
-    hits = await loop.run_in_executor(None, _perform_search, base_dir, q, ext)
-    return {"results": hits, "truncated": len(hits) >= 50}
-
-@app.get("/diff", response_class=PlainTextResponse)
-async def get_diff(base: str = "main", head: str = "HEAD", token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    base_dir = get_active_repo_dir()
-    try:
-        stdout = GitService.get_diff(base_dir, base, head)
-        content = redact_sensitive_data(stdout)
-        if len(content.encode('utf-8')) > MAX_BYTES: content = content[:MAX_BYTES] + TRUNCATED_MARKER
-        return content
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-# --- STATIC FILES & SPA ROUTING ---
-# Ensure this is after all API routes
+# Static Files & SPA Routing
 frontend_dist = BASE_DIR / "tools" / "orchestrator_ui" / "dist"
 if frontend_dist.exists():
     app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="assets")
 
     @app.get("/{full_path:path}")
     async def serve_spa(request: Request, full_path: str):
-        # Serve index.html for any route that isn't /ui/ or another API route
-        # This allows React Router to handle deep links
-        if full_path.startswith("ui/") or full_path.startswith("search") or full_path.startswith("status") or full_path.startswith("tree") or full_path.startswith("file") or full_path.startswith("diff"):
-            raise HTTPException(status_code=404)
+        # Prevent shadowing API routes (though register_routes should take precedence)
+        api_prefixes = ["ui/", "search", "status", "tree", "file", "diff"]
+        if any(full_path.startswith(p) for p in api_prefixes):
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
         
         index_file = frontend_dist / "index.html"
         if index_file.exists():
             return FileResponse(str(index_file))
-        raise HTTPException(status_code=404)
+        return JSONResponse(status_code=404, content={"detail": "Frontend index.html not found"})
 else:
-    import logging
-    logging.warning(f"Frontend dist not found at {frontend_dist}")
+    logger.warning(f"Frontend dist not found at {frontend_dist}")

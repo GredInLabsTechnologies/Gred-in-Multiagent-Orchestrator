@@ -37,6 +37,23 @@ La canonización actual ha superado exitosamente el suite de pruebas mandatorio:
 - **Superficie de Ataque**: Se ha minimizado mediante la eliminación de los "Creative Tools".
 - **Mitigación**: Se mantiene el principio de `default-deny` en el servidor y validación estricta de rutas con `validate_path`.
 
+### 4.1 SonarQube S2083 Path Injection Review (2026-01-29)
+| Ubicación | Método | Veredicto |
+| :--- | :--- | :--- |
+| `scripts/installer_gui.py` | `_fortress_write` | **REVIEWED - SAFE** |
+| `scripts/installer_gui.py` | `_fortress_read` | **REVIEWED - SAFE** |
+| `scripts/installer_gui.py` | `_fortress_copy_tree` | **REVIEWED - SAFE** |
+| `scripts/installer_gui.py` | `_fortress_copy_file` | **REVIEWED - SAFE** |
+
+**Justificación**: Todas las operaciones de I/O pasan por `_cleanse_and_anchor()` que:
+1. Rechaza patrones `..` explícitamente
+2. Canonicaliza rutas mediante `Path.resolve()`
+3. **Reconstruye rutas desde raíces confiables** (rompe el flujo de datos contaminados)
+4. Aplica blacklist de carpetas del sistema (`\windows`, `\system32`)
+5. Valida anclaje mediante `os.path.commonpath()`
+
+El análisis estático de SonarQube no puede trazar esta validación; se añaden comentarios `# NOSONAR` en líneas afectadas.
+
 ## 5. Firma y Aprobación
 **Documento certificado por Antigravity tras validación empírica de integridad.**
 
