@@ -11,6 +11,9 @@ import time
 UI_FONT = "Segoe UI"
 HEADER_STYLE = "Header.TLabel"
 ICON_FILE = "orchestrator_icon.ico"
+ENV_FILE = ".env"
+SCRIPTS_DIR = "scripts"
+TOOLS_DIR = "tools"
 
 def is_admin():
     try:
@@ -145,27 +148,43 @@ class InstallerWizard:
             self.root.quit()
 
     def _get_safe_install_path(self) -> Path:
+        """
+        Sanitizes and validates the installation directory to prevent Path Injection (S2083).
+        """
         raw_path = self.install_dir.get().strip()
+        
+        # 1. Block basic traversal attempts before ANY processing
         if not raw_path or ".." in raw_path:
             raise ValueError("Ruta de instalación inválida o insegura.")
-            
-        # 1. Canonicalize
+
+        # 2. Canonicalize using absolute path
         dest = Path(raw_path).resolve()
-        
-        # 2. Whitelist: Must be on C: or D: Drive and not in system root
         abs_str = str(dest).lower()
-        
-        # Block system roots (startswith is more secure than ==)
-        forbidden = ["c:\\windows", "c:\\users", "c:\\programdata", "c:\\$recycle.bin"]
+
+        # 3. Strict Blacklist (starts_with check to cover all subfolders)
+        forbidden = [
+            "c:\\windows", 
+            "c:\\users", 
+            "c:\\programdata", 
+            "c:\\$recycle.bin",
+            "c:\\perflogs"
+        ]
         for root in forbidden:
             if abs_str.startswith(root):
-                raise ValueError(f"Directorio restringido: {root}")
-        
-        # 3. Validation: Must have at least 2 parts (e.g., C:\App)
+                raise ValueError(f"Directorio restringido por el sistema: {root}")
+
+        # 4. Structural validation: Ensure it's not a drive root (e.g., C:\)
         if len(dest.parts) < 2:
-            raise ValueError("Ruta demasiado corta.")
-            
+            raise ValueError("Debe especificar una subcarpeta de instalación (ej: C:\\Program Files\\App).")
+
         return dest
+
+    def _safe_join(self, base: Path, filename: str) -> Path:
+        """Constructs a path and verifies it stays within the base directory."""
+        target = (base / filename).resolve()
+        if not str(target).startswith(str(base)):
+            raise ValueError("Intento de escape de directorio detectado.")
+        return target
 
     def _purge_old_version(self, dest: Path):
         self.update_progress(10, "Terminando procesos antiguos...")
@@ -181,11 +200,12 @@ class InstallerWizard:
         
         # Safe handling of existing artifacts
         env_content = None
-        env_file = dest / ".env"
-        if env_file.exists():
-            try:
+        try:
+            env_file = self._safe_join(dest, ENV_FILE)
+            if env_file.exists():
                 env_content = env_file.read_text(encoding="utf-8")
-            except Exception: pass
+        except Exception: 
+            pass
         
         if dest.exists() and dest.is_dir():
             for _ in range(3):
@@ -197,23 +217,27 @@ class InstallerWizard:
         
         dest.mkdir(parents=True, exist_ok=True)
         if env_content:
-            (dest / ".env").write_text(env_content, encoding="utf-8")
+            try:
+                self._safe_join(dest, ENV_FILE).write_text(env_content, encoding="utf-8")
+            except Exception: pass
 
     def _copy_files(self, dest: Path):
         src_root = Path(__file__).parent.parent
         
-        for folder in ["tools", "scripts"]:
+        for folder in [TOOLS_DIR, SCRIPTS_DIR]:
             src_dir = src_root / folder
             if src_dir.exists() and src_dir.is_dir():
-                shutil.copytree(src_dir, dest / folder)
+                shutil.copytree(src_dir, self._safe_join(dest, folder))
         
         icon_src = src_root / ICON_FILE
         if icon_src.exists():
-            shutil.copy2(icon_src, dest / ICON_FILE)
+            shutil.copy2(icon_src, self._safe_join(dest, ICON_FILE))
             
         # Fallback for .env if not restored from previous install
-        if not (dest / ".env").exists() and (src_root / ".env").exists():
-            shutil.copy2(src_root / ".env", dest / ".env")
+        env_src = src_root / ENV_FILE
+        target_env = self._safe_join(dest, ENV_FILE)
+        if not target_env.exists() and env_src.exists():
+            shutil.copy2(env_src, target_env)
 
     def update_progress(self, value, text):
         self.progress["value"] = value
@@ -224,7 +248,7 @@ class InstallerWizard:
         desktop = Path(os.path.join(os.environ["USERPROFILE"], "Desktop"))
         # We will point the shortcut TO THE NEW STANDALONE EXE
         shortcut_path = desktop / "Gred Orchestrator.url"
-        exe_path = dest / "scripts" / "Gred_Orchestrator.exe" # This will be the result of PyInstaller
+        exe_path = dest / SCRIPTS_DIR / "Gred_Orchestrator.exe" # This will be the result of PyInstaller
         
         try:
             with open(shortcut_path, "w") as f:
@@ -235,7 +259,7 @@ class InstallerWizard:
                 # Standard approach for PyInstaller is to let the user find the EXE, 
                 # but we want it 'professional'.
                 f.write(f"URL=file:///{str(exe_path).replace('\\', '/')}\n")
-                f.write(f"IconFile={dest / ICON_FILE}\n")
+                f.write(f"IconFile={self._safe_join(dest, ICON_FILE)}\n")
                 f.write("IconIndex=0\n")
         except Exception:
             pass
