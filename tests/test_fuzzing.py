@@ -1,5 +1,5 @@
 import os
-import random
+import secrets
 import string
 import pytest
 from fastapi.testclient import TestClient
@@ -14,12 +14,13 @@ from tools.repo_orchestrator.security import rate_limit_store
 
 client = TestClient(app)
 
-def random_string(length=10):
-    letters = string.ascii_letters + string.digits + string.punctuation + " "
-    return ''.join(random.choice(letters) for i in range(length))
+def random_string(length: int = 10) -> str:
+    """Generate a cryptographically secure random string for fuzzing."""
+    alphabet = string.ascii_letters + string.digits + string.punctuation + " "
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 def test_endpoint_fuzzing():
-    """Rigor: Perform 1000+ random injections to verify stability."""
+    """Rigor: Perform 100+ random injections to verify stability."""
     endpoints = [
         ("GET", "/status"),
         ("GET", "/ui/status"),
@@ -32,16 +33,16 @@ def test_endpoint_fuzzing():
     
     token = "fuzz-token"
     
-    for _ in range(100): # Reduced iterations for test speed, can be increased in full run
-        method, url = random.choice(endpoints)
+    for _ in range(100):
+        method, url = secrets.choice(endpoints)
         
-        # Randomized params
+        # Randomized params using secure random
         params = {
-            "path": random_string(random.randint(1, 50)),
-            "q": random_string(random.randint(1, 20)),
-            "max_depth": random.randint(-10, 100),
-            "start_line": random.randint(-100, 1000),
-            "end_line": random.randint(-100, 1000),
+            "path": random_string(secrets.randbelow(50) + 1),
+            "q": random_string(secrets.randbelow(20) + 1),
+            "max_depth": secrets.randbelow(110) - 10,
+            "start_line": secrets.randbelow(1100) - 100,
+            "end_line": secrets.randbelow(1100) - 100,
         }
         
         headers = {"Authorization": f"Bearer {token}"}
