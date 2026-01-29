@@ -3,7 +3,6 @@ import secrets
 from pathlib import Path
 
 import sys
-from pathlib import Path
 
 def _get_base_dir() -> Path:
     # Caso PyInstaller: el exe vive en el directorio de instalación
