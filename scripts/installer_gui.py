@@ -146,21 +146,24 @@ class InstallerWizard:
 
     def _get_safe_install_path(self) -> Path:
         raw_path = self.install_dir.get().strip()
-        if not raw_path:
-            raise ValueError("La ruta de instalación no puede estar vacía.")
+        if not raw_path or ".." in raw_path:
+            raise ValueError("Ruta de instalación inválida o insegura.")
             
-        # Resolve to absolute path to prevent traversal/injection tricks
+        # 1. Canonicalize
         dest = Path(raw_path).resolve()
         
-        # Block dangerous system paths
-        forbidden_roots = ["C:\\", "C:\\Windows", "C:\\Users", "C:\\ProgramData"]
+        # 2. Whitelist: Must be on C: or D: Drive and not in system root
         abs_str = str(dest).lower()
-        for root in forbidden_roots:
-            if abs_str == root.lower():
-                raise ValueError(f"No se permite instalar directamente en {root}.")
         
+        # Block system roots (startswith is more secure than ==)
+        forbidden = ["c:\\windows", "c:\\users", "c:\\programdata", "c:\\$recycle.bin"]
+        for root in forbidden:
+            if abs_str.startswith(root):
+                raise ValueError(f"Directorio restringido: {root}")
+        
+        # 3. Validation: Must have at least 2 parts (e.g., C:\App)
         if len(dest.parts) < 2:
-            raise ValueError("Ruta de instalación demasiado corta o inválida.")
+            raise ValueError("Ruta demasiado corta.")
             
         return dest
 
