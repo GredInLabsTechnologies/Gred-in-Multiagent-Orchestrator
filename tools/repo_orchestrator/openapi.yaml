@@ -1,0 +1,111 @@
+openapi: 3.1.0
+info:
+  title: Repo Orchestrator API (Snapshot Read-Only)
+  description: >
+    Acceso seguro y de solo lectura a través de snapshots temporales. 
+    Todas las operaciones de escritura están bloqueadas por diseño. 
+    Requiere autenticación Bearer Token.
+  version: 1.0.0
+servers:
+  - url: https://orch.giltech.dev
+    description: Orquestador producción (Cloudflare Tunnel)
+paths:
+  /status:
+    get:
+      summary: Estado del servicio
+      operationId: getStatus
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: {type: string}
+                  uptime_seconds: {type: number}
+  /tree:
+    get:
+      summary: Listar estructura del repo
+      operationId: getTree
+      parameters:
+        - name: path
+          in: query
+          schema: {type: string}
+        - name: max_depth
+          in: query
+          schema: {type: integer, default: 3}
+      responses:
+        '200':
+          description: Estructura de archivos
+  /file:
+    get:
+      summary: Leer contenido (Snapshot)
+      operationId: getFile
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema: {type: string}
+        - name: start_line
+          in: query
+          schema: {type: integer, default: 1}
+        - name: end_line
+          in: query
+          schema: {type: integer, default: 500}
+      responses:
+        '200':
+          description: Contenido del archivo redactado y seguro
+  /search:
+    get:
+      summary: Búsqueda global en código
+      operationId: searchCode
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Resultados de búsqueda
+  /diff:
+    get:
+      summary: Estadísticas de cambios git
+      operationId: getDiff
+      responses:
+        '200':
+          description: Resumen de diferencias
+  /ui/repos:
+    get:
+      summary: Listar repositorios disponibles en la base
+      operationId: listRepos
+      responses:
+        '200':
+          description: Listado de rutas base
+  /ui/repos/select:
+    post:
+      summary: Cambiar el repositorio activo
+      operationId: selectRepo
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Repositorio activado
+  /ui/service/stop:
+    post:
+      summary: Detener el servicio remotamente
+      operationId: stopService
+      responses:
+        '200':
+          description: Apagado iniciado
+components:
+  schemas: {}
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+security:
+  - bearerAuth: []

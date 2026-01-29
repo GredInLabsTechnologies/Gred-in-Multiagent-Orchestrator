@@ -1,0 +1,34 @@
+import pytest
+from pathlib import Path
+from tools.repo_orchestrator.security.validation import _normalize_path, validate_path
+from fastapi import HTTPException
+
+def test_normalize_path_traversal():
+    base_dir = Path("/tmp/base").resolve()
+    # Mocking path traversal
+    requested = "../../etc/passwd"
+    result = _normalize_path(requested, base_dir)
+    assert result is None
+
+def test_normalize_path_valid():
+    base_dir = Path(".").resolve()
+    requested = "tools/repo_orchestrator/main.py"
+    result = _normalize_path(requested, base_dir)
+    assert result is not None
+    assert str(result).endswith("main.py")
+
+def test_validate_path_denied():
+    base_dir = Path("/tmp/base").resolve()
+    with pytest.raises(HTTPException) as exc:
+        validate_path("../outside.txt", base_dir)
+    assert exc.value.status_code == 403
+
+def test_security_redaction():
+    from tools.repo_orchestrator.security.audit import redact_sensitive_data
+    content = "My key is sk-123456789012345678901234567890123456789012345678"
+    redacted = redact_sensitive_data(content)
+    assert "[REDACTED]" in redacted
+    assert "sk-" not in redacted
+
+if __name__ == "__main__":
+    pytest.main([__file__])

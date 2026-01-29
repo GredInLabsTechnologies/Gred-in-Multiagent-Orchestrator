@@ -22,3 +22,17 @@ true_hashes.txt
 integrity_*.log
 hardcoded_paths_evidence*.csv
 verify_index.html
+*.exe
+status.txt
+status_v2.txt
+security_db.json
+repo_registry.json
+*test_out.txt
+*results_utf8.txt
+*build_err*.txt
+*build_log*.txt
+*build_result.txt
+*changed_files.txt
+*lint_*.txt
+*lint_report.json
+*tsc_errors.txt
