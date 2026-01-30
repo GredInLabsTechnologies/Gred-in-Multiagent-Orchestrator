@@ -55,9 +55,14 @@ jobs:
         working-directory: tools/orchestrator_ui
         run: |
           npm run test:coverage || echo "No tests found or tests failed, but continuing to report partial coverage"
-          if [ -f coverage/lcov.info ]; then
-            # Fix paths in lcov.info to be relative to the root for SonarCloud
-            sed -i 's|SF:|SF:tools/orchestrator_ui/|g' coverage/lcov.info
+          if [ -d coverage ]; then
+            ls -R coverage
+            if [ -f coverage/lcov.info ]; then
+              # Fix paths in lcov.info to be relative to the root for SonarCloud
+              sed -i 's|SF:|SF:tools/orchestrator_ui/|g' coverage/lcov.info
+              echo "LCOV report head:"
+              head -n 20 coverage/lcov.info
+            fi
           fi
 
       - name: SonarCloud Scan
