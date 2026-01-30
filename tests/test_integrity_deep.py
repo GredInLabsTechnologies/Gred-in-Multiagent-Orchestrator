@@ -7,11 +7,11 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent.parent.resolve()
 
 def calculate_sha256(file_path):
-    sha256_hash = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest()
+    """Calculate SHA256 hash with normalized line endings for cross-platform consistency."""
+    content = Path(file_path).read_bytes()
+    # Normalize CRLF to LF for consistent hashes across Windows/Linux
+    normalized = content.replace(b'\r\n', b'\n')
+    return hashlib.sha256(normalized).hexdigest()
 
 def calculate_entropy(s: str) -> float:
     if not s: return 0
