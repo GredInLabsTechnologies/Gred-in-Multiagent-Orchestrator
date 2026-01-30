@@ -345,7 +345,30 @@ describe('MaintenanceIsland', () => {
         vi.mocked(URL.createObjectURL).mockClear()
         fireEvent.click(exportButton)
 
+
         // Should not call createObjectURL when logs are empty
         expect(URL.createObjectURL).not.toHaveBeenCalled()
+    })
+
+    it('applies correct class for SYSTEM logs', () => {
+        vi.mocked(useAuditLog).mockReturnValue({
+            ...mockAuditLog,
+            logs: ['2026-01-30 SYSTEM initialization complete'],
+            rawLogs: ['2026-01-30 SYSTEM initialization complete']
+        })
+        render(<MaintenanceIsland />)
+        const systemLog = screen.getByText('2026-01-30 SYSTEM initialization complete')
+        expect(systemLog).toHaveClass('text-amber-400')
+    })
+
+    it('applies default class for generic logs without keywords', () => {
+        vi.mocked(useAuditLog).mockReturnValue({
+            ...mockAuditLog,
+            logs: ['2026-01-30 Some generic log message'],
+            rawLogs: ['2026-01-30 Some generic log message']
+        })
+        render(<MaintenanceIsland />)
+        const genericLog = screen.getByText('2026-01-30 Some generic log message')
+        expect(genericLog).toHaveClass('text-slate-400')
     })
 })
