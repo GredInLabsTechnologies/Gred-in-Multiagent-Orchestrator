@@ -1,0 +1,98 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\shilo\Documents\GitHub\gred_orchestrator
+plugins: anyio-4.12.1, cov-7.0.0
+collecting ... collected 4 items
+
+tests/test_api_open_repo.py::test_api_open_repo_decoupled FAILED         [ 25%]
+tests/test_api_td002.py::test_api_vitaminize_success FAILED              [ 50%]
+tests/test_integrity_deep.py::test_critical_file_integrity PASSED        [ 75%]
+tests/test_security_hardened.py::test_auth_rejection_triggers_panic FAILED [100%]
+tests/test_security_hardened.py::test_auth_rejection_triggers_panic ERROR [100%]
+
+=================================== ERRORS ====================================
+___________ ERROR at teardown of test_auth_rejection_triggers_panic ___________
+tests\conftest.py:18: in test_client
+    with client:
+         ^^^^^^
+..\..\..\AppData\Roaming\Python\Python314\site-packages\starlette\testclient.py:699: in __exit__
+    self.exit_stack.close()
+C:\Python314\Lib\contextlib.py:627: in close
+    self.__exit__(None, None, None)
+C:\Python314\Lib\contextlib.py:619: in __exit__
+    raise exc
+C:\Python314\Lib\contextlib.py:604: in __exit__
+    if cb(*exc_details):
+       ^^^^^^^^^^^^^^^^
+C:\Python314\Lib\contextlib.py:482: in _exit_wrapper
+    callback(*args, **kwds)
+..\..\..\AppData\Roaming\Python\Python314\site-packages\starlette\testclient.py:692: in wait_shutdown
+    portal.call(self.wait_shutdown)
+..\..\..\AppData\Roaming\Python\Python314\site-packages\anyio\from_thread.py:334: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\concurrent\futures\_base.py:450: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\concurrent\futures\_base.py:395: in __get_result
+    raise self._exception
+..\..\..\AppData\Roaming\Python\Python314\site-packages\anyio\from_thread.py:259: in _call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\AppData\Roaming\Python\Python314\site-packages\starlette\testclient.py:739: in wait_shutdown
+    await receive()
+..\..\..\AppData\Roaming\Python\Python314\site-packages\starlette\testclient.py:729: in receive
+    self.task.result()
+C:\Python314\Lib\concurrent\futures\_base.py:441: in result
+    raise CancelledError()
+E   concurrent.futures._base.CancelledError
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/status "HTTP/1.1 200 OK"
+---------------------------- Captured log teardown ----------------------------
+INFO     orchestrator:main.py:43 Shutting down Repo Orchestrator...
+================================== FAILURES ===================================
+________________________ test_api_open_repo_decoupled _________________________
+tests\test_api_open_repo.py:33: in test_api_open_repo_decoupled
+    with patch('tools.repo_orchestrator.main.Path.exists', return_value=True):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\unittest\mock.py:1487: in __enter__
+    self.target = self.getter()
+                  ^^^^^^^^^^^^^
+C:\Python314\Lib\pkgutil.py:473: in resolve_name
+    result = getattr(result, p)
+             ^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'tools.repo_orchestrator.main' has no attribute 'Path'
+----------------------------- Captured log setup ------------------------------
+INFO     orchestrator:main.py:26 Starting Repo Orchestrator...
+_________________________ test_api_vitaminize_success _________________________
+C:\Python314\Lib\unittest\mock.py:1429: in patched
+    with self.decoration_helper(patched,
+C:\Python314\Lib\contextlib.py:141: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+C:\Python314\Lib\unittest\mock.py:1411: in decoration_helper
+    arg = exit_stack.enter_context(patching)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\contextlib.py:530: in enter_context
+    result = _enter(cm)
+             ^^^^^^^^^^
+C:\Python314\Lib\unittest\mock.py:1503: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\unittest\mock.py:1473: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'tools.repo_orchestrator.main' from 'C:\\Users\\shilo\\Documents\\GitHub\\gred_orchestrator\\tools\\repo_orchestrator\\main.py'> does not have the attribute '_vitaminize_repo'
+_____________________ test_auth_rejection_triggers_panic ______________________
+tests\test_security_hardened.py:23: in test_auth_rejection_triggers_panic
+    assert response.status_code == 401
+E   assert 200 == 401
+E    +  where 200 = <Response [200 OK]>.status_code
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/status "HTTP/1.1 200 OK"
+=========================== short test summary info ===========================
+FAILED tests/test_api_open_repo.py::test_api_open_repo_decoupled - AttributeE...
+FAILED tests/test_api_td002.py::test_api_vitaminize_success - AttributeError:...
+FAILED tests/test_security_hardened.py::test_auth_rejection_triggers_panic - ...
+ERROR tests/test_security_hardened.py::test_auth_rejection_triggers_panic - c...
+==================== 3 failed, 1 passed, 1 error in 0.31s =====================
