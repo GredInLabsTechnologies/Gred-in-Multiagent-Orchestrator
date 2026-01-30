@@ -17,12 +17,10 @@ async def override_verify_token():
 
 app.dependency_overrides[verify_token] = override_verify_token
 
-client = TestClient(app)
-
-@patch('tools.repo_orchestrator.main.REPO_ROOT_DIR', new=Path("/mock/repos"))
-@patch('tools.repo_orchestrator.main.audit_log')
+@patch('tools.repo_orchestrator.routes.REPO_ROOT_DIR', new=Path("/mock/repos"))
+@patch('tools.repo_orchestrator.routes.audit_log')
 @patch('subprocess.Popen')
-def test_api_open_repo_decoupled(mock_popen, mock_audit):
+def test_api_open_repo_decoupled(mock_popen, mock_audit, test_client):
     """
     Verifies that open_repo is decoupled:
     1. Returns 200 OK.
@@ -31,10 +29,10 @@ def test_api_open_repo_decoupled(mock_popen, mock_audit):
     """
     repo_path_str = "/mock/repos/myrepo"
     
-    # Mock existence and resolution
-    with patch('tools.repo_orchestrator.main.Path.exists', return_value=True):
-        with patch('tools.repo_orchestrator.main.Path.resolve', return_value=Path(repo_path_str)):
-            response = client.post(f"/ui/repos/open?path={repo_path_str}")
+    # Mock pathlib.Path.exists and resolve directly
+    with patch('pathlib.Path.exists', return_value=True):
+        with patch('pathlib.Path.resolve', return_value=Path(repo_path_str)):
+            response = test_client.post(f"/ui/repos/open?path={repo_path_str}")
             
             assert response.status_code == 200
             data = response.json()
