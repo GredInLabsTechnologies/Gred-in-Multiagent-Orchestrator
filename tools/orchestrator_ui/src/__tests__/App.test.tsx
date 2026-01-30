@@ -46,6 +46,6 @@ describe('App', () => {
         const rootDiv = container.firstChild as HTMLElement
 
         expect(rootDiv).toHaveClass('min-h-screen')
-        expect(rootDiv).toHaveClass('dark:bg-[#1d1d1f]')
+        expect(rootDiv).toHaveClass('bg-[#000000]')
     })
 })
