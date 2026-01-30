@@ -33,6 +33,12 @@ jobs:
       - name: Run tests with coverage
         run: |
           python -m pytest --cov=tools --cov=scripts --cov-report=xml:coverage.xml --cov-report=term
+          if [ -f coverage.xml ]; then
+            echo "Coverage report found. First 20 lines:"
+            head -n 20 coverage.xml
+          else
+            echo "Coverage report NOT found!"
+          fi
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@383f7e52eae3ab0510c3cb0e7d9d150bbaeab838 # v3
