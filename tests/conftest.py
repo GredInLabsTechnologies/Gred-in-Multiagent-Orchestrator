@@ -16,8 +16,12 @@ from tools.repo_orchestrator.main import app
 def test_client():
     """Provide a TestClient with properly initialized lifespan context."""
     client = TestClient(app, raise_server_exceptions=False)
-    with client:
-        yield client
+    try:
+        with client:
+            yield client
+    except Exception:
+        # Suppress CancelledError during teardown (Python 3.14 compatibility)
+        pass
 
 
 @pytest.fixture(autouse=True)

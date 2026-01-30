@@ -10,11 +10,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from tools.repo_orchestrator.main import app
 from tools.repo_orchestrator.security import verify_token
 
-# Mock token dependency
-async def override_verify_token():
-    return "test_actor"
 
-app.dependency_overrides[verify_token] = override_verify_token
+@pytest.fixture(autouse=True)
+def override_auth():
+    """Re-apply auth override before each test (survives conftest cleanup)."""
+    async def override_verify_token():
+        return "test_actor"
+    app.dependency_overrides[verify_token] = override_verify_token
+    yield
+
 
 @pytest.fixture(autouse=True)
 def setup_headless():

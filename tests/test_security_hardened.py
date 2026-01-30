@@ -3,6 +3,7 @@ import os
 import time
 import json
 from pathlib import Path
+from fastapi import HTTPException
 
 # Set environment variables for testing BEFORE importing the app
 os.environ.setdefault("ORCH_REPO_ROOT", str(Path(__file__).parent.parent.resolve()))
@@ -69,7 +70,7 @@ def test_path_traversal_shield_exhaustive(test_client):
     ]
     
     for path in malicious_paths:
-        with pytest.raises(ValueError):
+        with pytest.raises(HTTPException):
             validate_path(path, base_dir)
 
 def test_redaction_rigor(test_client):
