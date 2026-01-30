@@ -11,16 +11,8 @@ os.environ["ORCH_REPO_ROOT"] = str(Path(__file__).parent.parent.resolve())
 from tools.repo_orchestrator.main import app
 from tools.repo_orchestrator.security import validate_path, redact_sensitive_data, load_security_db, save_security_db
 
-# Initialize TestClient with lifespan context
-client = TestClient(app, raise_server_exceptions=False)
 
-@pytest.fixture(scope="module", autouse=True)
-def setup_client():
-    """Ensure the app lifespan is properly initialized."""
-    with client:
-        yield
-
-def test_auth_rejection_triggers_panic():
+def test_auth_rejection_triggers_panic(test_client):
     """ASVS L3: Verify that unauthorized attempts trigger Panic Mode."""
     # Reset security DB
     db = load_security_db()
@@ -28,7 +20,7 @@ def test_auth_rejection_triggers_panic():
     save_security_db(db)
     
     # Attempt unauthorized access
-    response = client.get("/status", headers={"Authorization": "Bearer invalid-token"})
+    response = test_client.get("/status", headers={"Authorization": "Bearer invalid-token"})
     assert response.status_code == 401
     
     # Check if panic mode was triggered
@@ -36,19 +28,19 @@ def test_auth_rejection_triggers_panic():
     assert db["panic_mode"] is True
     assert any(e["type"] == "PANIC_TRIGGER" for e in db["recent_events"])
 
-def test_panic_mode_isolation():
+def test_panic_mode_isolation(test_client):
     """ASVS L3: Verify that only the resolution route is available during Panic Mode."""
     db = load_security_db()
     db["panic_mode"] = True
     save_security_db(db)
     
     # Try normal route
-    response = client.get("/status", headers={"Authorization": "Bearer test-token-1234567890-very-secure"})
+    response = test_client.get("/status", headers={"Authorization": "Bearer test-token-1234567890-very-secure"})
     assert response.status_code == 503
     assert "System in LOCKDOWN" in response.text
     
     # Try resolution route
-    response = client.post("/ui/security/resolve?action=clear_panic", headers={"Authorization": "Bearer test-token-1234567890-very-secure"})
+    response = test_client.post("/ui/security/resolve?action=clear_panic", headers={"Authorization": "Bearer test-token-1234567890-very-secure"})
     assert response.status_code == 200
     
     # Verify cleanup
@@ -84,15 +76,15 @@ def test_redaction_rigor():
     random_secret = "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0"  # nosec: fake secret for testing (high entropy)
     """
     redacted = redact_sensitive_data(sensitive_content)
-    assert "***REDACTED" in redacted
+    assert "[REDACTED]" in redacted
     assert "sk-" not in redacted
     assert "ghp_" not in redacted
 
-def test_rate_limiting_functional():
+def test_rate_limiting_functional(test_client):
     """Verify that rapid requests are throttled."""
     # Reset limit store if possible or just spam
     for _ in range(110): # Limit is 100 per min in config
-        response = client.get("/status", headers={"Authorization": "Bearer test-token-1234567890-very-secure"})
+        response = test_client.get("/status", headers={"Authorization": "Bearer test-token-1234567890-very-secure"})
         if response.status_code == 429:
             break
     assert response.status_code == 429
