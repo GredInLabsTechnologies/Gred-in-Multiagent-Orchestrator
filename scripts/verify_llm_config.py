@@ -1,6 +1,7 @@
-import requests
 import json
 import time
+
+import requests
 
 URL = "http://localhost:1234/v1/chat/completions"
 HEADERS = {"Content-Type": "application/json"}
@@ -41,7 +42,9 @@ def log_speed(log_print, duration: float) -> None:
     elif duration < 10.0:
         log_print("[~] SPEED TEST: ACCEPTABLE (Maybe partial offload or large context)")
     else:
-        log_print("[!] SPEED TEST: SLOW (Check if 'Context Length' > 8192 or CPU offloading is happening)")
+        log_print(
+            "[!] SPEED TEST: SLOW (Check if 'Context Length' > 8192 or CPU offloading is happening)"
+        )
 
 
 def log_structured_output(log_print, content: str) -> None:
@@ -62,10 +65,14 @@ def log_adherence(log_print, content: str) -> None:
     elif "command" in lower_content and "xss" in lower_content:
         log_print("\n[SUCCESS] The model generated a structured payload.")
     else:
-        log_print("\n[WARNING] Model might be refusing or hallucinating. Check 'System Prompt' settings.")
+        log_print(
+            "\n[WARNING] Model might be refusing or hallucinating. Check 'System Prompt' settings."
+        )
 
     if "sorry" in lower_content or "cannot" in lower_content:
-        log_print("[FAIL] Model refused the request. Ensure 'System Prompt' overrides safety filters.")
+        log_print(
+            "[FAIL] Model refused the request. Ensure 'System Prompt' overrides safety filters."
+        )
 
 
 def handle_success(log_print, response, duration: float) -> None:
@@ -87,6 +94,7 @@ def handle_error(log_print, response) -> None:
 def verify_llm_config() -> None:
     payload = build_payload(SYSTEM_PROMPT, USER_PROMPT)
     with open("verification_log.txt", "w", encoding="utf-8") as log:
+
         def log_print(msg):
             print(msg)
             log.write(msg + "\n")

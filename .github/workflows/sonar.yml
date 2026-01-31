@@ -30,6 +30,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu118
 
+      - name: Security audit with pip-audit
+        run: |
+          pip install pip-audit
+          pip-audit --format json --output audit-report.json || true
+          pip-audit --format markdown --output audit-report.md || true
+          if [ -f audit-report.md ]; then
+            echo "### Security Audit Results" >> $GITHUB_STEP_SUMMARY
+            cat audit-report.md >> $GITHUB_STEP_SUMMARY
+          fi
+        continue-on-error: true
+
       - name: Run tests with coverage
         run: |
           python -m pytest --cov=tools --cov=scripts --cov-report=xml:coverage.xml --cov-report=term

@@ -1,5 +1,4 @@
 import os
-import sys
 from pathlib import Path
 
 # Setup environment
@@ -8,12 +7,15 @@ os.environ["ORCH_REPO_ROOT"] = str(Path(__file__).parent.resolve())
 os.environ["ORCH_HEADLESS"] = "true"
 
 from fastapi.testclient import TestClient
+
 from tools.repo_orchestrator.main import app
 from tools.repo_orchestrator.security import verify_token
+
 
 # Mock token dependency
 async def override_verify_token():
     return "test_actor"
+
 
 app.dependency_overrides[verify_token] = override_verify_token
 
@@ -24,7 +26,7 @@ client = TestClient(app)
 print("Test 1: Vitaminize invalid path")
 response = client.post("/ui/repos/vitaminize?path=C:/outside")
 print(f"  Status code: {response.status_code}")
-print(f"  Expected: 400")
+print("  Expected: 400")
 print(f"  Pass: {response.status_code == 400}")
 
 # Test 2: Check if route exists

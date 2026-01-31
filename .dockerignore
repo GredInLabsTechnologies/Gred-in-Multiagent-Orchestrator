@@ -1,0 +1,17 @@
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+venv_test/
+logs/
+htmlcov/
+coverage/
+*.log
+*.pyc
+.git/
+.idea/
+.vscode/
+node_modules/
+tools/orchestrator_ui/node_modules/

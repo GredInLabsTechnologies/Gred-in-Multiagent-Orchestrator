@@ -2,20 +2,22 @@ import os
 import shutil
 from pathlib import Path
 from typing import List, Optional
+
 from tools.repo_orchestrator.config import (
+    ALLOWED_EXTENSIONS,
     BASE_DIR,
     REPO_ROOT_DIR,
-    VITAMINIZE_PACKAGE,
-    ALLOWED_EXTENSIONS,
     SEARCH_EXCLUDE_DIRS,
+    VITAMINIZE_PACKAGE,
 )
+from tools.repo_orchestrator.models import RepoEntry
 from tools.repo_orchestrator.security import (
     load_repo_registry,
-    save_repo_registry,
     redact_sensitive_data,
+    save_repo_registry,
 )
 from tools.repo_orchestrator.services.git_service import GitService
-from tools.repo_orchestrator.models import RepoEntry
+
 
 class RepoService:
     @staticmethod
@@ -31,12 +33,12 @@ class RepoService:
             repo_path = Path(repo.path).resolve()
             if repo_path not in registry_paths:
                 registry["repos"].append(str(repo_path))
-        
+
         if registry.get("active_repo"):
             active = Path(registry["active_repo"]).resolve()
             if active not in registry_paths:
                 registry["active_repo"] = str(active)
-        
+
         save_repo_registry(registry)
         return registry
 
@@ -68,12 +70,15 @@ class RepoService:
             depth = len(current_path.parts) - base_parts
             if depth > max_depth:
                 continue
-            
+
             dirs[:] = [
-                d for d in dirs
-                if not d.startswith('.') and d not in ["node_modules", ".venv", ".git", "dist", "build", *SEARCH_EXCLUDE_DIRS]
+                d
+                for d in dirs
+                if not d.startswith(".")
+                and d
+                not in ["node_modules", ".venv", ".git", "dist", "build", *SEARCH_EXCLUDE_DIRS]
             ]
-            
+
             for f in files:
                 file_path = current_path / f
                 if file_path.suffix in ALLOWED_EXTENSIONS:
@@ -102,14 +107,16 @@ class RepoService:
     def _search_in_file(file_path: Path, base_dir: Path, q: str) -> List[dict]:
         file_hits = []
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f_obj:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f_obj:
                 for i, line in enumerate(f_obj):
                     if q in line:
-                        file_hits.append({
-                            "file": str(file_path.relative_to(base_dir)),
-                            "line": i + 1,
-                            "content": redact_sensitive_data(line.strip())
-                        })
+                        file_hits.append(
+                            {
+                                "file": str(file_path.relative_to(base_dir)),
+                                "line": i + 1,
+                                "content": redact_sensitive_data(line.strip()),
+                            }
+                        )
                         if len(file_hits) >= 50:
                             break
         except Exception:
@@ -118,4 +125,4 @@ class RepoService:
 
     @staticmethod
     def _should_skip_dir(d: str) -> bool:
-        return d.startswith('.') or d in ["node_modules", ".venv", ".git", *SEARCH_EXCLUDE_DIRS]
+        return d.startswith(".") or d in ["node_modules", ".venv", ".git", *SEARCH_EXCLUDE_DIRS]

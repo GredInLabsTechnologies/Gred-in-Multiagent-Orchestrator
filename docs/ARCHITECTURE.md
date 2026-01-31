@@ -884,6 +884,16 @@ graph TB
 2. **Docker Container** (recommended for portability)
 3. **Docker Compose** (multi-container if needed)
 
+**Scripts Linux añadidos:**
+- `scripts/start_orch.sh` - Lanzador principal Linux
+- `scripts/manage_service.sh` - Gestión de systemd
+- `scripts/vitaminize_repo.sh` - Activación de repositorios
+
+**Docker artifacts:**
+- `Dockerfile`
+- `docker-compose.yml`
+- `.dockerignore`
+
 ---
 
 ## Security Considerations

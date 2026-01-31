@@ -277,6 +277,31 @@ Este script:
 3. Inicia el backend FastAPI
 4. Sirve el frontend compilado
 
+### Modo Producción (Linux)
+
+```bash
+./scripts/start_orch.sh
+```
+
+Este script:
+1. Detecta el directorio base
+2. Autogenera ORCH_TOKEN si falta
+3. Verifica procesos previos en el puerto 9325
+4. Inicia FastAPI con uvicorn
+
+#### Systemd (opcional)
+
+```bash
+sudo ./scripts/manage_service.sh install
+sudo systemctl start gil-orchestrator
+```
+
+#### Docker (opcional)
+
+```bash
+docker compose up --build
+```
+
 ---
 
 ## Ejecutar Tests
@@ -612,6 +637,16 @@ taskkill /PID <PID> /F
 **Linux/macOS:**
 ```bash
 lsof -ti:6834 | xargs kill -9
+```
+
+#### 7. Permisos al instalar systemd
+
+Si el script `manage_service.sh` falla en Linux:
+
+```bash
+sudo ./scripts/manage_service.sh install
+sudo systemctl daemon-reload
+sudo systemctl start gil-orchestrator
 ```
 
 #### 3. Frontend no conecta con backend

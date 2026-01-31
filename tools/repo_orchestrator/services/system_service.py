@@ -1,5 +1,6 @@
-import subprocess
 import os
+import subprocess
+
 from tools.repo_orchestrator.config import SUBPROCESS_TIMEOUT
 from tools.repo_orchestrator.security import audit_log
 
@@ -132,4 +133,3 @@ class SystemService:
                 actor=actor,
             )
             return False
-

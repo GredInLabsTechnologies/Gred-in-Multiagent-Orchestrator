@@ -1,11 +1,11 @@
 import shutil
 from pathlib import Path
 
-root = Path('.')
-logs_dir = root / 'logs'
+root = Path(".")
+logs_dir = root / "logs"
 logs_dir.mkdir(exist_ok=True)
 
-patterns = ['test_*.txt', 'test_*.log', 'pytest_*.txt', 'pytest_*.log']
+patterns = ["test_*.txt", "test_*.log", "pytest_*.txt", "pytest_*.log"]
 moved_count = 0
 
 print(f"Cleaning root directory into {logs_dir}...")

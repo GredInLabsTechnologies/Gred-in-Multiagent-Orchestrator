@@ -1,30 +1,33 @@
 import os
 import secrets
+import sys
 from pathlib import Path
 
-import sys
 
 def _get_base_dir() -> Path:
     # Caso PyInstaller: el exe vive en el directorio de instalación
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    
+
     # Caso dev: buscamos el archivo sentinel repo_registry.json hacia arriba
     # Esto evita depender de un número fijo de 'parent'
     current = Path(__file__).resolve().parent
     for parent in current.parents:
         if (parent / "tools" / "repo_orchestrator" / "repo_registry.json").exists():
             return parent
-            
+
     # Fallback al directorio actual si no se encuentra
     return Path.cwd()
 
+
 BASE_DIR = _get_base_dir()
 REPO_ROOT_DIR = Path(os.environ.get("ORCH_REPO_ROOT", str(BASE_DIR.parent))).resolve()
-REPO_REGISTRY_PATH = Path(os.environ.get(
-    "ORCH_REPO_REGISTRY",
-    str(Path(__file__).parent / "repo_registry.json"),
-)).resolve()
+REPO_REGISTRY_PATH = Path(
+    os.environ.get(
+        "ORCH_REPO_REGISTRY",
+        str(Path(__file__).parent / "repo_registry.json"),
+    )
+).resolve()
 VITAMINIZE_PACKAGE = {
     "tools/repo_orchestrator",
     "tools/orchestrator_ui",
@@ -67,6 +70,7 @@ ORCH_TOKEN_FILE = Path(
     os.environ.get("ORCH_TOKEN_FILE", str(Path(__file__).parent / ".orch_token"))
 ).resolve()
 
+
 def _load_or_create_token() -> str:
     env_token = os.environ.get("ORCH_TOKEN", "").strip()
     if env_token:
@@ -88,6 +92,7 @@ def _load_or_create_token() -> str:
         pass
     os.environ["ORCH_TOKEN"] = token
     return token
+
 
 TOKENS = {_load_or_create_token()}
 

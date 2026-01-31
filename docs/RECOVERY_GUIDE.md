@@ -29,4 +29,9 @@ Critical data for migration/recovery:
    ```powershell
    ./scripts/vitaminize_repo.ps1 -RepoPath "C:/Path/To/NewRepo" -OrchToken "YOUR_TOKEN"
    ```
+
+   **Linux:**
+   ```bash
+   ./scripts/vitaminize_repo.sh -r "/path/to/new/repo" -t "YOUR_TOKEN"
+   ```
 4. **Cloudflare Exposure**: Point `orch.giltech.dev` to `127.0.0.1:9325`.

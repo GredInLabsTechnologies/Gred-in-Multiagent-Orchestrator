@@ -2,8 +2,8 @@ openapi: 3.1.0
 info:
   title: Repo Orchestrator API (Snapshot Read-Only)
   description: >
-    Acceso seguro y de solo lectura a través de snapshots temporales. 
-    Todas las operaciones de escritura están bloqueadas por diseño. 
+    Acceso seguro y de solo lectura a través de snapshots temporales.
+    Todas las operaciones de escritura están bloqueadas por diseño.
     Requiere autenticación Bearer Token.
   version: 1.0.0
 servers:

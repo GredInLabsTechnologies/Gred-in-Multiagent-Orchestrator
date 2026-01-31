@@ -2,8 +2,9 @@
 Gred-Repo-Orchestrator Integrity Check Script
 Refactored to reduce cognitive complexity (S3776)
 """
-import os
+
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -14,7 +15,7 @@ def check_json_file(path: Path, required_keys: list[str] | None = None) -> dict 
         print(f"[ERROR] Missing file: {path}")
         return None
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
             if required_keys:
                 for key in required_keys:
@@ -30,16 +31,12 @@ def validate_config_files(base_dir: Path) -> dict | None:
     """Validate JSON configuration files."""
     print("\n1. Validating JSON Configuration Files:")
     repo_registry = check_json_file(
-        base_dir / "tools" / "repo_orchestrator" / "repo_registry.json",
-        ["repos", "active_repo"]
+        base_dir / "tools" / "repo_orchestrator" / "repo_registry.json", ["repos", "active_repo"]
     )
-    check_json_file(
-        base_dir / "tools" / "repo_orchestrator" / "allowed_paths.json",
-        ["paths"]
-    )
+    check_json_file(base_dir / "tools" / "repo_orchestrator" / "allowed_paths.json", ["paths"])
     check_json_file(
         base_dir / "tools" / "repo_orchestrator" / "security_db.json",
-        ["panic_mode", "blacklist", "recent_events"]
+        ["panic_mode", "blacklist", "recent_events"],
     )
     return repo_registry
 
@@ -73,7 +70,12 @@ def is_excluded_directory(root: str) -> bool:
 
 def should_skip_file(file_path: Path) -> bool:
     """Check if file should be skipped from hardcoded path detection."""
-    skip_files = ["verify_integrity.py", "test_integrity_deep.py", "repo_registry.json", "config.py"]
+    skip_files = [
+        "verify_integrity.py",
+        "test_integrity_deep.py",
+        "repo_registry.json",
+        "config.py",
+    ]
     return file_path.name in skip_files
 
 
@@ -85,7 +87,7 @@ def is_code_file(filename: str) -> bool:
 def has_hardcoded_paths(file_path: Path) -> bool:
     """Check if a file contains hardcoded paths."""
     try:
-        content = file_path.read_text(encoding='utf-8', errors='ignore')
+        content = file_path.read_text(encoding="utf-8", errors="ignore")
         return "shilo" in content or "Documents\\GitHub" in content
     except Exception:
         return False
@@ -94,34 +96,34 @@ def has_hardcoded_paths(file_path: Path) -> bool:
 def scan_directory_for_hardcoded_paths(base_dir: Path) -> list[Path]:
     """Scan directory tree for files with hardcoded paths."""
     flagged_files: list[Path] = []
-    
+
     for root, _dirs, files in os.walk(base_dir):
         if is_excluded_directory(root):
             continue
-        
+
         for filename in files:
             if not is_code_file(filename):
                 continue
-            
+
             file_path = Path(root) / filename
             if should_skip_file(file_path):
                 continue
-            
+
             if has_hardcoded_paths(file_path):
                 flagged_files.append(file_path)
-    
+
     return flagged_files
 
 
 def check_hardcoded_paths(base_dir: Path) -> bool:
     """Search for hardcoded paths in code files."""
     print("\n4. Migration Check (Searching for missing file references):")
-    
+
     flagged_files = scan_directory_for_hardcoded_paths(base_dir)
-    
+
     for file_path in flagged_files:
         print(f"[ERROR] HARDCODED PATH DETECTED: {file_path}")
-    
+
     return len(flagged_files) > 0
 
 

@@ -6,7 +6,7 @@ Your goal is to generate high-quality, creative, and technical attack payloads f
 Constraints:
 1. Target: FastAPI, Python, Windows environment.
 2. Output: A JSON object with 'thought_process' (string), 'payloads' (array of strings), and 'status' ('SUCCESS', 'FAILURE', or 'PENDING').
-3. DO NOT use code-like syntax (e.g., * 1024 or +) inside JSON strings. 
+3. DO NOT use code-like syntax (e.g., * 1024 or +) inside JSON strings.
 4. DO NOT include header names like 'Authorization:' in the payload itself. Only the value.
 5. NO CONVERSATIONAL TEXT.
 6. Quality: Use advanced encodings, hex characters (e.g. \u0000), and traversal variations.
@@ -37,7 +37,7 @@ USER_PROMPTS = {
     Generate 5 patterns of request bursts to test rate limiting (100 req/min).
     Suggest "spiky" traffic patterns or header spoofing to bypass IP tracking.
     Output JSON list of strings only.
-    """
+    """,
 }
 
 SYSTEM_ADAPTIVE_ATTACKER = """

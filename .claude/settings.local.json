@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(pytest:*)",
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nchore: Fase 0 - Estabilización Crítica\n\n- Limpieza de directorio raíz: mover logs y archivos temporales a logs/\n- Actualizar .gitignore para ignorar archivos temporales de coverage y logs\n- Remover debug print statements en auth.py y reemplazar con logging seguro\n- Mejorar seguridad: no loggear tokens sensibles en auth.py\n\nResultados de tests:\n- 200 tests pasando\n- Cobertura de módulos core: 86-100%\n- Issues pendientes: 4 tests fallando \\(async lifecycle\\)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit:*)",
+      "Bash(pip install:*)",
+      "Bash(pip-audit:*)",
+      "Bash(copy requirements.txt requirements.txt.backup_fase1)",
+      "Bash(git push:*)",
+      "Bash(pre-commit install:*)"
+    ]
+  }
+}

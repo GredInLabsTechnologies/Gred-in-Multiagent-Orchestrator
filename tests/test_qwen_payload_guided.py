@@ -1,11 +1,14 @@
-import pytest
 import time
+
+import pytest
+
 from tests.llm.lm_studio_client import LMStudioClient, is_lm_studio_available
 from tests.llm.prompt_templates import SYSTEM_PAYLOAD_GENERATOR, USER_PROMPTS
 from tests.metrics.runtime_metrics import MetricsCollector
 
 # Configuration
 AUTH_TOKEN = "CHAOS_MONKEY_TOKEN_2026"
+
 
 @pytest.fixture(scope="module")
 def llm():
@@ -16,18 +19,25 @@ def llm():
 def llm_available():
     return is_lm_studio_available("http://localhost:1234/v1")
 
+
 @pytest.fixture(scope="module")
 def metrics():
     collector = MetricsCollector()
     yield collector
     collector.save_report("tests/metrics/payload_guided_report.json")
 
+
 def test_path_traversal_guided(llm, metrics, llm_available, test_client):
     """
     Test guided path traversal using LLM generated payloads.
     """
     if not llm_available:
-        payloads = ["../etc/passwd", "..\\..\\windows\\system32\\config\\sam", "....//....//etc/passwd", "%2e%2e/%2e%2e/etc/passwd"]
+        payloads = [
+            "../etc/passwd",
+            "..\\..\\windows\\system32\\config\\sam",
+            "....//....//etc/passwd",
+            "%2e%2e/%2e%2e/etc/passwd",
+        ]
     else:
         payloads = llm.generate_payloads(SYSTEM_PAYLOAD_GENERATOR, USER_PROMPTS["path_traversal"])
     assert len(payloads) > 0, "LLM failed to generate payloads"
@@ -41,12 +51,14 @@ def test_path_traversal_guided(llm, metrics, llm_available, test_client):
                 headers={"Authorization": f"Bearer {AUTH_TOKEN}"},
             )
             latency = time.time() - start_time
-            
+
             # Analyze results
             panic = response.status_code == 503
             # If we get 200/500 and the content looks leaked, it's a bypass
-            bypassed = response.status_code == 200 and ("root:" in response.text or "[extensions]" in response.text)
-            
+            bypassed = response.status_code == 200 and (
+                "root:" in response.text or "[extensions]" in response.text
+            )
+
             metrics.add_result(
                 suite="payload_guided",
                 endpoint="/file",
@@ -54,24 +66,32 @@ def test_path_traversal_guided(llm, metrics, llm_available, test_client):
                 status=response.status_code,
                 latency=latency,
                 panic=panic,
-                bypassed=bypassed
+                bypassed=bypassed,
             )
-            
+
             # Basic sanity: we expect 403 or 503 for malicious payloads
             # If 200, it's a critical failure of the security layer
-            assert response.status_code != 200 or not bypassed, f"CRITICAL: Payload {payload} bypassed protection!"
+            assert (
+                response.status_code != 200 or not bypassed
+            ), f"CRITICAL: Payload {payload} bypassed protection!"
 
-        except UnicodeEncodeError as e:
+        except UnicodeEncodeError:
             metrics.add_result("payload_guided", "/file", payload, 0, 0, False, False)
             print(f"Skipping payload due to encoding error: {payload}")
             continue
+
 
 def test_auth_bypass_guided(llm, metrics, llm_available, test_client):
     """
     Test guided authentication bypass.
     """
     if not llm_available:
-        payloads = ["invalid-token-1234567890", "Bearer invalid-token-1234567890", "".join(["A" for _ in range(32)]), "test-token-00000000000000000000000000000000"]
+        payloads = [
+            "invalid-token-1234567890",
+            "Bearer invalid-token-1234567890",
+            "".join(["A" for _ in range(32)]),
+            "test-token-00000000000000000000000000000000",
+        ]
     else:
         payloads = llm.generate_payloads(SYSTEM_PAYLOAD_GENERATOR, USER_PROMPTS["auth_bypass"])
     assert len(payloads) > 0
@@ -84,10 +104,10 @@ def test_auth_bypass_guided(llm, metrics, llm_available, test_client):
                 headers={"Authorization": f"Bearer {payload}"},
             )
             latency = time.time() - start_time
-            
+
             # 200 with a fake token is a bypass
             bypassed = response.status_code == 200
-            
+
             metrics.add_result(
                 suite="payload_guided",
                 endpoint="/status",
@@ -95,10 +115,14 @@ def test_auth_bypass_guided(llm, metrics, llm_available, test_client):
                 status=response.status_code,
                 latency=latency,
                 panic=False,
-                bypassed=bypassed
+                bypassed=bypassed,
             )
-            
-            assert response.status_code in [401, 403, 503], f"Security failure: Token {payload} allowed access (Status {response.status_code})"
-            
+
+            assert response.status_code in [
+                401,
+                403,
+                503,
+            ], f"Security failure: Token {payload} allowed access (Status {response.status_code})"
+
         except Exception:
             continue

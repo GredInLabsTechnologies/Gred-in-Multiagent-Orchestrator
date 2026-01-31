@@ -2,7 +2,7 @@ handover:
   version: "1.0.0"
   status: "PRODUCTION - STRICT READ-ONLY"
   verified_date: "2026-01-28"
-  
+
   service:
     path: "tools/repo_orchestrator"
     port: 9325
@@ -11,11 +11,11 @@ handover:
     traffic_type: "M2M (Machine-to-Machine)"
     environment: "INFRA_INTERNAL"
     repo_root_base: "YOUR_REPO_ROOT_PATH"
-    
+
   deployment:
     set_env_powershell: '$env:ORCH_TOKEN="TU_TOKEN_LARGO_Y_SEGURO"'
     start_command: 'uvicorn tools.repo_orchestrator.main:app --host 127.0.0.1 --port 9325'
-    
+
   security_guardrails:
     read_only: true # Strict Snapshot Read-Only mode enforced
     denylist_extensions: [".md", ".rst", ".adoc", ".txt", ".env", ".pem", ".key"]

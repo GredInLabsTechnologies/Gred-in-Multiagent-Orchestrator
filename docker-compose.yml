@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "9325:9325"
+    environment:
+      - ORCH_REPO_ROOT=/data/repos
+    volumes:
+      - ./logs:/app/logs
+      - ./tools/repo_orchestrator/repo_registry.json:/app/tools/repo_orchestrator/repo_registry.json
+      - ./tools/repo_orchestrator/security_db.json:/app/tools/repo_orchestrator/security_db.json
+      - ./tools/repo_orchestrator/allowed_paths.json:/app/tools/repo_orchestrator/allowed_paths.json
+      - ./repos:/data/repos

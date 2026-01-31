@@ -11,6 +11,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/status")
 async def get_status():
     return {"status": "ok"}

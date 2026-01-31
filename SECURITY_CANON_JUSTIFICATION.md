@@ -24,7 +24,7 @@ La canonización actual ha superado exitosamente el suite de pruebas mandatorio:
 ## 3. Registro Histórico de Cambios
 ### 3.1 Purga de Lógica Sprite (2026-01-28)
 - **Motivo**: Evolución del producto hacia una herramienta profesional de orquestación de repositorios, eliminando componentes y dependencias creativas (sprites/imágenes) para reducir la superficie de ataque y mejorar el rendimiento.
-- **Alcance**: 
+- **Alcance**:
     - Eliminación de rutas `/generate` duplicadas y purga de lógica de imagen en `main.py`.
     - Eliminación de componentes `SpritePreview` y `SpriteViewport`.
     - Refactorización de `App.tsx`, `ControlIsland.tsx`, `AIAssistantPanel.tsx` y `OutputIsland.tsx` para eliminar controles creativos.
@@ -60,4 +60,3 @@ El análisis estático de SonarQube no puede trazar esta validación; se añaden
 ---
 **Aprobación del Operador Responsable:**
 [ ] PENDIENTE DE FIRMA (José Carlos)
-

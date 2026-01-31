@@ -5,11 +5,10 @@ Este script analiza requirements.txt y busca referencias a cada paquete
 en el código fuente para identificar dependencias potencialmente no utilizadas.
 """
 
-import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import List, Tuple
 
 # Mapeo de nombres de paquetes a módulos de importación
 PACKAGE_TO_MODULE = {
@@ -47,24 +46,26 @@ PACKAGE_TO_MODULE = {
     "seaborn": "seaborn",
 }
 
+
 def parse_requirements(requirements_file: Path) -> List[Tuple[str, str]]:
     """Parse requirements.txt y extrae paquetes con versiones."""
     packages = []
 
-    with open(requirements_file, 'r', encoding='utf-8') as f:
+    with open(requirements_file, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             # Ignorar comentarios y líneas vacías
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
 
             # Extraer nombre de paquete (antes de ==, >=, etc.)
-            match = re.match(r'^([a-zA-Z0-9_-]+)', line)
+            match = re.match(r"^([a-zA-Z0-9_-]+)", line)
             if match:
                 package_name = match.group(1).lower()
                 packages.append((package_name, line))
 
     return packages
+
 
 def get_module_name(package_name: str) -> str:
     """Obtiene el nombre del módulo a partir del nombre del paquete."""
@@ -73,7 +74,8 @@ def get_module_name(package_name: str) -> str:
         return PACKAGE_TO_MODULE[package_name]
 
     # Por defecto, usar el nombre del paquete (reemplazar guiones con guiones bajos)
-    return package_name.replace('-', '_')
+    return package_name.replace("-", "_")
+
 
 def search_imports(module_name: str, source_dirs: List[Path]) -> List[str]:
     """Busca imports del módulo en los directorios de código fuente."""
@@ -91,20 +93,20 @@ def search_imports(module_name: str, source_dirs: List[Path]) -> List[str]:
             try:
                 # Usar grep recursivo para buscar imports
                 result = subprocess.run(
-                    ['grep', '-r', '-l', '--include=*.py', pattern, str(source_dir)],
+                    ["grep", "-r", "-l", "--include=*.py", pattern, str(source_dir)],
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=10,
                 )
 
                 if result.returncode == 0 and result.stdout.strip():
-                    files = result.stdout.strip().split('\n')
+                    files = result.stdout.strip().split("\n")
                     matches.extend(files)
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 # Si grep no está disponible, usar búsqueda manual
-                for py_file in source_dir.rglob('*.py'):
+                for py_file in source_dir.rglob("*.py"):
                     try:
-                        content = py_file.read_text(encoding='utf-8')
+                        content = py_file.read_text(encoding="utf-8")
                         if pattern in content:
                             matches.append(str(py_file))
                     except Exception:
@@ -112,19 +114,20 @@ def search_imports(module_name: str, source_dirs: List[Path]) -> List[str]:
 
     return list(set(matches))  # Eliminar duplicados
 
+
 def analyze_dependencies(repo_root: Path):
     """Analiza dependencias y genera reporte."""
 
-    requirements_file = repo_root / 'requirements.txt'
+    requirements_file = repo_root / "requirements.txt"
     if not requirements_file.exists():
         print(f"[ERROR] No se encontro requirements.txt en {repo_root}")
         return
 
     # Directorios de código fuente a analizar
     source_dirs = [
-        repo_root / 'tools' / 'repo_orchestrator',
-        repo_root / 'tests',
-        repo_root / 'scripts',
+        repo_root / "tools" / "repo_orchestrator",
+        repo_root / "tests",
+        repo_root / "scripts",
     ]
 
     # Filtrar solo los que existen
@@ -150,11 +153,27 @@ def analyze_dependencies(repo_root: Path):
             status = "[OK] USADO"
         else:
             # Paquetes que podrían ser dependencias indirectas
-            if package_name in ['certifi', 'charset-normalizer', 'idna', 'urllib3',
-                               'typing-extensions', 'annotated-types', 'pydantic-core',
-                               'anyio', 'sniffio', 'h11', 'click', 'setuptools', 'wheel',
-                               'packaging', 'platformdirs', 'filelock']:
-                unclear_packages.append((package_name, module_name, "Dependencia indirecta probable"))
+            if package_name in [
+                "certifi",
+                "charset-normalizer",
+                "idna",
+                "urllib3",
+                "typing-extensions",
+                "annotated-types",
+                "pydantic-core",
+                "anyio",
+                "sniffio",
+                "h11",
+                "click",
+                "setuptools",
+                "wheel",
+                "packaging",
+                "platformdirs",
+                "filelock",
+            ]:
+                unclear_packages.append(
+                    (package_name, module_name, "Dependencia indirecta probable")
+                )
                 status = "[?] INDIRECTA"
             else:
                 unused_packages.append((package_name, module_name, requirement_line))
@@ -185,8 +204,14 @@ def analyze_dependencies(repo_root: Path):
     print("\n" + "=" * 80)
     print("\nANALISIS DE PAQUETES SOSPECHOSOS (del plan):\n")
 
-    suspicious = ['torch', 'transformers', 'opencv-python', 'opencv-python-headless',
-                 'onnxruntime-gpu', 'google-generativeai']
+    suspicious = [
+        "torch",
+        "transformers",
+        "opencv-python",
+        "opencv-python-headless",
+        "onnxruntime-gpu",
+        "google-generativeai",
+    ]
 
     for pkg in suspicious:
         found_in_unused = any(p[0] == pkg for p in unused_packages)
@@ -201,8 +226,8 @@ def analyze_dependencies(repo_root: Path):
             print(f"  [?] {pkg:30} - No encontrado en requirements.txt")
 
     # Guardar reporte
-    report_file = repo_root / 'dependency_audit_report.txt'
-    with open(report_file, 'w', encoding='utf-8') as f:
+    report_file = repo_root / "dependency_audit_report.txt"
+    with open(report_file, "w", encoding="utf-8") as f:
         f.write("REPORTE DE AUDITORÍA DE DEPENDENCIAS\n")
         f.write("=" * 80 + "\n\n")
         f.write(f"Total de paquetes: {len(packages)}\n")
@@ -218,6 +243,7 @@ def analyze_dependencies(repo_root: Path):
 
     print(f"\nReporte guardado en: {report_file}")
     print("\nAnalisis completado")
+
 
 if __name__ == "__main__":
     repo_root = Path(__file__).parent.parent

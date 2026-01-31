@@ -1,9 +1,11 @@
-import os
-import time
-import shutil
 import hashlib
+import os
+import shutil
+import time
 from pathlib import Path
+
 from tools.repo_orchestrator.config import SNAPSHOT_DIR, SNAPSHOT_TTL
+
 
 class SnapshotService:
     @staticmethod
@@ -23,7 +25,7 @@ class SnapshotService:
         path_hash = hashlib.sha256(str(target_path).encode()).hexdigest()[:12]
         snapshot_filename = f"{timestamp}_{path_hash}_{target_path.name}"
         snapshot_path = SNAPSHOT_DIR / snapshot_filename
-        
+
         # Atomic copy preserving stats
         shutil.copy2(target_path, snapshot_path)
         return snapshot_path
@@ -37,16 +39,16 @@ class SnapshotService:
             if path.is_file():
                 # 1. Get size
                 size = path.stat().st_size
-                
+
                 # 2. Overwrite with zeros (Shred)
                 with open(path, "wb") as f:
-                    f.write(b'\0' * size)
-                    
+                    f.write(b"\0" * size)
+
                 # 3. Flush to disk (best effort)
                 with open(path, "wb") as f:
                     f.flush()
                     os.fsync(f.fileno())
-            
+
             # 4. Unlink
             path.unlink(missing_ok=True)
         except Exception:

@@ -41,7 +41,7 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr :9325 ^| findstr LISTENING') 
 )
 
 echo [START] Launching GIL Orchestrator...
-REM Asumiendo que estamos en modo dev con python instalado. 
+REM Asumiendo que estamos en modo dev con python instalado.
 REM Si es producción, el instalador debería apuntar al .exe
 uvicorn tools.repo_orchestrator.main:app --host 127.0.0.1 --port 9325
 

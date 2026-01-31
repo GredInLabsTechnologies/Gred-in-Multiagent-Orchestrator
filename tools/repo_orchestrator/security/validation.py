@@ -1,22 +1,22 @@
-import os
-import re
 import json
 import time
 from pathlib import Path
 from typing import Optional
+
 from fastapi import HTTPException
-from tools.repo_orchestrator.config import (
-    REPO_REGISTRY_PATH,
-    ALLOWLIST_PATH,
-    ALLOWLIST_TTL_SECONDS,
-)
+
+from tools.repo_orchestrator.config import ALLOWLIST_PATH, ALLOWLIST_TTL_SECONDS, REPO_REGISTRY_PATH
+
 from .common import load_json_db
+
 
 def load_repo_registry():
     return load_json_db(REPO_REGISTRY_PATH, lambda: {"active_repo": None, "repos": []})
 
+
 def save_repo_registry(data: dict):
     REPO_REGISTRY_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
 
 def get_active_repo_dir() -> Path:
     registry = load_repo_registry()
@@ -28,26 +28,48 @@ def get_active_repo_dir() -> Path:
     # Fallback to current dir if nothing active
     return Path.cwd()
 
+
 def _normalize_path(path_str: str, base_dir: Path) -> Optional[Path]:
     try:
         # Check for null bytes
-        if '\0' in path_str:
+        if "\0" in path_str:
             return None
-        
+
         # Check for Windows reserved names
-        reserved_names = {'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 
-                         'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 
-                         'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'}
+        reserved_names = {
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            "COM1",
+            "COM2",
+            "COM3",
+            "COM4",
+            "COM5",
+            "COM6",
+            "COM7",
+            "COM8",
+            "COM9",
+            "LPT1",
+            "LPT2",
+            "LPT3",
+            "LPT4",
+            "LPT5",
+            "LPT6",
+            "LPT7",
+            "LPT8",
+            "LPT9",
+        }
         path_upper = path_str.upper()
         if any(name in path_upper for name in reserved_names):
             return None
-        
+
         requested = Path(path_str)
         if requested.is_absolute():
             resolved = requested.resolve()
         else:
             resolved = (base_dir / requested).resolve()
-        
+
         # Ensure resolved path is within base_dir
         base_resolved = base_dir.resolve()
         try:
@@ -55,15 +77,18 @@ def _normalize_path(path_str: str, base_dir: Path) -> Optional[Path]:
         except ValueError:
             # Path is not relative to base_dir, it's outside
             return None
-            
+
         return resolved
     except Exception:
         return None
 
+
 def validate_path(requested_path: str, base_dir: Path) -> Path:
     target = _normalize_path(requested_path, base_dir)
     if not target:
-        raise HTTPException(status_code=403, detail="Access denied: Path traversal detected or invalid path.")
+        raise HTTPException(
+            status_code=403, detail="Access denied: Path traversal detected or invalid path."
+        )
     return target
 
 
@@ -86,11 +111,7 @@ def serialize_allowlist(paths: set[Path]) -> list[dict]:
     result = []
     for p in paths:
         try:
-            result.append({
-                "path": str(p),
-                "type": "file" if p.is_file() else "dir"
-            })
+            result.append({"path": str(p), "type": "file" if p.is_file() else "dir"})
         except Exception:
             continue
     return result
-

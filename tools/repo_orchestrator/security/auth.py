@@ -1,7 +1,9 @@
-import time
 import logging
-from fastapi import Request, HTTPException, Security
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import time
+
+from fastapi import HTTPException, Request, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 from tools.repo_orchestrator.config import TOKENS
 
 logger = logging.getLogger("orchestrator.auth")
@@ -10,15 +12,18 @@ security = HTTPBearer(auto_error=False)
 
 INVALID_TOKEN_ERROR = "Invalid token"
 
-def verify_token(_request: Request, credentials: HTTPAuthorizationCredentials | None = Security(security)):
+
+def verify_token(
+    _request: Request, credentials: HTTPAuthorizationCredentials | None = Security(security)
+):
     if not credentials:
         raise HTTPException(status_code=401, detail="Token missing")
-    
+
     # Strip whitespace and validate token is not empty
     token = credentials.credentials.strip() if credentials.credentials else ""
     if not token:
         raise HTTPException(status_code=401, detail=INVALID_TOKEN_ERROR)
-    
+
     # Validate token length (minimum 16 characters for security)
     if len(token) < 16:
         raise HTTPException(status_code=401, detail=INVALID_TOKEN_ERROR)
@@ -32,9 +37,14 @@ def verify_token(_request: Request, credentials: HTTPAuthorizationCredentials | 
 
 
 def _trigger_panic_for_invalid_token(token: str) -> None:
-    from tools.repo_orchestrator.security import load_security_db, save_security_db, SECURITY_DB_PATH
     import hashlib
     import json
+
+    from tools.repo_orchestrator.security import (
+        SECURITY_DB_PATH,
+        load_security_db,
+        save_security_db,
+    )
 
     token_hash = hashlib.sha256(token.encode("utf-8", errors="ignore")).hexdigest()
 
@@ -45,15 +55,12 @@ def _trigger_panic_for_invalid_token(token: str) -> None:
     db["panic_mode"] = True
     if "recent_events" not in db:
         db["recent_events"] = []
-    db["recent_events"].append({
-        "type": "PANIC_TRIGGER",
-        "timestamp": time.time(),
-        "reason": "Invalid authentication attempt",
-        "payload_hash": token_hash  # Observability: Hash of the malicious payload
-    })
+    db["recent_events"].append(
+        {
+            "type": "PANIC_TRIGGER",
+            "timestamp": time.time(),
+            "reason": "Invalid authentication attempt",
+            "payload_hash": token_hash,  # Observability: Hash of the malicious payload
+        }
+    )
     save_security_db(db)
-
-
-
-
-

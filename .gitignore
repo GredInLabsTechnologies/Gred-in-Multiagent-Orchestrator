@@ -45,3 +45,6 @@ coverage_*.txt
 htmlcov/
 requirements_utf8.txt
 failing_tests.txt
+last_llm_response.json
+venv_test/
+app_log.txt

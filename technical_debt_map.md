@@ -65,4 +65,3 @@
 - **TD-012: TypeScript Strict Mode**: Añadido `noImplicitAny: true` al tsconfig.
 - **TD-013: Tailwind Active**: Confirmado que Tailwind SÍ está en uso (no es zombie).
 - **TD-014: globalThis Standard**: Uso de `globalThis` en lugar de `window`.
-

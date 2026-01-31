@@ -1,5 +1,6 @@
 import socket
 
+
 def probe_ports(host, ports):
     for port in ports:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -9,6 +10,7 @@ def probe_ports(host, ports):
                 print(f"Port {port} is OPEN")
             except (socket.timeout, OSError):
                 pass
+
 
 if __name__ == "__main__":
     host = "127.0.0.1"

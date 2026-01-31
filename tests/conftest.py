@@ -1,7 +1,9 @@
 """Shared pytest configuration and fixtures for all test modules."""
+
 import os
-import pytest
 from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
 
 # Set environment variables for testing BEFORE importing the app
@@ -28,18 +30,18 @@ def test_client():
 def clean_environment():
     """Clean critical environment variables before each test."""
     # Backup current values
-    old_token = os.environ.get('ORCH_TOKEN')
-    
+    old_token = os.environ.get("ORCH_TOKEN")
+
     # Reset to clean state - ensure valid token for most tests
-    os.environ['ORCH_TOKEN'] = 'test-token-a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0'
-    
+    os.environ["ORCH_TOKEN"] = "test-token-a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0"
+
     yield  # Test runs here
-    
+
     # Restore original values
     if old_token:
-        os.environ['ORCH_TOKEN'] = old_token
+        os.environ["ORCH_TOKEN"] = old_token
     else:
-        os.environ.pop('ORCH_TOKEN', None)
+        os.environ.pop("ORCH_TOKEN", None)
 
 
 @pytest.fixture(autouse=True)
@@ -53,9 +55,14 @@ def reset_dependency_overrides():
 @pytest.fixture(scope="function", autouse=True)
 def reset_test_state():
     """Reset any global state between tests."""
-    from tools.repo_orchestrator.security import rate_limit_store, load_security_db, save_security_db
+    from tools.repo_orchestrator.security import (
+        load_security_db,
+        rate_limit_store,
+        save_security_db,
+    )
+
     rate_limit_store.clear()
-    
+
     # Reset panic mode in DB
     try:
         db = load_security_db()
@@ -64,5 +71,5 @@ def reset_test_state():
             save_security_db(db)
     except Exception:
         pass
-    
+
     yield

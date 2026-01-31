@@ -1,53 +1,45 @@
-import os
-import time
 import asyncio
-import logging
-from pathlib import Path
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Response
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
-
-from tools.repo_orchestrator.config import (
-    BASE_DIR,
-    CORS_ORIGINS,
-    REPO_ROOT_DIR,
-)
-from tools.repo_orchestrator.services.snapshot_service import SnapshotService
-from tools.repo_orchestrator.routes import register_routes
 import hashlib
-import uuid
+import logging
+import time
 import traceback
-import json
-from tools.repo_orchestrator.security.audit import audit_log, log_panic
-from tools.repo_orchestrator.security import (
-    load_security_db, 
-    save_security_db
-)
+import uuid
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from tools.repo_orchestrator.config import BASE_DIR, CORS_ORIGINS
+from tools.repo_orchestrator.routes import register_routes
+from tools.repo_orchestrator.security import load_security_db, save_security_db
+from tools.repo_orchestrator.security.audit import log_panic
+from tools.repo_orchestrator.services.snapshot_service import SnapshotService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("orchestrator")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Perform infrastructure checks and initialization without side-effects on import
     logger.info("Starting Repo Orchestrator...")
-    
+
     if not BASE_DIR.exists():
         logger.error(f"BASE_DIR {BASE_DIR} does not exist!")
         raise RuntimeError(f"BASE_DIR {BASE_DIR} does not exist!")
 
     app.state.start_time = time.time()
-    
+
     # Ensure snapshot dir exists
     SnapshotService.ensure_snapshot_dir()
-    
+
     # Start background cleanup task
     cleanup_task = asyncio.create_task(snapshot_cleanup_loop())
-    
+
     yield
-    
+
     # Shutdown: Clean up resources
     logger.info("Shutting down Repo Orchestrator...")
     cleanup_task.cancel()
@@ -55,6 +47,7 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         raise
+
 
 async def snapshot_cleanup_loop():
     """Background task to delete old snapshots every minute."""
@@ -66,11 +59,9 @@ async def snapshot_cleanup_loop():
             logger.error(f"Error in snapshot cleanup: {str(e)}")
             await asyncio.sleep(10)
 
-app = FastAPI(
-    title="Repo Orchestrator", 
-    version="1.0.0", 
-    lifespan=lifespan
-)
+
+app = FastAPI(title="Repo Orchestrator", version="1.0.0", lifespan=lifespan)
+
 
 @app.get("/")
 async def root_route():
@@ -81,22 +72,25 @@ async def root_route():
         return FileResponse(str(index_file))
     return JSONResponse({"status": "ok"})
 
+
 @app.middleware("http")
 async def panic_mode_check(request: Request, call_next):
     """Block all requests during panic mode except the resolution endpoint."""
     # Only allow resolution endpoint during panic
     if request.url.path in ["/", "/ui/security/resolve"]:
         return await call_next(request)
-    
+
     # Use the loader from the security module so tests can patch it
     from tools.repo_orchestrator import security as security_module
+
     db = security_module.load_security_db()
     if db.get("panic_mode", False):
         return Response(
             status_code=503,
-            content="System in LOCKDOWN. Use /ui/security/resolve to clear panic mode."
+            content="System in LOCKDOWN. Use /ui/security/resolve to clear panic mode.",
         )
     return await call_next(request)
+
 
 @app.middleware("http")
 async def allow_options_preflight(request: Request, call_next):
@@ -120,8 +114,10 @@ async def allow_options_preflight(request: Request, call_next):
         response.headers.setdefault("Access-Control-Allow-Credentials", "true")
     return response
 
-from starlette.exceptions import HTTPException as StarletteHTTPException
+
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 
 @app.middleware("http")
 async def panic_catcher(request: Request, call_next):
@@ -134,7 +130,7 @@ async def panic_catcher(request: Request, call_next):
             raise e
         # 1. Generate Correlation ID
         correlation_id = str(uuid.uuid4())
-        
+
         # 2. Capture & Hash Payload (Never log raw payload)
         try:
             body_bytes = await request.body()
@@ -155,7 +151,7 @@ async def panic_catcher(request: Request, call_next):
             reason=str(e),
             payload_hash=payload_hash,
             actor=actor_snippet,
-            traceback_str=traceback.format_exc()
+            traceback_str=traceback.format_exc(),
         )
 
         # 5. Persist Panic Mode (FAIL-CLOSED)
@@ -164,26 +160,29 @@ async def panic_catcher(request: Request, call_next):
             db["panic_mode"] = True
             # Add event
             db["recent_events"] = db.get("recent_events", [])
-            db["recent_events"].append({
-                "type": "PANIC",
-                "timestamp": str(uuid.uuid4().time), # simplified, good enough
-                "correlation_id": correlation_id,
-                "reason": str(e),
-                "resolved": False
-            })
+            db["recent_events"].append(
+                {
+                    "type": "PANIC",
+                    "timestamp": str(uuid.uuid4().time),  # simplified, good enough
+                    "correlation_id": correlation_id,
+                    "reason": str(e),
+                    "resolved": False,
+                }
+            )
             save_security_db(db)
         except Exception:
-            pass # Fail safe
+            pass  # Fail safe
 
         # 6. Return Opaque Error
         return JSONResponse(
             status_code=500,
             content={
-                "error": "Internal System Failure", 
+                "error": "Internal System Failure",
                 "correlation_id": correlation_id,
-                "message": "System has entered protective lockdown."
-            }
+                "message": "System has entered protective lockdown.",
+            },
         )
+
 
 # Register all API routes
 register_routes(app)
@@ -199,20 +198,22 @@ if frontend_dist.exists():
         api_prefixes = ["ui/", "search", "status", "tree", "file", "diff"]
         if any(full_path.startswith(p) for p in api_prefixes):
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
-        
+
         index_file = frontend_dist / "index.html"
         if index_file.exists():
             return FileResponse(str(index_file))
         return JSONResponse(status_code=404, content={"detail": "Frontend index.html not found"})
+
 else:
     logger.warning(f"Frontend dist not found at {frontend_dist}")
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "tools.repo_orchestrator.main:app",
         host="0.0.0.0",
         port=6834,
         reload=False,
-        log_level="info"
+        log_level="info",
     )
