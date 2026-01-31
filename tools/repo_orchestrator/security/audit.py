@@ -16,6 +16,7 @@ REDACTION_PATTERNS = [
     re.compile(r"ghp_[a-zA-Z0-9]{32,}"),       # GitHub Personal Access Token (variable length)
     re.compile(r"AKIA[0-9A-Z]{16}"),            # AWS
     re.compile(r"(?i)api[-_]?key['\"]?\s*[:=]\s*['\"]?([a-zA-Z0-9]{20,})['\"]?"), # General API Key
+    re.compile(r"\b[A-Za-z0-9_-]{40,}\b"),     # Long base64/urlsafe tokens (40+ chars)
 ]
 
 def redact_sensitive_data(content: str) -> str:
@@ -38,5 +39,19 @@ logging.basicConfig(
 )
 
 def audit_log(path: str, ranges: str, res_hash: str, operation: str = "READ", actor: str | None = None):
-    log_msg = f"OP:{operation} | PATH:{path} | RANGE:{ranges} | HASH:{res_hash} | ACTOR:{actor or 'unknown'}"
+    # Redact actor if it's a long token (prevent token leakage in logs)
+    safe_actor = actor or 'unknown'
+    if actor and len(actor) > 20:
+        safe_actor = f"{actor[:8]}...{actor[-4:]}"  # Show only first 8 and last 4 chars
+    
+    log_msg = f"OP:{operation} | PATH:{path} | RANGE:{ranges} | HASH:{res_hash} | ACTOR:{safe_actor}"
     logging.info(log_msg)
+
+def log_panic(correlation_id: str, reason: str, payload_hash: str, actor: str | None = None, traceback_str: str | None = None):
+    """Log a critical system panic with correlation metadata."""
+    safe_actor = actor or 'unknown'
+    msg = f"PANIC | ID:{correlation_id} | HASH:{payload_hash} | REASON:{reason} | ACTOR:{safe_actor}"
+    logging.critical(msg)
+    
+    if traceback_str:
+        logging.error(f"PANIC_TRACE [{correlation_id}]:\n{traceback_str}")

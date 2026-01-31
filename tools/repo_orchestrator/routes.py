@@ -1,5 +1,6 @@
 import time
 import os
+import re
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Query, Request
@@ -83,10 +84,23 @@ def list_repos_handler(token: str = Depends(verify_token), rl: None = Depends(ch
     repos = RepoService.list_repos()
     registry = RepoService.ensure_repo_registry(repos)
     active_repo = registry.get("active_repo")
+    
+    # Sanitize paths to prevent information disclosure
+    def sanitize_path(path_str: str) -> str:
+        """Remove user-specific portions from paths."""
+        if not path_str:
+            return path_str
+        # Replace Windows user paths (raw string for proper escaping)
+        path_str = re.sub(r'C:\\Users\\[^\\]+', r'C:\\Users\\[USER]', path_str)
+        # Replace Unix home paths
+        path_str = re.sub(r'/home/[^/]+', '/home/[USER]', path_str)
+        path_str = re.sub(r'/Users/[^/]+', '/Users/[USER]', path_str)
+        return path_str
+    
     return {
-        "root": str(REPO_ROOT_DIR),
-        "active_repo": active_repo,
-        "repos": [r.__dict__ for r in repos],
+        "root": sanitize_path(str(REPO_ROOT_DIR)),
+        "active_repo": sanitize_path(active_repo) if active_repo else None,
+        "repos": [{"name": r.name, "path": sanitize_path(r.path)} for r in repos],
     }
 
 def get_active_repo_handler(token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):

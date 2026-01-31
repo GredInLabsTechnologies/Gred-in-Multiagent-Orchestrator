@@ -16,7 +16,7 @@ export default function App() {
 
                 {/* Main Content */}
                 <main className="bg-[#1c1c1e] rounded-2xl shadow-2xl border border-[#38383a] p-8">
-                    <MaintenanceIsland />
+                    <MaintenanceIsland token={import.meta.env.VITE_ORCH_TOKEN} />
                 </main>
 
                 {/* Footer */}

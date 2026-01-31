@@ -1,0 +1,39 @@
+{
+    "total_tests": 3,
+    "panic_count": 0,
+    "bypass_count": 0,
+    "avg_latency_ms": 2045.620600382487,
+    "duration_sec": 69.44353652000427,
+    "results": [
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/status",
+            "payload": "Authorization: Bearer ",
+            "status_code": 503,
+            "latency_ms": 2053.5688400268555,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1769831996.5216722
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/status",
+            "payload": "Authorization: Bearer ",
+            "status_code": 503,
+            "latency_ms": 2033.1449508666992,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1769831998.5548172
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/status",
+            "payload": "Authorization: Bearer ",
+            "status_code": 503,
+            "latency_ms": 2050.1480102539062,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1769832000.6049652
+        }
+    ]
+}

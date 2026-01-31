@@ -1,0 +1,14 @@
+
+[-] Verifying LLM Configuration (8GB VRAM Optimized)...
+[-] Target URL: http://localhost:1234/v1/chat/completions (Primary)
+[-] System Prompt Length: 306 chars
+------------------------------------------------------------
+[+] Connected to http://localhost:1234/v1/chat/completions
+[+] Status Code: 200
+[+] Response Received in 6.64 seconds
+[~] SPEED TEST: ACCEPTABLE (Maybe partial offload or large context)
+============================================================
+
+============================================================
+
+[WARNING] Model might be refusing or hallucinating. Check 'System Prompt' settings.

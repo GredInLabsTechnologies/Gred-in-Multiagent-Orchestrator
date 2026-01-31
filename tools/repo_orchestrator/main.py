@@ -15,7 +15,15 @@ from tools.repo_orchestrator.config import (
 )
 from tools.repo_orchestrator.services.snapshot_service import SnapshotService
 from tools.repo_orchestrator.routes import register_routes
-from tools.repo_orchestrator.security.audit import audit_log
+import hashlib
+import uuid
+import traceback
+import json
+from tools.repo_orchestrator.security.audit import audit_log, log_panic
+from tools.repo_orchestrator.security import (
+    load_security_db, 
+    save_security_db
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -98,6 +106,71 @@ async def allow_options_preflight(request: Request, call_next):
         response.headers.setdefault("Access-Control-Allow-Origin", allowed_origin)
         response.headers.setdefault("Access-Control-Allow-Credentials", "true")
     return response
+
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exceptions import RequestValidationError
+
+@app.middleware("http")
+async def panic_catcher(request: Request, call_next):
+    """Global exception handler that triggers Panic Mode."""
+    try:
+        return await call_next(request)
+    except Exception as e:
+        # Ignore known HTTP exceptions (logic flow controls)
+        if isinstance(e, (StarletteHTTPException, RequestValidationError)):
+            raise e
+        # 1. Generate Correlation ID
+        correlation_id = str(uuid.uuid4())
+        
+        # 2. Capture & Hash Payload (Never log raw payload)
+        try:
+            body_bytes = await request.body()
+            if not body_bytes:
+                payload_hash = "empty"
+            else:
+                payload_hash = hashlib.sha256(body_bytes).hexdigest()
+        except Exception:
+            payload_hash = "read_error"
+
+        # 3. Extract Actor (Best Effort)
+        auth_header = request.headers.get("Authorization", "")
+        actor_snippet = auth_header[:20] + "..." if auth_header else "anonymous"
+
+        # 4. Log Critical Panic
+        log_panic(
+            correlation_id=correlation_id,
+            reason=str(e),
+            payload_hash=payload_hash,
+            actor=actor_snippet,
+            traceback_str=traceback.format_exc()
+        )
+
+        # 5. Persist Panic Mode (FAIL-CLOSED)
+        try:
+            db = load_security_db()
+            db["panic_mode"] = True
+            # Add event
+            db["recent_events"] = db.get("recent_events", [])
+            db["recent_events"].append({
+                "type": "PANIC",
+                "timestamp": str(uuid.uuid4().time), # simplified, good enough
+                "correlation_id": correlation_id,
+                "reason": str(e),
+                "resolved": False
+            })
+            save_security_db(db)
+        except Exception:
+            pass # Fail safe
+
+        # 6. Return Opaque Error
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal System Failure", 
+                "correlation_id": correlation_id,
+                "message": "System has entered protective lockdown."
+            }
+        )
 
 # Register all API routes
 register_routes(app)

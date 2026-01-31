@@ -1,0 +1,135 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 29 items
+
+tests\test_adaptive_attack_vectors.py .                                  [  3%]
+tests\test_api_open_repo.py F                                            [  6%]
+tests\test_api_td002.py .....                                            [ 24%]
+tests\test_fuzzing.py ..                                                 [ 31%]
+tests\test_integrity_deep.py ...                                         [ 41%]
+tests\test_load_chaos_resilience.py ..                                   [ 48%]
+tests\test_qwen_payload_guided.py FF                                     [ 55%]
+tests\test_security_hardened.py .....                                    [ 72%]
+tests\test_unit_security.py ....                                         [ 86%]
+tests\test_unit_system_service.py ....                                   [100%]
+
+================================== FAILURES ===================================
+________________________ test_api_open_repo_decoupled _________________________
+
+mock_popen = <MagicMock name='Popen' id='2808297907904'>
+mock_audit = <MagicMock name='audit_log' id='2808302789664'>
+test_client = <starlette.testclient.TestClient object at 0x0000028DDB996DE0>
+
+    @patch('tools.repo_orchestrator.routes.REPO_ROOT_DIR', new=Path("/mock/repos"))
+    @patch('tools.repo_orchestrator.routes.audit_log')
+    @patch('subprocess.Popen')
+    def test_api_open_repo_decoupled(mock_popen, mock_audit, test_client):
+        """
+        Verifies that open_repo is decoupled:
+        1. Returns 200 OK.
+        2. Logs the event.
+        3. NEVER calls subprocess.Popen.
+        """
+        repo_path_str = "/mock/repos/myrepo"
+    
+        # Mock pathlib.Path.exists and resolve directly
+        with patch('pathlib.Path.exists', return_value=True):
+            with patch('pathlib.Path.resolve', return_value=Path(repo_path_str)):
+                response = test_client.post(f"/ui/repos/open?path={repo_path_str}")
+    
+>               assert response.status_code == 200
+E               assert 401 == 200
+E                +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_api_open_repo.py:37: AssertionError
+----------------------------- Captured log setup ------------------------------
+INFO     orchestrator:main.py:27 Starting Repo Orchestrator...
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/ui/repos/open?path=/mock/repos/myrepo "HTTP/1.1 401 Unauthorized"
+_________________________ test_path_traversal_guided __________________________
+
+llm = <tests.llm.lm_studio_client.LMStudioClient object at 0x0000028DDBEF3B60>
+metrics = <tests.metrics.runtime_metrics.MetricsCollector object at 0x0000028DDBEF3110>
+
+    def test_path_traversal_guided(llm, metrics):
+        """
+        Test guided path traversal using LLM generated payloads.
+        """
+        payloads = llm.generate_payloads(SYSTEM_PAYLOAD_GENERATOR, USER_PROMPTS["path_traversal"])
+>       assert len(payloads) > 0, "LLM failed to generate payloads"
+E       AssertionError: LLM failed to generate payloads
+E       assert 0 > 0
+E        +  where 0 = len([])
+
+tests\test_qwen_payload_guided.py:27: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  lm_studio_client:lm_studio_client.py:49 Failed to parse JSON from LLM: 
+
+[
+    "GET /file?path=../../%00 HTTP/1.1",
+    "GET /file?path=%2e%2e%2f%00 HTTP/1.1",
+    "GET /file?path=C:/Windows/win.ini%00 HTTP/1.1",
+    "GET /file?path=\\127.0.0.1\c$\Windows\system.ini%00 HTTP/1.1",
+    "GET /file?path=%2e%2e%2f%2e%2e%2f%00 HTTP/1.1",
+    "GET /file?path=../../../../etc/passwd%00 HTTP/1.1",
+    "GET /file?path=\\.\pipe\win.ini%00 HTTP/1.1",
+    "GET /file?path=%2e%2e%2f%2e%2e%2f%00C:/Windows/win.ini%00 HTTP/1.1",
+    "GET /file?path=../../../../etc/passwd%00%00 HTTP/1.1",
+    "GET /file?path=%2e%2e%2f%2e%2e%2f%00\\127.0.0.1\c$\inetpub\wwwroot%00 HTTP/1.1"
+]
+___________________________ test_auth_bypass_guided ___________________________
+
+llm = <tests.llm.lm_studio_client.LMStudioClient object at 0x0000028DDBEF3B60>
+metrics = <tests.metrics.runtime_metrics.MetricsCollector object at 0x0000028DDBEF3110>
+
+    def test_auth_bypass_guided(llm, metrics):
+        """
+        Test guided authentication bypass.
+        """
+        payloads = llm.generate_payloads(SYSTEM_PAYLOAD_GENERATOR, USER_PROMPTS["auth_bypass"])
+>       assert len(payloads) > 0
+E       assert 0 > 0
+E        +  where 0 = len([])
+
+tests\test_qwen_payload_guided.py:68: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  lm_studio_client:lm_studio_client.py:49 Failed to parse JSON from LLM: 
+
+[
+    "Authorization: Bearer '' OR 1=1--",
+    "Authorization: Bearer A"*1000 + "\x00" + "A"*1000,
+    "X-Original-URL: /admin; Authorization: Bearer ",
+    "Authorization: Bearer \" UNION SELECT NULL, NULL, NULL --",
+    "Authorization: Bearer \x00\x00\x00\x00\x00\x00\x00\x00"
+]
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                                   Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------------
+tools\repo_orchestrator\__init__.py                        0      0   100%
+tools\repo_orchestrator\config.py                         60     19    68%   10, 20, 74-90
+tools\repo_orchestrator\main.py                           75     19    75%   30-31, 55-56, 86-94, 98-99, 113-122
+tools\repo_orchestrator\models.py                         23      0   100%
+tools\repo_orchestrator\routes.py                        164     57    65%   67, 72-80, 83-86, 93-94, 97-104, 107-118, 121-122, 129, 146, 152, 160, 181-189, 196-203, 221, 223-224
+tools\repo_orchestrator\security\__init__.py              16      3    81%   8, 11-12
+tools\repo_orchestrator\security\audit.py                 18      0   100%
+tools\repo_orchestrator\security\auth.py                  19      1    95%   18
+tools\repo_orchestrator\security\rate_limit.py            26      6    77%   16-22, 34-35
+tools\repo_orchestrator\security\validation.py            69     21    70%   16, 19-20, 23, 29-31, 51, 64-65, 77, 83-85, 90-99
+tools\repo_orchestrator\services\file_service.py          33     18    45%   19, 23-24, 38-68
+tools\repo_orchestrator\services\git_service.py           24     10    58%   19, 21-22, 26-32
+tools\repo_orchestrator\services\repo_service.py          93     52    44%   23-24, 28-41, 45-60, 64-83, 92, 98, 108-116
+tools\repo_orchestrator\services\snapshot_service.py      27     10    63%   15-18, 24, 26-30
+tools\repo_orchestrator\services\system_service.py        53     19    64%   28, 36-45, 51-57, 85-92, 98-104, 127-134
+tools\repo_orchestrator\test_app.py                        7      7     0%   1-16
+------------------------------------------------------------------------------------
+TOTAL                                                    707    242    66%
+=========================== short test summary info ===========================
+FAILED tests/test_api_open_repo.py::test_api_open_repo_decoupled - assert 401...
+FAILED tests/test_qwen_payload_guided.py::test_path_traversal_guided - Assert...
+FAILED tests/test_qwen_payload_guided.py::test_auth_bypass_guided - assert 0 > 0
+================== 3 failed, 26 passed in 115.79s (0:01:55) ===================
