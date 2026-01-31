@@ -1,0 +1,43 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 125 items
+
+tests\unit\test_config.py ....                                           [  3%]
+tests\unit\test_file_service.py ......                                   [  8%]
+tests\unit\test_git_service.py .....                                     [ 12%]
+tests\unit\test_main.py .......                                          [ 17%]
+tests\unit\test_repo_service.py .......                                  [ 23%]
+tests\unit\test_routes.py ..................................             [ 50%]
+tests\unit\test_security_core.py .................                       [ 64%]
+tests\unit\test_security_validation.py ................                  [ 76%]
+tests\unit\test_services_remaining.py .................                  [ 90%]
+tests\unit\test_system_service.py ............                           [100%]
+
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                                   Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------------
+tools\repo_orchestrator\__init__.py                        0      0   100%
+tools\repo_orchestrator\config.py                         60      6    90%   10, 20, 80-81, 87-88
+tools\repo_orchestrator\main.py                          112     11    90%   109-110, 124, 134-136, 165-166, 191, 196-198
+tools\repo_orchestrator\models.py                         23      0   100%
+tools\repo_orchestrator\routes.py                        172      0   100%
+tools\repo_orchestrator\security\__init__.py              12      0   100%
+tools\repo_orchestrator\security\audit.py                 26      0   100%
+tools\repo_orchestrator\security\auth.py                  26      0   100%
+tools\repo_orchestrator\security\common.py                15      0   100%
+tools\repo_orchestrator\security\rate_limit.py            26      0   100%
+tools\repo_orchestrator\security\validation.py            65      0   100%
+tools\repo_orchestrator\services\file_service.py          33      0   100%
+tools\repo_orchestrator\services\git_service.py           24      0   100%
+tools\repo_orchestrator\services\repo_service.py          93      1    99%   95
+tools\repo_orchestrator\services\snapshot_service.py      46      0   100%
+tools\repo_orchestrator\services\system_service.py        53      0   100%
+tools\repo_orchestrator\test_app.py                        7      7     0%   1-16
+------------------------------------------------------------------------------------
+TOTAL                                                    793     25    97%
+============================= 125 passed in 1.51s =============================

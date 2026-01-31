@@ -67,6 +67,22 @@ describe('MaintenanceIsland', () => {
         refresh: vi.fn()
     }
 
+    const setPanicMode = (panic: boolean, extras = {}) => {
+        vi.mocked(useSecurityService).mockReturnValue({
+            ...mockSecurityService,
+            panicMode: panic,
+            ...extras
+        })
+    }
+
+    const mockEmptyLogs = () => {
+        vi.mocked(useAuditLog).mockReturnValue({
+            ...mockAuditLog,
+            logs: [],
+            rawLogs: []
+        })
+    }
+
     beforeEach(() => {
         vi.mocked(useSystemService).mockReturnValue(mockSystemService)
         vi.mocked(useAuditLog).mockReturnValue(mockAuditLog)
@@ -118,20 +134,14 @@ describe('MaintenanceIsland', () => {
     })
 
     it('renders panic mode banner when panicMode is true', () => {
-        vi.mocked(useSecurityService).mockReturnValue({
-            ...mockSecurityService,
-            panicMode: true
-        })
+        setPanicMode(true)
         render(<MaintenanceIsland />)
         expect(screen.getByText('System in Panic Mode')).toBeInTheDocument()
         expect(screen.getByText('Deactivate Lockdown')).toBeInTheDocument()
     })
 
     it('calls clearPanic when Deactivate Lockdown clicked', () => {
-        vi.mocked(useSecurityService).mockReturnValue({
-            ...mockSecurityService,
-            panicMode: true
-        })
+        setPanicMode(true)
         render(<MaintenanceIsland />)
         const clearButton = screen.getByText('Deactivate Lockdown')
         fireEvent.click(clearButton)
@@ -139,9 +149,7 @@ describe('MaintenanceIsland', () => {
     })
 
     it('shows events in panic mode', () => {
-        vi.mocked(useSecurityService).mockReturnValue({
-            ...mockSecurityService,
-            panicMode: true,
+        setPanicMode(true, {
             events: [
                 { timestamp: '2026-01-30T10:00:00', type: 'auth', reason: 'Invalid token', actor: 'system', resolved: false }
             ]
@@ -151,10 +159,7 @@ describe('MaintenanceIsland', () => {
     })
 
     it('displays LOCKDOWN status when in panic mode', () => {
-        vi.mocked(useSecurityService).mockReturnValue({
-            ...mockSecurityService,
-            panicMode: true
-        })
+        setPanicMode(true)
         render(<MaintenanceIsland />)
         expect(screen.getByText('LOCKDOWN')).toBeInTheDocument()
     })
@@ -207,11 +212,7 @@ describe('MaintenanceIsland', () => {
     })
 
     it('shows no matches message when logs empty', () => {
-        vi.mocked(useAuditLog).mockReturnValue({
-            ...mockAuditLog,
-            logs: [],
-            rawLogs: []
-        })
+        mockEmptyLogs()
         render(<MaintenanceIsland />)
         expect(screen.getByText('No matches found')).toBeInTheDocument()
     })
@@ -266,10 +267,7 @@ describe('MaintenanceIsland', () => {
     })
 
     it('shows System Locked when in panic mode', () => {
-        vi.mocked(useSecurityService).mockReturnValue({
-            ...mockSecurityService,
-            panicMode: true
-        })
+        setPanicMode(true)
         render(<MaintenanceIsland />)
         expect(screen.getByText('System Locked')).toBeInTheDocument()
         expect(screen.getByText('Critical')).toBeInTheDocument()
@@ -302,10 +300,7 @@ describe('MaintenanceIsland', () => {
     })
 
     it('disables buttons when in panic mode', () => {
-        vi.mocked(useSecurityService).mockReturnValue({
-            ...mockSecurityService,
-            panicMode: true
-        })
+        setPanicMode(true)
         render(<MaintenanceIsland />)
         const restartButton = screen.getByTitle('Restart Service')
         const stopButton = screen.getByTitle('Stop Service')
@@ -314,11 +309,7 @@ describe('MaintenanceIsland', () => {
     })
 
     it('shows Processing... when security isLoading in panic mode', () => {
-        vi.mocked(useSecurityService).mockReturnValue({
-            ...mockSecurityService,
-            panicMode: true,
-            isLoading: true
-        })
+        setPanicMode(true, { isLoading: true })
         render(<MaintenanceIsland />)
         expect(screen.getByText('Processing...')).toBeInTheDocument()
     })
@@ -332,11 +323,7 @@ describe('MaintenanceIsland', () => {
     })
 
     it('does not export when rawLogs is empty', () => {
-        vi.mocked(useAuditLog).mockReturnValue({
-            ...mockAuditLog,
-            logs: [],
-            rawLogs: []
-        })
+        mockEmptyLogs()
 
         render(<MaintenanceIsland />)
         const exportButton = screen.getByTitle('Export Logs')

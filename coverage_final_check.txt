@@ -1,0 +1,92 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 104 items
+
+tests\unit\test_routes.py ..................................             [ 32%]
+tests\unit\test_security_core.py .................                       [ 49%]
+tests\unit\test_security_validation.py ................                  [ 64%]
+tests\unit\test_system_service.py ............                           [ 75%]
+tests\unit\test_repo_service.py .......                                  [ 82%]
+tests\unit\test_services_remaining.py .................F                 [100%]
+
+================================== FAILURES ===================================
+____________________________ test_snapshot_cleanup ____________________________
+
+tmp_path = WindowsPath('C:/Users/shilo/AppData/Local/Temp/pytest-of-shilo/pytest-30/test_snapshot_cleanup0')
+
+    def test_snapshot_cleanup(tmp_path):
+        snap_dir = tmp_path / "snaps"
+        snap_dir.mkdir()
+        old_file = snap_dir / "old.txt"
+        old_file.write_text("old")
+        new_file = snap_dir / "new.txt"
+        new_file.write_text("new")
+    
+        now = time.time()
+        with patch('tools.repo_orchestrator.services.snapshot_service.SNAPSHOT_DIR', snap_dir):
+            with patch('tools.repo_orchestrator.services.snapshot_service.SNAPSHOT_TTL', 60):
+                with patch.object(Path, 'iterdir', return_value=[old_file, new_file]):
+                    def get_stat(file_obj=None, **kwargs):
+                        m = MagicMock()
+                        if file_obj and "old.txt" in str(file_obj):
+                            m.st_mtime = now - 100
+                            m.st_size = 10
+                        else:
+                            m.st_mtime = now - 10
+                            m.st_size = 10
+                        return m
+    
+                    with patch.object(Path, 'stat', side_effect=get_stat):
+                        with patch.object(SnapshotService, 'secure_delete') as mock_delete:
+>                           SnapshotService.cleanup_old_snapshots()
+
+tests\unit\test_services_remaining.py:170: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tools\repo_orchestrator\services\snapshot_service.py:65: in cleanup_old_snapshots
+    if item.is_file() and now - item.stat().st_mtime > SNAPSHOT_TTL:
+       ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('C:/Users/shilo/AppData/Local/Temp/pytest-of-shilo/pytest-30/test_snapshot_cleanup0/snaps/old.txt')
+
+    def is_file(self):
+        """
+        Whether this path is a regular file (also True for symlinks pointing
+        to regular files).
+        """
+        try:
+>           return S_ISREG(self.stat().st_mode)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: an integer is required
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:892: TypeError
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                                   Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------------
+tools\repo_orchestrator\__init__.py                        0      0   100%
+tools\repo_orchestrator\config.py                         60     19    68%   10, 20, 74-90
+tools\repo_orchestrator\main.py                          112     44    61%   38-39, 64, 66-67, 85, 97-105, 109-110, 121-169, 189-198
+tools\repo_orchestrator\models.py                         23      0   100%
+tools\repo_orchestrator\routes.py                        172      0   100%
+tools\repo_orchestrator\security\__init__.py              12      0   100%
+tools\repo_orchestrator\security\audit.py                 26      0   100%
+tools\repo_orchestrator\security\auth.py                  26      0   100%
+tools\repo_orchestrator\security\common.py                15      0   100%
+tools\repo_orchestrator\security\rate_limit.py            26      0   100%
+tools\repo_orchestrator\security\validation.py            65      0   100%
+tools\repo_orchestrator\services\file_service.py          33      0   100%
+tools\repo_orchestrator\services\git_service.py           24      0   100%
+tools\repo_orchestrator\services\repo_service.py          93      1    99%   95
+tools\repo_orchestrator\services\snapshot_service.py      46      1    98%   66
+tools\repo_orchestrator\services\system_service.py        53      0   100%
+tools\repo_orchestrator\test_app.py                        7      7     0%   1-16
+------------------------------------------------------------------------------------
+TOTAL                                                    793     72    91%
+=========================== short test summary info ===========================
+FAILED tests/unit/test_services_remaining.py::test_snapshot_cleanup - TypeErr...
+======================== 1 failed, 103 passed in 1.51s ========================

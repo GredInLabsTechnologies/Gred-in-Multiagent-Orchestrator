@@ -53,6 +53,16 @@ def reset_dependency_overrides():
 @pytest.fixture(scope="function", autouse=True)
 def reset_test_state():
     """Reset any global state between tests."""
-    from tools.repo_orchestrator.security import rate_limit_store
+    from tools.repo_orchestrator.security import rate_limit_store, load_security_db, save_security_db
     rate_limit_store.clear()
+    
+    # Reset panic mode in DB
+    try:
+        db = load_security_db()
+        if db.get("panic_mode"):
+            db["panic_mode"] = False
+            save_security_db(db)
+    except Exception:
+        pass
+    
     yield

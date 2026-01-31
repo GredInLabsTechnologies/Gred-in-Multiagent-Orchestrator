@@ -32,7 +32,10 @@ def test_api_open_repo_decoupled(mock_popen, mock_audit, test_client):
     # Mock pathlib.Path.exists and resolve directly
     with patch('pathlib.Path.exists', return_value=True):
         with patch('pathlib.Path.resolve', return_value=Path(repo_path_str)):
-            response = test_client.post(f"/ui/repos/open?path={repo_path_str}")
+            # conftest.py sets ORCH_TOKEN to a specific test value
+            token = os.environ.get("ORCH_TOKEN", "test-token-a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0")
+            headers = {"Authorization": f"Bearer {token}"}
+            response = test_client.post(f"/ui/repos/open?path={repo_path_str}", headers=headers)
             
             assert response.status_code == 200
             data = response.json()

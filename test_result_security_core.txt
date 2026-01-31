@@ -1,0 +1,118 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 8 items
+
+tests\unit\test_security_core.py F.F....F                                [100%]
+
+================================== FAILURES ===================================
+__________________________ test_verify_token_success __________________________
+
+    @patch('tools.repo_orchestrator.security.auth.TOKENS', {"valid-token"})
+    def test_verify_token_success():
+        credentials = MagicMock()
+        credentials.credentials = "valid-token"
+>       assert verify_token(MagicMock(), credentials) == "valid-token"
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\unit\test_security_core.py:16: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+_request = <MagicMock id='2241139332912'>
+credentials = <MagicMock id='2241139193184'>
+
+    def verify_token(_request: Request, credentials: HTTPAuthorizationCredentials | None = Security(security)):
+        if not credentials:
+            raise HTTPException(status_code=401, detail="Token missing")
+    
+        # Strip whitespace and validate token is not empty
+        token = credentials.credentials.strip() if credentials.credentials else ""
+        if not token:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    
+        # Validate token length (minimum 16 characters for security)
+        if len(token) < 16:
+>           raise HTTPException(status_code=401, detail="Invalid token")
+E           fastapi.exceptions.HTTPException: 401: Invalid token
+
+tools\repo_orchestrator\security\auth.py:19: HTTPException
+___________________ test_verify_token_invalid_trigger_panic ___________________
+
+args = (), keywargs = {}
+
+    @wraps(func)
+    def patched(*args, **keywargs):
+>       with self.decoration_helper(patched,
+                                    args,
+                                    keywargs) as (newargs, newkeywargs):
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py:1393: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py:1375: in decoration_helper
+    arg = exit_stack.enter_context(patching)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py:526: in enter_context
+    result = _enter(cm)
+             ^^^^^^^^^^
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py:1467: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <unittest.mock._patch object at 0x00000209CE3E6C90>
+
+    def get_original(self):
+        target = self.getter()
+        name = self.attribute
+    
+        original = DEFAULT
+        local = False
+    
+        try:
+            original = target.__dict__[name]
+        except (AttributeError, KeyError):
+            original = getattr(target, name, DEFAULT)
+        else:
+            local = True
+    
+        if name in _builtins and isinstance(target, ModuleType):
+            self.create = True
+    
+        if not self.create and original is DEFAULT:
+>           raise AttributeError(
+                "%s does not have the attribute %r" % (target, name)
+            )
+E           AttributeError: <module 'tools.repo_orchestrator.security.auth' from 'C:\\Users\\shilo\\Documents\\GitHub\\Gred-Repo-Orchestrator\\tools\\repo_orchestrator\\security\\auth.py'> does not have the attribute 'save_security_db'
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py:1437: AttributeError
+__________________________ test_load_json_db_factory __________________________
+
+    def test_load_json_db_factory():
+        # Test factory called on missing file
+        factory = MagicMock(return_value={"default": True})
+>       assert load_json_db(Path("nonexistent"), factory) == {"default": True}
+                            ^^^^
+E       NameError: name 'Path' is not defined
+
+tests\unit\test_security_core.py:74: NameError
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                             Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------
+tools\repo_orchestrator\security\audit.py           26      3    88%   45-47
+tools\repo_orchestrator\security\auth.py            26     14    46%   15, 21-41
+tools\repo_orchestrator\security\common.py          15      3    80%   7, 10-11
+tools\repo_orchestrator\security\rate_limit.py      26      6    77%   16-22, 34-35
+------------------------------------------------------------------------------
+TOTAL                                               93     26    72%
+=========================== short test summary info ===========================
+FAILED tests/unit/test_security_core.py::test_verify_token_success - fastapi....
+FAILED tests/unit/test_security_core.py::test_verify_token_invalid_trigger_panic
+FAILED tests/unit/test_security_core.py::test_load_json_db_factory - NameErro...
+========================= 3 failed, 5 passed in 0.53s =========================

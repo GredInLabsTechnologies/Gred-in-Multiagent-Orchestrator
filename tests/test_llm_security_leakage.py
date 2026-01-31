@@ -36,7 +36,7 @@ class TestPromptInjectionAttacks:
         app.dependency_overrides.clear()
         
         # Mock para simular LLM autenticado
-        async def override_verify_token():
+        def override_verify_token():
             return "llm_test_actor"
         
         app.dependency_overrides[verify_token] = override_verify_token
@@ -155,8 +155,6 @@ class TestPromptInjectionAttacks:
             # Should handle safely without execution
             assert response.status_code in [200, 400, 422]
             if response.status_code == 200:
-                # Verify payload is handled as literal search, not executed
-                result = response.json()
                 # SQL injection shouldn't execute - just search for the literal string
                 # The search might find the query itself but shouldn't execute it
                 assert response.status_code == 200  # Safe handling
@@ -172,7 +170,7 @@ class TestInformationDisclosure:
         save_security_db(db)
         
         app.dependency_overrides.clear()
-        async def override_verify_token():
+        def override_verify_token():
             return "llm_test_actor"
         app.dependency_overrides[verify_token] = override_verify_token
         
@@ -268,7 +266,7 @@ class TestRateLimitBypass:
     def setup_method(self):
         """Setup."""
         app.dependency_overrides.clear()
-        async def override_verify_token():
+        def override_verify_token():
             return "llm_test_actor"
         app.dependency_overrides[verify_token] = override_verify_token
         
@@ -286,9 +284,9 @@ class TestRateLimitBypass:
         """Verify rate limiting cannot be bypassed."""
         # Attempt rapid requests
         responses = []
-        for i in range(110):  # Exceeds default limit of 100
+        for _ in range(110):  # Exceeds default limit of 100
             response = self.client.get(
-                f"/status",
+                "/status",
                 headers={"Authorization": f"Bearer {self.valid_token}"}
             )
             responses.append(response)
@@ -385,7 +383,7 @@ class TestSemanticAttackVectors:
     def setup_method(self):
         """Setup."""
         app.dependency_overrides.clear()
-        async def override_verify_token():
+        def override_verify_token():
             return "llm_test_actor"
         app.dependency_overrides[verify_token] = override_verify_token
         
@@ -445,7 +443,7 @@ class TestDataExfiltration:
     def setup_method(self):
         """Setup."""
         app.dependency_overrides.clear()
-        async def override_verify_token():
+        def override_verify_token():
             return "llm_test_actor"
         app.dependency_overrides[verify_token] = override_verify_token
         

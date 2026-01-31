@@ -3,13 +3,10 @@ import json
 
 SECURITY_DB_PATH = Path(__file__).parent.parent / "security_db.json"
 
+from .common import load_json_db
+
 def load_security_db():
-    if not SECURITY_DB_PATH.exists():
-        return {"panic_mode": False, "recent_events": []}
-    try:
-        return json.loads(SECURITY_DB_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {"panic_mode": False, "recent_events": []}
+    return load_json_db(SECURITY_DB_PATH, lambda: {"panic_mode": False, "recent_events": []})
 
 def save_security_db(db: dict):
     SECURITY_DB_PATH.write_text(json.dumps(db, indent=2), encoding="utf-8")

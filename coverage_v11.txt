@@ -1,0 +1,241 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 111 items
+
+tests\unit\test_routes.py ..................................             [ 30%]
+tests\unit\test_security_core.py .................                       [ 45%]
+tests\unit\test_security_validation.py ................                  [ 60%]
+tests\unit\test_system_service.py ............                           [ 71%]
+tests\unit\test_repo_service.py .......                                  [ 77%]
+tests\unit\test_services_remaining.py .................                  [ 92%]
+tests\unit\test_main.py FF.F....                                         [100%]
+
+================================== FAILURES ===================================
+________________________ test_panic_catcher_middleware ________________________
+
+auth_client = <starlette.testclient.TestClient object at 0x0000022C508F74D0>
+
+    def test_panic_catcher_middleware(auth_client):
+        with patch('tools.repo_orchestrator.main.load_security_db', return_value={"panic_mode": False}):
+            with patch('tools.repo_orchestrator.routes.get_active_repo_dir', side_effect=RuntimeError("critical fail")):
+                response = auth_client.get("/ui/status")
+                assert response.status_code == 500
+>               assert "critical_error" in response.json()
+E               AssertionError: assert 'critical_error' in {'correlation_id': '8d980c42-2903-4648-b8a0-0fe1862fe23f', 'error': 'Internal System Failure', 'message': 'System has entered protective lockdown.'}
+E                +  where {'correlation_id': '8d980c42-2903-4648-b8a0-0fe1862fe23f', 'error': 'Internal System Failure', 'message': 'System has entered protective lockdown.'} = json()
+E                +    where json = <Response [500 Internal Server Error]>.json
+
+tests\unit\test_main.py:25: AssertionError
+------------------------------ Captured log call ------------------------------
+CRITICAL root:audit.py:53 PANIC | ID:8d980c42-2903-4648-b8a0-0fe1862fe23f | HASH:empty | REASON:critical fail | ACTOR:anonymous
+ERROR    root:audit.py:56 PANIC_TRACE [8d980c42-2903-4648-b8a0-0fe1862fe23f]:
+Traceback (most recent call last):
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 151, in call_next
+    message = await recv_stream.receive()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\anyio\streams\memory.py", line 126, in receive
+    raise EndOfStream from None
+anyio.EndOfStream
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator\tools\repo_orchestrator\main.py", line 120, in panic_catcher
+    return await call_next(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 159, in call_next
+    raise app_exc
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 182, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+                                   ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_utils.py", line 83, in collapse_excgroups
+    raise exc
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 184, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator\tools\repo_orchestrator\main.py", line 107, in allow_options_preflight
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 159, in call_next
+    raise app_exc
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 182, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+                                   ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_utils.py", line 83, in collapse_excgroups
+    raise exc
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 184, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator\tools\repo_orchestrator\main.py", line 89, in panic_mode_check
+    return await call_next(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 159, in call_next
+    raise app_exc
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 115, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 101, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 355, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\fastapi\routing.py", line 245, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\starlette\concurrency.py", line 38, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\anyio\to_thread.py", line 56, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\anyio\_backends\_asyncio.py", line 2476, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\shilo\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\anyio\_backends\_asyncio.py", line 967, in run
+    result = context.run(func, *args)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator\tools\repo_orchestrator\routes.py", line 50, in get_ui_status_handler
+    base_dir = get_active_repo_dir()
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py", line 1198, in _execute_mock_call
+    raise effect
+RuntimeError: critical fail
+
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/ui/status "HTTP/1.1 500 Internal Server Error"
+______________________ test_panic_mode_check_middleware _______________________
+
+auth_client = <starlette.testclient.TestClient object at 0x0000022C5089B680>
+
+    def test_panic_mode_check_middleware(auth_client):
+        # Important: patch where main.py imports it
+        with patch('tools.repo_orchestrator.main.load_security_db', return_value={"panic_mode": True}):
+            response = auth_client.get("/ui/status")
+>           assert response.status_code == 503
+E           assert 200 == 503
+E            +  where 200 = <Response [200 OK]>.status_code
+
+tests\unit\test_main.py:32: AssertionError
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/ui/status "HTTP/1.1 200 OK"
+____________________________ test_lifespan_events _____________________________
+
+    @pytest.mark.asyncio
+    async def test_lifespan_events():
+        with patch('tools.repo_orchestrator.services.snapshot_service.SnapshotService.ensure_snapshot_dir') as mock_ensure:
+            # Create a real future to avoid TypeError MagicMock can't be used in 'await'
+            loop = asyncio.get_running_loop()
+            fake_task = loop.create_future()
+            fake_task.set_result(None) # Make it done so it can be awaited
+    
+            mock_task = MagicMock(spec=asyncio.Task)
+            mock_task.__await__ = fake_task.__await__
+    
+            with patch('asyncio.create_task', return_value=mock_task):
+                from tools.repo_orchestrator.main import lifespan
+>               async with lifespan(app):
+                           ^^^^^^^^^^^^^
+
+tests\unit\test_main.py:69: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py:217: in __aexit__
+    await anext(self.gen)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+app = <fastapi.applications.FastAPI object at 0x0000022C502478F0>
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Startup: Perform infrastructure checks and initialization without side-effects on import
+        logger.info("Starting Repo Orchestrator...")
+    
+        if not BASE_DIR.exists():
+            logger.error(f"BASE_DIR {BASE_DIR} does not exist!")
+            raise RuntimeError(f"BASE_DIR {BASE_DIR} does not exist!")
+    
+        app.state.start_time = time.time()
+    
+        # Ensure snapshot dir exists
+        SnapshotService.ensure_snapshot_dir()
+    
+        # Start background cleanup task
+        cleanup_task = asyncio.create_task(snapshot_cleanup_loop())
+    
+        yield
+    
+        # Shutdown: Clean up resources
+        logger.info("Shutting down Repo Orchestrator...")
+        cleanup_task.cancel()
+        try:
+>           await cleanup_task
+E           TypeError: object MagicMock can't be used in 'await' expression
+
+tools\repo_orchestrator\main.py:55: TypeError
+------------------------------ Captured log call ------------------------------
+INFO     orchestrator:main.py:35 Starting Repo Orchestrator...
+INFO     orchestrator:main.py:52 Shutting down Repo Orchestrator...
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                                   Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------------
+tools\repo_orchestrator\__init__.py                        0      0   100%
+tools\repo_orchestrator\config.py                         60     19    68%   10, 20, 74-90
+tools\repo_orchestrator\main.py                          112     12    89%   85, 109-110, 124, 134-136, 165-166, 191, 196-198
+tools\repo_orchestrator\models.py                         23      0   100%
+tools\repo_orchestrator\routes.py                        172      0   100%
+tools\repo_orchestrator\security\__init__.py              12      0   100%
+tools\repo_orchestrator\security\audit.py                 26      0   100%
+tools\repo_orchestrator\security\auth.py                  26      0   100%
+tools\repo_orchestrator\security\common.py                15      0   100%
+tools\repo_orchestrator\security\rate_limit.py            26      0   100%
+tools\repo_orchestrator\security\validation.py            65      0   100%
+tools\repo_orchestrator\services\file_service.py          33      0   100%
+tools\repo_orchestrator\services\git_service.py           24      0   100%
+tools\repo_orchestrator\services\repo_service.py          93      1    99%   95
+tools\repo_orchestrator\services\snapshot_service.py      46      0   100%
+tools\repo_orchestrator\services\system_service.py        53      0   100%
+tools\repo_orchestrator\test_app.py                        7      7     0%   1-16
+------------------------------------------------------------------------------------
+TOTAL                                                    793     39    95%
+=========================== short test summary info ===========================
+FAILED tests/unit/test_main.py::test_panic_catcher_middleware - AssertionErro...
+FAILED tests/unit/test_main.py::test_panic_mode_check_middleware - assert 200...
+FAILED tests/unit/test_main.py::test_lifespan_events - TypeError: object Magi...
+======================== 3 failed, 108 passed in 1.74s ========================

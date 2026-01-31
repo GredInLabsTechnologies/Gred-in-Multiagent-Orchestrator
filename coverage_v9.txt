@@ -1,0 +1,204 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 109 items
+
+tests\unit\test_routes.py ..................................             [ 31%]
+tests\unit\test_security_core.py .................                       [ 46%]
+tests\unit\test_security_validation.py ................                  [ 61%]
+tests\unit\test_system_service.py ............                           [ 72%]
+tests\unit\test_repo_service.py .......                                  [ 78%]
+tests\unit\test_services_remaining.py .................F                 [ 95%]
+tests\unit\test_main.py FFFFF                                            [100%]
+
+================================== FAILURES ===================================
+____________________________ test_snapshot_cleanup ____________________________
+
+tmp_path = WindowsPath('C:/Users/shilo/AppData/Local/Temp/pytest-of-shilo/pytest-31/test_snapshot_cleanup0')
+
+    def test_snapshot_cleanup(tmp_path):
+        snap_dir = tmp_path / "snaps"
+        snap_dir.mkdir()
+        old_file = snap_dir / "old.txt"
+        old_file.write_text("old")
+        new_file = snap_dir / "new.txt"
+        new_file.write_text("new")
+    
+        now = time.time()
+        with patch('tools.repo_orchestrator.services.snapshot_service.SNAPSHOT_DIR', snap_dir):
+            with patch('tools.repo_orchestrator.services.snapshot_service.SNAPSHOT_TTL', 60):
+                with patch.object(Path, 'iterdir', return_value=[old_file, new_file]):
+                    def get_stat(file_obj=None, **kwargs):
+                        m = MagicMock()
+                        m.st_mode = 0o100644 # Regular file
+                        if file_obj and "old.txt" in str(file_obj):
+                            m.st_mtime = now - 100
+                            m.st_size = 10
+                        else:
+                            m.st_mtime = now - 10
+                            m.st_size = 10
+                        return m
+    
+                    with patch.object(Path, 'stat', side_effect=get_stat):
+                        with patch.object(SnapshotService, 'secure_delete') as mock_delete:
+                            SnapshotService.cleanup_old_snapshots()
+>                           mock_delete.assert_called_once_with(old_file)
+
+tests\unit\test_services_remaining.py:172: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <MagicMock name='secure_delete' id='1273271908832'>
+args = (WindowsPath('C:/Users/shilo/AppData/Local/Temp/pytest-of-shilo/pytest-31/test_snapshot_cleanup0/snaps/old.txt'),)
+kwargs = {}, msg = "Expected 'secure_delete' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'secure_delete' to be called once. Called 0 times.
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py:960: AssertionError
+________________________ test_panic_catcher_middleware ________________________
+
+    def test_panic_catcher_middleware():
+        client = TestClient(app)
+        with patch('tools.repo_orchestrator.main.load_security_db', return_value={"panic_mode": False}):
+            # Trigger an exception in a route
+            with patch('tools.repo_orchestrator.routes.get_active_repo_dir', side_effect=RuntimeError("critical fail")):
+                response = client.get("/ui/status")
+>               assert response.status_code == 500
+E               assert 401 == 500
+E                +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\unit\test_main.py:13: AssertionError
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/ui/status "HTTP/1.1 401 Unauthorized"
+______________________ test_panic_mode_check_middleware _______________________
+
+    def test_panic_mode_check_middleware():
+        client = TestClient(app)
+        # Mock panic mode active
+        with patch('tools.repo_orchestrator.main.load_security_db', return_value={"panic_mode": True}):
+            response = client.get("/ui/status")
+>           assert response.status_code == 503
+E           assert 401 == 503
+E            +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\unit\test_main.py:21: AssertionError
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/ui/status "HTTP/1.1 401 Unauthorized"
+________________________ test_allow_options_preflight _________________________
+
+    def test_allow_options_preflight():
+        client = TestClient(app)
+        response = client.options("/ui/status")
+>       assert response.status_code == 200
+E       assert 204 == 200
+E        +  where 204 = <Response [204 No Content]>.status_code
+
+tests\unit\test_main.py:31: AssertionError
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: OPTIONS http://testserver/ui/status "HTTP/1.1 204 No Content"
+____________________________ test_lifespan_events _____________________________
+
+    @pytest.mark.asyncio
+    async def test_lifespan_events():
+        # Test startup and shutdown logic
+        with patch('tools.repo_orchestrator.services.snapshot_service.SnapshotService.ensure_snapshot_dir') as mock_ensure:
+            # Mock create_task to return a fake task
+            fake_task = MagicMock()
+            with patch('asyncio.create_task', return_value=fake_task):
+                from tools.repo_orchestrator.main import lifespan
+>               async with lifespan(app):
+                           ^^^^^^^^^^^^^
+
+tests\unit\test_main.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py:217: in __aexit__
+    await anext(self.gen)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+app = <fastapi.applications.FastAPI object at 0x0000012874947530>
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Startup: Perform infrastructure checks and initialization without side-effects on import
+        logger.info("Starting Repo Orchestrator...")
+    
+        if not BASE_DIR.exists():
+            logger.error(f"BASE_DIR {BASE_DIR} does not exist!")
+            raise RuntimeError(f"BASE_DIR {BASE_DIR} does not exist!")
+    
+        app.state.start_time = time.time()
+    
+        # Ensure snapshot dir exists
+        SnapshotService.ensure_snapshot_dir()
+    
+        # Start background cleanup task
+        cleanup_task = asyncio.create_task(snapshot_cleanup_loop())
+    
+        yield
+    
+        # Shutdown: Clean up resources
+        logger.info("Shutting down Repo Orchestrator...")
+        cleanup_task.cancel()
+        try:
+>           await cleanup_task
+E           TypeError: object MagicMock can't be used in 'await' expression
+
+tools\repo_orchestrator\main.py:55: TypeError
+------------------------------ Captured log call ------------------------------
+INFO     orchestrator:main.py:35 Starting Repo Orchestrator...
+INFO     orchestrator:main.py:52 Shutting down Repo Orchestrator...
+_______________________________ test_root_route _______________________________
+
+    def test_root_route():
+        client = TestClient(app)
+        response = client.get("/")
+        assert response.status_code == 200
+>       assert "Gred Repo Orchestrator" in response.text
+E       assert 'Gred Repo Orchestrator' in '<!doctype html>\r\n<html lang="en" translate="no">\r\n\r\n<head>\r\n  <meta name="google" content="notranslate" />\r\...rigin href="/assets/index-BGeqPesP.css">\n</head>\r\n\r\n<body>\r\n  <div id="root"></div>\r\r\n</body>\r\n\r\n</html>'
+E        +  where '<!doctype html>\r\n<html lang="en" translate="no">\r\n\r\n<head>\r\n  <meta name="google" content="notranslate" />\r\...rigin href="/assets/index-BGeqPesP.css">\n</head>\r\n\r\n<body>\r\n  <div id="root"></div>\r\r\n</body>\r\n\r\n</html>' = <Response [200 OK]>.text
+
+tests\unit\test_main.py:51: AssertionError
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/ "HTTP/1.1 200 OK"
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                                   Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------------
+tools\repo_orchestrator\__init__.py                        0      0   100%
+tools\repo_orchestrator\config.py                         60     19    68%   10, 20, 74-90
+tools\repo_orchestrator\main.py                          112     35    69%   38-39, 64, 66-67, 85, 104, 109-110, 121-169, 191, 196-198
+tools\repo_orchestrator\models.py                         23      0   100%
+tools\repo_orchestrator\routes.py                        172      0   100%
+tools\repo_orchestrator\security\__init__.py              12      0   100%
+tools\repo_orchestrator\security\audit.py                 26      0   100%
+tools\repo_orchestrator\security\auth.py                  26      0   100%
+tools\repo_orchestrator\security\common.py                15      0   100%
+tools\repo_orchestrator\security\rate_limit.py            26      0   100%
+tools\repo_orchestrator\security\validation.py            65      0   100%
+tools\repo_orchestrator\services\file_service.py          33      0   100%
+tools\repo_orchestrator\services\git_service.py           24      0   100%
+tools\repo_orchestrator\services\repo_service.py          93      1    99%   95
+tools\repo_orchestrator\services\snapshot_service.py      46      1    98%   66
+tools\repo_orchestrator\services\system_service.py        53      0   100%
+tools\repo_orchestrator\test_app.py                        7      7     0%   1-16
+------------------------------------------------------------------------------------
+TOTAL                                                    793     63    92%
+=========================== short test summary info ===========================
+FAILED tests/unit/test_services_remaining.py::test_snapshot_cleanup - Asserti...
+FAILED tests/unit/test_main.py::test_panic_catcher_middleware - assert 401 ==...
+FAILED tests/unit/test_main.py::test_panic_mode_check_middleware - assert 401...
+FAILED tests/unit/test_main.py::test_allow_options_preflight - assert 204 == 200
+FAILED tests/unit/test_main.py::test_lifespan_events - TypeError: object Magi...
+FAILED tests/unit/test_main.py::test_root_route - assert 'Gred Repo Orchestra...
+======================== 6 failed, 103 passed in 1.77s ========================

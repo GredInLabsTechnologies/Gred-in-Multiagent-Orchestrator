@@ -1,0 +1,98 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 22 items
+
+tests\unit\test_routes.py ...F.................F                         [100%]
+
+================================== FAILURES ===================================
+____________________________ test_get_ui_allowlist ____________________________
+
+client = <starlette.testclient.TestClient object at 0x0000013D6785C170>
+tmp_path = WindowsPath('C:/Users/shilo/AppData/Local/Temp/pytest-of-shilo/pytest-22/test_get_ui_allowlist0')
+
+    def test_get_ui_allowlist(client, tmp_path):
+        base = tmp_path / "base"
+        base.mkdir()
+        f = base / "file.py"
+        f.write_text("ok")
+        with patch('tools.repo_orchestrator.routes.get_active_repo_dir', return_value=base):
+            with patch('tools.repo_orchestrator.routes.get_allowed_paths', return_value={f}):
+                with patch('tools.repo_orchestrator.routes.serialize_allowlist', return_value=[{"path": str(f), "type": "file"}, {"path": "/outside", "type": "file"}]):
+                    response = client.get("/ui/allowlist")
+                    assert response.status_code == 200
+                    assert response.json()["paths"][0]["path"] == "file.py"
+>                   assert len(response.json()["paths"]) == 1 # /outside should be skipped by relative_to except
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E                   AssertionError: assert 2 == 1
+E                    +  where 2 = len([{'path': 'file.py', 'type': 'file'}, {'path': '/outside', 'type': 'file'}])
+
+tests\unit\test_routes.py:52: AssertionError
+----------------------------- Captured log setup ------------------------------
+INFO     orchestrator:main.py:35 Starting Repo Orchestrator...
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/ui/allowlist "HTTP/1.1 200 OK"
+---------------------------- Captured log teardown ----------------------------
+INFO     orchestrator:main.py:52 Shutting down Repo Orchestrator...
+_____________________________ test_diff_truncated _____________________________
+
+client = <starlette.testclient.TestClient object at 0x0000013D679ACB60>
+tmp_path = WindowsPath('C:/Users/shilo/AppData/Local/Temp/pytest-of-shilo/pytest-22/test_diff_truncated0')
+
+    def test_diff_truncated(client, tmp_path):
+        with patch('tools.repo_orchestrator.routes.get_active_repo_dir', return_value=tmp_path):
+            with patch('tools.repo_orchestrator.services.git_service.GitService.get_diff', return_value="d" * 2000000):
+>               with patch('tools.repo_orchestrator.routes.MAX_BYTES', 10):
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\unit\test_routes.py:171: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py:1467: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <unittest.mock._patch object at 0x0000013D679D8470>
+
+    def get_original(self):
+        target = self.getter()
+        name = self.attribute
+    
+        original = DEFAULT
+        local = False
+    
+        try:
+            original = target.__dict__[name]
+        except (AttributeError, KeyError):
+            original = getattr(target, name, DEFAULT)
+        else:
+            local = True
+    
+        if name in _builtins and isinstance(target, ModuleType):
+            self.create = True
+    
+        if not self.create and original is DEFAULT:
+>           raise AttributeError(
+                "%s does not have the attribute %r" % (target, name)
+            )
+E           AttributeError: <module 'tools.repo_orchestrator.routes' from 'C:\\Users\\shilo\\Documents\\GitHub\\Gred-Repo-Orchestrator\\tools\\repo_orchestrator\\routes.py'> does not have the attribute 'MAX_BYTES'
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py:1437: AttributeError
+----------------------------- Captured log setup ------------------------------
+INFO     orchestrator:main.py:35 Starting Repo Orchestrator...
+---------------------------- Captured log teardown ----------------------------
+INFO     orchestrator:main.py:52 Shutting down Repo Orchestrator...
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                Stmts   Miss  Cover   Missing
+-----------------------------------------------------------------
+tools\repo_orchestrator\routes.py     172     41    76%   113, 127-132, 145-152, 158-161, 172, 174, 200-203, 215, 220-224, 227-238
+-----------------------------------------------------------------
+TOTAL                                 172     41    76%
+=========================== short test summary info ===========================
+FAILED tests/unit/test_routes.py::test_get_ui_allowlist - AssertionError: ass...
+FAILED tests/unit/test_routes.py::test_diff_truncated - AttributeError: <modu...
+======================== 2 failed, 20 passed in 0.82s =========================

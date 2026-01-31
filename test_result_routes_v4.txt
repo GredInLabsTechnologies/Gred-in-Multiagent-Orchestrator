@@ -1,0 +1,18 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 16 items
+
+tests\unit\test_routes.py ................                               [100%]
+
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                Stmts   Miss  Cover   Missing
+-----------------------------------------------------------------
+tools\repo_orchestrator\routes.py     172     36    79%   79-80, 92, 107-108, 115, 123, 125, 135-136, 143, 155, 164-167, 170-183, 193, 196-198, 209, 211, 216-217, 235
+-----------------------------------------------------------------
+TOTAL                                 172     36    79%
+============================= 16 passed in 0.48s ==============================

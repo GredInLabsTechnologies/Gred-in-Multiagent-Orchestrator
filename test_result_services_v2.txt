@@ -1,0 +1,101 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 23 items
+
+tests\unit\test_services_remaining.py ...............F                   [ 69%]
+tests\unit\test_repo_service.py .......                                  [100%]
+
+================================== FAILURES ===================================
+____________________________ test_snapshot_cleanup ____________________________
+
+tmp_path = WindowsPath('C:/Users/shilo/AppData/Local/Temp/pytest-of-shilo/pytest-29/test_snapshot_cleanup0')
+
+    def test_snapshot_cleanup(tmp_path):
+        snap_dir = tmp_path / "snaps"
+        snap_dir.mkdir()
+        old_file = snap_dir / "old.txt"
+        old_file.write_text("old")
+        new_file = snap_dir / "new.txt"
+        new_file.write_text("new")
+    
+        # Mock stat to make old_file look old
+        now = time.time()
+        with patch('tools.repo_orchestrator.services.snapshot_service.SNAPSHOT_DIR', snap_dir):
+            with patch('tools.repo_orchestrator.services.snapshot_service.SNAPSHOT_TTL', 60):
+                with patch('pathlib.Path.stat') as mock_stat:
+                    def side_effect():
+                        # This is tricky because we iterate over dir.
+                        # Let's just mock the whole cleanup logic by patching iterdir or stat
+                        pass
+    
+                    # Simpler: just use real files and manipulate mtime if possible,
+                    # but on Windows it's hard. Let's patch iterdir.
+                    with patch.object(Path, 'iterdir', return_value=[old_file, new_file]):
+                        # Patch stat for each file
+                        def get_stat(file_obj):
+                            m = MagicMock()
+                            if "old.txt" in str(file_obj):
+                                m.st_mtime = now - 100
+                            else:
+                                m.st_mtime = now - 10
+                            return m
+    
+                        with patch.object(Path, 'stat', side_effect=get_stat):
+                            with patch.object(SnapshotService, 'secure_delete') as mock_delete:
+>                               SnapshotService.cleanup_old_snapshots()
+
+tests\unit\test_services_remaining.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tools\repo_orchestrator\services\snapshot_service.py:62: in cleanup_old_snapshots
+    if not SNAPSHOT_DIR.exists():
+           ^^^^^^^^^^^^^^^^^^^^^
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\pathlib.py:860: in exists
+    self.stat(follow_symlinks=follow_symlinks)
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <MagicMock name='stat' id='2288659352224'>, args = ()
+kwargs = {'follow_symlinks': True}
+effect = <function test_snapshot_cleanup.<locals>.get_stat at 0x00000214DEB196C0>
+
+    def _execute_mock_call(self, /, *args, **kwargs):
+        # separate from _increment_mock_call so that awaited functions are
+        # executed separately from their call, also AsyncMock overrides this method
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+                raise effect
+            elif not _callable(effect):
+                result = next(effect)
+                if _is_exception(result):
+                    raise result
+            else:
+>               result = effect(*args, **kwargs)
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+E               TypeError: test_snapshot_cleanup.<locals>.get_stat() got an unexpected keyword argument 'follow_symlinks'
+
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\unittest\mock.py:1204: TypeError
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                                   Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------------
+tools\repo_orchestrator\services\file_service.py          33      0   100%
+tools\repo_orchestrator\services\git_service.py           24      0   100%
+tools\repo_orchestrator\services\repo_service.py          93      1    99%   95
+tools\repo_orchestrator\services\snapshot_service.py      46     11    76%   15-16, 52-57, 63-66
+tools\repo_orchestrator\services\system_service.py        53     42    21%   13-45, 50-92, 97-134
+------------------------------------------------------------------------------------
+TOTAL                                                    249     54    78%
+=========================== short test summary info ===========================
+FAILED tests/unit/test_services_remaining.py::test_snapshot_cleanup - TypeErr...
+======================== 1 failed, 22 passed in 0.82s =========================

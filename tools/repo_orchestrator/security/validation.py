@@ -10,14 +10,10 @@ from tools.repo_orchestrator.config import (
     ALLOWLIST_PATH,
     ALLOWLIST_TTL_SECONDS,
 )
+from .common import load_json_db
 
 def load_repo_registry():
-    if not REPO_REGISTRY_PATH.exists():
-        return {"active_repo": None, "repos": []}
-    try:
-        return json.loads(REPO_REGISTRY_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {"active_repo": None, "repos": []}
+    return load_json_db(REPO_REGISTRY_PATH, lambda: {"active_repo": None, "repos": []})
 
 def save_repo_registry(data: dict):
     REPO_REGISTRY_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")

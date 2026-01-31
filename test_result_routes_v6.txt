@@ -1,0 +1,43 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 22 items
+
+tests\unit\test_routes.py .....................F                         [100%]
+
+================================== FAILURES ===================================
+_____________________________ test_diff_truncated _____________________________
+
+client = <starlette.testclient.TestClient object at 0x000001BCF7E1DE50>
+tmp_path = WindowsPath('C:/Users/shilo/AppData/Local/Temp/pytest-of-shilo/pytest-23/test_diff_truncated0')
+
+    def test_diff_truncated(client, tmp_path):
+        with patch('tools.repo_orchestrator.routes.get_active_repo_dir', return_value=tmp_path):
+            with patch('tools.repo_orchestrator.services.git_service.GitService.get_diff', return_value="d" * 2000000):
+                with patch('tools.repo_orchestrator.config.MAX_BYTES', 10):
+                    response = client.get("/diff")
+                    assert response.status_code == 200
+>                   assert "TRUNCATED" in response.text
+E                   AssertionError: assert 'TRUNCATED' in '[REDACTED]'
+E                    +  where '[REDACTED]' = <Response [200 OK]>.text
+
+tests\unit\test_routes.py:174: AssertionError
+----------------------------- Captured log setup ------------------------------
+INFO     orchestrator:main.py:35 Starting Repo Orchestrator...
+------------------------------ Captured log call ------------------------------
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/diff "HTTP/1.1 200 OK"
+---------------------------- Captured log teardown ----------------------------
+INFO     orchestrator:main.py:52 Shutting down Repo Orchestrator...
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                Stmts   Miss  Cover   Missing
+-----------------------------------------------------------------
+tools\repo_orchestrator\routes.py     172     32    81%   113, 127-132, 145-152, 158-161, 172, 174, 200-203, 215, 220-224, 235, 237-238
+-----------------------------------------------------------------
+TOTAL                                 172     32    81%
+=========================== short test summary info ===========================
+FAILED tests/unit/test_routes.py::test_diff_truncated - AssertionError: asser...
+======================== 1 failed, 21 passed in 0.79s =========================

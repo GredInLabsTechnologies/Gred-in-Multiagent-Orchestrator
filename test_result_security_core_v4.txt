@@ -1,0 +1,42 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 13 items
+
+tests\unit\test_security_core.py .....F.......                           [100%]
+
+================================== FAILURES ===================================
+_______________________________ test_rate_limit _______________________________
+
+    def test_rate_limit():
+        rate_limit_store.clear()
+        request = MagicMock()
+        request.client.host = "1.2.3.4"
+    
+        # First request
+        check_rate_limit(request)
+        assert rate_limit_store["1.2.3.4"]["count"] == 1
+    
+        # Test cleanup
+        rate_limit_store["9.9.9.9"] = {"count": 1, "start_time": time.time() - 100}
+        check_rate_limit(request) # This calls cleanup
+>       assert "9.9.9.9" not in rate_limit_store
+E       AssertionError: assert '9.9.9.9' not in {'1.2.3.4': {'count': 2, 'start_time': datetime.datetime(2026, 1, 31, 18, 23, 21, 969655)}, '9.9.9.9': {'count': 1, 'start_time': 1769880101.97129}}
+
+tests\unit\test_security_core.py:69: AssertionError
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                             Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------
+tools\repo_orchestrator\security\audit.py           26      3    88%   45-47
+tools\repo_orchestrator\security\auth.py            26      1    96%   32
+tools\repo_orchestrator\security\common.py          15      2    87%   10-11
+tools\repo_orchestrator\security\rate_limit.py      26      7    73%   16-22, 34-35, 39
+------------------------------------------------------------------------------
+TOTAL                                               93     13    86%
+=========================== short test summary info ===========================
+FAILED tests/unit/test_security_core.py::test_rate_limit - AssertionError: as...
+======================== 1 failed, 12 passed in 0.38s =========================
