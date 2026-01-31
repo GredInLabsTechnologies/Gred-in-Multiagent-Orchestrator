@@ -1,0 +1,29 @@
+# Development Dependencies
+# Install with: pip install -r requirements-dev.txt
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+coverage[toml]>=7.0.0
+
+# Code Quality & Formatting
+black>=24.0.0
+ruff>=0.1.0
+
+# Security Scanning
+pip-audit>=2.10.0
+
+# Build & Packaging
+pyinstaller>=6.0.0
+pyinstaller-hooks-contrib>=2024.0
+
+# Documentation
+pdoc>=14.0.0
+
+# Testing Utilities
+ddt>=1.7.0
+httpx>=0.27.0
+
+# Linting
+pydocstyle>=6.3.0

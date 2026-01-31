@@ -1,0 +1,395 @@
+REPORTE DE AUDITORÍA DE DEPENDENCIAS
+================================================================================
+
+Total de paquetes: 147
+Paquetes usados: 6
+Dependencias indirectas: 13
+Paquetes NO usados: 128
+
+
+PAQUETES NO USADOS:
+--------------------------------------------------------------------------------
+annotated-doc
+  annotated-doc==0.0.4
+
+arabic-reshaper
+  arabic-reshaper==3.0.0
+
+asn1crypto
+  asn1crypto==1.5.1
+
+attrs
+  attrs==25.4.0
+
+beautifulsoup4
+  beautifulsoup4==4.13.4
+
+black
+  black==25.1.0
+
+cffi
+  cffi==1.17.1
+
+chardet
+  chardet==5.2.0
+
+colorama
+  colorama==0.4.6
+
+coloredlogs
+  coloredlogs==15.0.1
+
+contourpy
+  contourpy==1.3.3
+
+coverage
+  coverage==7.10.2
+
+cryptography
+  cryptography==45.0.6
+
+cssselect2
+  cssselect2==0.8.0
+
+cycler
+  cycler==0.12.1
+
+ddt
+  ddt==1.7.2
+
+distro
+  distro==1.9.0
+
+docutils
+  docutils==0.22.4
+
+flatbuffers
+  flatbuffers==25.12.19
+
+fonttools
+  fonttools==4.61.1
+
+fpdf
+  fpdf==1.7.2
+
+fsspec
+  fsspec==2025.12.0
+
+google-ai-generativelanguage
+  google-ai-generativelanguage==0.6.15
+
+google-api-core
+  google-api-core==2.29.0
+
+google-api-python-client
+  google-api-python-client==2.188.0
+
+google-auth
+  google-auth==2.47.0
+
+google-auth-httplib2
+  google-auth-httplib2==0.3.0
+
+google-genai
+  google-genai==1.59.0
+
+google-generativeai
+  google-generativeai==0.8.6
+
+googleapis-common-protos
+  googleapis-common-protos==1.72.0
+
+grpcio
+  grpcio==1.76.0
+
+grpcio-status
+  grpcio-status==1.71.2
+
+html5lib
+  html5lib==1.1
+
+httpcore
+  httpcore==1.0.9
+
+httplib2
+  httplib2==0.31.1
+
+httpx
+  httpx==0.28.1
+
+huggingface-hub
+  huggingface-hub==0.36.0
+
+humanfriendly
+  humanfriendly==10.0
+
+imageio
+  ImageIO==2.37.2
+
+iniconfig
+  iniconfig==2.1.0
+
+jinja2
+  Jinja2==3.1.6
+
+joblib
+  joblib==1.5.3
+
+jsonschema
+  jsonschema==4.26.0
+
+jsonschema-specifications
+  jsonschema-specifications==2025.9.1
+
+kiwisolver
+  kiwisolver==1.4.9
+
+lazy_loader
+  lazy_loader==0.4
+
+llvmlite
+  llvmlite==0.46.0
+
+lxml
+  lxml==6.0.0
+
+markdown
+  Markdown==3.6
+
+markupsafe
+  MarkupSafe==3.0.2
+
+matplotlib
+  matplotlib==3.10.8
+
+mpmath
+  mpmath==1.3.0
+
+mss
+  mss==10.1.0
+
+mypy_extensions
+  mypy_extensions==1.1.0
+
+networkx
+  networkx==3.6.1
+
+numba
+  numba==0.63.1
+
+numpy
+  numpy==2.2.2
+
+onnxruntime-gpu
+  onnxruntime-gpu==1.23.2
+
+opencv-python
+  opencv-python==4.12.0.88
+
+opencv-python-headless
+  opencv-python-headless==4.13.0.90
+
+oscrypto
+  oscrypto==1.3.0
+
+pathspec
+  pathspec==0.12.1
+
+pdoc
+  pdoc==15.0.4
+
+pefile
+  pefile==2023.2.7
+
+pillow
+  pillow==12.1.0
+
+pluggy
+  pluggy==1.6.0
+
+pooch
+  pooch==1.8.2
+
+proto-plus
+  proto-plus==1.27.0
+
+protobuf
+  protobuf==5.29.5
+
+psutil
+  psutil==7.2.1
+
+pyasn1
+  pyasn1==0.6.1
+
+pyasn1_modules
+  pyasn1_modules==0.4.2
+
+pycparser
+  pycparser==2.22
+
+pydantic_core
+  pydantic_core==2.41.5
+
+pydocstyle
+  pydocstyle==6.3.0
+
+pygame
+  pygame==2.6.1
+
+pygments
+  Pygments==2.19.2
+
+pyhanko
+  pyHanko==0.29.1
+
+pyhanko-certvalidator
+  pyhanko-certvalidator==0.27.0
+
+pyinstaller
+  pyinstaller==6.15.0
+
+pyinstaller-hooks-contrib
+  pyinstaller-hooks-contrib==2025.8
+
+pyparsing
+  pyparsing==3.3.1
+
+pypdf
+  pypdf==5.9.0
+
+pyreadline3
+  pyreadline3==3.5.4
+
+pytest-asyncio
+  pytest-asyncio==1.1.0
+
+pytest-cov
+  pytest-cov==6.2.1
+
+python-bidi
+  python-bidi==0.6.6
+
+python-dateutil
+  python-dateutil==2.9.0.post0
+
+python-docx
+  python-docx==1.2.0
+
+python-dotenv
+  python-dotenv==1.1.1
+
+python-multipart
+  python-multipart==0.0.21
+
+pywin32-ctypes
+  pywin32-ctypes==0.2.3
+
+pyyaml
+  PyYAML==6.0.2
+
+referencing
+  referencing==0.37.0
+
+regex
+  regex==2026.1.15
+
+reportlab
+  reportlab==4.0.9
+
+rpds-py
+  rpds-py==0.30.0
+
+rsa
+  rsa==4.9.1
+
+ruff
+  ruff==0.12.8
+
+safetensors
+  safetensors==0.7.0
+
+scikit-image
+  scikit-image==0.26.0
+
+scikit-learn
+  scikit-learn==1.8.0
+
+scipy
+  scipy==1.17.0
+
+six
+  six==1.17.0
+
+snowballstemmer
+  snowballstemmer==3.0.1
+
+soupsieve
+  soupsieve==2.7
+
+svglib
+  svglib==1.5.1
+
+sympy
+  sympy==1.14.0
+
+tenacity
+  tenacity==9.1.2
+
+threadpoolctl
+  threadpoolctl==3.6.0
+
+tifffile
+  tifffile==2026.1.14
+
+tinycss2
+  tinycss2==1.4.0
+
+tokenizers
+  tokenizers==0.22.2
+
+torch
+  torch==2.7.1+cu118
+
+torchaudio
+  torchaudio==2.7.1+cu118
+
+torchvision
+  torchvision==0.22.1+cu118
+
+tqdm
+  tqdm==4.67.1
+
+transformers
+  transformers==4.57.6
+
+typing-inspection
+  typing-inspection==0.4.2
+
+typing_extensions
+  typing_extensions==4.14.1
+
+tzdata
+  tzdata==2025.2
+
+tzlocal
+  tzlocal==5.3.1
+
+uritemplate
+  uritemplate==4.2.0
+
+uritools
+  uritools==5.0.0
+
+watchdog
+  watchdog==6.0.0
+
+webencodings
+  webencodings==0.5.1
+
+websockets
+  websockets==15.0.1
+
+xhtml2pdf
+  xhtml2pdf==0.2.15
+

@@ -206,3 +206,13 @@ if frontend_dist.exists():
         return JSONResponse(status_code=404, content={"detail": "Frontend index.html not found"})
 else:
     logger.warning(f"Frontend dist not found at {frontend_dist}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "tools.repo_orchestrator.main:app",
+        host="0.0.0.0",
+        port=6834,
+        reload=False,
+        log_level="info"
+    )
