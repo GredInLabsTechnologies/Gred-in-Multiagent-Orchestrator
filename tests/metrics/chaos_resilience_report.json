@@ -3,7 +3,7 @@
     "panic_count": 0,
     "bypass_count": 0,
     "avg_latency_ms": 50.0,
-    "duration_sec": 56.332337379455566,
+    "duration_sec": 56.415639877319336,
     "results": [
         {
             "suite": "chaos_resilience",
@@ -13,7 +13,7 @@
             "latency_ms": 100.0,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1769889456.6931624
+            "timestamp": 1769890032.5743763
         },
         {
             "suite": "chaos_resilience",
@@ -23,7 +23,7 @@
             "latency_ms": 0,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1769889480.8231266
+            "timestamp": 1769890056.7233067
         }
     ]
 }

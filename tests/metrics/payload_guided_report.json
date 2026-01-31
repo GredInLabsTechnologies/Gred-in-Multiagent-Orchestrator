@@ -2,88 +2,88 @@
     "total_tests": 8,
     "panic_count": 3,
     "bypass_count": 0,
-    "avg_latency_ms": 5.114436149597168,
-    "duration_sec": 4.06162691116333,
+    "avg_latency_ms": 5.572259426116943,
+    "duration_sec": 4.06209135055542,
     "results": [
         {
             "suite": "payload_guided",
             "target_endpoint": "/file",
             "payload": "../etc/passwd",
             "status_code": 401,
-            "latency_ms": 3.6323070526123047,
+            "latency_ms": 4.6367645263671875,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1769889484.8483362
+            "timestamp": 1769890060.744598
         },
         {
             "suite": "payload_guided",
             "target_endpoint": "/file",
             "payload": "..\\..\\windows\\system32\\config\\sam",
             "status_code": 503,
-            "latency_ms": 10.551214218139648,
+            "latency_ms": 10.303020477294922,
             "panic_triggered": true,
             "bypassed": false,
-            "timestamp": 1769889484.8588874
+            "timestamp": 1769890060.754901
         },
         {
             "suite": "payload_guided",
             "target_endpoint": "/file",
             "payload": "....//....//etc/passwd",
             "status_code": 503,
-            "latency_ms": 2.0449161529541016,
+            "latency_ms": 2.565145492553711,
             "panic_triggered": true,
             "bypassed": false,
-            "timestamp": 1769889484.8609324
+            "timestamp": 1769890060.757466
         },
         {
             "suite": "payload_guided",
             "target_endpoint": "/file",
             "payload": "%2e%2e/%2e%2e/etc/passwd",
             "status_code": 503,
-            "latency_ms": 1.1048316955566406,
+            "latency_ms": 1.5492439270019531,
             "panic_triggered": true,
             "bypassed": false,
-            "timestamp": 1769889484.8620372
+            "timestamp": 1769890060.7590153
         },
         {
             "suite": "payload_guided",
             "target_endpoint": "/status",
             "payload": "invalid-token-1234567890",
             "status_code": 401,
-            "latency_ms": 12.021303176879883,
+            "latency_ms": 11.36159896850586,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1769889484.8761294
+            "timestamp": 1769890060.7745156
         },
         {
             "suite": "payload_guided",
             "target_endpoint": "/status",
             "payload": "Bearer invalid-token-1234567890",
             "status_code": 503,
-            "latency_ms": 8.966684341430664,
+            "latency_ms": 9.490728378295898,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1769889484.885096
+            "timestamp": 1769890060.7840064
         },
         {
             "suite": "payload_guided",
             "target_endpoint": "/status",
             "payload": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "status_code": 503,
-            "latency_ms": 1.5118122100830078,
+            "latency_ms": 2.5107860565185547,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1769889484.886608
+            "timestamp": 1769890060.7865171
         },
         {
             "suite": "payload_guided",
             "target_endpoint": "/status",
             "payload": "test-token-00000000000000000000000000000000",
             "status_code": 503,
-            "latency_ms": 1.0824203491210938,
+            "latency_ms": 2.160787582397461,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1769889484.8876903
+            "timestamp": 1769890060.788678
         }
     ]
 }

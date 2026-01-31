@@ -72,6 +72,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+@app.get("/")
+async def root_route():
+    """Serve the SPA index when available, otherwise return a basic health payload."""
+    frontend_dist = BASE_DIR / "tools" / "orchestrator_ui" / "dist"
+    index_file = frontend_dist / "index.html"
+    if index_file.exists():
+        return FileResponse(str(index_file))
+    return JSONResponse({"status": "ok"})
+
 @app.middleware("http")
 async def panic_mode_check(request: Request, call_next):
     """Block all requests during panic mode except the resolution endpoint."""
