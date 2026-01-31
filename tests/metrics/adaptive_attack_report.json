@@ -1,59 +1,8 @@
 {
-    "total_tests": 5,
-    "panic_count": 5,
+    "total_tests": 0,
+    "panic_count": 0,
     "bypass_count": 0,
-    "avg_latency_ms": 2038.069248199463,
-    "duration_sec": 272.41878151893616,
-    "results": [
-        {
-            "suite": "adaptive_attack",
-            "target_endpoint": "/file",
-            "payload": "../etc/passwd",
-            "status_code": 503,
-            "latency_ms": 2029.3793678283691,
-            "panic_triggered": true,
-            "bypassed": false,
-            "timestamp": 1769832002.6389146
-        },
-        {
-            "suite": "adaptive_attack",
-            "target_endpoint": "/file",
-            "payload": "**Analysis of Failure:**  ",
-            "status_code": 503,
-            "latency_ms": 2042.2451496124268,
-            "panic_triggered": true,
-            "bypassed": false,
-            "timestamp": 1769832058.098845
-        },
-        {
-            "suite": "adaptive_attack",
-            "target_endpoint": "/file",
-            "payload": "**Analysis of Failure:**  ",
-            "status_code": 503,
-            "latency_ms": 2046.1108684539795,
-            "panic_triggered": true,
-            "bypassed": false,
-            "timestamp": 1769832117.9048076
-        },
-        {
-            "suite": "adaptive_attack",
-            "target_endpoint": "/file",
-            "payload": "**Analysis of Failure:**  ",
-            "status_code": 503,
-            "latency_ms": 2039.759874343872,
-            "panic_triggered": true,
-            "bypassed": false,
-            "timestamp": 1769832168.3230073
-        },
-        {
-            "suite": "adaptive_attack",
-            "target_endpoint": "/file",
-            "payload": "**Analysis of Failure:**  ",
-            "status_code": 503,
-            "latency_ms": 2032.850980758667,
-            "panic_triggered": true,
-            "bypassed": false,
-            "timestamp": 1769832224.0395827
-        }
-    ]
+    "avg_latency_ms": 0,
+    "duration_sec": 8.110087633132935,
+    "results": []
 }

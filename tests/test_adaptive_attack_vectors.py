@@ -2,7 +2,7 @@ import pytest
 import requests
 import time
 import json
-from tests.llm.lm_studio_client import LMStudioClient
+from tests.llm.lm_studio_client import LMStudioClient, is_lm_studio_available
 from tests.llm.prompt_templates import SYSTEM_ADAPTIVE_ATTACKER
 from tests.metrics.runtime_metrics import MetricsCollector
 
@@ -14,13 +14,18 @@ AUTH_TOKEN = "CHAOS_MONKEY_TOKEN_2026"
 def llm():
     return LMStudioClient(host="http://localhost:1234/v1")
 
+
+@pytest.fixture(scope="module")
+def llm_available():
+    return is_lm_studio_available("http://localhost:1234/v1")
+
 @pytest.fixture(scope="module")
 def metrics():
     collector = MetricsCollector()
     yield collector
     collector.save_report("tests/metrics/adaptive_attack_report.json")
 
-def test_adaptive_path_traversal(llm, metrics):
+def test_adaptive_path_traversal(llm, metrics, llm_available):
     """
     Simulates an attacker learning from failures to bypass file validation.
     """
@@ -59,8 +64,17 @@ def test_adaptive_path_traversal(llm, metrics):
             feedback = f"Payload: {current_payload} | Status: {response.status_code} | Message: {response.text[:100]}"
             history.append({"role": "user", "content": feedback})
             
-            # Get next payload from LLM
-            next_payload = llm.get_feedback_adaptation(SYSTEM_ADAPTIVE_ATTACKER, history)
+            # Get next payload from LLM or fallback sequence
+            if llm_available:
+                next_payload = llm.get_feedback_adaptation(SYSTEM_ADAPTIVE_ATTACKER, history)
+            else:
+                fallback_payloads = [
+                    "..\\..\\windows\\system32\\config\\sam",
+                    "....//....//etc/passwd",
+                    "%2e%2e/%2e%2e/etc/passwd",
+                    "..%2f..%2fetc%2fpasswd",
+                ]
+                next_payload = fallback_payloads[i] if i < len(fallback_payloads) else None
             if not next_payload or next_payload == current_payload:
                 break # Converged or failed
                 

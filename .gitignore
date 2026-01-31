@@ -36,3 +36,9 @@ repo_registry.json
 *lint_*.txt
 *lint_report.json
 *tsc_errors.txt
+logs/
+coverage.xml
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/

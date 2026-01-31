@@ -9,7 +9,7 @@ from fastapi import HTTPException
 os.environ.setdefault("ORCH_REPO_ROOT", str(Path(__file__).parent.parent.resolve()))
 
 from tools.repo_orchestrator.main import app
-from tools.repo_orchestrator.security import validate_path, redact_sensitive_data, load_security_db, save_security_db
+from tools.repo_orchestrator.security import validate_path, redact_sensitive_data, load_security_db, save_security_db, SECURITY_DB_PATH
 
 def test_auth_rejection_triggers_panic():
     """ASVS L3: Verify that unauthorized attempts trigger Panic Mode."""
@@ -26,11 +26,11 @@ def test_auth_rejection_triggers_panic():
     clean_client = TestClient(app)
     
     # Attempt unauthorized access
-    response = clean_client.get("/status", headers={"Authorization": "Bearer invalid-token"})
+    response = clean_client.get("/status", headers={"Authorization": "Bearer invalid-token-1234567890"})
     assert response.status_code == 401
     
     # Check if panic mode was triggered
-    db = load_security_db()
+    db = json.loads(SECURITY_DB_PATH.read_text(encoding="utf-8"))
     assert db["panic_mode"] is True
     assert any(e["type"] == "PANIC_TRIGGER" for e in db["recent_events"])
     

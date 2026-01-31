@@ -31,9 +31,9 @@ def test_panic_mode_check_middleware(auth_client):
         assert response.status_code == 503
         assert "LOCKDOWN" in response.text
         
-        # /status SHOULD return 200 (bypass)
+        # /status should be blocked during panic
         response_status = auth_client.get("/status")
-        assert response_status.status_code == 200
+        assert response_status.status_code == 503
 
 def test_allow_options_preflight(auth_client):
     # Case 1: Origin in CORS_ORIGINS

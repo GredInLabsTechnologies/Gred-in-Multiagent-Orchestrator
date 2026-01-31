@@ -138,3 +138,12 @@ class LMStudioClient:
         except Exception as e:
             logger.error(f"LM Studio feedback error: {str(e)}")
             return None
+
+
+def is_lm_studio_available(host: str = "http://localhost:1234/v1") -> bool:
+    """Quick health check to see if LM Studio is available."""
+    try:
+        response = requests.get(f"{host}/models", timeout=2)
+        return response.status_code == 200
+    except Exception:
+        return False

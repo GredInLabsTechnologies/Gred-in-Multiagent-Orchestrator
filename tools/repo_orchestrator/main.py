@@ -75,12 +75,13 @@ app = FastAPI(
 @app.middleware("http")
 async def panic_mode_check(request: Request, call_next):
     """Block all requests during panic mode except the resolution endpoint."""
-    # Allow critical routes during panic
-    if request.url.path in ["/", "/status", "/ui/security/resolve"]:
+    # Only allow resolution endpoint during panic
+    if request.url.path in ["/", "/ui/security/resolve"]:
         return await call_next(request)
     
-    from tools.repo_orchestrator.security import load_security_db
-    db = load_security_db()
+    # Use the loader from the security module so tests can patch it
+    from tools.repo_orchestrator import security as security_module
+    db = security_module.load_security_db()
     if db.get("panic_mode", False):
         return Response(
             status_code=503,
