@@ -59,14 +59,14 @@
 - **Cómo se hizo**: Se incorporó un middleware `correlation_id_middleware` que toma `X-Correlation-ID` o genera UUID, lo guarda en `request.state`, mide duración con `time.perf_counter`, añade el header de respuesta y registra un log estructurado vía `logger.info(..., extra=...)`. En `panic_catcher` se obtiene el correlation ID desde `request.state` con fallback. En `tests/unit/test_main.py` se añadió verificación del header en `test_root_route`.
 - **Por qué se hizo**: Para garantizar trazabilidad end-to-end y observabilidad básica sin cambiar comportamiento de rutas, cumpliendo el guardrail de compatibilidad.
 - **Resultado**: ✅ Cambios aplicados en `main.py` y `tests/unit/test_main.py`. Tests unitarios relevantes ejecutados: `pytest tests/unit/test_main.py` (8 passed, 1 warning). Se actualizó `tests/integrity_manifest.json` con el hash normalizado (LF) de `main.py` y se validó `pytest tests/test_integrity_deep.py` (3 passed, 1 warning).
-- **Notas operativas**: Se mantiene la política de no borrar archivos. Logging usa el logger existente `orchestrator` y no altera payloads ni respuestas. El hash se calculó con normalización CRLF→LF para coherencia cross-platform.
+- **Notas operativas**: Se mantiene la política de no borrar archivos. Logging usa el logger existente `orchestrator` y no altera payloads ni respuestas. El hash se calculó con normalización CRLF→LF para coherencia cross-platform. Durante el re-test completo apareció un fallo inicial por `tests/integrity_manifest.json` (hash de `main.py` desactualizado) y se corrigió actualizando el manifest. Se usó `pytest tests/test_integrity_deep.py` para validar el fix. Commit/push ejecutados tras permisos explícitos del usuario.
 
 ### F2 — App Factory mínima
-- **Qué se hizo**: _(pendiente)_
-- **Cómo se hizo**: _(pendiente)_
-- **Por qué se hizo**: _(pendiente)_
-- **Resultado**: _(pendiente)_
-- **Notas operativas**: _(pendiente)_
+- **Qué se hizo**: Se introdujo un `create_app()` en `tools/repo_orchestrator/main.py` para construir la instancia de FastAPI y se mantuvo `app = create_app()` para compatibilidad.
+- **Cómo se hizo**: Se movió la creación de la app, rutas, middlewares, registro de rutas y montaje de static/SPAs dentro de `create_app()` sin alterar la lógica existente. `lifespan` y tareas de cleanup permanecen intactos y se reutilizan en el factory. Se evitó introducir side-effects adicionales en importación.
+- **Por qué se hizo**: Desacoplar la construcción de la aplicación (app factory) para habilitar refactors posteriores y mejorar testabilidad, sin cambiar el comportamiento externo.
+- **Resultado**: ✅ App factory mínima implementada; se mantiene compatibilidad con import `app` y el entrypoint `__main__`.
+- **Notas operativas**: No se elimina ningún archivo. Se requiere ejecutar tests relevantes y actualizar `tests/integrity_manifest.json` si cambia el hash de `main.py`.
 
 ### F3 — Extracción por módulos
 - **Qué se hizo**: _(pendiente)_
