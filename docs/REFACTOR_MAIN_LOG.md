@@ -83,19 +83,19 @@
 - **Notas operativas**: Mantener política de no borrado. Se actualizó `tests/integrity_manifest.json` tras cambios en `main.py` y `config.py`. Revisar `git status` antes de commit si los hooks reescriben archivos (EOF/isort).
 
 ### F5 — End-to-end test harness
-- **Qué se hizo**: _(pendiente)_
-- **Cómo se hizo**: _(pendiente)_
-- **Por qué se hizo**: _(pendiente)_
-- **Resultado**: _(pendiente)_
-- **Notas operativas**: _(pendiente)_
+- **Qué se hizo**: Se añadió un harness E2E mínimo en `tests/test_e2e_harness.py` que valida `/status` y `/ui/status` con auth real.
+- **Cómo se hizo**: Se creó un test con `TestClient(app)` y headers `Authorization: Bearer <token>` usando el `ORCH_TOKEN` del entorno (con fallback al token de `conftest`). Se verifican códigos 200 y campos clave (`version`, `uptime_seconds`, `service_status`).
+- **Por qué se hizo**: Para disponer de un smoke/E2E simple que valide el flujo end-to-end del API sin mocks, manteniendo compatibilidad y cobertura mínima antes de avanzar.
+- **Resultado**: ✅ Harness E2E añadido y validado con `pytest tests/test_e2e_harness.py` (1 passed, 1 warning).
+- **Notas operativas**: No se borró ningún archivo. Mantener guardrails de token válido para no disparar `panic_mode`.
 
 ---
 
 ## 5. Validación de Éxito
-- **Refactor completado sin roturas**: _(pendiente)_
-- **Tests unit + integration verdes**: _(pendiente)_
-- **Smoke tests API**: _(pendiente)_
-- **Trazabilidad completa (Correlation ID)**: _(pendiente)_
+- **Refactor completado sin roturas**: ✅ Re-test completo en verde (205 passed, 1 warning).
+- **Tests unit + integration verdes**: ✅ `pytest` completo verde.
+- **Smoke tests API**: ✅ Harness E2E ejecutado y validado.
+- **Trazabilidad completa (Correlation ID)**: ✅ Se mantiene verificación en `tests/unit/test_main.py`.
 
 ---
 
