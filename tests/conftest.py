@@ -6,12 +6,26 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+IGNORED_COLLECTION_FILES = {"test_diag_2.txt", "test_failures.txt"}
+
 # Set environment variables for testing BEFORE importing the app
 # Default token - will be reset by clean_environment fixture
 os.environ.setdefault("ORCH_TOKEN", "test-token-a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0")
 os.environ.setdefault("ORCH_REPO_ROOT", str(Path(__file__).parent.parent.resolve()))
 
-from tools.repo_orchestrator.main import app
+from tools.repo_orchestrator.main import app  # noqa: E402
+
+
+def pytest_ignore_collect(path: Path, config: pytest.Config) -> bool:
+    """Ignore non-test diagnostic artifacts stored in the repo root."""
+    try:
+        filename = path.name
+    except AttributeError:
+        try:
+            filename = path.basename
+        except Exception:
+            return False
+    return filename in IGNORED_COLLECTION_FILES
 
 
 @pytest.fixture(scope="session")

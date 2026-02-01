@@ -30,28 +30,32 @@ class LMStudioClient:
         try:
             data = json.loads(json_str)
             if isinstance(data, list):
-                # Clean payloads: some models include "Authorization: Bearer " or "path=" prefixes
-                cleaned = []
-                for item in data:
-                    s = str(item)
-                    for prefix in [
-                        "Authorization: Bearer ",
-                        "Authorization: ",
-                        "Bearer ",
-                        "path=",
-                        "GET ",
-                        "HTTP/1.1",
-                    ]:
-                        if s.startswith(prefix):
-                            s = s[len(prefix) :]
-                        if s.endswith(" HTTP/1.1"):
-                            s = s[: -len(" HTTP/1.1")]
-                    cleaned.append(s.strip())
-                return cleaned
+                return self._clean_payloads(data)
         except json.JSONDecodeError:
             # Try to fix trailing commas or unquoted strings if possible (future enhancement)
             pass
         return []
+
+    def _clean_payloads(self, payloads: List[object]) -> List[str]:
+        """Clean payloads by removing common prefixes and suffixes."""
+        cleaned = []
+        prefixes = [
+            "Authorization: Bearer ",
+            "Authorization: ",
+            "Bearer ",
+            "path=",
+            "GET ",
+            "HTTP/1.1",
+        ]
+        for item in payloads:
+            s = str(item)
+            for prefix in prefixes:
+                if s.startswith(prefix):
+                    s = s[len(prefix) :]
+            if s.endswith(" HTTP/1.1"):
+                s = s[: -len(" HTTP/1.1")]
+            cleaned.append(s.strip())
+        return cleaned
 
     def generate_payloads(self, system_prompt: str, user_prompt: str) -> List[str]:
         """

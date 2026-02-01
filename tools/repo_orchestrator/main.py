@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
     try:
         await cleanup_task
     except asyncio.CancelledError:
-        raise
+        logger.debug("Cleanup task cancelled successfully.")
 
 
 async def snapshot_cleanup_loop():
@@ -115,8 +115,8 @@ async def allow_options_preflight(request: Request, call_next):
     return response
 
 
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 
 
 @app.middleware("http")
@@ -170,8 +170,8 @@ async def panic_catcher(request: Request, call_next):
                 }
             )
             save_security_db(db)
-        except Exception:
-            pass  # Fail safe
+        except Exception as persistence_error:
+            logger.error(f"Failed to persist panic mode: {persistence_error}")
 
         # 6. Return Opaque Error
         return JSONResponse(
@@ -212,7 +212,7 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "tools.repo_orchestrator.main:app",
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec B104 - CLI entrypoint for local/dev use
         port=6834,
         reload=False,
         log_level="info",

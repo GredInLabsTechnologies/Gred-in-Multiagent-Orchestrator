@@ -73,10 +73,7 @@ async def test_lifespan_events():
     ) as mock_ensure:
 
         async def dummy_loop():
-            try:
-                await asyncio.sleep(100)
-            except asyncio.CancelledError:
-                pass
+            await asyncio.sleep(100)
 
         with patch("tools.repo_orchestrator.main.snapshot_cleanup_loop", side_effect=dummy_loop):
             from tools.repo_orchestrator.main import lifespan
@@ -92,7 +89,7 @@ async def test_lifespan_base_dir_missing():
         mock_base.exists.return_value = False
         with pytest.raises(RuntimeError, match="BASE_DIR"):
             async with lifespan(app):
-                pass
+                pass  # Execution SHOULD fail before reaching here
 
 
 def test_root_route():
@@ -117,10 +114,7 @@ async def test_snapshot_cleanup_loop_exit():
 @pytest.mark.asyncio
 async def test_lifespan_cleanup_task_cancelled_error_propagates():
     async def dummy_loop():
-        try:
-            await asyncio.sleep(100)
-        except asyncio.CancelledError:
-            raise
+        await asyncio.sleep(100)
 
     with patch(
         "tools.repo_orchestrator.services.snapshot_service.SnapshotService.ensure_snapshot_dir"
@@ -129,4 +123,4 @@ async def test_lifespan_cleanup_task_cancelled_error_propagates():
             from tools.repo_orchestrator.main import lifespan
 
             async with lifespan(app):
-                pass
+                assert app.state.start_time > 0

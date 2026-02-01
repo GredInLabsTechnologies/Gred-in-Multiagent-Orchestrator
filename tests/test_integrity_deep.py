@@ -75,14 +75,18 @@ def test_orphan_dependency_check():
             continue
         for file in files:
             if file.endswith((".py", ".ts", ".js", ".cmd", ".ps1")):
-                path = Path(root) / file
-                if path == Path(__file__):
-                    continue
-                content = path.read_text(encoding="utf-8", errors="ignore")
-                for pattern in forbidden_patterns:
-                    if pattern in content:
-                        # Skip allowlisted occurrences (like the registry path itself if it's there)
-                        if "repo_registry.json" in str(path):
-                            continue
-                        print(f"[WARNING] Potential environment leak in {path}: '{pattern}' found.")
-                        # In strict mode this could be an assert
+                _check_file_for_patterns(Path(root) / file, forbidden_patterns)
+
+
+def _check_file_for_patterns(path: Path, forbidden_patterns: list[str]):
+    """Checks a single file for forbidden patterns."""
+    if path == Path(__file__):
+        return
+
+    content = path.read_text(encoding="utf-8", errors="ignore")
+    for pattern in forbidden_patterns:
+        if pattern in content:
+            # Skip allowlisted occurrences (like the registry path itself if it's there)
+            if "repo_registry.json" in str(path):
+                continue
+            print(f"[WARNING] Potential environment leak in {path}: '{pattern}' found.")

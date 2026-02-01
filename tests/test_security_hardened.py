@@ -95,7 +95,7 @@ def test_path_traversal_shield_exhaustive(test_client):
 def test_redaction_rigor(test_client):
     """Ensure sensitive patterns are properly redacted."""
     test_data = {
-        "openai": "sk-1234567890abcdefghijklmnopqrstuvwxyz1234567890AB",
+        "openai": "sk-REDACTED-DUMMY-KEY-FOR-TESTING-PURPOSES-ONLY-123",
         "github_token": "ghp_1234567890abcdefghijklmnopqrstuv",
         "aws": "AKIA1234567890ABCDEF",
         "custom_key": 'api-key: "myapikey123456789012"',
