@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 
-from tools.repo_orchestrator.config import BASE_DIR
+from tools.repo_orchestrator.config import BASE_DIR, get_settings
 from tools.repo_orchestrator.middlewares import register_middlewares
 from tools.repo_orchestrator.routes import register_routes
 from tools.repo_orchestrator.services.snapshot_service import SnapshotService
@@ -47,12 +47,13 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    settings = get_settings()
     app = FastAPI(title="Repo Orchestrator", version="1.0.0", lifespan=lifespan)
 
     @app.get("/")
     async def root_route():
         """Serve the SPA index when available, otherwise return a basic health payload."""
-        frontend_dist = BASE_DIR / "tools" / "orchestrator_ui" / "dist"
+        frontend_dist = settings.base_dir / "tools" / "orchestrator_ui" / "dist"
         index_file = frontend_dist / "index.html"
         if index_file.exists():
             return FileResponse(str(index_file))

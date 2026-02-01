@@ -76,11 +76,11 @@
 - **Notas operativas**: No se eliminó ningún archivo. Mantener verificación de integridad (`tests/integrity_manifest.json`) si cambia el hash de `main.py`.
 
 ### F4 — Configuración modular (settings)
-- **Qué se hizo**: _(pendiente)_
-- **Cómo se hizo**: _(pendiente)_
-- **Por qué se hizo**: _(pendiente)_
-- **Resultado**: _(pendiente)_
-- **Notas operativas**: _(pendiente)_
+- **Qué se hizo**: Se modularizó la configuración en `tools/repo_orchestrator/config.py` con un objeto `Settings` y un factory `get_settings()`. Se ajustó `main.py` para consumir `settings` en runtime. Se añadió logging en la carga del token y se eliminaron variables sin uso detectadas por los hooks.
+- **Cómo se hizo**: Se introdujo un dataclass inmutable `Settings`, un builder `_build_settings()` que centraliza lectura de env vars, rutas y defaults, y se expusieron constantes existentes como alias de `Settings` para compatibilidad. En `main.py` se reemplazaron accesos directos a `BASE_DIR` por `settings.base_dir` y se inicializó `settings = get_settings()` en `create_app()` (el `settings` de `lifespan` se eliminó por no usarse). En `config.py` se sustituyeron `try/except pass` por `logger.warning(...)` y se añadió `logging.getLogger(__name__)`. Los hooks de pre-commit ajustaron EOF e import order.
+- **Por qué se hizo**: Para agrupar y centralizar la configuración sin cambiar el comportamiento externo, facilitando tests y evolución del módulo, y cumplir los guardrails de calidad (ruff/bandit/isort).
+- **Resultado**: ✅ Configuración modular aplicada sin cambios de API. Tests relevantes en verde (`pytest tests/unit/test_main.py tests/unit/test_config.py tests/test_integrity_deep.py`).
+- **Notas operativas**: Mantener política de no borrado. Se actualizó `tests/integrity_manifest.json` tras cambios en `main.py` y `config.py`. Revisar `git status` antes de commit si los hooks reescriben archivos (EOF/isort).
 
 ### F5 — End-to-end test harness
 - **Qué se hizo**: _(pendiente)_
