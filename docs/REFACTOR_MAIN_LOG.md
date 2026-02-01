@@ -99,6 +99,15 @@
 
 ---
 
+## 7. Verificación forense posterior al refactor (post-check)
+- **Qué se hizo**: Se ejecutó un re-test completo con `pytest` para verificar estabilidad post-refactor y se revisó el manifest de integridad.
+- **Cómo se hizo**: `pytest` desde la raíz del repo en Win11, con `pytest.ini` activo. Resultado: `205 passed, 1 warning` (warning de `PytestRemovedIn9Warning` en `tests/conftest.py`). Se revisó `tests/integrity_manifest.json` para hashes de archivos críticos.
+- **Por qué se hizo**: Aportar evidencia verificable posterior a F5 para un cierre forense con resultados reproducibles.
+- **Resultado**: ✅ Re-test completo en verde. Integridad validada por ejecución del test `tests/test_integrity_deep.py` dentro del run completo.
+- **Notas operativas**: Los logs históricos (`test_results.txt`, `test_results_2.txt`, `test_results.log`) contienen fallos previos que ya fueron corregidos; el último run completo en esta verificación salió en verde.
+
+---
+
 ## 6. Registro de Cambios (cronología)
 - **2026-02-01** — Decisión operativa: **no se borra nada** hasta completar el refactor y validar con tests (source of truth intacto).
 - **2026-02-01** — Se adopta **SSoT en `.agent/workflows/`** y **script de sincronización** para Cline/Claude: `scripts/sync-workflows.ps1`.
