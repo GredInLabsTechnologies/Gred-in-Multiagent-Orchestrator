@@ -48,3 +48,10 @@ failing_tests.txt
 last_llm_response.json
 venv_test/
 app_log.txt
+error.txt
+last_test_run.txt
+pytest_error.txt
+pytest_final.txt
+pytest_short.txt
+nul
+.orch_actions_token

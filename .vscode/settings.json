@@ -1,8 +1,4 @@
 {
-    "sonarlint.connectedMode.project": {
-        "connectionId": "shiloren",
-        "projectKey": "Shiloren_gred_orchestrator"
-    },
     "java.jdt.ls.java.home": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.9.10-hotspot",
     "java.configuration.runtime": [
         {
