@@ -1,5 +1,8 @@
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger("orchestrator.security")
 
 
 def load_json_db(path: Path, default_factory):
@@ -8,7 +11,8 @@ def load_json_db(path: Path, default_factory):
         return default_factory()
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to load JSON db %s: %s", path, exc)
         return default_factory()
 
 

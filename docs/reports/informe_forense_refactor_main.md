@@ -1,5 +1,7 @@
 # Informe Forense — Refactor `main.py`
 
+**Estado del documento**: ✅ **CONGELADO** (2026-02-01) — Auditoría forense final completada.
+
 ## 1) Resumen ejecutivo
 **Estado**: ✅ **OPERACIÓN VALIDADA** (evidencia reproducible en verde).
 

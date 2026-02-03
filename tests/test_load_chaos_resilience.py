@@ -1,4 +1,5 @@
 import concurrent.futures
+import os
 import time
 
 import pytest
@@ -7,8 +8,8 @@ import requests
 from tests.metrics.runtime_metrics import MetricsCollector
 
 # Configuration
-BASE_URL = "http://localhost:9325"
-AUTH_TOKEN = "GRED_SECRET_TOKEN_2025"
+BASE_URL = os.environ.get("ORCH_BASE_URL", "http://localhost:9325")
+AUTH_TOKEN = os.environ.get("ORCH_TEST_TOKEN", "")
 PANIC_THRESHOLD_RPS = 100  # Adjust based on rate limit config in config.py if known
 
 
@@ -30,10 +31,23 @@ def send_request(endpoint, token=None):
         return 0, 0, "error"
 
 
+def _is_orchestrator_available() -> bool:
+    try:
+        response = requests.get(f"{BASE_URL}/status", timeout=2)
+        return response.status_code in {200, 401}
+    except requests.exceptions.RequestException:
+        return False
+
+
+@pytest.mark.integration
 def test_rate_limit_saturation(metrics):
     """
     Floods the API to trigger 429 Rate Limit.
     """
+    if not AUTH_TOKEN:
+        pytest.skip("ORCH_TEST_TOKEN not set")
+    if not _is_orchestrator_available():
+        pytest.skip("Orchestrator not reachable")
     total_reqs = 150
     endpoint = "/status"
 
@@ -61,10 +75,10 @@ def test_rate_limit_saturation(metrics):
     )
 
     # We expect at least some 429s given the config usually has limits
-    # If config allows >150/min, this assertion might need tuning
-    # assert rate_limited_count > 0, "Rate limit checking failed (no 429s received)"
+    assert rate_limited_count > 0, "Rate limit not triggered; adjust ORCH_RATE_LIMIT settings"
 
 
+@pytest.mark.integration
 def test_panic_mode_trigger_and_recovery(metrics):
     """
     Forces the system into PANIC mode by simulating a massive security event spike,
@@ -74,6 +88,10 @@ def test_panic_mode_trigger_and_recovery(metrics):
     # but here we might need to rely on the backend's panic logic.
     # If there's no direct 'trigger panic' endpoint, we simulate attack traffic)
 
+    if not AUTH_TOKEN:
+        pytest.skip("ORCH_TEST_TOKEN not set")
+    if not _is_orchestrator_available():
+        pytest.skip("Orchestrator not reachable")
     # Simulating attack traffic (e.g. 50 bad auth requests in 1 sec)
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(send_request, "/status", "BAD_TOKEN") for _ in range(50)]
@@ -105,7 +123,7 @@ def test_panic_mode_trigger_and_recovery(metrics):
             res_resp = requests.post(
                 f"{BASE_URL}/ui/security/resolve",
                 headers={"Authorization": f"Bearer {AUTH_TOKEN}"},
-                json={"resolution_code": "ADMIN_OVERRIDE_2026"},  # Hypothetical code
+                params={"action": "clear_panic"},
             )
             assert res_resp.status_code == 200, "Failed to resolve panic mode"
             print("System recovered from PANIC mode.")

@@ -1,6 +1,7 @@
 import os
 import sys
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -9,14 +10,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from tools.repo_orchestrator.main import app
 from tools.repo_orchestrator.security import verify_token
+from tools.repo_orchestrator.security.auth import AuthContext
 
 
 @pytest.fixture(autouse=True)
-def override_auth():
+def override_auth(test_actor):
     """Re-apply auth override before each test (survives conftest cleanup)."""
 
     async def override_verify_token():
-        return "test_actor"
+        return AuthContext(token=test_actor, role="admin")
 
     app.dependency_overrides[verify_token] = override_verify_token
     yield
@@ -68,7 +70,7 @@ def test_api_vitaminize_invalid_path(test_client):
 
 def test_api_vitaminize_success(test_client):
     """Use sequential patching for better control and debugging"""
-    with patch("tools.repo_orchestrator.routes.REPO_ROOT_DIR", new="/mock/repos"):
+    with patch("tools.repo_orchestrator.routes.REPO_ROOT_DIR", new=Path("/mock/repos")):
         with patch(
             "tools.repo_orchestrator.services.repo_service.RepoService.vitaminize_repo"
         ) as mock_vit:
@@ -77,7 +79,7 @@ def test_api_vitaminize_success(test_client):
             with patch("pathlib.Path.exists", return_value=True):
                 with patch(
                     "pathlib.Path.resolve",
-                    return_value=MagicMock(__str__=lambda x: "/mock/repos/myrepo"),
+                    return_value=Path("/mock/repos/myrepo"),
                 ):
                     with patch(
                         "tools.repo_orchestrator.routes.load_repo_registry",

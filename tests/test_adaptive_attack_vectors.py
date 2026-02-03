@@ -1,3 +1,4 @@
+import os
 import time
 
 import pytest
@@ -8,8 +9,8 @@ from tests.llm.prompt_templates import SYSTEM_ADAPTIVE_ATTACKER
 from tests.metrics.runtime_metrics import MetricsCollector
 
 # Configuration
-BASE_URL = "http://localhost:9325"
-AUTH_TOKEN = "CHAOS_MONKEY_TOKEN_2026"
+BASE_URL = os.environ.get("ORCH_BASE_URL", "http://localhost:9325")
+AUTH_TOKEN = os.environ.get("ORCH_TEST_TOKEN", "")
 
 
 @pytest.fixture(scope="module")
@@ -29,10 +30,16 @@ def metrics():
     collector.save_report("tests/metrics/adaptive_attack_report.json")
 
 
+@pytest.mark.integration
 def test_adaptive_path_traversal(llm, metrics, llm_available):
     """
     Simulates an attacker learning from failures to bypass file validation.
     """
+    if not AUTH_TOKEN:
+        pytest.skip("ORCH_TEST_TOKEN not set")
+    if not _is_orchestrator_available():
+        pytest.skip("Orchestrator not reachable")
+
     history = []
     current_payload = "../etc/passwd"  # Starting point
 
@@ -105,3 +112,11 @@ def _get_next_payload(i, llm, llm_available, history):
         "..%2f..%2fetc%2fpasswd",
     ]
     return fallback_payloads[i] if i < len(fallback_payloads) else None
+
+
+def _is_orchestrator_available() -> bool:
+    try:
+        response = requests.get(f"{BASE_URL}/status", timeout=2)
+        return response.status_code in {200, 401}
+    except requests.exceptions.RequestException:
+        return False

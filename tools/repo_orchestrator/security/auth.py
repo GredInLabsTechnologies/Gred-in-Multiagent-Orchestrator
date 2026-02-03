@@ -1,10 +1,11 @@
 import logging
 import time
+from dataclasses import dataclass
 
 from fastapi import HTTPException, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from tools.repo_orchestrator.config import TOKENS
+from tools.repo_orchestrator.config import ORCH_ACTIONS_TOKEN, TOKENS
 
 logger = logging.getLogger("orchestrator.auth")
 
@@ -13,9 +14,15 @@ security = HTTPBearer(auto_error=False)
 INVALID_TOKEN_ERROR = "Invalid token"
 
 
+@dataclass(frozen=True)
+class AuthContext:
+    token: str
+    role: str
+
+
 def verify_token(
     _request: Request, credentials: HTTPAuthorizationCredentials | None = Security(security)
-):
+) -> AuthContext:
     if not credentials:
         raise HTTPException(status_code=401, detail="Token missing")
 
@@ -33,34 +40,72 @@ def verify_token(
     if token not in TOKENS:
         _trigger_panic_for_invalid_token(token)
         raise HTTPException(status_code=401, detail=INVALID_TOKEN_ERROR)
-    return token
+    role = "actions" if token == ORCH_ACTIONS_TOKEN else "admin"
+    return AuthContext(token=token, role=role)
+
+
+PANIC_THRESHOLD = 5  # Attempts before lockdown
+PANIC_WINDOW_SECONDS = 60  # Time window for threshold
+EVENT_RETENTION_SECONDS = 86400  # 24 hours - events older than this are cleaned up
 
 
 def _trigger_panic_for_invalid_token(token: str) -> None:
     import hashlib
-    import json
+    import threading
 
-    from tools.repo_orchestrator.security import (
-        SECURITY_DB_PATH,
-        load_security_db,
-        save_security_db,
-    )
+    from tools.repo_orchestrator.security import load_security_db, save_security_db
 
     token_hash = hashlib.sha256(token.encode("utf-8", errors="ignore")).hexdigest()
+    now = time.time()
 
-    try:
-        db = json.loads(SECURITY_DB_PATH.read_text(encoding="utf-8"))
-    except Exception:
+    lock = getattr(_trigger_panic_for_invalid_token, "_lock", None)
+    if lock is None:
+        lock = threading.Lock()
+        _trigger_panic_for_invalid_token._lock = lock
+
+    with lock:
         db = load_security_db()
-    db["panic_mode"] = True
-    if "recent_events" not in db:
-        db["recent_events"] = []
-    db["recent_events"].append(
-        {
-            "type": "PANIC_TRIGGER",
-            "timestamp": time.time(),
-            "reason": "Invalid authentication attempt",
-            "payload_hash": token_hash,  # Observability: Hash of the malicious payload
-        }
-    )
-    save_security_db(db)
+
+        if "recent_events" not in db:
+            db["recent_events"] = []
+
+        # Clean up old events (older than retention period)
+        db["recent_events"] = [
+            e
+            for e in db["recent_events"]
+            if isinstance(e.get("timestamp"), (int, float))
+            and (now - e["timestamp"]) < EVENT_RETENTION_SECONDS
+        ]
+
+        # Count recent failed attempts within the time window
+        recent_failures = [
+            e
+            for e in db["recent_events"]
+            if e.get("type") == "PANIC_TRIGGER"
+            and isinstance(e.get("timestamp"), (int, float))
+            and (now - e["timestamp"]) < PANIC_WINDOW_SECONDS
+            and not e.get("resolved", False)
+        ]
+
+        # Add the new event
+        db["recent_events"].append(
+            {
+                "type": "PANIC_TRIGGER",
+                "timestamp": now,
+                "reason": "Invalid authentication attempt",
+                "payload_hash": token_hash,
+            }
+        )
+
+        # Only activate panic mode if threshold exceeded
+        if len(recent_failures) + 1 >= PANIC_THRESHOLD:
+            db["panic_mode"] = True
+            logger.warning(
+                f"PANIC MODE ACTIVATED: {len(recent_failures) + 1} failed attempts in {PANIC_WINDOW_SECONDS}s"
+            )
+        else:
+            logger.info(
+                f"Auth failure {len(recent_failures) + 1}/{PANIC_THRESHOLD} (window: {PANIC_WINDOW_SECONDS}s)"
+            )
+
+        save_security_db(db)

@@ -1,5 +1,6 @@
 # Refactor de `main.py` — Registro Operativo y de Trazabilidad
 
+**Estado del documento**: ✅ **CONGELADO** (2026-02-01) — Auditoría forense completada y aprobada.
 **Documento vivo**: Este registro se actualiza en cada fase del refactor.
 
 ## 0. Metadatos

@@ -119,8 +119,13 @@ class RepoService:
                         )
                         if len(file_hits) >= 50:
                             break
-        except Exception:
-            pass
+        except (OSError, UnicodeDecodeError) as exc:
+            # Log and continue; individual file failures shouldn't crash search
+            import logging
+
+            logging.getLogger("orchestrator.repo").warning(
+                "Failed to search %s: %s", file_path, exc
+            )
         return file_hits
 
     @staticmethod

@@ -45,6 +45,7 @@ class Settings:
     cors_origins: List[str]
     orch_token_file: Path
     tokens: Set[str]
+    actions_token: str
     rate_limit_per_min: int
     rate_limit_window_seconds: int
     rate_limit_cleanup_seconds: int
@@ -55,16 +56,16 @@ class Settings:
     audit_log_backup_count: int
 
 
-def _load_or_create_token(token_file: Path | None = None) -> str:
+def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_TOKEN") -> str:
     token_file = token_file or ORCH_TOKEN_FILE
-    env_token = os.environ.get("ORCH_TOKEN", "").strip()
+    env_token = os.environ.get(env_key, "").strip()
     if env_token:
         return env_token
     if token_file.exists():
         try:
             file_token = token_file.read_text(encoding="utf-8").strip()
             if file_token:
-                os.environ["ORCH_TOKEN"] = file_token
+                os.environ[env_key] = file_token
                 return file_token
         except Exception:
             logger.warning("Failed to read token file %s", token_file)
@@ -75,7 +76,7 @@ def _load_or_create_token(token_file: Path | None = None) -> str:
         os.chmod(token_file, 0o600)
     except Exception:
         logger.warning("Failed to chmod token file %s", token_file)
-    os.environ["ORCH_TOKEN"] = token
+    os.environ[env_key] = token
     return token
 
 
@@ -96,7 +97,16 @@ def _build_settings() -> Settings:
     }
     service_name = os.environ.get("ORCH_SERVICE_NAME", "GILOrchestrator")
     allowed_extensions = {".ts", ".tsx", ".py", ".go", ".rs", ".c", ".cpp", ".json", ".yaml"}
-    denied_extensions = {".md", ".rst", ".adoc", ".txt", ".env", ".pem", ".key"}
+    denied_extensions = {
+        ".md",
+        ".markdown",
+        ".rst",
+        ".adoc",
+        ".txt",
+        ".env",
+        ".pem",
+        ".key",
+    }
     denied_dirs = {".git", "node_modules", ".venv", "__pycache__", "dist", "build"}
     snapshot_dir = base_dir / ".orch_snapshots"
     snapshot_ttl = int(os.environ.get("ORCH_SNAPSHOT_TTL", "240"))
@@ -113,7 +123,15 @@ def _build_settings() -> Settings:
     orch_token_file = Path(
         os.environ.get("ORCH_TOKEN_FILE", str(Path(__file__).parent / ".orch_token"))
     ).resolve()
-    tokens = {_load_or_create_token(orch_token_file)}
+    actions_token_file = Path(
+        os.environ.get(
+            "ORCH_ACTIONS_TOKEN_FILE",
+            str(Path(__file__).parent / ".orch_actions_token"),
+        )
+    ).resolve()
+    main_token = _load_or_create_token(orch_token_file, "ORCH_TOKEN")
+    actions_token = _load_or_create_token(actions_token_file, "ORCH_ACTIONS_TOKEN")
+    tokens = {main_token, actions_token}
     rate_limit_per_min = 100
     rate_limit_window_seconds = int(os.environ.get("ORCH_RATE_LIMIT_WINDOW_SECONDS", "60"))
     rate_limit_cleanup_seconds = int(os.environ.get("ORCH_RATE_LIMIT_CLEANUP_SECONDS", "120"))
@@ -141,6 +159,7 @@ def _build_settings() -> Settings:
         cors_origins=cors_origins,
         orch_token_file=orch_token_file,
         tokens=tokens,
+        actions_token=actions_token,
         rate_limit_per_min=rate_limit_per_min,
         rate_limit_window_seconds=rate_limit_window_seconds,
         rate_limit_cleanup_seconds=rate_limit_cleanup_seconds,
@@ -177,6 +196,7 @@ MAX_BYTES = _SETTINGS.max_bytes
 CORS_ORIGINS = _SETTINGS.cors_origins
 ORCH_TOKEN_FILE = _SETTINGS.orch_token_file
 TOKENS = _SETTINGS.tokens
+ORCH_ACTIONS_TOKEN = _SETTINGS.actions_token
 RATE_LIMIT_PER_MIN = _SETTINGS.rate_limit_per_min
 RATE_LIMIT_WINDOW_SECONDS = _SETTINGS.rate_limit_window_seconds
 RATE_LIMIT_CLEANUP_SECONDS = _SETTINGS.rate_limit_cleanup_seconds

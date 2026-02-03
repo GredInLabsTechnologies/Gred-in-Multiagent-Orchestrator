@@ -47,7 +47,7 @@ class FileService:
 
         if len(content.encode("utf-8")) > MAX_BYTES:
             content = content[:MAX_BYTES] + truncated_marker
-        else:
+        elif final_truncated_marker and len(lines) > end_line:
             content += final_truncated_marker
 
         content_hash = hashlib.sha256(content.encode()).hexdigest()

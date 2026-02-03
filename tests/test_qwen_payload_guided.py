@@ -6,9 +6,6 @@ from tests.llm.lm_studio_client import LMStudioClient, is_lm_studio_available
 from tests.llm.prompt_templates import SYSTEM_PAYLOAD_GENERATOR, USER_PROMPTS
 from tests.metrics.runtime_metrics import MetricsCollector
 
-# Configuration
-AUTH_TOKEN = "CHAOS_MONKEY_TOKEN_2026"
-
 
 @pytest.fixture(scope="module")
 def llm():
@@ -27,7 +24,7 @@ def metrics():
     collector.save_report("tests/metrics/payload_guided_report.json")
 
 
-def test_path_traversal_guided(llm, metrics, llm_available, test_client):
+def test_path_traversal_guided(llm, metrics, llm_available, test_client, valid_token):
     """
     Test guided path traversal using LLM generated payloads.
     """
@@ -48,7 +45,7 @@ def test_path_traversal_guided(llm, metrics, llm_available, test_client):
             response = test_client.get(
                 "/file",
                 params={"path": payload},
-                headers={"Authorization": f"Bearer {AUTH_TOKEN}"},
+                headers={"Authorization": f"Bearer {valid_token}"},
             )
             latency = time.time() - start_time
 

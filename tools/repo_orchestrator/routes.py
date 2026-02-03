@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import time
@@ -22,9 +23,32 @@ from tools.repo_orchestrator.security import (
     validate_path,
     verify_token,
 )
+from tools.repo_orchestrator.security.auth import AuthContext
 from tools.repo_orchestrator.services.file_service import FileService
 from tools.repo_orchestrator.services.repo_service import RepoService
 from tools.repo_orchestrator.services.system_service import SystemService
+
+READ_ONLY_ACTIONS_PATHS = {
+    "/file",
+    "/tree",
+    "/search",
+    "/diff",
+    "/ui/status",
+}
+
+
+def require_read_only_access(
+    request: Request, auth: AuthContext = Depends(verify_token)
+) -> AuthContext:
+    if auth.role == "actions":
+        if request.url.path not in READ_ONLY_ACTIONS_PATHS:
+            raise HTTPException(
+                status_code=403, detail="Read-only token cannot access this endpoint"
+            )
+    return auth
+
+
+logger = logging.getLogger("orchestrator.routes")
 
 # Constants for error messages
 ERR_REPO_NOT_FOUND = "Repo no encontrado"
@@ -34,13 +58,17 @@ ERR_REPO_OUT_OF_BASE = "Repo fuera de la base permitida"
 
 
 def get_status_handler(
-    request: Request, token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)
+    request: Request,
+    auth: AuthContext = Depends(require_read_only_access),
+    rl: None = Depends(check_rate_limit),
 ):
     return {"version": "1.0.0", "uptime_seconds": time.time() - request.app.state.start_time}
 
 
 def get_ui_status_handler(
-    request: Request, token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)
+    request: Request,
+    auth: AuthContext = Depends(require_read_only_access),
+    rl: None = Depends(check_rate_limit),
 ):
     audit_lines = FileService.tail_audit_lines(limit=1)
     base_dir = get_active_repo_dir()
@@ -63,7 +91,7 @@ def get_ui_status_handler(
 
 def get_ui_audit_handler(
     limit: int = Query(200, ge=10, le=500),
-    token: str = Depends(verify_token),
+    auth: AuthContext = Depends(require_read_only_access),
     rl: None = Depends(check_rate_limit),
 ):
     return {
@@ -72,20 +100,33 @@ def get_ui_audit_handler(
 
 
 def get_ui_allowlist_handler(
-    token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)
+    auth: AuthContext = Depends(require_read_only_access), rl: None = Depends(check_rate_limit)
 ):
     base_dir = get_active_repo_dir()
     allowed_paths = get_allowed_paths(base_dir)
     items = serialize_allowlist(allowed_paths)
+    safe_items = []
     for item in items:
         try:
-            item["path"] = str(Path(item["path"]).relative_to(base_dir))
-        except Exception:
+            resolved = Path(item["path"]).resolve()
+            if not _is_path_within_base(resolved, base_dir):
+                logger.warning(
+                    "Rejected allowlist path outside base %s: %s",
+                    base_dir,
+                    item.get("path"),
+                )
+                continue
+            item["path"] = str(resolved.relative_to(base_dir))
+            safe_items.append(item)
+        except (ValueError, TypeError, OSError) as exc:
+            logger.warning("Failed to relativize allowlist path %s: %s", item.get("path"), exc)
             continue
-    return {"paths": items}
+    return {"paths": safe_items}
 
 
-def list_repos_handler(token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
+def list_repos_handler(
+    auth: AuthContext = Depends(require_read_only_access), rl: None = Depends(check_rate_limit)
+):
     repos = RepoService.list_repos()
     registry = RepoService.ensure_repo_registry(repos)
     active_repo = registry.get("active_repo")
@@ -110,30 +151,43 @@ def list_repos_handler(token: str = Depends(verify_token), rl: None = Depends(ch
 
 
 def get_active_repo_handler(
-    token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)
+    auth: AuthContext = Depends(require_read_only_access), rl: None = Depends(check_rate_limit)
 ):
     registry = load_repo_registry()
     return {"active_repo": registry.get("active_repo")}
 
 
+def _is_path_within_base(path: Path, base: Path) -> bool:
+    """Safely check if path is within base directory."""
+    try:
+        path.resolve().relative_to(base.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def open_repo_handler(
-    path: str = Query(...), token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)
+    path: str = Query(...),
+    auth: AuthContext = Depends(require_read_only_access),
+    rl: None = Depends(check_rate_limit),
 ):
     repo_path = Path(path).resolve()
-    if not str(repo_path).startswith(str(REPO_ROOT_DIR)):
+    if not _is_path_within_base(repo_path, REPO_ROOT_DIR):
         raise HTTPException(status_code=400, detail=ERR_REPO_OUT_OF_BASE)
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail=ERR_REPO_NOT_FOUND)
 
-    audit_log("UI", "OPEN_REPO", str(repo_path), actor=token)
+    audit_log("UI", "OPEN_REPO", str(repo_path), actor=auth.token)
     return {"status": "success", "message": "Repo signaled for opening (server-agnostic)"}
 
 
 def select_repo_handler(
-    path: str = Query(...), token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)
+    path: str = Query(...),
+    auth: AuthContext = Depends(require_read_only_access),
+    rl: None = Depends(check_rate_limit),
 ):
     repo_path = Path(path).resolve()
-    if not str(repo_path).startswith(str(REPO_ROOT_DIR)):
+    if not _is_path_within_base(repo_path, REPO_ROOT_DIR):
         raise HTTPException(status_code=400, detail=ERR_REPO_OUT_OF_BASE)
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail=ERR_REPO_NOT_FOUND)
@@ -142,18 +196,20 @@ def select_repo_handler(
     registry["active_repo"] = str(repo_path)
     save_repo_registry(registry)
 
-    audit_log("REPO", "SELECT", str(repo_path), actor=token)
+    audit_log("REPO", "SELECT", str(repo_path), actor=auth.token)
     return {"status": "success", "active_repo": str(repo_path)}
 
 
 def get_security_events_handler(
-    token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)
+    auth: AuthContext = Depends(require_read_only_access), rl: None = Depends(check_rate_limit)
 ):
     db = load_security_db()
     return {"panic_mode": db.get("panic_mode", False), "events": db.get("recent_events", [])}
 
 
-def resolve_security_handler(action: str = Query(...), token: str = Depends(verify_token)):
+def resolve_security_handler(
+    action: str = Query(...), auth: AuthContext = Depends(require_read_only_access)
+):
     if action != "clear_panic":
         raise HTTPException(status_code=400, detail="Invalid action")
 
@@ -163,37 +219,41 @@ def resolve_security_handler(action: str = Query(...), token: str = Depends(veri
         event["resolved"] = True
     save_security_db(db)
 
-    audit_log("SECURITY", "PANIC_CLEARED", "SUCCESS", actor=token)
+    audit_log("SECURITY", "PANIC_CLEARED", "SUCCESS", actor=auth.token)
     return {"status": "panic cleared"}
 
 
 def get_service_status_handler(
-    token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)
+    auth: AuthContext = Depends(require_read_only_access), rl: None = Depends(check_rate_limit)
 ):
     return {"status": SystemService.get_status()}
 
 
 def restart_service_handler(
-    token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)
+    auth: AuthContext = Depends(require_read_only_access), rl: None = Depends(check_rate_limit)
 ):
-    success = SystemService.restart(actor=token)
+    success = SystemService.restart(actor=auth.token)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to restart service")
     return {"status": "restarting"}
 
 
-def stop_service_handler(token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)):
-    success = SystemService.stop(actor=token)
+def stop_service_handler(
+    auth: AuthContext = Depends(require_read_only_access), rl: None = Depends(check_rate_limit)
+):
+    success = SystemService.stop(actor=auth.token)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to stop service")
     return {"status": "stopping"}
 
 
 def vitaminize_repo_handler(
-    path: str = Query(...), token: str = Depends(verify_token), rl: None = Depends(check_rate_limit)
+    path: str = Query(...),
+    auth: AuthContext = Depends(require_read_only_access),
+    rl: None = Depends(check_rate_limit),
 ):
     repo_path = Path(path).resolve()
-    if not str(repo_path).startswith(str(REPO_ROOT_DIR)):
+    if not _is_path_within_base(repo_path, REPO_ROOT_DIR):
         raise HTTPException(status_code=400, detail=ERR_REPO_OUT_OF_BASE)
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail=ERR_REPO_NOT_FOUND)
@@ -204,14 +264,14 @@ def vitaminize_repo_handler(
     registry["active_repo"] = str(repo_path)
     save_repo_registry(registry)
 
-    audit_log("REPO", "VITAMINIZE", str(repo_path), actor=token)
+    audit_log("REPO", "VITAMINIZE", str(repo_path), actor=auth.token)
     return {"status": "success", "created_files": created, "active_repo": str(repo_path)}
 
 
 async def get_tree_handler(
     path: str = ".",
     max_depth: int = Query(3, le=6),
-    token: str = Depends(verify_token),
+    auth: AuthContext = Depends(require_read_only_access),
     rl: None = Depends(check_rate_limit),
 ):
     base_dir = get_active_repo_dir()
@@ -221,9 +281,13 @@ async def get_tree_handler(
 
     if ALLOWLIST_REQUIRE:
         allowed_paths = get_allowed_paths(base_dir)
-        files = [
-            str(p.relative_to(target)) for p in allowed_paths if str(p).startswith(str(target))
-        ]
+        files = []
+        for p in allowed_paths:
+            try:
+                rel = p.resolve().relative_to(target.resolve())
+            except ValueError:
+                continue
+            files.append(str(rel))
         return {"files": sorted(set(files)), "truncated": False}
 
     import asyncio
@@ -237,7 +301,7 @@ def get_file_handler(
     path: str,
     start_line: int = Query(1, ge=1),
     end_line: int = Query(MAX_LINES, ge=1),
-    token: str = Depends(verify_token),
+    auth: AuthContext = Depends(require_read_only_access),
     rl: None = Depends(check_rate_limit),
 ):
     base_dir = get_active_repo_dir()
@@ -248,7 +312,7 @@ def get_file_handler(
         raise HTTPException(status_code=413, detail="File too large.")
 
     try:
-        content, _ = FileService.get_file_content(target, start_line, end_line, token)
+        content, _ = FileService.get_file_content(target, start_line, end_line, auth.token)
         return content
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -257,7 +321,7 @@ def get_file_handler(
 async def search_handler(
     q: str = Query(..., min_length=3, max_length=128),
     ext: Optional[str] = None,
-    token: str = Depends(verify_token),
+    auth: AuthContext = Depends(require_read_only_access),
     rl: None = Depends(check_rate_limit),
 ):
     base_dir = get_active_repo_dir()
@@ -271,7 +335,7 @@ async def search_handler(
 def get_diff_handler(
     base: str = "main",
     head: str = "HEAD",
-    token: str = Depends(verify_token),
+    auth: AuthContext = Depends(require_read_only_access),
     rl: None = Depends(check_rate_limit),
 ):
     from tools.repo_orchestrator.config import MAX_BYTES

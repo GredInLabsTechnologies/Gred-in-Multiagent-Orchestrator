@@ -15,6 +15,7 @@ class SnapshotService:
         try:
             SNAPSHOT_DIR.chmod(0o700)
         except Exception:
+            # Best-effort permissions on Windows; ignore failures.
             pass
 
     @staticmethod
@@ -40,16 +41,13 @@ class SnapshotService:
                 # 1. Get size
                 size = path.stat().st_size
 
-                # 2. Overwrite with zeros (Shred)
-                with open(path, "wb") as f:
+                # 2. Overwrite with zeros and flush in single open
+                with open(path, "r+b") as f:
                     f.write(b"\0" * size)
-
-                # 3. Flush to disk (best effort)
-                with open(path, "wb") as f:
                     f.flush()
                     os.fsync(f.fileno())
 
-            # 4. Unlink
+            # 3. Unlink
             path.unlink(missing_ok=True)
         except Exception:
             # Fallback to standard unlink on error to ensure removal at least

@@ -1,29 +1,8 @@
 {
-    "total_tests": 2,
+    "total_tests": 0,
     "panic_count": 0,
     "bypass_count": 0,
-    "avg_latency_ms": 50.0,
-    "duration_sec": 56.327513694763184,
-    "results": [
-        {
-            "suite": "chaos_resilience",
-            "target_endpoint": "/status",
-            "payload": "BURST_150",
-            "status_code": 200,
-            "latency_ms": 100.0,
-            "panic_triggered": false,
-            "bypassed": false,
-            "timestamp": 1769913507.1774006
-        },
-        {
-            "suite": "chaos_resilience",
-            "target_endpoint": "/status",
-            "payload": "PANIC_TRIGGER_ATTEMPT",
-            "status_code": 0,
-            "latency_ms": 0,
-            "panic_triggered": false,
-            "bypassed": false,
-            "timestamp": 1769913531.3106546
-        }
-    ]
+    "avg_latency_ms": 0,
+    "duration_sec": 0.002674579620361328,
+    "results": []
 }

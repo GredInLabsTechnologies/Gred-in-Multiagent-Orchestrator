@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Optional
@@ -8,6 +9,8 @@ from fastapi import HTTPException
 from tools.repo_orchestrator.config import ALLOWLIST_PATH, ALLOWLIST_TTL_SECONDS, REPO_REGISTRY_PATH
 
 from .common import load_json_db
+
+logger = logging.getLogger("orchestrator.validation")
 
 
 def load_repo_registry():
@@ -29,13 +32,15 @@ def get_active_repo_dir() -> Path:
     return Path.cwd()
 
 
-def _normalize_path(path_str: str, base_dir: Path) -> Optional[Path]:
+def _normalize_path(path_str: str | None, base_dir: Path) -> Optional[Path]:
     try:
+        if not isinstance(path_str, str) or not path_str:
+            return None
         # Check for null bytes
         if "\0" in path_str:
             return None
 
-        # Check for Windows reserved names
+        # Check for Windows reserved names (must match exact component, not substring)
         reserved_names = {
             "CON",
             "PRN",
@@ -60,9 +65,15 @@ def _normalize_path(path_str: str, base_dir: Path) -> Optional[Path]:
             "LPT8",
             "LPT9",
         }
-        path_upper = path_str.upper()
-        if any(name in path_upper for name in reserved_names):
-            return None
+        # Check each path component for exact match with reserved names
+        import re
+
+        path_components = re.split(r"[\\/]", path_str)
+        for component in path_components:
+            # Get base name without extension (e.g., "CON.txt" -> "CON")
+            base_name = component.split(".")[0].upper()
+            if base_name in reserved_names:
+                return None
 
         requested = Path(path_str)
         if requested.is_absolute():
@@ -79,7 +90,8 @@ def _normalize_path(path_str: str, base_dir: Path) -> Optional[Path]:
             return None
 
         return resolved
-    except Exception:
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        logger.warning("Failed to normalize path %s: %s", path_str, exc)
         return None
 
 
@@ -102,7 +114,8 @@ def get_allowed_paths(base_dir: Path) -> set[Path]:
         if time.time() - timestamp > ALLOWLIST_TTL_SECONDS:
             return set()
         return {base_dir / p for p in data.get("paths", [])}
-    except Exception:
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to load allowlist: %s", exc)
         return set()
 
 
@@ -112,6 +125,7 @@ def serialize_allowlist(paths: set[Path]) -> list[dict]:
     for p in paths:
         try:
             result.append({"path": str(p), "type": "file" if p.is_file() else "dir"})
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to serialize allowlist path %s: %s", p, exc)
             continue
     return result

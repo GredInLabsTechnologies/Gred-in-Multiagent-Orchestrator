@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -5,20 +6,30 @@ import pytest
 from fastapi import HTTPException
 
 from tools.repo_orchestrator.security.audit import audit_log, log_panic, redact_sensitive_data
-from tools.repo_orchestrator.security.auth import verify_token
+from tools.repo_orchestrator.security.auth import AuthContext, verify_token
 from tools.repo_orchestrator.security.common import get_safe_actor, load_json_db
 from tools.repo_orchestrator.security.rate_limit import check_rate_limit, rate_limit_store
 
 
 # --- Auth tests ---
-@patch("tools.repo_orchestrator.security.auth.TOKENS", {"long-valid-token-123456"})
+@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch(
+    "tools.repo_orchestrator.security.auth.TOKENS",
+    {"long-valid-token-123456", "actions-token-123456"},
+)
 def test_verify_token_success():
     credentials = MagicMock()
     credentials.credentials = "long-valid-token-123456"
-    assert verify_token(MagicMock(), credentials) == "long-valid-token-123456"
+    assert verify_token(MagicMock(), credentials) == AuthContext(
+        token="long-valid-token-123456", role="admin"
+    )
 
 
-@patch("tools.repo_orchestrator.security.auth.TOKENS", {"long-valid-token-123456"})
+@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch(
+    "tools.repo_orchestrator.security.auth.TOKENS",
+    {"long-valid-token-123456", "actions-token-123456"},
+)
 def test_verify_token_too_short():
     credentials = MagicMock()
     credentials.credentials = "short"
@@ -27,7 +38,11 @@ def test_verify_token_too_short():
     assert exc.value.status_code == 401
 
 
-@patch("tools.repo_orchestrator.security.auth.TOKENS", {"long-valid-token-123456"})
+@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch(
+    "tools.repo_orchestrator.security.auth.TOKENS",
+    {"long-valid-token-123456", "actions-token-123456"},
+)
 def test_verify_token_empty():
     credentials = MagicMock()
     credentials.credentials = ""
@@ -42,7 +57,11 @@ def test_verify_token_missing():
     assert exc.value.status_code == 401
 
 
-@patch("tools.repo_orchestrator.security.auth.TOKENS", {"long-valid-token-123456"})
+@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch(
+    "tools.repo_orchestrator.security.auth.TOKENS",
+    {"long-valid-token-123456", "actions-token-123456"},
+)
 @patch("tools.repo_orchestrator.security.load_security_db")
 @patch("tools.repo_orchestrator.security.save_security_db")
 def test_verify_token_invalid_trigger_panic(mock_save, mock_load):
@@ -53,12 +72,16 @@ def test_verify_token_invalid_trigger_panic(mock_save, mock_load):
     with pytest.raises(HTTPException):
         verify_token(MagicMock(), credentials)
 
-    # Check panic mode triggered
+    # Check panic mode only triggers after threshold reached
     args, _ = mock_save.call_args
-    assert args[0]["panic_mode"] is True
+    assert args[0]["panic_mode"] is False
 
 
-@patch("tools.repo_orchestrator.security.auth.TOKENS", {"long-valid-token-123456"})
+@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch(
+    "tools.repo_orchestrator.security.auth.TOKENS",
+    {"long-valid-token-123456", "actions-token-123456"},
+)
 @patch("tools.repo_orchestrator.security.load_security_db")
 @patch("tools.repo_orchestrator.security.save_security_db")
 def test_verify_token_invalid_trigger_panic_no_events(mock_save, mock_load):
@@ -71,11 +94,21 @@ def test_verify_token_invalid_trigger_panic_no_events(mock_save, mock_load):
         verify_token(MagicMock(), credentials)
 
     args, _ = mock_save.call_args
-    assert args[0]["panic_mode"] is True
+    assert args[0]["panic_mode"] is False
     assert "recent_events" in args[0]
 
 
-from datetime import datetime, timedelta
+@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch(
+    "tools.repo_orchestrator.security.auth.TOKENS",
+    {"long-valid-token-123456", "actions-token-123456"},
+)
+def test_verify_token_actions_role():
+    credentials = MagicMock()
+    credentials.credentials = "actions-token-123456"
+    assert verify_token(MagicMock(), credentials) == AuthContext(
+        token="actions-token-123456", role="actions"
+    )
 
 
 # --- Rate Limit tests ---

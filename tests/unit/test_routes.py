@@ -8,11 +8,12 @@ from fastapi.testclient import TestClient
 from tools.repo_orchestrator.main import app
 from tools.repo_orchestrator.models import RepoEntry
 from tools.repo_orchestrator.security import verify_token
+from tools.repo_orchestrator.security.auth import AuthContext
 
 
 # Mock token dependency for all route tests
 def override_verify_token():
-    return "test-user"
+    return AuthContext(token="test-user", role="admin")
 
 
 @pytest.fixture
@@ -66,7 +67,7 @@ def test_get_ui_allowlist(client, tmp_path):
                 response = client.get("/ui/allowlist")
                 assert response.status_code == 200
                 assert response.json()["paths"][0]["path"] == "file.py"
-                assert response.json()["paths"][1]["path"] == "/outside"
+                assert len(response.json()["paths"]) == 1
 
 
 def test_list_repos(client):

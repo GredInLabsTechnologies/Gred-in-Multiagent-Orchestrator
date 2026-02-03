@@ -6,11 +6,12 @@ from fastapi.testclient import TestClient
 
 from tools.repo_orchestrator.main import app, lifespan
 from tools.repo_orchestrator.security import verify_token
+from tools.repo_orchestrator.security.auth import AuthContext
 
 
 # Mock token dependency
 def override_verify_token():
-    return "test-user"
+    return AuthContext(token="test-user", role="admin")
 
 
 @pytest.fixture

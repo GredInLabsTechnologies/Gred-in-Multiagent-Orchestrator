@@ -11,13 +11,17 @@ def run_step(name, command):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(BASE_DIR)
     try:
+        # Split command into list to avoid shell=True security risk
+        import shlex
+
+        cmd_list = shlex.split(command)
         process = subprocess.Popen(
-            command,
+            cmd_list,
             cwd=BASE_DIR,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            shell=True,
+            shell=False,
             env=env,
         )
         for line in process.stdout:
