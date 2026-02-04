@@ -80,6 +80,14 @@ ATTACK_VECTORS = {
     - Whitespace: .. /, ..%20/, ..%09/
     - Comments: ..;/, ..#/
     """,
+    "path_traversal_combo": """
+    Generate 20 hybrid path traversal payloads that combine:
+    - Double encoding + Windows UNC
+    - NTFS ADS + traversal
+    - Mixed separators + overlong UTF-8
+    - Long path prefix (\\\\?\\) with traversal
+    - Environment variables (e.g. %WINDIR%) if applicable
+    """,
     # ═══════════════════════════════════════════════════════════════
     # AUTHENTICATION BYPASS (25+ variations)
     # ═══════════════════════════════════════════════════════════════
@@ -122,6 +130,13 @@ ATTACK_VECTORS = {
     - Tokens matching prefix of valid token
     - Tokens with special regex chars: .*+?^$
     """,
+    "auth_parser_smuggling": """
+    Generate 10 payloads that attempt to confuse Bearer token parsing:
+    - Multiple spaces, tabs, mixed unicode whitespace
+    - Embedded nulls and control chars
+    - Duplicate prefixes: "Bearer Bearer <token>"
+    - Mixed-case bearer schemes
+    """,
     # ═══════════════════════════════════════════════════════════════
     # INJECTION ATTACKS (20+ variations)
     # ═══════════════════════════════════════════════════════════════
@@ -159,6 +174,13 @@ ATTACK_VECTORS = {
     - Mako: ${7*7}
     - Tornado: {{import os}}
     - Generic: ${7*7}, #{7*7}, @(7*7)
+    """,
+    "injection_windows_shell": """
+    Generate 10 Windows shell injection payloads:
+    - PowerShell: powershell -c "Get-ChildItem"
+    - CMD metacharacters: & | && ||
+    - Delayed expansion tricks
+    - Unicode-escaped cmd separators
     """,
     # ═══════════════════════════════════════════════════════════════
     # RATE LIMIT BYPASS (10+ techniques)
@@ -212,6 +234,13 @@ ATTACK_VECTORS = {
     - Carriage return: \\x0d
     - Escape: \\x1b
     - Delete: \\x7f
+    """,
+    "special_path_weirdness": """
+    Generate 15 payloads with path edge cases:
+    - Trailing dots/spaces
+    - Alternate separators and reserved names
+    - Mixed UTF-8 normalization
+    - Percent-encoded backslashes and colons
     """,
 }
 

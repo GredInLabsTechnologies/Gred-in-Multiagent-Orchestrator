@@ -1,8 +1,12 @@
 import json
 import logging
+import re
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import requests
+
+_LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
 
 logger = logging.getLogger("lm_studio_client")
 
@@ -57,6 +61,111 @@ class LMStudioClient:
             cleaned.append(s.strip())
         return cleaned
 
+    def _sanitize_json_escapes(self, text: str) -> str:
+        r"""Fix invalid JSON escape sequences like \? or bare backslashes."""
+        return re.sub(r"\\(?![\\/\"bfnrtu])", r"\\\\", text)
+
+    def _extract_payloads_from_object(self, text: str) -> List[str]:
+        """Extract payloads field even if JSON has invalid escapes."""
+        marker = '"payloads"'
+        if marker not in text:
+            return []
+        try:
+            start = text.index("[", text.index(marker))
+        except ValueError:
+            return []
+        depth = 0
+        end = None
+        for idx in range(start, len(text)):
+            if text[idx] == "[":
+                depth += 1
+            elif text[idx] == "]":
+                depth -= 1
+                if depth == 0:
+                    end = idx + 1
+                    break
+        if end is None:
+            return []
+        array_text = text[start:end]
+        array_text = self._sanitize_json_escapes(array_text)
+        try:
+            data = json.loads(array_text)
+            if isinstance(data, list):
+                return self._clean_payloads(data)
+        except Exception:
+            return []
+        return []
+
+    def _extract_payloads_regex(self, text: str) -> List[str]:
+        """Regex fallback when JSON parsing fails completely."""
+        marker = '"payloads"'
+        if marker not in text:
+            return []
+        try:
+            start = text.index("[", text.index(marker))
+        except ValueError:
+            return []
+        raw = text[start:]
+        matches = re.findall(r'"((?:\\.|[^"\\])*)"', raw)
+        payloads = [m.encode("utf-8").decode("unicode_escape") for m in matches]
+        return self._clean_payloads(payloads) if payloads else []
+
+    def _extract_json_object(self, text: str) -> List[str]:
+        """Extract a JSON object and return payloads if present."""
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start == -1 or end <= start:
+            return []
+        candidate = text[start:end]
+        candidate = self._sanitize_json_escapes(candidate)
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, dict) and "payloads" in data:
+                return self._clean_payloads(list(data.get("payloads", [])))
+        except Exception:
+            return []
+        return []
+
+    def _extract_truncated_payloads(self, text: str) -> List[str]:
+        """Extract payload strings even if the JSON array is truncated."""
+        marker = '"payloads"'
+        if marker not in text:
+            return []
+        try:
+            start = text.index("[", text.index(marker))
+        except ValueError:
+            return []
+        raw = text[start:]
+        payloads: List[str] = []
+        buffer: List[str] = []
+        in_string = False
+        escape = False
+        for ch in raw:
+            if escape:
+                buffer.append(ch)
+                escape = False
+                continue
+            if ch == "\\":
+                if in_string:
+                    escape = True
+                continue
+            if ch == '"':
+                if in_string:
+                    payloads.append("".join(buffer))
+                    buffer = []
+                    in_string = False
+                else:
+                    in_string = True
+                continue
+            if in_string:
+                buffer.append(ch)
+        if in_string and buffer:
+            payloads.append("".join(buffer))
+        if not payloads:
+            return []
+        cleaned = [p.encode("utf-8").decode("unicode_escape") for p in payloads]
+        return self._clean_payloads(cleaned)
+
     def generate_payloads(self, system_prompt: str, user_prompt: str) -> List[str]:
         """
         Generates security payloads via LM Studio (OpenAI API format).
@@ -99,7 +208,8 @@ class LMStudioClient:
             content = data["choices"][0]["message"]["content"]
 
             # DEBUG
-            with open("llm_debug.log", "a", encoding="utf-8") as f:
+            _LOG_DIR.mkdir(parents=True, exist_ok=True)
+            with open(_LOG_DIR / "llm_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"--- PROMPT: {user_prompt[:50]}... ---\n")
                 f.write(f"--- CONTENT ---\n{content}\n--- END ---\n")
 
@@ -107,20 +217,44 @@ class LMStudioClient:
                 # Try to parse as the new structured schema first
                 structured = json.loads(content)
                 if isinstance(structured, dict) and "payloads" in structured:
-                    return [str(p) for p in structured["payloads"]]
+                    return self._clean_payloads(list(structured["payloads"]))
             except json.JSONDecodeError:
+                try:
+                    sanitized = self._sanitize_json_escapes(content)
+                    structured = json.loads(sanitized)
+                    if isinstance(structured, dict) and "payloads" in structured:
+                        return self._clean_payloads(list(structured["payloads"]))
+                except Exception:
+                    pass
                 # Fallback: if there's trailing junk (common in some LM Studio versions), try to fix it
                 if "}" in content:
                     try:
                         fixed_content = content[: content.rfind("}") + 1]
+                        fixed_content = self._sanitize_json_escapes(fixed_content)
                         structured = json.loads(fixed_content)
                         if isinstance(structured, dict) and "payloads" in structured:
-                            return [str(p) for p in structured["payloads"]]
+                            return self._clean_payloads(list(structured["payloads"]))
                     except Exception:
                         pass
 
+            payloads = self._extract_json_object(content)
+            if payloads:
+                return payloads
+
             # Fallback to legacy extraction if needed
             payloads = self._extract_json_array(content)
+            if payloads:
+                return payloads
+
+            payloads = self._extract_payloads_from_object(content)
+            if payloads:
+                return payloads
+
+            payloads = self._extract_payloads_regex(content)
+            if payloads:
+                return payloads
+
+            payloads = self._extract_truncated_payloads(content)
             if payloads:
                 return payloads
 

@@ -74,7 +74,10 @@ async def test_lifespan_events():
     ) as mock_ensure:
 
         async def dummy_loop():
-            await asyncio.sleep(100)
+            try:
+                await asyncio.sleep(100)
+            except asyncio.CancelledError:
+                return
 
         with patch("tools.repo_orchestrator.main.snapshot_cleanup_loop", side_effect=dummy_loop):
             from tools.repo_orchestrator.main import lifespan
@@ -116,7 +119,10 @@ async def test_snapshot_cleanup_loop_exit():
 @pytest.mark.asyncio
 async def test_lifespan_cleanup_task_cancelled_error_propagates():
     async def dummy_loop():
-        await asyncio.sleep(100)
+        try:
+            await asyncio.sleep(100)
+        except asyncio.CancelledError:
+            return
 
     with patch(
         "tools.repo_orchestrator.services.snapshot_service.SnapshotService.ensure_snapshot_dir"

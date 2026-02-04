@@ -1,0 +1,19 @@
+{
+    "total_tests": 1,
+    "panic_count": 0,
+    "bypass_count": 0,
+    "avg_latency_ms": 6.191492080688477,
+    "duration_sec": 55.40853548049927,
+    "results": [
+        {
+            "suite": "path_traversal_combo",
+            "target_endpoint": "/file",
+            "payload": "..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5.HTM",
+            "status_code": 400,
+            "latency_ms": 6.191492080688477,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770164068.606295
+        }
+    ]
+}

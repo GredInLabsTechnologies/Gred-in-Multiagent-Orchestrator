@@ -1,0 +1,1759 @@
+{
+    "total_tests": 175,
+    "panic_count": 10,
+    "bypass_count": 0,
+    "avg_latency_ms": 2.9778848375592912,
+    "duration_sec": 249.91691422462463,
+    "results": [
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "../../",
+            "status_code": 403,
+            "latency_ms": 7.04193115234375,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.1624146
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "....//",
+            "status_code": 400,
+            "latency_ms": 3.45611572265625,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.1658833
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "../..\\",
+            "status_code": 403,
+            "latency_ms": 3.622770309448242,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.1695163
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "....\\\\",
+            "status_code": 400,
+            "latency_ms": 3.774404525756836,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.1732986
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "C:\\..\\..\\..\\..\\",
+            "status_code": 403,
+            "latency_ms": 4.352331161499023,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.1776593
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "/etc/passwd",
+            "status_code": 403,
+            "latency_ms": 3.5638809204101562,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.1812325
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "..\\..\\..\\..\\",
+            "status_code": 403,
+            "latency_ms": 3.8101673126220703,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.1850502
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "....//..//",
+            "status_code": 400,
+            "latency_ms": 2.8755664825439453,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.187933
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "....\\\\..\\\\",
+            "status_code": 400,
+            "latency_ms": 2.727031707763672,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.1906664
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "C:/../../../../",
+            "status_code": 403,
+            "latency_ms": 3.859281539916992,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.1945329
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "/../../../etc/passwd",
+            "status_code": 403,
+            "latency_ms": 3.042459487915039,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.1975837
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "....//..//..//",
+            "status_code": 403,
+            "latency_ms": 3.4744739532470703,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.201066
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "....\\\\..\\\\..\\\\",
+            "status_code": 403,
+            "latency_ms": 3.1054019927978516,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.204179
+        },
+        {
+            "suite": "path_traversal_basic",
+            "target_endpoint": "/file",
+            "payload": "C:\\..\\..\\..\\..\\..\\",
+            "status_code": 403,
+            "latency_ms": 2.745389938354492,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158581.2069314
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "../../etc/passwd",
+            "status_code": 403,
+            "latency_ms": 3.7212371826171875,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.6707563
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%2e%2e%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 4.40216064453125,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.6751678
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%252e%252e%252fetc%252fpasswd",
+            "status_code": 400,
+            "latency_ms": 4.282474517822266,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.6794615
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "..%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 3.1561851501464844,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.6826255
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%2e%2e%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 3.0694007873535156,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.685702
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%c0%ae%c0%ae%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 3.0629634857177734,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.6887722
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%c0%2e%c0%2e%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 3.255128860473633,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.6920345
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%c0%ae%c0%ae%2fboot%2fconfig.txt",
+            "status_code": 400,
+            "latency_ms": 3.7860870361328125,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.6958294
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%c0%2e%c0%2e%2fboot%2fconfig.txt",
+            "status_code": 400,
+            "latency_ms": 2.8107166290283203,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.6986473
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%c0%ae%c0%ae%2fproc%2fself%2fmaps",
+            "status_code": 400,
+            "latency_ms": 2.551555633544922,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.7012038
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%c0%2e%c0%2e%2fproc%2fself%2fmaps",
+            "status_code": 400,
+            "latency_ms": 2.8901100158691406,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.7040982
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%c0%ae%c0%ae%2fetc%2fshadow",
+            "status_code": 400,
+            "latency_ms": 2.5320053100585938,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.7066348
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%c0%2e%c0%2s%2fetc%2fshadow",
+            "status_code": 400,
+            "latency_ms": 3.294706344604492,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.7099364
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%c0%ae%c0%ae%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 3.046274185180664,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.71299
+        },
+        {
+            "suite": "path_traversal_encoded",
+            "target_endpoint": "/file",
+            "payload": "%c0%2e%c0%2e%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 3.099679946899414,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158592.716097
+        },
+        {
+            "suite": "path_traversal_null_byte",
+            "target_endpoint": "/file",
+            "payload": "../../../../etc/passwd%00.txt",
+            "status_code": 403,
+            "latency_ms": 4.34112548828125,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158598.1966207
+        },
+        {
+            "suite": "path_traversal_null_byte",
+            "target_endpoint": "/file",
+            "payload": "../../../../etc/passwd%2500.png",
+            "status_code": 403,
+            "latency_ms": 3.473043441772461,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158598.2001011
+        },
+        {
+            "suite": "path_traversal_null_byte",
+            "target_endpoint": "/file",
+            "payload": "../etc/passwd%00%00",
+            "status_code": 403,
+            "latency_ms": 3.4737586975097656,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158598.2035828
+        },
+        {
+            "suite": "path_traversal_null_byte",
+            "target_endpoint": "/file",
+            "payload": "....//....//etc/passwd%00.jpg",
+            "status_code": 400,
+            "latency_ms": 3.376483917236328,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158598.2069676
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "C:/Windows/System32/config/SAM",
+            "status_code": 403,
+            "latency_ms": 3.7393569946289062,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.383485
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "\\\\127.0.0.1\\c$\\Windows\\win.ini",
+            "status_code": 403,
+            "latency_ms": 10.36381721496582,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.3938568
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "C:/PROGRA~1/",
+            "status_code": 403,
+            "latency_ms": 3.7560462951660156,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.397623
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "CON",
+            "status_code": 403,
+            "latency_ms": 2.8505325317382812,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.4004812
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "PRN",
+            "status_code": 403,
+            "latency_ms": 2.5696754455566406,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.4030583
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "AUX",
+            "status_code": 403,
+            "latency_ms": 2.499818801879883,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.4055657
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "NUL",
+            "status_code": 403,
+            "latency_ms": 2.630949020385742,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.4082053
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "COM1",
+            "status_code": 403,
+            "latency_ms": 3.4027099609375,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.4116178
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "LPT1",
+            "status_code": 403,
+            "latency_ms": 3.0176639556884766,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.414644
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "file.txt::$DATA",
+            "status_code": 400,
+            "latency_ms": 2.910137176513672,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.4175618
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "\\\\?\\C:\\Windows\\System32\\config\\SAM",
+            "status_code": 403,
+            "latency_ms": 3.172159194946289,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.4207418
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "\\?\\C:\\Windows\\System32\\config\\SAM",
+            "status_code": 403,
+            "latency_ms": 4.679679870605469,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.4254305
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "file.txt::$DATA",
+            "status_code": 400,
+            "latency_ms": 3.759145736694336,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.4291983
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "C:/Users/ADMINI~1/win.ini",
+            "status_code": 403,
+            "latency_ms": 2.8519630432128906,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158605.432058
+        },
+        {
+            "suite": "path_traversal_filter_bypass",
+            "target_endpoint": "/file",
+            "payload": "....//....//",
+            "status_code": 403,
+            "latency_ms": 4.469156265258789,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158610.676634
+        },
+        {
+            "suite": "path_traversal_filter_bypass",
+            "target_endpoint": "/file",
+            "payload": "...//...//.../",
+            "status_code": 403,
+            "latency_ms": 3.854513168334961,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158610.680497
+        },
+        {
+            "suite": "path_traversal_filter_bypass",
+            "target_endpoint": "/file",
+            "payload": "..././..././",
+            "status_code": 403,
+            "latency_ms": 3.3102035522460938,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158610.683816
+        },
+        {
+            "suite": "path_traversal_filter_bypass",
+            "target_endpoint": "/file",
+            "payload": "..\t..\\..\\",
+            "status_code": 400,
+            "latency_ms": 2.9442310333251953,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158610.6867676
+        },
+        {
+            "suite": "path_traversal_filter_bypass",
+            "target_endpoint": "/file",
+            "payload": ".. /",
+            "status_code": 400,
+            "latency_ms": 2.866506576538086,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158610.6896408
+        },
+        {
+            "suite": "path_traversal_filter_bypass",
+            "target_endpoint": "/file",
+            "payload": "..%20/",
+            "status_code": 400,
+            "latency_ms": 3.493785858154297,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158610.6931853
+        },
+        {
+            "suite": "path_traversal_filter_bypass",
+            "target_endpoint": "/file",
+            "payload": "..%09/",
+            "status_code": 400,
+            "latency_ms": 3.2291412353515625,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158610.6964226
+        },
+        {
+            "suite": "path_traversal_filter_bypass",
+            "target_endpoint": "/file",
+            "payload": "..;/",
+            "status_code": 400,
+            "latency_ms": 3.1023025512695312,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158610.69953
+        },
+        {
+            "suite": "path_traversal_filter_bypass",
+            "target_endpoint": "/file",
+            "payload": "..#/",
+            "status_code": 400,
+            "latency_ms": 2.622842788696289,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158610.7021575
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "",
+            "status_code": 401,
+            "latency_ms": 3.5898685455322266,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158673.1547441
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "   ",
+            "status_code": 401,
+            "latency_ms": 2.438068389892578,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158673.1571925
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "\t\t\t",
+            "status_code": 401,
+            "latency_ms": 4.2724609375,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158673.1614778
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "\n\n\n",
+            "status_code": 401,
+            "latency_ms": 4.168987274169922,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158673.165661
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "\u0000",
+            "status_code": 401,
+            "latency_ms": 4.5719146728515625,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158673.1706834
+        },
+        {
+            "suite": "auth_length_boundary",
+            "target_endpoint": "/status",
+            "payload": "123456789012345",
+            "status_code": 401,
+            "latency_ms": 2.3391246795654297,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158678.4657657
+        },
+        {
+            "suite": "auth_length_boundary",
+            "target_endpoint": "/status",
+            "payload": "1234567890123456",
+            "status_code": 401,
+            "latency_ms": 2.797842025756836,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158678.4685712
+        },
+        {
+            "suite": "auth_length_boundary",
+            "target_endpoint": "/status",
+            "payload": "a",
+            "status_code": 401,
+            "latency_ms": 10.577201843261719,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158678.4791563
+        },
+        {
+            "suite": "auth_format_attacks",
+            "target_endpoint": "/status",
+            "payload": "%s%s%s%s%s%s%s%s%s%s",
+            "status_code": 401,
+            "latency_ms": 4.128217697143555,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158682.8180928
+        },
+        {
+            "suite": "auth_format_attacks",
+            "target_endpoint": "/status",
+            "payload": "{0}{1}{2}",
+            "status_code": 401,
+            "latency_ms": 10.675668716430664,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158682.8287766
+        },
+        {
+            "suite": "auth_format_attacks",
+            "target_endpoint": "/status",
+            "payload": "{{config}}",
+            "status_code": 401,
+            "latency_ms": 1.924276351928711,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158682.830709
+        },
+        {
+            "suite": "auth_format_attacks",
+            "target_endpoint": "/status",
+            "payload": "' OR '1'='1",
+            "status_code": 401,
+            "latency_ms": 1.8754005432128906,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158682.8325918
+        },
+        {
+            "suite": "auth_format_attacks",
+            "target_endpoint": "/status",
+            "payload": "{\"$gt\": \"\"}",
+            "status_code": 401,
+            "latency_ms": 1.8897056579589844,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158682.8344884
+        },
+        {
+            "suite": "auth_encoding_attacks",
+            "target_endpoint": "/status",
+            "payload": "base64:Zm9v",
+            "status_code": 401,
+            "latency_ms": 3.494739532470703,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158689.607281
+        },
+        {
+            "suite": "auth_encoding_attacks",
+            "target_endpoint": "/status",
+            "payload": "hex:68656c6c6f",
+            "status_code": 401,
+            "latency_ms": 2.640247344970703,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158689.6099296
+        },
+        {
+            "suite": "auth_encoding_attacks",
+            "target_endpoint": "/status",
+            "payload": "urlencoded:hello%20world",
+            "status_code": 401,
+            "latency_ms": 3.4987926483154297,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158689.6134377
+        },
+        {
+            "suite": "auth_encoding_attacks",
+            "target_endpoint": "/status",
+            "payload": "uni_norm:U+0068U+0065U+006cU+006cU+006f",
+            "status_code": 401,
+            "latency_ms": 10.346412658691406,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158689.623792
+        },
+        {
+            "suite": "auth_encoding_attacks",
+            "target_endpoint": "/status",
+            "payload": "utf7:QWxhbmQ%3D",
+            "status_code": 401,
+            "latency_ms": 10.314464569091797,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158689.634115
+        },
+        {
+            "suite": "auth_encoding_attacks",
+            "target_endpoint": "/status",
+            "payload": "punycode:hello-world",
+            "status_code": 401,
+            "latency_ms": 2.5510787963867188,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158689.6366725
+        },
+        {
+            "suite": "auth_timing_attacks",
+            "target_endpoint": "/status",
+            "payload": "valid_token_prefixaaaaaaaaaaaa",
+            "status_code": 401,
+            "latency_ms": 4.279375076293945,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158694.2840273
+        },
+        {
+            "suite": "auth_timing_attacks",
+            "target_endpoint": "/status",
+            "payload": "a.*+?^$aaaaaaa",
+            "status_code": 401,
+            "latency_ms": 11.226892471313477,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158694.2952616
+        },
+        {
+            "suite": "auth_timing_attacks",
+            "target_endpoint": "/status",
+            "payload": "superlongstringwithmanychars",
+            "status_code": 401,
+            "latency_ms": 3.203868865966797,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158694.2984757
+        },
+        {
+            "suite": "auth_timing_attacks",
+            "target_endpoint": "/status",
+            "payload": "token_with_special_chars_.*+",
+            "status_code": 401,
+            "latency_ms": 11.045217514038086,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158694.3095307
+        },
+        {
+            "suite": "auth_timing_attacks",
+            "target_endpoint": "/status",
+            "payload": "partial_match_token",
+            "status_code": 401,
+            "latency_ms": 11.904716491699219,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158694.3214445
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "Bearer   <token>",
+            "status_code": 401,
+            "latency_ms": 4.38380241394043,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158700.4645233
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "Bearer\t<token>",
+            "status_code": 401,
+            "latency_ms": 9.789705276489258,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158700.4743204
+        },
+        {
+            "suite": "injection_command",
+            "target_endpoint": "/file",
+            "payload": "; whoami",
+            "status_code": 400,
+            "latency_ms": 5.443572998046875,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158705.2133064
+        },
+        {
+            "suite": "injection_command",
+            "target_endpoint": "/file",
+            "payload": "| dir",
+            "status_code": 400,
+            "latency_ms": 3.016233444213867,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158705.2163289
+        },
+        {
+            "suite": "injection_command",
+            "target_endpoint": "/file",
+            "payload": "`id`",
+            "status_code": 400,
+            "latency_ms": 2.996206283569336,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158705.2193308
+        },
+        {
+            "suite": "injection_command",
+            "target_endpoint": "/file",
+            "payload": "$(whoami)",
+            "status_code": 400,
+            "latency_ms": 3.13568115234375,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158705.222472
+        },
+        {
+            "suite": "injection_command",
+            "target_endpoint": "/file",
+            "payload": "\\nwhoami",
+            "status_code": 403,
+            "latency_ms": 2.634763717651367,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158705.2251112
+        },
+        {
+            "suite": "injection_command",
+            "target_endpoint": "/file",
+            "payload": "& dir",
+            "status_code": 400,
+            "latency_ms": 3.5495758056640625,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158705.2286656
+        },
+        {
+            "suite": "injection_command",
+            "target_endpoint": "/file",
+            "payload": "&& dir",
+            "status_code": 400,
+            "latency_ms": 2.7320384979248047,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158705.2314024
+        },
+        {
+            "suite": "injection_sql",
+            "target_endpoint": "/file",
+            "payload": "' OR 1=1--",
+            "status_code": 400,
+            "latency_ms": 3.5538673400878906,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158714.0721183
+        },
+        {
+            "suite": "injection_sql",
+            "target_endpoint": "/file",
+            "payload": "' UNION SELECT NULL--",
+            "status_code": 400,
+            "latency_ms": 4.072666168212891,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158714.0761962
+        },
+        {
+            "suite": "injection_sql",
+            "target_endpoint": "/file",
+            "payload": "' AND SLEEP(5)--",
+            "status_code": 400,
+            "latency_ms": 4.45866584777832,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158714.0806606
+        },
+        {
+            "suite": "injection_sql",
+            "target_endpoint": "/file",
+            "payload": "' AND 1=1--",
+            "status_code": 400,
+            "latency_ms": 3.222942352294922,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158714.08389
+        },
+        {
+            "suite": "injection_sql",
+            "target_endpoint": "/file",
+            "payload": "' AND 1=2--",
+            "status_code": 400,
+            "latency_ms": 2.949237823486328,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158714.0868456
+        },
+        {
+            "suite": "injection_sql",
+            "target_endpoint": "/file",
+            "payload": "'; DROP TABLE--",
+            "status_code": 400,
+            "latency_ms": 2.899646759033203,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158714.0897512
+        },
+        {
+            "suite": "injection_sql",
+            "target_endpoint": "/file",
+            "payload": "' OR 1=0 WAITFOR DELAY '00:00:10'--",
+            "status_code": 400,
+            "latency_ms": 2.8684139251708984,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158714.0926254
+        },
+        {
+            "suite": "injection_sql",
+            "target_endpoint": "/file",
+            "payload": "' OR (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='users')>0--",
+            "status_code": 400,
+            "latency_ms": 4.061222076416016,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158714.096693
+        },
+        {
+            "suite": "injection_sql",
+            "target_endpoint": "/file",
+            "payload": "' UNION SELECT username,password FROM users--",
+            "status_code": 400,
+            "latency_ms": 2.8243064880371094,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158714.0995226
+        },
+        {
+            "suite": "injection_sql",
+            "target_endpoint": "/file",
+            "payload": "' AND (SELECT 1 FROM (SELECT COUNT(*), CONCAT(0x27,USER(),0x27,0x3e,0x27,FORCE_CAST((SELECT 1) AS BINARY),0x27) x FROM INFORMATION_SCHEMA.COLUMNS GROUP BY x ORDER BY x ASC) a)--",
+            "status_code": 400,
+            "latency_ms": 2.6443004608154297,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158714.102171
+        },
+        {
+            "suite": "injection_ldap",
+            "target_endpoint": "/file",
+            "payload": "*",
+            "status_code": 400,
+            "latency_ms": 5.415678024291992,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158718.2956004
+        },
+        {
+            "suite": "injection_ldap",
+            "target_endpoint": "/file",
+            "payload": ")(cn=*",
+            "status_code": 400,
+            "latency_ms": 4.90570068359375,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158718.300514
+        },
+        {
+            "suite": "injection_ldap",
+            "target_endpoint": "/file",
+            "payload": "\u0000",
+            "status_code": 403,
+            "latency_ms": 3.4246444702148438,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158718.303947
+        },
+        {
+            "suite": "injection_ldap",
+            "target_endpoint": "/file",
+            "payload": "(&(cn=*))",
+            "status_code": 400,
+            "latency_ms": 3.6869049072265625,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158718.307641
+        },
+        {
+            "suite": "injection_ldap",
+            "target_endpoint": "/file",
+            "payload": "(uid=*)",
+            "status_code": 400,
+            "latency_ms": 5.456447601318359,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158718.3131049
+        },
+        {
+            "suite": "injection_xpath",
+            "target_endpoint": "/file",
+            "payload": "' or '1'='1",
+            "status_code": 400,
+            "latency_ms": 4.071474075317383,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158723.6664724
+        },
+        {
+            "suite": "injection_xpath",
+            "target_endpoint": "/file",
+            "payload": "] | //user/*[1",
+            "status_code": 400,
+            "latency_ms": 3.579378128051758,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158723.6700585
+        },
+        {
+            "suite": "injection_xpath",
+            "target_endpoint": "/file",
+            "payload": "' OR '1'='1",
+            "status_code": 400,
+            "latency_ms": 3.865957260131836,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158723.6739316
+        },
+        {
+            "suite": "injection_xpath",
+            "target_endpoint": "/file",
+            "payload": "'] | //user/*[1",
+            "status_code": 400,
+            "latency_ms": 5.023717880249023,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158723.6789615
+        },
+        {
+            "suite": "injection_xpath",
+            "target_endpoint": "/file",
+            "payload": "' OR 1=1",
+            "status_code": 400,
+            "latency_ms": 4.731893539428711,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158723.6836996
+        },
+        {
+            "suite": "injection_ssti",
+            "target_endpoint": "/file",
+            "payload": "{{7*7}}",
+            "status_code": 400,
+            "latency_ms": 4.026651382446289,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158730.5017283
+        },
+        {
+            "suite": "injection_ssti",
+            "target_endpoint": "/file",
+            "payload": "{{config}}",
+            "status_code": 400,
+            "latency_ms": 4.68134880065918,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158730.5064151
+        },
+        {
+            "suite": "injection_ssti",
+            "target_endpoint": "/file",
+            "payload": "${7*3}",
+            "status_code": 400,
+            "latency_ms": 4.1103363037109375,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158730.5105321
+        },
+        {
+            "suite": "injection_ssti",
+            "target_endpoint": "/file",
+            "payload": "#{'%20'.join(['import','os'])}",
+            "status_code": 400,
+            "latency_ms": 4.126787185668945,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158730.5146654
+        },
+        {
+            "suite": "injection_ssti",
+            "target_endpoint": "/file",
+            "payload": "@{7*7}",
+            "status_code": 400,
+            "latency_ms": 3.72314453125,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158730.5183954
+        },
+        {
+            "suite": "injection_ssti",
+            "target_endpoint": "/file",
+            "payload": "##{'%20'.join(['os','system'])+'('+'%20'.join(['echo','Hello'])+')'}",
+            "status_code": 400,
+            "latency_ms": 3.5271644592285156,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158730.5219293
+        },
+        {
+            "suite": "injection_ssti",
+            "target_endpoint": "/file",
+            "payload": "}}{{7*7}}",
+            "status_code": 400,
+            "latency_ms": 3.968477249145508,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158730.5259051
+        },
+        {
+            "suite": "injection_ssti",
+            "target_endpoint": "/file",
+            "payload": "}}{{config}}",
+            "status_code": 400,
+            "latency_ms": 3.4341812133789062,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158730.5293455
+        },
+        {
+            "suite": "injection_ssti",
+            "target_endpoint": "/file",
+            "payload": "${{7*7}}",
+            "status_code": 400,
+            "latency_ms": 2.7434825897216797,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158730.5320933
+        },
+        {
+            "suite": "injection_ssti",
+            "target_endpoint": "/file",
+            "payload": "}}{{import os}}",
+            "status_code": 400,
+            "latency_ms": 2.7027130126953125,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158730.534799
+        },
+        {
+            "suite": "injection_windows_shell",
+            "target_endpoint": "/file",
+            "payload": "powershell -c \"Get-ChildItem\"",
+            "status_code": 400,
+            "latency_ms": 4.905223846435547,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158737.3822908
+        },
+        {
+            "suite": "injection_windows_shell",
+            "target_endpoint": "/file",
+            "payload": "& cmd /c \"dir\"",
+            "status_code": 400,
+            "latency_ms": 5.340576171875,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158737.3876371
+        },
+        {
+            "suite": "injection_windows_shell",
+            "target_endpoint": "/file",
+            "payload": "| cmd /c \"dir\"",
+            "status_code": 400,
+            "latency_ms": 3.849029541015625,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158737.3914921
+        },
+        {
+            "suite": "injection_windows_shell",
+            "target_endpoint": "/file",
+            "payload": "&& cmd /c \"dir\"",
+            "status_code": 400,
+            "latency_ms": 4.961252212524414,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158737.3964596
+        },
+        {
+            "suite": "injection_windows_shell",
+            "target_endpoint": "/file",
+            "payload": "|| cmd /c \"dir\"",
+            "status_code": 400,
+            "latency_ms": 4.184722900390625,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158737.4006515
+        },
+        {
+            "suite": "injection_windows_shell",
+            "target_endpoint": "/file",
+            "payload": "$env:PATH += \";C:\\Windows\\System32\"; whoami",
+            "status_code": 400,
+            "latency_ms": 4.11534309387207,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158737.4047737
+        },
+        {
+            "suite": "injection_windows_shell",
+            "target_endpoint": "/file",
+            "payload": "cmd /k \"echo Vulnerable!\"",
+            "status_code": 400,
+            "latency_ms": 3.455638885498047,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158737.4082348
+        },
+        {
+            "suite": "injection_windows_shell",
+            "target_endpoint": "/file",
+            "payload": "cmd /c \"whoami\"",
+            "status_code": 400,
+            "latency_ms": 3.888368606567383,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158737.4121282
+        },
+        {
+            "suite": "injection_windows_shell",
+            "target_endpoint": "/file",
+            "payload": "cmd /d \"echo Exploit successful\"",
+            "status_code": 400,
+            "latency_ms": 3.4351348876953125,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158737.41557
+        },
+        {
+            "suite": "injection_windows_shell",
+            "target_endpoint": "/file",
+            "payload": "cmd /e \"dir\"",
+            "status_code": 400,
+            "latency_ms": 3.624439239501953,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158737.4191997
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'../../%u202e/..%u202e/./etc/passwd'",
+            "status_code": 403,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.753097
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'../%u202e/..%u202e/./boot.ini'",
+            "status_code": 403,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.7575366
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'%u200b%u200b%u200b/etc/shadow'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.7619128
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'file%u200c.txt'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.7653837
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'data%u200d.json'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.7685091
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'config\u0430.txt'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.7716148
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'settings\u0430.json'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.774729
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'\uff0e\uff0f\uff0e\uff0f.ini'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.7788997
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'log\\u3000.txt'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.7824376
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'secret\u3001.txt'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.7855422
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'user\u3002.txt'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.7887897
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'data\u309b.txt'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.7930193
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'config\u309d.json'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.7969198
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'file\\u3000\u3001.txt'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.8000717
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'settings\u3001\u309b.json'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158746.802947
+        },
+        {
+            "suite": "special_control_chars",
+            "target_endpoint": "/file",
+            "payload": "'\\x07'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158752.2182133
+        },
+        {
+            "suite": "special_control_chars",
+            "target_endpoint": "/file",
+            "payload": "'\\x08'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158752.2228563
+        },
+        {
+            "suite": "special_control_chars",
+            "target_endpoint": "/file",
+            "payload": "'\\t'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158752.2274544
+        },
+        {
+            "suite": "special_control_chars",
+            "target_endpoint": "/file",
+            "payload": "'\\x0c'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158752.232761
+        },
+        {
+            "suite": "special_control_chars",
+            "target_endpoint": "/file",
+            "payload": "'\\r'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158752.237028
+        },
+        {
+            "suite": "special_control_chars",
+            "target_endpoint": "/file",
+            "payload": "'\\x1b'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158752.2413058
+        },
+        {
+            "suite": "special_control_chars",
+            "target_endpoint": "/file",
+            "payload": "'\\x7f'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158752.2470436
+        },
+        {
+            "suite": "special_path_weirdness",
+            "target_endpoint": "/file",
+            "payload": "'../../etc/passwd%00'",
+            "status_code": 403,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158809.1071901
+        },
+        {
+            "suite": "special_path_weirdness",
+            "target_endpoint": "/file",
+            "payload": "'../../../../tmp/.%2e..%5c..%5c.ini'",
+            "status_code": 403,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158809.1111708
+        },
+        {
+            "suite": "special_path_weirdness",
+            "target_endpoint": "/file",
+            "payload": "'../..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2f.",
+            "status_code": 403,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158809.1149476
+        },
+        {
+            "suite": "special_path_weirdness",
+            "target_endpoint": "/file",
+            "payload": "'C:\\\\Windows\\\\System32\\\\drivers\\\\etc\\\\hosts%00'",
+            "status_code": 403,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158809.1179533
+        },
+        {
+            "suite": "ratelimit_header_spoofing",
+            "target_endpoint": "/status",
+            "payload": "X-Forwarded-For: 192.168.1.100",
+            "status_code": 429,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158819.4145842
+        },
+        {
+            "suite": "ratelimit_header_spoofing",
+            "target_endpoint": "/status",
+            "payload": "X-Real-IP: 192.168.1.100",
+            "status_code": 429,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158819.4171882
+        },
+        {
+            "suite": "ratelimit_header_spoofing",
+            "target_endpoint": "/status",
+            "payload": "X-Originating-IP: 192.168.1.100",
+            "status_code": 429,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158819.4196749
+        },
+        {
+            "suite": "ratelimit_header_spoofing",
+            "target_endpoint": "/status",
+            "payload": "X-Client-IP: 192.168.1.100",
+            "status_code": 429,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158819.4219067
+        },
+        {
+            "suite": "ratelimit_header_spoofing",
+            "target_endpoint": "/status",
+            "payload": "True-Client-IP: 192.163.45.67",
+            "status_code": 429,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158819.4242232
+        },
+        {
+            "suite": "ratelimit_header_spoofing",
+            "target_endpoint": "/status",
+            "payload": "CF-Connecting-IP: 192.168.1.100",
+            "status_code": 429,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158819.4276037
+        },
+        {
+            "suite": "ratelimit_header_spoofing",
+            "target_endpoint": "/status",
+            "payload": "X-Forwarded-For: [2001:db8::1]",
+            "status_code": 429,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158819.4308963
+        },
+        {
+            "suite": "ratelimit_header_spoofing",
+            "target_endpoint": "/status",
+            "payload": "X-Real-IP: [2001:db8::1]",
+            "status_code": 429,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158819.4339159
+        },
+        {
+            "suite": "ratelimit_header_spoofing",
+            "target_endpoint": "/status",
+            "payload": "X-Client-IP: [2001:db8::1]",
+            "status_code": 429,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158819.4361374
+        },
+        {
+            "suite": "ratelimit_header_spoofing",
+            "target_endpoint": "/status",
+            "payload": "True-Client-IP: [2001:db8::1]",
+            "status_code": 429,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158819.4384348
+        },
+        {
+            "suite": "panic_evasion",
+            "target_endpoint": "/status",
+            "payload": "valid_token1",
+            "status_code": 503,
+            "latency_ms": 0,
+            "panic_triggered": true,
+            "bypassed": false,
+            "timestamp": 1770158824.7957165
+        },
+        {
+            "suite": "panic_evasion",
+            "target_endpoint": "/status",
+            "payload": "invalid_token2",
+            "status_code": 503,
+            "latency_ms": 0,
+            "panic_triggered": true,
+            "bypassed": false,
+            "timestamp": 1770158824.7976043
+        },
+        {
+            "suite": "panic_evasion",
+            "target_endpoint": "/status",
+            "payload": "valid_token3",
+            "status_code": 503,
+            "latency_ms": 0,
+            "panic_triggered": true,
+            "bypassed": false,
+            "timestamp": 1770158824.7999268
+        },
+        {
+            "suite": "panic_evasion",
+            "target_endpoint": "/status",
+            "payload": "invalid_token4",
+            "status_code": 503,
+            "latency_ms": 0,
+            "panic_triggered": true,
+            "bypassed": false,
+            "timestamp": 1770158824.8019197
+        },
+        {
+            "suite": "panic_evasion",
+            "target_endpoint": "/status",
+            "payload": "valid_token5",
+            "status_code": 503,
+            "latency_ms": 0,
+            "panic_triggered": true,
+            "bypassed": false,
+            "timestamp": 1770158824.8034523
+        },
+        {
+            "suite": "panic_evasion",
+            "target_endpoint": "/status",
+            "payload": "invalid_token6",
+            "status_code": 503,
+            "latency_ms": 0,
+            "panic_triggered": true,
+            "bypassed": false,
+            "timestamp": 1770158824.8048348
+        },
+        {
+            "suite": "panic_evasion",
+            "target_endpoint": "/status",
+            "payload": "valid_token7",
+            "status_code": 503,
+            "latency_ms": 0,
+            "panic_triggered": true,
+            "bypassed": false,
+            "timestamp": 1770158824.8070142
+        },
+        {
+            "suite": "panic_evasion",
+            "target_endpoint": "/status",
+            "payload": "invalid_token8",
+            "status_code": 503,
+            "latency_ms": 0,
+            "panic_triggered": true,
+            "bypassed": false,
+            "timestamp": 1770158824.808638
+        },
+        {
+            "suite": "panic_evasion",
+            "target_endpoint": "/status",
+            "payload": "valid_token9",
+            "status_code": 503,
+            "latency_ms": 0,
+            "panic_triggered": true,
+            "bypassed": false,
+            "timestamp": 1770158824.8110225
+        },
+        {
+            "suite": "panic_evasion",
+            "target_endpoint": "/status",
+            "payload": "invalid_token10",
+            "status_code": 503,
+            "latency_ms": 0,
+            "panic_triggered": true,
+            "bypassed": false,
+            "timestamp": 1770158824.8129897
+        }
+    ]
+}

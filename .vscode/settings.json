@@ -6,5 +6,10 @@
             "path": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.9.10-hotspot",
             "default": true
         }
-    ]
+    ],
+    "sonarlint.connectedMode.project": {
+        "connectionId": "shiloren",
+        "projectKey": "Shiloren_gred_orchestrator"
+    },
+    "sonarlint.ls.nodePath": "C:\\Program Files\\nodejs\\node.exe"
 }

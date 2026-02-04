@@ -1,89 +1,119 @@
 {
-    "total_tests": 8,
+    "total_tests": 11,
     "panic_count": 0,
     "bypass_count": 0,
-    "avg_latency_ms": 29.282420873641968,
-    "duration_sec": 4.24793004989624,
+    "avg_latency_ms": 3.230506723577326,
+    "duration_sec": 68.20274019241333,
     "results": [
         {
             "suite": "payload_guided",
             "target_endpoint": "/file",
-            "payload": "../etc/passwd",
+            "payload": "../../etc/passwd",
             "status_code": 403,
-            "latency_ms": 22.609710693359375,
+            "latency_ms": 4.787445068359375,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1770076823.3907568
+            "timestamp": 1770158841.9786544
         },
         {
             "suite": "payload_guided",
             "target_endpoint": "/file",
-            "payload": "..\\..\\windows\\system32\\config\\sam",
+            "payload": "%00/etc/passwd",
+            "status_code": 400,
+            "latency_ms": 3.5941600799560547,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158841.982257
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "%2e%2e%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 3.6051273345947266,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158841.9858682
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "C:/Windows/win.ini",
             "status_code": 403,
-            "latency_ms": 18.25714111328125,
+            "latency_ms": 2.939939498901367,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1770076823.409014
+            "timestamp": 1770158841.9888146
         },
         {
             "suite": "payload_guided",
             "target_endpoint": "/file",
-            "payload": "....//....//etc/passwd",
+            "payload": "%00C:/Windows/win.ini",
             "status_code": 400,
-            "latency_ms": 22.755146026611328,
+            "latency_ms": 3.0820369720458984,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1770076823.4317691
+            "timestamp": 1770158841.9919028
         },
         {
             "suite": "payload_guided",
             "target_endpoint": "/file",
-            "payload": "%2e%2e/%2e%2e/etc/passwd",
+            "payload": "%2530%2530C%3a%2fWindows%2fwindows.ini",
             "status_code": 400,
-            "latency_ms": 21.562576293945312,
+            "latency_ms": 3.4105777740478516,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1770076823.4533317
+            "timestamp": 1770158841.9953198
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "\\127.0.0.1\nc$\temp.txt",
+            "status_code": 403,
+            "latency_ms": 2.8688907623291016,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158841.998194
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "%00\\127.0.0.1\nc$\temp.txt",
+            "status_code": 400,
+            "latency_ms": 2.7539730072021484,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158842.0009518
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "%2e%2e%2530%2530%5c127.0.0.1%5cc%24%5ctemp.txt",
+            "status_code": 400,
+            "latency_ms": 2.778768539428711,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158842.003734
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "%2530%2530%5c127.0.0.1%5cc%24%5ctemp.txt",
+            "status_code": 400,
+            "latency_ms": 2.5751590728759766,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770158842.0063121
         },
         {
             "suite": "payload_guided",
             "target_endpoint": "/status",
-            "payload": "invalid-token-1234567890",
+            "payload": "",
             "status_code": 401,
-            "latency_ms": 36.246299743652344,
+            "latency_ms": 3.139495849609375,
             "panic_triggered": false,
             "bypassed": false,
-            "timestamp": 1770076823.491696
-        },
-        {
-            "suite": "payload_guided",
-            "target_endpoint": "/status",
-            "payload": "Bearer invalid-token-1234567890",
-            "status_code": 401,
-            "latency_ms": 36.014556884765625,
-            "panic_triggered": false,
-            "bypassed": false,
-            "timestamp": 1770076823.5277104
-        },
-        {
-            "suite": "payload_guided",
-            "target_endpoint": "/status",
-            "payload": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-            "status_code": 401,
-            "latency_ms": 33.51473808288574,
-            "panic_triggered": false,
-            "bypassed": false,
-            "timestamp": 1770076823.5612252
-        },
-        {
-            "suite": "payload_guided",
-            "target_endpoint": "/status",
-            "payload": "test-token-00000000000000000000000000000000",
-            "status_code": 401,
-            "latency_ms": 43.299198150634766,
-            "panic_triggered": false,
-            "bypassed": false,
-            "timestamp": 1770076823.6045244
+            "timestamp": 1770158899.2808838
         }
     ]
 }

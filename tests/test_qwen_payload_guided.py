@@ -47,6 +47,9 @@ def test_path_traversal_guided(llm, metrics, llm_available, test_client, valid_t
                 params={"path": payload},
                 headers={"Authorization": f"Bearer {valid_token}"},
             )
+            _require_orchestrator_response(
+                response, f"path traversal payload {payload[:50]}"
+            )
             latency = time.time() - start_time
 
             # Analyze results
@@ -100,6 +103,9 @@ def test_auth_bypass_guided(llm, metrics, llm_available, test_client):
                 "/status",
                 headers={"Authorization": f"Bearer {payload}"},
             )
+            _require_orchestrator_response(
+                response, f"auth bypass payload {payload[:50]}"
+            )
             latency = time.time() - start_time
 
             # 200 with a fake token is a bypass
@@ -121,5 +127,15 @@ def test_auth_bypass_guided(llm, metrics, llm_available, test_client):
                 503,
             ], f"Security failure: Token {payload} allowed access (Status {response.status_code})"
 
-        except Exception:
-            continue
+        except Exception as exc:
+            pytest.fail(f"Orchestrator call failed for auth payload {payload[:50]}: {exc}")
+
+
+def _require_orchestrator_response(response, context: str) -> None:
+    if response is None:
+        pytest.fail(f"Orchestrator call failed (no response) during {context}")
+    status_code = getattr(response, "status_code", 0)
+    if status_code == 0:
+        pytest.fail(f"Orchestrator call failed (status 0) during {context}")
+    if status_code >= 500 and status_code != 503:
+        pytest.fail(f"Orchestrator error {status_code} during {context}")

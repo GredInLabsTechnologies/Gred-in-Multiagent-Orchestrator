@@ -1,0 +1,209 @@
+{
+    "total_tests": 20,
+    "panic_count": 0,
+    "bypass_count": 0,
+    "avg_latency_ms": 3.4343719482421875,
+    "duration_sec": 64.27369451522827,
+    "results": [
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "",
+            "status_code": 401,
+            "latency_ms": 5.4683685302734375,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160560.4469604
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "",
+            "status_code": 401,
+            "latency_ms": 3.0062198638916016,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160560.4499805
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "",
+            "status_code": 401,
+            "latency_ms": 2.5568008422851562,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160560.4525478
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "",
+            "status_code": 401,
+            "latency_ms": 2.7189254760742188,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160560.4552748
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "\u0000",
+            "status_code": 401,
+            "latency_ms": 2.6950836181640625,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160560.457978
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "\u200b",
+            "status_code": 401,
+            "latency_ms": 2.681255340576172,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160560.4606667
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "\ufeff",
+            "status_code": 401,
+            "latency_ms": 2.2919178009033203,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160560.4629667
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "\u0000",
+            "status_code": 401,
+            "latency_ms": 3.360271453857422,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160560.466335
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "\u231a",
+            "status_code": 401,
+            "latency_ms": 1.916646957397461,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160560.4682586
+        },
+        {
+            "suite": "auth_empty_variations",
+            "target_endpoint": "/status",
+            "payload": "\u2060",
+            "status_code": 401,
+            "latency_ms": 1.7480850219726562,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160560.470012
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "<token>",
+            "status_code": 401,
+            "latency_ms": 2.8848648071289062,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160566.1190438
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "Bearer\t<token>",
+            "status_code": 401,
+            "latency_ms": 2.508878707885742,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160566.12156
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "Bearer\r\n<token>",
+            "status_code": 401,
+            "latency_ms": 2.201080322265625,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160566.1237688
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "Bearer\ndata<token>",
+            "status_code": 401,
+            "latency_ms": 2.863168716430664,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160566.1266398
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "Bearer\u00a0<token>",
+            "status_code": 401,
+            "latency_ms": 9.896516799926758,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160566.1365452
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "Bearer\u200b<token>",
+            "status_code": 401,
+            "latency_ms": 2.5246143341064453,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160566.1390772
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "Bearer\u1680<token>",
+            "status_code": 401,
+            "latency_ms": 2.420186996459961,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160566.1415036
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "Bearer <token>",
+            "status_code": 401,
+            "latency_ms": 1.8582344055175781,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160566.1433675
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "Bearerbearer<token>",
+            "status_code": 401,
+            "latency_ms": 2.7625560760498047,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160566.1461353
+        },
+        {
+            "suite": "auth_parser_smuggling",
+            "target_endpoint": "/status",
+            "payload": "BearerBEARER<token>",
+            "status_code": 401,
+            "latency_ms": 10.323762893676758,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770160566.1564658
+        }
+    ]
+}

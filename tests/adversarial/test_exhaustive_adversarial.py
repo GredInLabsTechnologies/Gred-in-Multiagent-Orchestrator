@@ -60,9 +60,9 @@ def metrics():
     summary = {
         "timestamp": timestamp,
         "total_tests": len(collector.results),
-        "bypasses": sum(1 for r in collector.results if r.get("bypassed")),
-        "panics": sum(1 for r in collector.results if r.get("panic")),
-        "categories_tested": list(set(r.get("suite", "unknown") for r in collector.results)),
+        "bypasses": sum(1 for r in collector.results if getattr(r, "bypassed", False)),
+        "panics": sum(1 for r in collector.results if getattr(r, "panic_triggered", False)),
+        "categories_tested": list(set(getattr(r, "suite", "unknown") for r in collector.results)),
     }
     summary_path = REPORT_DIR / "adversarial_summary_latest.json"
     summary_path.write_text(json.dumps(summary, indent=2))
@@ -82,6 +82,7 @@ class TestPathTraversalExhaustive:
             "path_traversal_null_byte",
             "path_traversal_windows",
             "path_traversal_filter_bypass",
+            "path_traversal_combo",
         ],
     )
     def test_path_traversal_vectors(
@@ -115,6 +116,9 @@ class TestPathTraversalExhaustive:
                 params={"path": payload},
                 headers={"Authorization": f"Bearer {token}"},
             )
+            _require_orchestrator_response(
+                response, f"path traversal payload {category}: {payload[:50]}"
+            )
             latency = time.time() - start
 
             # Detect bypass: 200 with sensitive content
@@ -139,14 +143,9 @@ class TestPathTraversalExhaustive:
             return result
 
         except Exception as e:
-            return {
-                "suite": category,
-                "payload": payload[:200],
-                "status": 0,
-                "error": str(e),
-                "bypassed": False,
-                "panic": False,
-            }
+            pytest.fail(
+                f"Orchestrator call failed for {category} payload {payload[:50]}: {e}"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -163,6 +162,7 @@ class TestAuthBypassExhaustive:
             "auth_format_attacks",
             "auth_encoding_attacks",
             "auth_timing_attacks",
+            "auth_parser_smuggling",
         ],
     )
     def test_auth_bypass_vectors(self, vector_name, llm, llm_available, metrics, test_client):
@@ -184,10 +184,15 @@ class TestAuthBypassExhaustive:
         """Test a single auth token."""
         start = time.time()
 
+        safe_token = _ascii_safe_token(token)
+
         try:
             response = client.get(
                 "/status",
-                headers={"Authorization": f"Bearer {token}"},
+                headers={"Authorization": f"Bearer {safe_token}"},
+            )
+            _require_orchestrator_response(
+                response, f"auth bypass payload {category}: {token[:50]}"
             )
             latency = time.time() - start
 
@@ -208,14 +213,9 @@ class TestAuthBypassExhaustive:
             return result
 
         except Exception as e:
-            return {
-                "suite": category,
-                "payload": token[:50],
-                "status": 0,
-                "error": str(e),
-                "bypassed": False,
-                "panic": False,
-            }
+            pytest.fail(
+                f"Orchestrator call failed for {category} token {token[:50]}: {e}"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -232,6 +232,7 @@ class TestInjectionExhaustive:
             "injection_ldap",
             "injection_xpath",
             "injection_ssti",
+            "injection_windows_shell",
         ],
     )
     def test_injection_vectors(
@@ -251,6 +252,9 @@ class TestInjectionExhaustive:
                     "/file",
                     params={"path": payload},
                     headers={"Authorization": f"Bearer {valid_token}"},
+                )
+                _require_orchestrator_response(
+                    response, f"injection payload {vector_name}: {payload[:50]}"
                 )
                 latency = time.time() - start
 
@@ -278,8 +282,10 @@ class TestInjectionExhaustive:
 
                 assert not bypassed, f"INJECTION SUCCESS with {vector_name}: {payload}"
 
-            except Exception:
-                continue
+            except Exception as exc:
+                pytest.fail(
+                    f"Orchestrator call failed for injection {vector_name} payload {payload[:50]}: {exc}"
+                )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -293,6 +299,7 @@ class TestSpecialCharsExhaustive:
         [
             "special_unicode",
             "special_control_chars",
+            "special_path_weirdness",
         ],
     )
     def test_special_char_vectors(
@@ -301,6 +308,7 @@ class TestSpecialCharsExhaustive:
         """Test special character handling."""
         prompt = ATTACK_VECTORS[vector_name]
         payloads = llm.generate_payloads(SYSTEM_ADVERSARIAL_MASTER, prompt)
+        assert len(payloads) > 0, f"LLM failed to generate payloads for {vector_name}"
 
         for payload in payloads:
             try:
@@ -308,6 +316,9 @@ class TestSpecialCharsExhaustive:
                     "/file",
                     params={"path": payload},
                     headers={"Authorization": f"Bearer {valid_token}"},
+                )
+                _require_orchestrator_response(
+                    response, f"special chars payload {vector_name}: {repr(payload)[:50]}"
                 )
 
                 # Should get 400, 403, or 503 - not 200 or 500
@@ -334,12 +345,130 @@ class TestSpecialCharsExhaustive:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# RATE LIMIT BYPASS TESTS
+# ═══════════════════════════════════════════════════════════════════════════
+class TestRateLimitBypass:
+    """Verify that IP-based rate limiting cannot be bypassed via header spoofing."""
+
+    def test_ratelimit_header_spoofing(
+        self, llm, llm_available, metrics, test_client, valid_token
+    ):
+        """Exhaust the rate limit, then confirm spoofed headers do not reset the counter."""
+        # Phase 1: exhaust rate limit (limit is 100 req/min; request #101 triggers 429)
+        for _ in range(102):
+            resp = test_client.get(
+                "/status", headers={"Authorization": f"Bearer {valid_token}"}
+            )
+            _require_orchestrator_response(resp, "rate limit warmup")
+            if resp.status_code == 429:
+                break
+
+        baseline = test_client.get(
+            "/status", headers={"Authorization": f"Bearer {valid_token}"}
+        )
+        _require_orchestrator_response(baseline, "rate limit baseline")
+        assert baseline.status_code == 429, "Rate limit not triggered - precondition failed"
+
+        # Phase 2: Qwen generates IP-spoofing header payloads
+        prompt = ATTACK_VECTORS["ratelimit_header_spoofing"]
+        payloads = llm.generate_payloads(SYSTEM_ADVERSARIAL_MASTER, prompt)
+        assert len(payloads) > 0, "LLM failed to generate rate limit bypass payloads"
+
+        for payload in payloads:
+            headers = {"Authorization": f"Bearer {valid_token}"}
+            # Payload may be "Header-Name: value" or a bare IP
+            if ":" in payload and not payload.strip().startswith("http"):
+                key, val = payload.split(":", 1)
+                headers[key.strip()] = val.strip()
+            else:
+                headers["X-Forwarded-For"] = payload.strip()
+
+            response = test_client.get("/status", headers=headers)
+            _require_orchestrator_response(
+                response, f"rate limit spoofing payload {payload[:50]}"
+            )
+            bypassed = response.status_code == 200
+
+            metrics.add_result(
+                suite="ratelimit_header_spoofing",
+                endpoint="/status",
+                payload=payload[:100],
+                status=response.status_code,
+                latency=0,
+                panic=response.status_code == 503,
+                bypassed=bypassed,
+            )
+
+            assert not bypassed, f"RATE LIMIT BYPASS via header spoofing: {payload}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PANIC MODE EVASION TESTS
+# ═══════════════════════════════════════════════════════════════════════════
+class TestPanicEvasion:
+    """Verify that panic-mode lockdown cannot be evaded by attacker techniques."""
+
+    def test_panic_evasion_vectors(
+        self, llm, llm_available, metrics, test_client, valid_token
+    ):
+        """Trigger panic, validate fail-closed semantics, then test Qwen evasion payloads."""
+        # Phase 1: trigger panic (threshold = 5 invalid tokens >= 16 chars)
+        for i in range(6):
+            resp = test_client.get(
+                "/status",
+                headers={"Authorization": f"Bearer adversarial-panic-trigger-{i:020d}"},
+            )
+            _require_orchestrator_response(resp, "panic trigger")
+
+        # Verify panic is active (invalid token → 503 from middleware)
+        baseline = test_client.get(
+            "/status",
+            headers={"Authorization": "Bearer not-a-real-token-panic-check-active"},  # NOSONAR S8217
+        )
+        _require_orchestrator_response(baseline, "panic baseline")
+        assert baseline.status_code == 503, "Panic mode not triggered - precondition failed"
+
+        # Verify valid token still works (fail-closed blocks attackers, not operators)
+        legit = test_client.get(
+            "/status", headers={"Authorization": f"Bearer {valid_token}"}
+        )
+        _require_orchestrator_response(legit, "panic legit token")
+        assert legit.status_code == 200, "Valid token blocked during panic - misconfigured"
+
+        # Phase 2: Qwen generates evasion attempts
+        prompt = ATTACK_VECTORS["panic_evasion"]
+        payloads = llm.generate_payloads(SYSTEM_ADVERSARIAL_MASTER, prompt)
+        assert len(payloads) > 0, "LLM failed to generate panic evasion payloads"
+
+        for payload in payloads:
+            response = test_client.get(
+                "/status", headers={"Authorization": f"Bearer {payload}"}
+            )
+            _require_orchestrator_response(
+                response, f"panic evasion payload {payload[:50]}"
+            )
+            bypassed = response.status_code == 200
+
+            metrics.add_result(
+                suite="panic_evasion",
+                endpoint="/status",
+                payload=payload[:100],
+                status=response.status_code,
+                latency=0,
+                panic=response.status_code == 503,
+                bypassed=bypassed,
+            )
+
+            assert not bypassed, f"PANIC MODE EVADED: {payload}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # SUMMARY TEST
 # ═══════════════════════════════════════════════════════════════════════════
 def test_final_security_summary(metrics):
     """Generate final security summary after all tests."""
-    bypasses = [r for r in metrics.results if r.get("bypassed")]
-    panics = [r for r in metrics.results if r.get("panic")]
+    bypasses = [r for r in metrics.results if getattr(r, "bypassed", False)]
+    panics = [r for r in metrics.results if getattr(r, "panic_triggered", False)]
 
     print("\n" + "=" * 60)
     print("ADVERSARIAL SECURITY TEST SUMMARY")
@@ -352,9 +481,27 @@ def test_final_security_summary(metrics):
     if bypasses:
         print("\n⚠️  CRITICAL: BYPASSES DETECTED!")
         for b in bypasses[:10]:  # Show first 10
-            print(f"  - {b['suite']}: {b['payload'][:50]}...")
+            print(f"  - {b.suite}: {b.payload[:50]}...")
     else:
         print("\n✅ NO BYPASSES DETECTED - Security validated")
 
     # This should pass only if no bypasses
     assert len(bypasses) == 0, f"SECURITY FAILURE: {len(bypasses)} bypasses detected"
+
+
+def _require_orchestrator_response(response, context: str) -> None:
+    if response is None:
+        pytest.fail(f"Orchestrator call failed (no response) during {context}")
+    status_code = getattr(response, "status_code", 0)
+    if status_code == 0:
+        pytest.fail(f"Orchestrator call failed (status 0) during {context}")
+    if status_code >= 500 and status_code != 503:
+        pytest.fail(f"Orchestrator error {status_code} during {context}")
+
+
+def _ascii_safe_token(token: str) -> str:
+    try:
+        token.encode("ascii")
+        return token
+    except UnicodeEncodeError:
+        return token.encode("utf-8", errors="ignore").decode("ascii", errors="ignore")

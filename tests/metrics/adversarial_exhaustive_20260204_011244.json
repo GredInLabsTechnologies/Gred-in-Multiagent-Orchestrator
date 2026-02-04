@@ -1,0 +1,19 @@
+{
+    "total_tests": 1,
+    "panic_count": 0,
+    "bypass_count": 0,
+    "avg_latency_ms": 11.387348175048828,
+    "duration_sec": 54.74571776390076,
+    "results": [
+        {
+            "suite": "path_traversal_combo",
+            "target_endpoint": "/file",
+            "payload": "..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%5C..%5C%de9%80%81%2e%2e%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%5C%",
+            "status_code": 400,
+            "latency_ms": 11.387348175048828,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770163964.2919898
+        }
+    ]
+}

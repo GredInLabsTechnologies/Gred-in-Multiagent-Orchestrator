@@ -44,6 +44,8 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         logger.debug("Cleanup task cancelled successfully.")
+    except Exception as exc:
+        logger.error(f"Cleanup task failed during shutdown: {exc}")
 
 
 def create_app() -> FastAPI:
