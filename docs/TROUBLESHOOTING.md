@@ -15,7 +15,7 @@ Fix:
 
 1) Ensure you have a token:
    - set `ORCH_TOKEN` in your shell, or
-   - read it from `tools/repo_orchestrator/.orch_token` (auto-generated).
+   - read it from `tools/gimo_server/.orch_token` (auto-generated).
 2) Call endpoints with the header:
 
 ```cmd
@@ -48,7 +48,7 @@ Symptoms:
 
 Fix:
 
-- Windows: `scripts/start_orch.cmd` attempts to kill any process listening on 9325.
+- Windows: `scripts/ops/start_orch.cmd` attempts to kill any process listening on 9325.
 - Otherwise, manually find and stop the process.
 
 ## UI cannot connect to API

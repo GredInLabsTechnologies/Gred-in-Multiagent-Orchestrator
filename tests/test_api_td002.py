@@ -8,9 +8,9 @@ import pytest
 # Path injection
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from tools.repo_orchestrator.main import app
-from tools.repo_orchestrator.security import verify_token
-from tools.repo_orchestrator.security.auth import AuthContext
+from tools.gimo_server.main import app
+from tools.gimo_server.security import verify_token
+from tools.gimo_server.security.auth import AuthContext
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +34,7 @@ def setup_headless():
 
 def test_api_service_status(test_client):
     with patch(
-        "tools.repo_orchestrator.services.system_service.SystemService.get_status"
+        "tools.gimo_server.services.system_service.SystemService.get_status"
     ) as mock_status:
         mock_status.return_value = "RUNNING"
         response = test_client.get("/ui/service/status")
@@ -44,7 +44,7 @@ def test_api_service_status(test_client):
 
 def test_api_service_restart(test_client):
     with patch(
-        "tools.repo_orchestrator.services.system_service.SystemService.restart"
+        "tools.gimo_server.services.system_service.SystemService.restart"
     ) as mock_restart:
         mock_restart.return_value = True
         response = test_client.post("/ui/service/restart")
@@ -54,7 +54,7 @@ def test_api_service_restart(test_client):
 
 
 def test_api_service_stop(test_client):
-    with patch("tools.repo_orchestrator.services.system_service.SystemService.stop") as mock_stop:
+    with patch("tools.gimo_server.services.system_service.SystemService.stop") as mock_stop:
         mock_stop.return_value = True
         response = test_client.post("/ui/service/stop")
         assert response.status_code == 200
@@ -70,9 +70,9 @@ def test_api_vitaminize_invalid_path(test_client):
 
 def test_api_vitaminize_success(test_client):
     """Use sequential patching for better control and debugging"""
-    with patch("tools.repo_orchestrator.routes.REPO_ROOT_DIR", new=Path("/mock/repos")):
+    with patch("tools.gimo_server.routes.REPO_ROOT_DIR", new=Path("/mock/repos")):
         with patch(
-            "tools.repo_orchestrator.services.repo_service.RepoService.vitaminize_repo"
+            "tools.gimo_server.services.repo_service.RepoService.vitaminize_repo"
         ) as mock_vit:
             mock_vit.return_value = ["file1.txt", "file2.txt"]
             # Ensure path exists for validation - patch pathlib directly
@@ -82,10 +82,10 @@ def test_api_vitaminize_success(test_client):
                     return_value=Path("/mock/repos/myrepo"),
                 ):
                     with patch(
-                        "tools.repo_orchestrator.routes.load_repo_registry",
+                        "tools.gimo_server.routes.load_repo_registry",
                         return_value={"repos": []},
                     ):
-                        with patch("tools.repo_orchestrator.routes.save_repo_registry"):
+                        with patch("tools.gimo_server.routes.save_repo_registry"):
                             response = test_client.post(
                                 "/ui/repos/vitaminize?path=/mock/repos/myrepo"
                             )

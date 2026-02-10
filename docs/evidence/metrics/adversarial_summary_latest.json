@@ -1,0 +1,31 @@
+{
+  "timestamp": "20260209_184736",
+  "total_tests": 177,
+  "bypasses": 0,
+  "panics": 13,
+  "categories_tested": [
+    "injection_xpath",
+    "path_traversal_encoded",
+    "auth_length_boundary",
+    "path_traversal_windows",
+    "auth_parser_smuggling",
+    "path_traversal_combo",
+    "auth_timing_attacks",
+    "injection_ssti",
+    "auth_empty_variations",
+    "injection_command",
+    "special_path_weirdness",
+    "auth_format_attacks",
+    "injection_sql",
+    "path_traversal_basic",
+    "injection_windows_shell",
+    "panic_evasion",
+    "special_unicode",
+    "path_traversal_null_byte",
+    "path_traversal_filter_bypass",
+    "ratelimit_header_spoofing",
+    "special_control_chars",
+    "auth_encoding_attacks",
+    "injection_ldap"
+  ]
+}

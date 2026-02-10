@@ -8,8 +8,8 @@ from fastapi import HTTPException
 # Set environment variables for testing BEFORE importing the app
 os.environ.setdefault("ORCH_REPO_ROOT", str(Path(__file__).parent.parent.resolve()))
 
-from tools.repo_orchestrator.main import app
-from tools.repo_orchestrator.security import (
+from tools.gimo_server.main import app
+from tools.gimo_server.security import (
     SECURITY_DB_PATH,
     load_security_db,
     redact_sensitive_data,

@@ -23,15 +23,15 @@ This document describes the security model implemented in the current codebase.
 
 Code:
 
-- `tools/repo_orchestrator/security/auth.py`
-- `tools/repo_orchestrator/routes.py`
+- `tools/gimo_server/security/auth.py`
+- `tools/gimo_server/routes.py`
 
 ### Rate limiting
 
 - Window-based limiter (default 100 requests / 60s).
 - Returns `429` when exceeded.
 
-Code: `tools/repo_orchestrator/security/rate_limit.py`.
+Code: `tools/gimo_server/security/rate_limit.py`.
 
 ### Path traversal shield
 
@@ -39,7 +39,7 @@ Code: `tools/repo_orchestrator/security/rate_limit.py`.
 - Null-byte rejection.
 - Windows reserved device names rejection.
 
-Code: `tools/repo_orchestrator/security/validation.py`.
+Code: `tools/gimo_server/security/validation.py`.
 
 ### Redaction
 
@@ -47,7 +47,7 @@ Code: `tools/repo_orchestrator/security/validation.py`.
 - Applied to file outputs and git diff outputs.
 - Audit logging redacts long actor tokens.
 
-Code: `tools/repo_orchestrator/security/audit.py`.
+Code: `tools/gimo_server/security/audit.py`.
 
 ### Panic mode (LOCKDOWN)
 
@@ -57,8 +57,8 @@ Code: `tools/repo_orchestrator/security/audit.py`.
 
 Code:
 
-- `tools/repo_orchestrator/middlewares.py`
-- `tools/repo_orchestrator/security/auth.py`
+- `tools/gimo_server/middlewares.py`
+- `tools/gimo_server/security/auth.py`
 
 ## Allowlist (known gap)
 
@@ -66,7 +66,7 @@ There is an allowlist mechanism intended to constrain enumeration.
 
 Known mismatch to resolve before 1.0:
 
-- `tools/repo_orchestrator/allowed_paths.json` currently contains objects with `{path, expires_at}`.
+- `tools/gimo_server/allowed_paths.json` currently contains objects with `{path, expires_at}`.
 - `get_allowed_paths()` currently expects a JSON with `timestamp` and a `paths` list of strings.
 
 This can result in an empty allowlist at runtime and breaks the intended guardrail.
@@ -78,7 +78,7 @@ This can result in an empty allowlist at runtime and breaks the intended guardra
 Recommended evidence commands:
 
 ```cmd
-pip install -r requirements-dev.txt
+python scripts\\ci\\quality_gates.py
 python scripts\quality_gates.py
 bandit -c pyproject.toml -r tools scripts
 pip-audit -r requirements.txt

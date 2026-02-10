@@ -2,12 +2,12 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-from tools.repo_orchestrator.config import _load_or_create_token
+from tools.gimo_server.config import _load_or_create_token
 
 
 def test_token_creation(tmp_path):
     token_file = tmp_path / ".token"
-    with patch("tools.repo_orchestrator.config.ORCH_TOKEN_FILE", token_file):
+    with patch("tools.gimo_server.config.ORCH_TOKEN_FILE", token_file):
         with patch.dict(os.environ, {"ORCH_TOKEN": ""}):
             if token_file.exists():
                 token_file.unlink()
@@ -26,7 +26,7 @@ def test_token_from_env():
 def test_token_from_file(tmp_path):
     token_file = tmp_path / ".token"
     token_file.write_text("file-token")
-    with patch("tools.repo_orchestrator.config.ORCH_TOKEN_FILE", token_file):
+    with patch("tools.gimo_server.config.ORCH_TOKEN_FILE", token_file):
         with patch.dict(os.environ, {"ORCH_TOKEN": ""}):
             token = _load_or_create_token()
             assert token == "file-token"
@@ -34,7 +34,7 @@ def test_token_from_file(tmp_path):
 
 def test_token_file_read_error(tmp_path):
     token_file = tmp_path / ".token"
-    with patch("tools.repo_orchestrator.config.ORCH_TOKEN_FILE", token_file):
+    with patch("tools.gimo_server.config.ORCH_TOKEN_FILE", token_file):
         with patch.dict(os.environ, {"ORCH_TOKEN": ""}):
             with patch.object(Path, "read_text", side_effect=Exception("read error")):
                 token = _load_or_create_token()

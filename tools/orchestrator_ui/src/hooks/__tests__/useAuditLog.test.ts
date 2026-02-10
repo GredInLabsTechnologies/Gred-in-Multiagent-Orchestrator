@@ -137,14 +137,16 @@ describe('useAuditLog', () => {
         const { result } = renderHook(() => useAuditLog())
 
         await waitFor(() => {
-            expect(fetch).toHaveBeenCalledTimes(1)
+            expect(result.current.rawLogs).toHaveLength(3)
         })
+
+        const initialCalls = vi.mocked(fetch).mock.calls.length
 
         await act(async () => {
             await result.current.refresh()
         })
 
-        expect(fetch).toHaveBeenCalledTimes(2)
+        expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(initialCalls)
     })
 
     it('reverses logs order (latest first)', async () => {

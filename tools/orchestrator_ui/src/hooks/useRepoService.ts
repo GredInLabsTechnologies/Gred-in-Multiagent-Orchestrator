@@ -28,17 +28,19 @@ export const useRepoService = (token?: string) => {
         }
     }, [token]);
 
-    const vitaminize = useCallback(async (path: string) => {
+    const bootstrap = useCallback(async (path: string) => {
         setIsLoading(true);
         try {
             const headers: HeadersInit = {};
             if (token) headers['Authorization'] = `Bearer ${token}`;
 
-            const res = await fetch(`${API_BASE}/ui/repos/vitaminize?path=${encodeURIComponent(path)}`, {
+            const MODERN_BOOTSTRAP_ENDPOINT = `${API_BASE}/ui/repos/bootstrap?path=${encodeURIComponent(path)}`;
+            const res = await fetch(MODERN_BOOTSTRAP_ENDPOINT, {
                 method: 'POST',
                 headers
             });
-            if (!res.ok) throw new Error('Failed to vitaminize repository');
+
+            if (!res.ok) throw new Error('Failed to bootstrap repository');
 
             await fetchRepos();
         } catch (err) {
@@ -77,7 +79,7 @@ export const useRepoService = (token?: string) => {
         activeRepo,
         isLoading,
         error,
-        vitaminize,
+        bootstrap,
         selectRepo,
         refresh: fetchRepos
     };

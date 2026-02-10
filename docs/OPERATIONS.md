@@ -7,7 +7,7 @@ This document covers day-2 operations for the Repo Orchestrator service.
 
 ## Service overview
 
-- Backend: FastAPI (`tools/repo_orchestrator/main.py`)
+- Backend: FastAPI (`tools/gimo_server/main.py`)
 - Default port (docs + docker + scripts): **9325**
 - Auth: `Authorization: Bearer <TOKEN>` required for API endpoints
 - Local-only by default: helper scripts bind to `127.0.0.1`
@@ -17,18 +17,22 @@ This document covers day-2 operations for the Repo Orchestrator service.
 ### Development (manual)
 
 ```cmd
-python -m uvicorn tools.repo_orchestrator.main:app --host 127.0.0.1 --port 9325
+python -m uvicorn tools.gimo_server.main:app --host 127.0.0.1 --port 9325
 ```
 
 ### Windows helper scripts
 
-- `scripts/start_orch.cmd` (dev convenience; kills any process listening on 9325)
-- `scripts/run_as_service.bat` (intended for Windows Service style execution)
-- `scripts/manage_service.ps1` (create/start/stop Windows service wrapper around an executable)
+- `scripts/ops/start_orch.cmd` (dev convenience; kills any process listening on 9325)
+- `scripts/ops/run_as_service.bat` (intended for Windows Service style execution)
+- `scripts/ops/manage_service.ps1` (create/start/stop Windows service wrapper around an executable)
 
 Known inconsistency:
 
-- `scripts/launch_orchestrator.ps1` now launches `tools.repo_orchestrator.main:app` on port `9325`.
+- `scripts/ops/launch_orchestrator.ps1` launches `tools.gimo_server.main:app` on port `9325`.
+
+Note:
+
+- Scripts were reorganized under `scripts/{dev,ops,ci,tools}`.
 
 ## Health & status
 
@@ -60,7 +64,7 @@ Panic mode is a protective lockdown state.
 
 The service supports selecting an “active repo” under a configured root.
 
-Endpoints (see `tools/repo_orchestrator/routes.py`):
+Endpoints (see `tools/gimo_server/routes.py`):
 
 - `GET /ui/repos`
 - `GET /ui/repos/active`
@@ -73,10 +77,10 @@ File reads are served from snapshots:
 
 - Snapshot directory: `.orch_snapshots/`
 - TTL: `ORCH_SNAPSHOT_TTL` (default 240 seconds)
-- Cleanup loop runs in background (see `tools/repo_orchestrator/tasks.py`).
+- Cleanup loop runs in background (see `tools/gimo_server/tasks.py`).
 
 ## Rollback (safe)
 
 1) Stop the running uvicorn process (Ctrl+C) / stop the service.
 2) Remove Cloudflare tunnel / reverse proxy rules if applicable.
-3) Archive `logs/` and `tools/repo_orchestrator/security_db.json` if you need incident traces.
+3) Archive `logs/` and `tools/gimo_server/security_db.json` if you need incident traces.

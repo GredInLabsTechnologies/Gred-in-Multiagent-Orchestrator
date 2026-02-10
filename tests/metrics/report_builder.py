@@ -5,7 +5,7 @@ from datetime import datetime
 
 
 class ReportBuilder:
-    def __init__(self, metrics_dir="tests/metrics"):
+    def __init__(self, metrics_dir="out/metrics"):
         self.metrics_dir = metrics_dir
         self.results = []
         self.summary = {
@@ -58,7 +58,7 @@ class ReportBuilder:
         if self.summary["total_tests"] > 0:
             self.summary["avg_latency"] = total_latency / self.summary["total_tests"]
 
-    def generate_markdown(self, output_path="tests/metrics/security_report.md"):
+    def generate_markdown(self, output_path="out/metrics/security_report.md"):
         """Generates a human-readable Markdown report."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 

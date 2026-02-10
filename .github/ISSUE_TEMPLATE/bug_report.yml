@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible problem
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please include minimal reproduction steps and logs.
+        If the issue is security-sensitive, do not paste secrets.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of GET /status (version)
+      placeholder: UNRELEASED
+    validations:
+      required: false
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps to reproduce
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / evidence
+      description: Attach relevant log snippets. Prefer sanitized content.
+      render: text
+    validations:
+      required: false

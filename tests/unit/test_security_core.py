@@ -5,16 +5,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from tools.repo_orchestrator.security.audit import audit_log, log_panic, redact_sensitive_data
-from tools.repo_orchestrator.security.auth import AuthContext, verify_token
-from tools.repo_orchestrator.security.common import get_safe_actor, load_json_db
-from tools.repo_orchestrator.security.rate_limit import check_rate_limit, rate_limit_store
+from tools.gimo_server.security.audit import audit_log, log_panic, redact_sensitive_data
+from tools.gimo_server.security.auth import AuthContext, verify_token
+from tools.gimo_server.security.common import get_safe_actor, load_json_db
+from tools.gimo_server.security.rate_limit import check_rate_limit, rate_limit_store
 
 
 # --- Auth tests ---
-@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch("tools.gimo_server.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
 @patch(
-    "tools.repo_orchestrator.security.auth.TOKENS",
+    "tools.gimo_server.security.auth.TOKENS",
     {"long-valid-token-123456", "actions-token-123456"},
 )
 def test_verify_token_success():
@@ -25,9 +25,9 @@ def test_verify_token_success():
     )
 
 
-@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch("tools.gimo_server.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
 @patch(
-    "tools.repo_orchestrator.security.auth.TOKENS",
+    "tools.gimo_server.security.auth.TOKENS",
     {"long-valid-token-123456", "actions-token-123456"},
 )
 def test_verify_token_too_short():
@@ -38,9 +38,9 @@ def test_verify_token_too_short():
     assert exc.value.status_code == 401
 
 
-@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch("tools.gimo_server.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
 @patch(
-    "tools.repo_orchestrator.security.auth.TOKENS",
+    "tools.gimo_server.security.auth.TOKENS",
     {"long-valid-token-123456", "actions-token-123456"},
 )
 def test_verify_token_empty():
@@ -57,13 +57,13 @@ def test_verify_token_missing():
     assert exc.value.status_code == 401
 
 
-@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch("tools.gimo_server.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
 @patch(
-    "tools.repo_orchestrator.security.auth.TOKENS",
+    "tools.gimo_server.security.auth.TOKENS",
     {"long-valid-token-123456", "actions-token-123456"},
 )
-@patch("tools.repo_orchestrator.security.load_security_db")
-@patch("tools.repo_orchestrator.security.save_security_db")
+@patch("tools.gimo_server.security.load_security_db")
+@patch("tools.gimo_server.security.save_security_db")
 def test_verify_token_invalid_trigger_panic(mock_save, mock_load):
     mock_load.return_value = {"panic_mode": False, "recent_events": []}
     credentials = MagicMock()
@@ -77,13 +77,13 @@ def test_verify_token_invalid_trigger_panic(mock_save, mock_load):
     assert args[0]["panic_mode"] is False
 
 
-@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch("tools.gimo_server.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
 @patch(
-    "tools.repo_orchestrator.security.auth.TOKENS",
+    "tools.gimo_server.security.auth.TOKENS",
     {"long-valid-token-123456", "actions-token-123456"},
 )
-@patch("tools.repo_orchestrator.security.load_security_db")
-@patch("tools.repo_orchestrator.security.save_security_db")
+@patch("tools.gimo_server.security.load_security_db")
+@patch("tools.gimo_server.security.save_security_db")
 def test_verify_token_invalid_trigger_panic_no_events(mock_save, mock_load):
     # Case: recent_events missing in DB
     mock_load.return_value = {"panic_mode": False}  # missing recent_events
@@ -98,9 +98,9 @@ def test_verify_token_invalid_trigger_panic_no_events(mock_save, mock_load):
     assert "recent_events" in args[0]
 
 
-@patch("tools.repo_orchestrator.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
+@patch("tools.gimo_server.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
 @patch(
-    "tools.repo_orchestrator.security.auth.TOKENS",
+    "tools.gimo_server.security.auth.TOKENS",
     {"long-valid-token-123456", "actions-token-123456"},
 )
 def test_verify_token_actions_role():
@@ -122,7 +122,7 @@ def test_rate_limit():
     assert rate_limit_store["1.2.3.4"]["count"] == 1
 
     # Test cleanup
-    from tools.repo_orchestrator.security import rate_limit
+    from tools.gimo_server.security import rate_limit
 
     # Force cleanup to run by changing last cleanup time
     rate_limit._last_cleanup = datetime.now() - timedelta(seconds=1000)
@@ -157,7 +157,7 @@ def test_check_rate_limit_no_client():
 
 # --- Audit tests ---
 def test_audit_log():
-    with patch("tools.repo_orchestrator.security.audit.logging") as mock_logging:
+    with patch("tools.gimo_server.security.audit.logging") as mock_logging:
         audit_log("file.py", "1-2", "abc", actor="user")
         mock_logging.info.assert_called_once()
         assert "ACTOR:user" in mock_logging.info.call_args[0][0]
@@ -169,7 +169,7 @@ def test_redact_sensitive_data():
 
 
 def test_log_panic(tmp_path):
-    with patch("tools.repo_orchestrator.security.audit.logging") as mock_logging:
+    with patch("tools.gimo_server.security.audit.logging") as mock_logging:
         log_panic("id-123", "boom", "hash-456", traceback_str="stack")
         assert mock_logging.critical.called
         assert mock_logging.error.called
@@ -177,7 +177,7 @@ def test_log_panic(tmp_path):
 
 def test_log_panic_exception():
     with patch(
-        "tools.repo_orchestrator.security.audit.logging.getLogger", side_effect=Exception("fail")
+        "tools.gimo_server.security.audit.logging.getLogger", side_effect=Exception("fail")
     ):
         # Should not crash
         log_panic("id", "reason", "hash")
@@ -215,8 +215,8 @@ def test_save_security_db(tmp_path):
     import json
 
     db_path = tmp_path / "test_sec.json"
-    with patch("tools.repo_orchestrator.security.SECURITY_DB_PATH", db_path):
-        from tools.repo_orchestrator.security import save_security_db
+    with patch("tools.gimo_server.security.SECURITY_DB_PATH", db_path):
+        from tools.gimo_server.security import save_security_db
 
         save_security_db({"test": 1})
         assert db_path.exists()

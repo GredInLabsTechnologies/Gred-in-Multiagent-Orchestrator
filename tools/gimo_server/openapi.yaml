@@ -1,0 +1,739 @@
+openapi: 3.1.0
+info:
+  title: Repo Orchestrator API
+  description: >
+    Secure read-only access to a selected repository, plus UI/service operations.
+    All endpoints require Bearer authentication.
+  version: UNRELEASED
+
+servers:
+  - url: http://127.0.0.1:9325
+    description: Local default
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+
+    OpsTask:
+      type: object
+      required: [id, title, scope, description]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        scope: { type: string }
+        depends: { type: array, items: { type: string }, default: [] }
+        status: { type: string, enum: [pending, in_progress, done, blocked], default: pending }
+        description: { type: string }
+
+    OpsPlan:
+      type: object
+      required: [id, title, workspace, created, objective, tasks]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        workspace: { type: string }
+        created: { type: string }
+        objective: { type: string }
+        tasks: { type: array, items: { $ref: '#/components/schemas/OpsTask' } }
+        constraints: { type: array, items: { type: string }, default: [] }
+
+    OpsDraft:
+      type: object
+      required: [id, prompt]
+      properties:
+        id: { type: string }
+        prompt: { type: string }
+        context: { type: object, default: {} }
+        provider: { type: string, nullable: true }
+        content: { type: string, nullable: true }
+        status: { type: string, enum: [draft, rejected, approved, error], default: draft }
+        error: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    OpsApproved:
+      type: object
+      required: [id, draft_id, prompt, content]
+      properties:
+        id: { type: string }
+        draft_id: { type: string }
+        prompt: { type: string }
+        provider: { type: string, nullable: true }
+        content: { type: string }
+        approved_at: { type: string, format: date-time }
+        approved_by: { type: string, nullable: true }
+
+    OpsRun:
+      type: object
+      required: [id, approved_id]
+      properties:
+        id: { type: string }
+        approved_id: { type: string }
+        status: { type: string, enum: [pending, running, done, error, cancelled], default: pending }
+        log:
+          type: array
+          items:
+            type: object
+            properties:
+              ts: { type: string }
+              level: { type: string }
+              msg: { type: string }
+        started_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    OpsApproveResponse:
+      type: object
+      required: [approved]
+      properties:
+        approved: { $ref: '#/components/schemas/OpsApproved' }
+        run: { $ref: '#/components/schemas/OpsRun', nullable: true }
+
+    OpsConfig:
+      type: object
+      properties:
+        default_auto_run: { type: boolean, default: false }
+        draft_cleanup_ttl_days: { type: integer, default: 7 }
+        max_concurrent_runs: { type: integer, default: 3 }
+        operator_can_generate: { type: boolean, default: false }
+
+    ProviderEntry:
+      type: object
+      required: [type, model]
+      properties:
+        type: { type: string, enum: [openai_compat, anthropic, gemini] }
+        base_url: { type: string, nullable: true }
+        api_key: { type: string, nullable: true, description: "Always null in responses (redacted)" }
+        model: { type: string }
+
+    ProviderConfig:
+      type: object
+      required: [active, providers]
+      properties:
+        active: { type: string }
+        providers:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/ProviderEntry' }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /status:
+    get:
+      summary: Service status
+      operationId: getStatus
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: { type: string }
+                  uptime_seconds: { type: number }
+
+  /tree:
+    get:
+      summary: List directory tree
+      operationId: getTree
+      parameters:
+        - name: path
+          in: query
+          required: false
+          schema: { type: string, default: "." }
+        - name: max_depth
+          in: query
+          required: false
+          schema: { type: integer, default: 3, maximum: 6 }
+      responses:
+        '200':
+          description: Files list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items: { type: string }
+                  truncated: { type: boolean }
+
+  /file:
+    get:
+      summary: Read file content
+      operationId: getFile
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+        - name: start_line
+          in: query
+          required: false
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: end_line
+          in: query
+          required: false
+          schema: { type: integer, default: 500, minimum: 1 }
+      responses:
+        '200':
+          description: Plaintext content
+          content:
+            text/plain:
+              schema: { type: string }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '413': { description: Too large, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { description: Server error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /search:
+    get:
+      summary: Search in repository
+      operationId: search
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 128 }
+        - name: ext
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                  truncated: { type: boolean }
+
+  /diff:
+    get:
+      summary: Git diff summary
+      operationId: getDiff
+      parameters:
+        - name: base
+          in: query
+          required: false
+          schema: { type: string, default: "main" }
+        - name: head
+          in: query
+          required: false
+          schema: { type: string, default: "HEAD" }
+      responses:
+        '200':
+          description: Plaintext diff
+          content:
+            text/plain:
+              schema: { type: string }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /ui/status:
+    get:
+      summary: UI status payload
+      operationId: getUiStatus
+      responses:
+        '200':
+          description: OK
+
+  /ui/audit:
+    get:
+      summary: Tail audit log lines
+      operationId: getUiAudit
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 200, minimum: 10, maximum: 500 }
+      responses:
+        '200':
+          description: OK
+
+  /ui/allowlist:
+    get:
+      summary: Return allowlist items (relative to active repo)
+      operationId: getUiAllowlist
+      responses:
+        '200':
+          description: OK
+
+  /ui/repos:
+    get:
+      summary: List repos under configured root
+      operationId: listRepos
+      responses:
+        '200':
+          description: OK
+
+  /ui/repos/active:
+    get:
+      summary: Get active repo path
+      operationId: getActiveRepo
+      responses:
+        '200':
+          description: OK
+
+  /ui/repos/open:
+    post:
+      summary: Signal opening a repo path (server-agnostic)
+      operationId: openRepo
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /ui/repos/select:
+    post:
+      summary: Select the active repo
+      operationId: selectRepo
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /ui/repos/vitaminize:
+    post:
+      summary: Create supporting files in the target repo (vitaminize)
+      operationId: vitaminizeRepo
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /ui/security/events:
+    get:
+      summary: Get recent security events and panic mode
+      operationId: getSecurityEvents
+      responses:
+        '200':
+          description: OK
+
+  /ui/security/resolve:
+    post:
+      summary: Resolve a security action (e.g. clear panic)
+      operationId: resolveSecurity
+      parameters:
+        - name: action
+          in: query
+          required: true
+          schema: { type: string, enum: ["clear_panic"] }
+      responses:
+        '200':
+          description: OK
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /ui/service/status:
+    get:
+      summary: Get system service status
+      operationId: getServiceStatus
+      responses:
+        '200':
+          description: OK
+
+  /ui/service/restart:
+    post:
+      summary: Restart system service
+      operationId: restartService
+      responses:
+        '200':
+          description: OK
+        '500': { description: Server error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /ui/service/stop:
+    post:
+      summary: Stop system service
+      operationId: stopService
+      responses:
+        '200':
+          description: OK
+        '500': { description: Server error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  # ───────── OPS v2 Multi-Agent Endpoints ─────────
+
+  /ops/plan:
+    get:
+      summary: Get the active operational plan
+      operationId: getOpsPlan
+      tags: [ops]
+      description: "Roles: actions, operator, admin"
+      responses:
+        '200':
+          description: Active plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsPlan' }
+        '404': { description: Plan not set, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+    put:
+      summary: Set or replace the operational plan
+      operationId: setOpsPlan
+      tags: [ops]
+      description: "Roles: admin only"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpsPlan' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /ops/drafts:
+    get:
+      summary: List all drafts
+      operationId: listOpsDrafts
+      tags: [ops]
+      description: "Roles: actions, operator, admin"
+      responses:
+        '200':
+          description: Draft list (newest first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OpsDraft' }
+    post:
+      summary: Create a draft manually
+      operationId: createOpsDraft
+      tags: [ops]
+      description: "Roles: admin only"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string }
+                context: { type: object, default: {} }
+      responses:
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsDraft' }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /ops/drafts/{draft_id}:
+    get:
+      summary: Get a single draft by ID
+      operationId: getOpsDraft
+      tags: [ops]
+      description: "Roles: actions, operator, admin"
+      parameters:
+        - name: draft_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Draft detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsDraft' }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+    put:
+      summary: Update a draft (prompt, content, context)
+      operationId: updateOpsDraft
+      tags: [ops]
+      description: "Roles: admin only"
+      parameters:
+        - name: draft_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompt: { type: string }
+                content: { type: string }
+                context: { type: object }
+      responses:
+        '200':
+          description: Updated draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsDraft' }
+        '403': { description: Forbidden }
+        '404': { description: Not found }
+
+  /ops/drafts/{draft_id}/approve:
+    post:
+      summary: Approve a draft (optionally auto-run)
+      operationId: approveOpsDraft
+      tags: [ops]
+      description: "Roles: operator, admin. Pass auto_run to override the global default_auto_run setting."
+      parameters:
+        - name: draft_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: auto_run
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: "If true, automatically creates a run after approval. Defaults to config.default_auto_run."
+      responses:
+        '200':
+          description: Approved (with optional auto-created run)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsApproveResponse' }
+        '403': { description: Forbidden }
+        '404': { description: Draft not found }
+
+  /ops/drafts/{draft_id}/reject:
+    post:
+      summary: Reject a draft
+      operationId: rejectOpsDraft
+      tags: [ops]
+      description: "Roles: admin only"
+      parameters:
+        - name: draft_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Rejected draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsDraft' }
+        '403': { description: Forbidden }
+        '404': { description: Not found }
+
+  /ops/approved:
+    get:
+      summary: List approved operations
+      operationId: listOpsApproved
+      tags: [ops]
+      description: "Roles: actions, operator, admin"
+      responses:
+        '200':
+          description: Approved list (newest first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OpsApproved' }
+
+  /ops/approved/{approved_id}:
+    get:
+      summary: Get a single approved entry
+      operationId: getOpsApproved
+      tags: [ops]
+      description: "Roles: actions, operator, admin"
+      parameters:
+        - name: approved_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Approved detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsApproved' }
+        '404': { description: Not found }
+
+  /ops/runs:
+    get:
+      summary: List execution runs
+      operationId: listOpsRuns
+      tags: [ops]
+      description: "Roles: actions, operator, admin"
+      responses:
+        '200':
+          description: Run list (newest first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OpsRun' }
+    post:
+      summary: Create a run from an approved entry
+      operationId: createOpsRun
+      tags: [ops]
+      description: "Roles: operator, admin. The approved_id must reference an existing approved entry (never a draft)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approved_id]
+              properties:
+                approved_id: { type: string }
+      responses:
+        '201':
+          description: Run created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsRun' }
+        '403': { description: Forbidden (draft_id passed instead of approved_id) }
+        '404': { description: Approved entry not found }
+
+  /ops/runs/{run_id}:
+    get:
+      summary: Get run detail with logs
+      operationId: getOpsRun
+      tags: [ops]
+      description: "Roles: actions, operator, admin"
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Run detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsRun' }
+        '404': { description: Not found }
+
+  /ops/runs/{run_id}/cancel:
+    post:
+      summary: Cancel a running or pending run
+      operationId: cancelOpsRun
+      tags: [ops]
+      description: "Roles: operator, admin. Only runs in pending/running state can be cancelled."
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Cancelled run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsRun' }
+        '403': { description: Forbidden }
+        '404': { description: Run not found }
+        '409': { description: Run already in terminal state }
+
+  /ops/generate:
+    post:
+      summary: Generate a draft via LLM provider
+      operationId: generateOpsDraft
+      tags: [ops]
+      description: "Roles: admin (or operator if config.operator_can_generate is true)"
+      parameters:
+        - name: prompt
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 8000 }
+      responses:
+        '201':
+          description: Generated draft (status may be 'draft' or 'error')
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsDraft' }
+        '403': { description: Forbidden }
+
+  /ops/provider:
+    get:
+      summary: Get provider configuration (redacted keys)
+      operationId: getOpsProvider
+      tags: [ops]
+      description: "Roles: admin only. API keys are always redacted (null)."
+      responses:
+        '200':
+          description: Provider config
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderConfig' }
+        '403': { description: Forbidden }
+        '404': { description: Not configured }
+    put:
+      summary: Set provider configuration
+      operationId: setOpsProvider
+      tags: [ops]
+      description: "Roles: admin only. Use ${ENV_VAR} syntax for API keys."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProviderConfig' }
+      responses:
+        '200':
+          description: Updated config (redacted)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderConfig' }
+        '403': { description: Forbidden }
+
+  /ops/config:
+    get:
+      summary: Get OPS runtime config
+      operationId: getOpsConfig
+      tags: [ops]
+      description: "Roles: operator, admin"
+      responses:
+        '200':
+          description: Current config
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsConfig' }
+        '403': { description: Forbidden }
+    put:
+      summary: Update OPS runtime config
+      operationId: setOpsConfig
+      tags: [ops]
+      description: "Roles: admin only"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpsConfig' }
+      responses:
+        '200':
+          description: Updated config
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsConfig' }
+        '403': { description: Forbidden }

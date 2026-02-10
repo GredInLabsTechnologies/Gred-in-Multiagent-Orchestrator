@@ -1,0 +1,49 @@
+{
+    "total_tests": 4,
+    "panic_count": 0,
+    "bypass_count": 0,
+    "avg_latency_ms": 0.0,
+    "duration_sec": 47.33477830886841,
+    "results": [
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'..\uff0f..\uff0fetc\uff0fpasswd'",
+            "status_code": 400,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658800.7554533
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'..\\\\..\\\\Windows\\\\System32'",
+            "status_code": 403,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658800.7613719
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'../etc/passwd'",
+            "status_code": 403,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658800.7668064
+        },
+        {
+            "suite": "special_unicode",
+            "target_endpoint": "/file",
+            "payload": "'../../etc/passwd'",
+            "status_code": 403,
+            "latency_ms": 0,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658800.7712367
+        }
+    ]
+}

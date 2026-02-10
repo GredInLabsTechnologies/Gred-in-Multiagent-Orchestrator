@@ -1,0 +1,51 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.1, pluggy-1.6.0 -- C:\Users\shilo\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\shilo\Documents\GitHub\Gred-Repo-Orchestrator
+configfile: pytest.ini
+plugins: anyio-4.10.0, asyncio-1.1.0, cov-6.2.1
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 3 items
+
+tests/test_integrity_deep.py::test_critical_file_integrity FAILED        [ 33%]
+tests/test_integrity_deep.py::test_environment_entropy PASSED            [ 66%]
+tests/test_integrity_deep.py::test_orphan_dependency_check PASSED        [100%]
+
+================================== FAILURES ===================================
+________________________ test_critical_file_integrity _________________________
+
+    def test_critical_file_integrity():
+        """Verify that core orchestrator files match known good hashes."""
+        # In a real military-grade system, these hashes would be signed.
+        # We'll use a local manifest for demonstration.
+        manifest_path = BASE_DIR / "tests" / "integrity_manifest.json"
+
+        critical_files = [
+            "tools/gimo_server/main.py",
+            "tools/gimo_server/security/__init__.py",
+            "tools/gimo_server/security/validation.py",
+            "tools/gimo_server/security/auth.py",
+            "tools/gimo_server/security/audit.py",
+            "tools/gimo_server/config.py",
+        ]
+
+        if not manifest_path.exists():
+            # First-time run: Generate manifest
+            manifest = {f: calculate_sha256(BASE_DIR / f) for f in critical_files}
+            manifest_path.write_text(json.dumps(manifest, indent=4))
+            return
+
+        manifest = json.loads(manifest_path.read_text())
+        for file_rel, expected_hash in manifest.items():
+            actual_hash = calculate_sha256(BASE_DIR / file_rel)
+>           assert actual_hash == expected_hash, f"INTEGRITY BREACH: {file_rel} has been tampered with!"
+E           AssertionError: INTEGRITY BREACH: tools/gimo_server/main.py has been tampered with!
+E           assert '24a5a4e2b348...7dea9b2b3c475' == '96b5ed8a4e12...070187b580fcd'
+E
+E             - 96b5ed8a4e12325f48f34fd04ef45a3e031dab4aa7765b3da6c070187b580fcd
+E             + 24a5a4e2b3485b6e5b55637b4eee9c571e37f32165f79f2bac07dea9b2b3c475
+
+tests\test_integrity_deep.py:49: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_integrity_deep.py::test_critical_file_integrity - Assertion...
+========================= 1 failed, 2 passed in 3.82s =========================

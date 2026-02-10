@@ -21,11 +21,16 @@ from tests.adversarial.prompts_exhaustive import ATTACK_VECTORS, SYSTEM_ADVERSAR
 from tests.llm.lm_studio_client import LMStudioClient, is_lm_studio_available
 from tests.metrics.runtime_metrics import MetricsCollector
 
+# This suite requires an external LLM server and is considered integration-level.
+pytestmark = pytest.mark.integration
+
 # ═══════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════
 LM_STUDIO_HOST = os.environ.get("LM_STUDIO_HOST", "http://localhost:1234/v1")
-REPORT_DIR = Path(__file__).parent.parent / "metrics"
+# Generated metrics go to out/ by default (gitignored). Golden snapshots (if any)
+# should live under tests/metrics/golden/.
+REPORT_DIR = Path(__file__).parent.parent.parent / "out" / "metrics"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -42,6 +47,10 @@ def llm_available():
     """Check if LM Studio is available."""
     available = is_lm_studio_available(LM_STUDIO_HOST)
     if not available:
+        if os.environ.get("LM_STUDIO_REQUIRED", "0").strip() in {"1", "true", "yes"}:
+            pytest.fail(
+                "LM Studio/OpenAI-compatible LLM not available but LM_STUDIO_REQUIRED=1"
+            )
         pytest.skip("LM Studio not available - these tests require a running LLM")
     return available
 

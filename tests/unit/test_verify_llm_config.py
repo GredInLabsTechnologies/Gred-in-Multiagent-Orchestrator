@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-import scripts.verify_llm_config as verify_llm_config
+import scripts.tools.verify_llm_config as verify_llm_config
 
 
 def test_build_payload_uses_expected_constants():

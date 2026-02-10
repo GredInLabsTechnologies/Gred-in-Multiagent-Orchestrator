@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 
-from tools.repo_orchestrator.security.validation import (
+from tools.gimo_server.security.validation import (
     _normalize_path,
     get_active_repo_dir,
     get_allowed_paths,
@@ -19,21 +19,21 @@ from tools.repo_orchestrator.security.validation import (
 
 def test_load_repo_registry_missing(tmp_path):
     path = tmp_path / "registry.json"
-    with patch("tools.repo_orchestrator.security.validation.REPO_REGISTRY_PATH", path):
+    with patch("tools.gimo_server.security.validation.REPO_REGISTRY_PATH", path):
         data = load_repo_registry()
         assert data == {"active_repo": None, "repos": []}
 
 
 def test_save_repo_registry(tmp_path):
     path = tmp_path / "registry.json"
-    with patch("tools.repo_orchestrator.security.validation.REPO_REGISTRY_PATH", path):
+    with patch("tools.gimo_server.security.validation.REPO_REGISTRY_PATH", path):
         save_repo_registry({"test": True})
         assert json.loads(path.read_text()) == {"test": True}
 
 
 def test_get_active_repo_dir_fallback(tmp_path):
     # Case: No registry file
-    with patch("tools.repo_orchestrator.security.validation.REPO_REGISTRY_PATH", tmp_path / "none"):
+    with patch("tools.gimo_server.security.validation.REPO_REGISTRY_PATH", tmp_path / "none"):
         assert get_active_repo_dir() == Path.cwd()
 
 
@@ -42,7 +42,7 @@ def test_get_active_repo_dir_exists(tmp_path):
     active.mkdir()
     path = tmp_path / "registry.json"
     path.write_text(json.dumps({"active_repo": str(active)}))
-    with patch("tools.repo_orchestrator.security.validation.REPO_REGISTRY_PATH", path):
+    with patch("tools.gimo_server.security.validation.REPO_REGISTRY_PATH", path):
         assert get_active_repo_dir() == active.resolve()
 
 
@@ -91,7 +91,7 @@ def test_validate_path_denied():
 
 
 def test_get_allowed_paths_none():
-    with patch("tools.repo_orchestrator.security.validation.ALLOWLIST_PATH", Path("nonexistent")):
+    with patch("tools.gimo_server.security.validation.ALLOWLIST_PATH", Path("nonexistent")):
         assert get_allowed_paths(Path(".")) == set()
 
 
@@ -99,8 +99,8 @@ def test_get_allowed_paths_success(tmp_path):
     path = tmp_path / "allowed.json"
     data = {"timestamp": time.time(), "paths": ["test.py"]}
     path.write_text(json.dumps(data))
-    with patch("tools.repo_orchestrator.security.validation.ALLOWLIST_PATH", path):
-        with patch("tools.repo_orchestrator.security.validation.ALLOWLIST_TTL_SECONDS", 100):
+    with patch("tools.gimo_server.security.validation.ALLOWLIST_PATH", path):
+        with patch("tools.gimo_server.security.validation.ALLOWLIST_TTL_SECONDS", 100):
             paths = get_allowed_paths(tmp_path)
             assert str(tmp_path / "test.py") in [str(p) for p in paths]
 
@@ -113,7 +113,7 @@ def test_get_allowed_paths_new_format_success(tmp_path):
         ]
     }
     allowlist_path.write_text(json.dumps(data))
-    with patch("tools.repo_orchestrator.security.validation.ALLOWLIST_PATH", allowlist_path):
+    with patch("tools.gimo_server.security.validation.ALLOWLIST_PATH", allowlist_path):
         paths = get_allowed_paths(tmp_path)
         assert str(tmp_path / "test.py") in [str(p) for p in paths]
 
@@ -126,7 +126,7 @@ def test_get_allowed_paths_new_format_expired(tmp_path):
         ]
     }
     allowlist_path.write_text(json.dumps(data))
-    with patch("tools.repo_orchestrator.security.validation.ALLOWLIST_PATH", allowlist_path):
+    with patch("tools.gimo_server.security.validation.ALLOWLIST_PATH", allowlist_path):
         assert get_allowed_paths(tmp_path) == set()
 
 
@@ -138,7 +138,7 @@ def test_get_allowed_paths_new_format_missing_expires_is_denied(tmp_path):
         ]
     }
     allowlist_path.write_text(json.dumps(data))
-    with patch("tools.repo_orchestrator.security.validation.ALLOWLIST_PATH", allowlist_path):
+    with patch("tools.gimo_server.security.validation.ALLOWLIST_PATH", allowlist_path):
         assert get_allowed_paths(tmp_path) == set()
 
 
@@ -146,15 +146,15 @@ def test_get_allowed_paths_expired(tmp_path):
     path = tmp_path / "allowed.json"
     data = {"timestamp": time.time() - 1000, "paths": ["test.py"]}
     path.write_text(json.dumps(data))
-    with patch("tools.repo_orchestrator.security.validation.ALLOWLIST_PATH", path):
-        with patch("tools.repo_orchestrator.security.validation.ALLOWLIST_TTL_SECONDS", 100):
+    with patch("tools.gimo_server.security.validation.ALLOWLIST_PATH", path):
+        with patch("tools.gimo_server.security.validation.ALLOWLIST_TTL_SECONDS", 100):
             assert get_allowed_paths(tmp_path) == set()
 
 
 def test_get_allowed_paths_error(tmp_path):
     path = tmp_path / "allowed.json"
     path.write_text("corrupt json")
-    with patch("tools.repo_orchestrator.security.validation.ALLOWLIST_PATH", path):
+    with patch("tools.gimo_server.security.validation.ALLOWLIST_PATH", path):
         assert get_allowed_paths(tmp_path) == set()
 
 

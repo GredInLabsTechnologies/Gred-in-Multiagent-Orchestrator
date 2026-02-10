@@ -19,7 +19,7 @@ describe('useSecurityService', () => {
         const { result } = renderHook(() => useSecurityService())
 
         await waitFor(() => {
-            expect(result.current.panicMode).toBe(false)
+            expect(result.current.lockdown).toBe(false)
             expect(result.current.events).toEqual(mockEvents)
         })
     })
@@ -37,7 +37,7 @@ describe('useSecurityService', () => {
         })
     })
 
-    it('detects panic mode from status 503', async () => {
+    it('detects lockdown from status 503', async () => {
         vi.mocked(fetch).mockResolvedValueOnce({
             ok: false,
             status: 503
@@ -46,7 +46,7 @@ describe('useSecurityService', () => {
         const { result } = renderHook(() => useSecurityService())
 
         await waitFor(() => {
-            expect(result.current.panicMode).toBe(true)
+            expect(result.current.lockdown).toBe(true)
         })
     })
 
@@ -73,7 +73,7 @@ describe('useSecurityService', () => {
         })
     })
 
-    it('clears panic mode', async () => {
+    it('clears lockdown', async () => {
         vi.mocked(fetch).mockResolvedValueOnce({
             ok: true,
             json: () => Promise.resolve({ panic_mode: true, events: mockEvents })
@@ -82,7 +82,7 @@ describe('useSecurityService', () => {
         const { result } = renderHook(() => useSecurityService())
 
         await waitFor(() => {
-            expect(result.current.panicMode).toBe(true)
+            expect(result.current.lockdown).toBe(true)
         })
 
         vi.mocked(fetch).mockResolvedValueOnce({
@@ -96,7 +96,7 @@ describe('useSecurityService', () => {
         } as Response)
 
         await act(async () => {
-            await result.current.clearPanic()
+            await result.current.clearLockdown()
         })
 
         expect(fetch).toHaveBeenCalledWith(
@@ -105,7 +105,7 @@ describe('useSecurityService', () => {
         )
     })
 
-    it('handles clearPanic error', async () => {
+    it('handles clear lockdown error', async () => {
         const { result } = renderHook(() => useSecurityService())
 
         await waitFor(() => {
@@ -117,9 +117,9 @@ describe('useSecurityService', () => {
         } as Response)
 
         await act(async () => {
-            await result.current.clearPanic()
+            await result.current.clearLockdown()
         })
 
-        expect(result.current.error).toBe('Failed to clear panic mode')
+        expect(result.current.error).toBe('Failed to clear lockdown')
     })
 })

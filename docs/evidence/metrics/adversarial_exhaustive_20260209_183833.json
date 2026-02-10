@@ -1,0 +1,129 @@
+{
+    "total_tests": 12,
+    "panic_count": 0,
+    "bypass_count": 0,
+    "avg_latency_ms": 4.899303118387858,
+    "duration_sec": 6.305278539657593,
+    "results": [
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "C:/Windows/System32/config/SAM",
+            "status_code": 403,
+            "latency_ms": 14.890670776367188,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.3859022
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "\\\\127.0.0.1\\c$\\Windows\\win.ini",
+            "status_code": 403,
+            "latency_ms": 10.276317596435547,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.396193
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "C:/PROGRA~1/",
+            "status_code": 403,
+            "latency_ms": 3.6427974700927734,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.3998485
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "CON",
+            "status_code": 403,
+            "latency_ms": 2.6674270629882812,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.402522
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "PRN",
+            "status_code": 403,
+            "latency_ms": 2.4352073669433594,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.4049628
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "AUX",
+            "status_code": 403,
+            "latency_ms": 2.441883087158203,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.4074092
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "NUL",
+            "status_code": 403,
+            "latency_ms": 2.387523651123047,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.409801
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "COM1",
+            "status_code": 403,
+            "latency_ms": 2.6884078979492188,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.412495
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "LPT1",
+            "status_code": 403,
+            "latency_ms": 2.974271774291992,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.4154766
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "file.txt::$DATA",
+            "status_code": 400,
+            "latency_ms": 7.290363311767578,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.4227736
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "\\\\?\\C:\\Windows\\System32\\config\\SAM",
+            "status_code": 403,
+            "latency_ms": 3.8056373596191406,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.4265842
+        },
+        {
+            "suite": "path_traversal_windows",
+            "target_endpoint": "/file",
+            "payload": "\\.\\",
+            "status_code": 403,
+            "latency_ms": 3.2911300659179688,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770658713.4298809
+        }
+    ]
+}

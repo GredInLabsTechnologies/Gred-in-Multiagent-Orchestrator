@@ -30,12 +30,12 @@ El repositorio **Gred-Repo-Orchestrator** está en buen estado general con prác
 **Tipo:** Orquestador de repositorios con frontend React y backend FastAPI
 
 **Componentes principales:**
-- **Backend Python/FastAPI** ([tools/repo_orchestrator/](tools/repo_orchestrator/))
-  - [main.py](tools/repo_orchestrator/main.py) - 208 líneas (reducido de 430)
-  - [routes.py](tools/repo_orchestrator/routes.py) - 258 líneas
-  - [config.py](tools/repo_orchestrator/config.py) - 108 líneas
-  - Módulos de seguridad: [security/auth.py](tools/repo_orchestrator/security/auth.py), [security/audit.py](tools/repo_orchestrator/security/audit.py), [security/validation.py](tools/repo_orchestrator/security/validation.py)
-  - Capa de servicios: [services/file_service.py](tools/repo_orchestrator/services/file_service.py), [services/git_service.py](tools/repo_orchestrator/services/git_service.py), [services/repo_service.py](tools/repo_orchestrator/services/repo_service.py)
+- **Backend Python/FastAPI** ([tools/gimo_server/](tools/gimo_server/))
+  - [main.py](tools/gimo_server/main.py) - 208 líneas (reducido de 430)
+  - [routes.py](tools/gimo_server/routes.py) - 258 líneas
+  - [config.py](tools/gimo_server/config.py) - 108 líneas
+  - Módulos de seguridad: [security/auth.py](tools/gimo_server/security/auth.py), [security/audit.py](tools/gimo_server/security/audit.py), [security/validation.py](tools/gimo_server/security/validation.py)
+  - Capa de servicios: [services/file_service.py](tools/gimo_server/services/file_service.py), [services/git_service.py](tools/gimo_server/services/git_service.py), [services/repo_service.py](tools/gimo_server/services/repo_service.py)
 
 - **Frontend React/TypeScript** ([tools/orchestrator_ui/](tools/orchestrator_ui/))
   - Stack: React 18, TypeScript, Vite, Tailwind CSS
@@ -175,8 +175,8 @@ M docs/SONAR.md
 M scripts/probe_ports.py
 M scripts/verify_llm_config.py
 M tests/unit/test_main.py
-M tools/repo_orchestrator/main.py
-M tools/repo_orchestrator/security/auth.py
+M tools/gimo_server/main.py
+M tools/gimo_server/security/auth.py
 ?? tests/unit/test_probe_ports.py
 ?? tests/unit/test_verify_llm_config.py
 ```
@@ -236,7 +236,7 @@ M tools/repo_orchestrator/security/auth.py
    - Acción: Continuar extracción a capa de servicios
 
 5. **Debug statements en producción**
-   - [auth.py:23](tools/repo_orchestrator/security/auth.py#L23) - Print debugging
+   - [auth.py:23](tools/gimo_server/security/auth.py#L23) - Print debugging
    - Debe usar logging apropiado
 
 **🟢 MEDIA/BAJA PRIORIDAD:**
@@ -287,7 +287,7 @@ M tools/repo_orchestrator/security/auth.py
   - Estructura del proyecto
 
 **Remover debug statements**
-- Reemplazar prints en [auth.py](tools/repo_orchestrator/security/auth.py) con logging
+- Reemplazar prints en [auth.py](tools/gimo_server/security/auth.py) con logging
 - Buscar otros `print()` statements: `grep -r "print(" tools/`
 
 ### 2.3 Largo plazo (1-3 meses)
@@ -324,14 +324,14 @@ M tools/repo_orchestrator/security/auth.py
 ## 3. Archivos Críticos Identificados
 
 ### Backend Core
-- [tools/repo_orchestrator/main.py](tools/repo_orchestrator/main.py) - FastAPI app
-- [tools/repo_orchestrator/routes.py](tools/repo_orchestrator/routes.py) - API endpoints
-- [tools/repo_orchestrator/config.py](tools/repo_orchestrator/config.py) - Configuración
+- [tools/gimo_server/main.py](tools/gimo_server/main.py) - FastAPI app
+- [tools/gimo_server/routes.py](tools/gimo_server/routes.py) - API endpoints
+- [tools/gimo_server/config.py](tools/gimo_server/config.py) - Configuración
 
 ### Seguridad
-- [tools/repo_orchestrator/security/auth.py](tools/repo_orchestrator/security/auth.py) - Autenticación
-- [tools/repo_orchestrator/security/validation.py](tools/repo_orchestrator/security/validation.py) - Validación
-- [tools/repo_orchestrator/security/audit.py](tools/repo_orchestrator/security/audit.py) - Auditoría
+- [tools/gimo_server/security/auth.py](tools/gimo_server/security/auth.py) - Autenticación
+- [tools/gimo_server/security/validation.py](tools/gimo_server/security/validation.py) - Validación
+- [tools/gimo_server/security/audit.py](tools/gimo_server/security/audit.py) - Auditoría
 
 ### Tests con Issues
 - [tests/unit/test_config.py](tests/unit/test_config.py) - Falta import patch
@@ -442,13 +442,13 @@ Los problemas identificados son **manejables** y principalmente relacionados con
 
 ### Tarea 0.3: Remover debug statements en producción
 **Archivos a modificar:**
-- [tools/repo_orchestrator/security/auth.py](tools/repo_orchestrator/security/auth.py)
+- [tools/gimo_server/security/auth.py](tools/gimo_server/security/auth.py)
 
 **Acciones:**
-1. Leer [auth.py](tools/repo_orchestrator/security/auth.py)
+1. Leer [auth.py](tools/gimo_server/security/auth.py)
 2. Identificar statements de `print()` para debugging
 3. Reemplazar con logging apropiado usando el logger existente
-4. Buscar otros print statements: `grep -r "print(" tools/repo_orchestrator/`
+4. Buscar otros print statements: `grep -r "print(" tools/gimo_server/`
 5. Reemplazar todos con logging
 
 **Criterio de éxito:**
@@ -480,7 +480,7 @@ pytest --cov=tools --cov=scripts --cov-report=term --cov-report=xml
 - Directorio raíz limpio y organizado
 
 **✅ Tarea 0.3: Debug statements**
-- Removido print() inseguro en [auth.py:23](tools/repo_orchestrator/security/auth.py#L23)
+- Removido print() inseguro en [auth.py:23](tools/gimo_server/security/auth.py#L23)
 - Implementado logging seguro: `logger.debug()` sin exponer tokens
 - Agregado logger `orchestrator.auth`
 
@@ -502,7 +502,7 @@ pytest --cov=tools --cov=scripts --cov-report=term --cov-report=xml
 
 **Archivos modificados:**
 - [.gitignore](.gitignore) - patrones adicionales
-- [tools/repo_orchestrator/security/auth.py](tools/repo_orchestrator/security/auth.py) - logging seguro
+- [tools/gimo_server/security/auth.py](tools/gimo_server/security/auth.py) - logging seguro
 - 27 archivos temporales eliminados del repo
 
 ---
@@ -530,7 +530,7 @@ pytest --cov=tools --cov=scripts --cov-report=term --cov-report=xml
 ### Tarea 1.2: Auditoría de dependencias no usadas
 **Archivos a analizar:**
 - [requirements.txt](requirements.txt)
-- [tools/repo_orchestrator/](tools/repo_orchestrator/) (todos los archivos .py)
+- [tools/gimo_server/](tools/gimo_server/) (todos los archivos .py)
 
 **Acciones:**
 1. Crear script de análisis que:
@@ -630,7 +630,7 @@ pytest --cov=tools --cov=scripts --cov-report=term --cov-report=xml
 
 **Archivos Modificados:**
 - [requirements.txt](requirements.txt) - Reducido a 8 paquetes core
-- [tools/repo_orchestrator/main.py](tools/repo_orchestrator/main.py) - Bloque de arranque agregado
+- [tools/gimo_server/main.py](tools/gimo_server/main.py) - Bloque de arranque agregado
 
 **Validación:**
 - ✅ Instalación exitosa en venv limpio

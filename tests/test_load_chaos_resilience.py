@@ -17,7 +17,7 @@ PANIC_THRESHOLD_RPS = 100  # Adjust based on rate limit config in config.py if k
 def metrics():
     collector = MetricsCollector()
     yield collector
-    collector.save_report("tests/metrics/chaos_resilience_report.json")
+    collector.save_report("out/metrics/chaos_resilience_report.json")
 
 
 def send_request(endpoint, token=None):

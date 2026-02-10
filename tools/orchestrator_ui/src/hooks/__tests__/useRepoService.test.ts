@@ -60,29 +60,31 @@ describe('useRepoService', () => {
         })
     })
 
-    it('vitaminizes a repository', async () => {
+    it('bootstraps a repository', async () => {
         const { result } = renderHook(() => useRepoService())
 
         await waitFor(() => {
             expect(result.current.repos.length).toBe(2)
         })
 
+        // Mock success for bootstrap endpoint
         vi.mocked(fetch).mockResolvedValueOnce({
             ok: true,
+            status: 200,
             json: () => Promise.resolve({})
         } as Response)
 
         await act(async () => {
-            await result.current.vitaminize('/path/to/repo1')
+            await result.current.bootstrap('/path/to/repo1')
         })
 
         expect(fetch).toHaveBeenCalledWith(
-            expect.stringContaining('/ui/repos/vitaminize?path='),
+            expect.stringContaining('/ui/repos/bootstrap?path='),
             expect.objectContaining({ method: 'POST' })
         )
     })
 
-    it('handles vitaminize error', async () => {
+    it('handles bootstrap error', async () => {
         const { result } = renderHook(() => useRepoService())
 
         await waitFor(() => {
@@ -90,14 +92,15 @@ describe('useRepoService', () => {
         })
 
         vi.mocked(fetch).mockResolvedValueOnce({
-            ok: false
+            ok: false,
+            status: 500
         } as Response)
 
         await act(async () => {
-            await result.current.vitaminize('/path/to/repo1')
+            await result.current.bootstrap('/path/to/repo1')
         })
 
-        expect(result.current.error).toBe('Failed to vitaminize repository')
+        expect(result.current.error).toBe('Failed to bootstrap repository')
     })
 
     it('selects a repository', async () => {

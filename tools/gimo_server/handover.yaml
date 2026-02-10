@@ -1,0 +1,83 @@
+handover:
+  version: "UNRELEASED"
+  status: "UNRELEASED - VALIDATION PENDING"
+  verified_date: "2026-01-28"
+
+  service:
+    path: "tools/gimo_server"
+    port: 9325
+    hostname: "orch.giltech.dev"
+    root_lock: "REPO_ROOT (realpath)"
+    traffic_type: "M2M (Machine-to-Machine)"
+    environment: "INFRA_INTERNAL"
+    repo_root_base: "YOUR_REPO_ROOT_PATH"
+
+  deployment:
+    set_env_powershell: '$env:ORCH_TOKEN="TU_TOKEN_LARGO_Y_SEGURO"'
+    start_command: 'uvicorn tools.gimo_server.main:app --host 127.0.0.1 --port 9325'
+
+  security_guardrails:
+    read_only: true # Strict Snapshot Read-Only mode enforced
+    denylist_extensions: [".md", ".rst", ".adoc", ".txt", ".env", ".pem", ".key"]
+    denylist_directories: [".git", "node_modules", ".venv", "__pycache__", "dist", "build"]
+    allowlist_extensions: [".ts", ".tsx", ".py", ".go", ".rs", ".c", ".cpp", ".json", ".yaml"]
+    dynamic_allowlist:
+      enabled: true
+      ttl_seconds: 240
+      file: "tools/gimo_server/allowed_paths.json"
+      format:
+        paths:
+          - path: "relative/or/absolute/path"
+            expires_at: "2026-01-26T05:10:00Z"
+    output_caps:
+      max_lines: 500
+      max_bytes: 250000
+    cors:
+      default_origins: ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173"]
+      env_override: "ORCH_CORS_ORIGINS"
+    redaction: "Regex + Entropy masking enabled"
+    path_traversal: "realpath comparison shield enabled"
+    rate_limit:
+      window_seconds: 60
+      cleanup_seconds: 120
+    logs:
+      rotation_max_bytes: 5242880
+      rotation_backup_count: 5
+    subprocess_timeout_seconds: 10
+    search_excludes: ["tools", "scripts"]
+  repo_multi_select:
+    enabled: true
+    endpoints:
+      list: "/ui/repos"
+      active: "/ui/repos/active"
+      select: "/ui/repos/select"
+      vitaminize: "/ui/repos/vitaminize"
+    vitaminize_package:
+      - "tools/gimo_server"
+      - "tools/orchestrator_dashboard"
+      - "scripts/ops/start_orch.cmd"
+      - "scripts/ops/launch_orchestrator.ps1"
+    open_repo_endpoint: "/ui/repos/open"
+    install_script: "scripts/ops/vitaminize_repo.ps1"
+  cloudflare_tunnel:
+    steps:
+      - "cloudflared tunnel login"
+      - "cloudflared tunnel create repo-orchestrator"
+    tunnel_config:
+      ingress:
+        - hostname: "orch.giltech.dev"
+          service: "http://127.0.0.1:9325"
+        - service: "http_status:404"
+    waf: "Access-only; no IP allowlists."
+    zero_trust:
+      policy: "DENY ALL"
+      exceptions: ["Owner Identity", "Service Token (ChatGPT Actions)"]
+  gpt_actions:
+    auth_type: "API Key"
+    auth_scheme: "Bearer"
+    token_location: "Header (Authorization: Bearer <TOKEN>)"
+    schema_file: "tools/gimo_server/openapi.yaml"
+  rollback_plan:
+    - "Stop uvicorn process (Ctrl+C)"
+    - "Stop cloudflared service"
+    - "Remove Cloudflare DNS CNAME"

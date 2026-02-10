@@ -26,8 +26,8 @@ This project must remain **UNRELEASED** until the maintainer explicitly declares
    - docker build logs
    - UI build/lint/test logs
 3) Version markers updated:
-   - `tools/repo_orchestrator/version.py`
-   - `tools/repo_orchestrator/openapi.yaml`
+   - `tools/gimo_server/version.py`
+   - `tools/gimo_server/openapi.yaml`
    - UI package version (if applicable)
 
 ## Reproducible commands (recommended)
@@ -36,7 +36,7 @@ Backend + tests:
 
 ```cmd
 pip install -r requirements.txt
-pip install -r requirements-dev.txt
+	python scripts\\ci\\quality_gates.py
 python scripts\quality_gates.py
 python -m pytest -q
 bandit -c pyproject.toml -r tools scripts

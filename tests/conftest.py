@@ -18,7 +18,7 @@ os.environ.setdefault("ORCH_TOKEN", DEFAULT_TEST_TOKEN)
 os.environ.setdefault("ORCH_TEST_ACTOR", DEFAULT_TEST_ACTOR)
 os.environ.setdefault("ORCH_REPO_ROOT", str(Path(__file__).parent.parent.resolve()))
 
-from tools.repo_orchestrator.main import app  # noqa: E402
+from tools.gimo_server.main import app  # noqa: E402
 
 
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
@@ -85,7 +85,7 @@ def reset_dependency_overrides():
 @pytest.fixture(scope="function", autouse=True)
 def reset_test_state():
     """Reset any global state between tests."""
-    from tools.repo_orchestrator.security import (
+    from tools.gimo_server.security import (
         load_security_db,
         rate_limit_store,
         save_security_db,

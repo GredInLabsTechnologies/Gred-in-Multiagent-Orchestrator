@@ -2,8 +2,8 @@ import os
 
 from fastapi.testclient import TestClient
 
-from tools.repo_orchestrator.main import app
-from tools.repo_orchestrator.version import __version__
+from tools.gimo_server.main import app
+from tools.gimo_server.version import __version__
 
 
 def _auth_headers() -> dict[str, str]:

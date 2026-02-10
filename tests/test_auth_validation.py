@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 # Set environment variables for testing BEFORE importing the app
 os.environ.setdefault("ORCH_REPO_ROOT", str(Path(__file__).parent.parent.resolve()))
 
-from tools.repo_orchestrator.main import app
-from tools.repo_orchestrator.security import load_security_db, save_security_db
+from tools.gimo_server.main import app
+from tools.gimo_server.security import load_security_db, save_security_db
 
 
 class TestAuthenticationBypass:
@@ -97,7 +97,7 @@ class TestAuthenticationBypass:
 
     def test_case_sensitive_token(self):
         """Verify token validation is case-sensitive."""
-        from tools.repo_orchestrator.config import TOKENS
+        from tools.gimo_server.config import TOKENS
 
         valid_token = list(TOKENS)[0]
 

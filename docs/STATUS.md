@@ -19,12 +19,12 @@ Recent fixes applied in this repo (still pending a fresh evidence run under `doc
 
 1) **Ports / entrypoints aligned**
    - Canonical service port: **9325**.
-   - `tools/repo_orchestrator/main.py` defaults to 9325 (override via `ORCH_PORT`).
+   - `tools/gimo_server/main.py` defaults to 9325 (override via `ORCH_PORT`).
    - UI fallback uses 9325 if `VITE_API_URL` is unset.
-   - `scripts/launch_orchestrator.ps1` launches `tools.repo_orchestrator.main:app` on 9325.
+   - `scripts/ops/launch_orchestrator.ps1` launches `tools.gimo_server.main:app` on 9325.
 
 2) **OpenAPI expanded**
-   - `tools/repo_orchestrator/openapi.yaml` now covers the implemented `/ui/*` routes and core read-only endpoints.
+   - `tools/gimo_server/openapi.yaml` now covers the implemented `/ui/*` routes and core read-only endpoints.
 
 3) **Allowlist parser made backward-compatible**
    - `get_allowed_paths()` accepts both legacy `{timestamp, paths:[str]}` and new `{paths:[{path, expires_at}]}` formats.
@@ -40,7 +40,7 @@ Recent fixes applied in this repo (still pending a fresh evidence run under `doc
 1) Produce/refresh evidence pack (pytest + quality gates + UI checks + security scans).
 2) Confirm OpenAPI coverage is complete and kept in sync with `routes.py`.
 3) Decide 1.0 version bump (still `UNRELEASED`).
-4) Produce evidence pack by running:
+   - `python scripts\\ci\\quality_gates.py`
    - `python scripts\quality_gates.py`
    - `python -m pytest -q`
    - `pip-audit`, `bandit`

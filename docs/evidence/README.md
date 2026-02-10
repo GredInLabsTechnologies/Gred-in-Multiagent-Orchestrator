@@ -25,10 +25,17 @@ Rule: any claim marked as **VALIDATED** in `docs/DOCS_REGISTRY.md` should refere
   python -m pytest -q > docs\evidence\pytest_full_YYYYMMDD_HHMM.txt 2>&1
   ```
 
+  Note: scripts were reorganized under `scripts/{dev,ops,ci,tools}`.
+  Use:
+
+  ```cmd
+  python scripts\\ci\\quality_gates.py > docs\\evidence\\quality_gates_YYYYMMDD_HHMM.txt 2>&1
+  ```
+
 - Quality gates:
 
   ```cmd
-  python scripts\quality_gates.py > docs\evidence\quality_gates_YYYYMMDD_HHMM.txt 2>&1
+  python scripts\ci\quality_gates.py > docs\evidence\quality_gates_YYYYMMDD_HHMM.txt 2>&1
   ```
 
 - Dependency audit (requires pip-audit installed):

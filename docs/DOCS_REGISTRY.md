@@ -14,14 +14,20 @@
 
 | Doc | Status | Last Verified | Commit | Evidence | Notes |
 |---|---|---:|---|---|---|
-| `README.md` | NEEDS_REVIEW | 2026-02-06 04:33 CET | d670a320 | N/A | Bootstrap / entrypoint |
+| `README.md` | NEEDS_REVIEW | 2026-02-10 | N/A | N/A | Entry point; points to source of truth |
+| `docs/GIMO_SYSTEM.md` | VALIDATED | 2026-02-10 | N/A | N/A | **AUTHORITATIVE source of truth** |
 | `docs/STATUS.md` | NEEDS_REVIEW | 2026-02-06 04:56 CET | d670a320 | N/A | Current state + blockers |
 | `docs/SETUP.md` | NEEDS_REVIEW | 2026-02-06 04:56 CET | d670a320 | N/A | Setup (to be verified) |
 | `docs/OPERATIONS.md` | NEEDS_REVIEW | 2026-02-06 04:56 CET | d670a320 | N/A | Ops (to be verified) |
 | `docs/SECURITY.md` | NEEDS_REVIEW | 2026-02-06 04:56 CET | d670a320 | N/A | Security verification plan |
-| `docs/ARCHITECTURE.md` | NEEDS_REVIEW | N/A | N/A | N/A | Will be rewritten/validated |
 | `docs/RELEASE.md` | NEEDS_REVIEW | 2026-02-06 04:56 CET | d670a320 | N/A | Release workflow (to be verified) |
 | `docs/TROUBLESHOOTING.md` | NEEDS_REVIEW | 2026-02-06 04:56 CET | d670a320 | N/A | Troubleshooting (to be filled) |
+
+## History (non-authoritative)
+
+These documents are preserved for project history and **must not be used as current system specification**.
+
+- `docs/history/` (see `docs/history/README.md`)
 
 ## Notes (current)
 

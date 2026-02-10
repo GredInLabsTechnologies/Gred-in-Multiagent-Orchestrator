@@ -8,17 +8,17 @@ import pytest
 # Path injection
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from tools.repo_orchestrator.main import app
-from tools.repo_orchestrator.security import verify_token
-from tools.repo_orchestrator.security.auth import AuthContext
+from tools.gimo_server.main import app
+from tools.gimo_server.security import verify_token
+from tools.gimo_server.security.auth import AuthContext
 
 
 def override_verify_token(actor: str):
     return AuthContext(token=actor, role="admin")
 
 
-@patch("tools.repo_orchestrator.routes.REPO_ROOT_DIR", new=Path("/mock/repos"))
-@patch("tools.repo_orchestrator.routes.audit_log")
+@patch("tools.gimo_server.routes.REPO_ROOT_DIR", new=Path("/mock/repos"))
+@patch("tools.gimo_server.routes.audit_log")
 @patch("subprocess.Popen")
 def test_api_open_repo_decoupled(mock_popen, mock_audit, test_client, valid_token, test_actor):
     """

@@ -10,7 +10,9 @@ export interface SecurityEvent {
 }
 
 export const useSecurityService = (token?: string) => {
-    const [panicMode, setPanicMode] = useState(false);
+    // Server schema still uses `panic_mode`, but the UI/UX terminology is "LOCKDOWN".
+    // Use "lockdown" internally, but expose compatibility aliases for backward compatibility.
+    const [lockdown, setLockdown] = useState(false);
     const [events, setEvents] = useState<SecurityEvent[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -23,13 +25,13 @@ export const useSecurityService = (token?: string) => {
             const res = await fetch(`${API_BASE}/ui/security/events`, { headers });
             if (!res.ok) {
                 if (res.status === 503) {
-                    setPanicMode(true);
+                    setLockdown(true);
                     return;
                 }
                 throw new Error('Failed to fetch security status');
             }
             const data = await res.json();
-            setPanicMode(data.panic_mode);
+            setLockdown(Boolean(data.panic_mode));
             setEvents(data.events || []);
             setError(null);
         } catch (err) {
@@ -37,7 +39,7 @@ export const useSecurityService = (token?: string) => {
         }
     }, [token]);
 
-    const clearPanic = useCallback(async () => {
+    const clearLockdown = useCallback(async () => {
         setIsLoading(true);
         try {
             const headers: HeadersInit = {};
@@ -47,7 +49,7 @@ export const useSecurityService = (token?: string) => {
                 method: 'POST',
                 headers
             });
-            if (!res.ok) throw new Error('Failed to clear panic mode');
+            if (!res.ok) throw new Error('Failed to clear lockdown');
 
             await fetchSecurity();
         } catch (err) {
@@ -64,11 +66,16 @@ export const useSecurityService = (token?: string) => {
     }, [fetchSecurity]);
 
     return {
-        panicMode,
+        // Preferred terminology
+        lockdown,
+        clearLockdown,
+
+        // Backward compatible terminology
+        panicMode: lockdown,
         events,
         isLoading,
         error,
-        clearPanic,
+        clearPanic: clearLockdown,
         refresh: fetchSecurity
     };
 };

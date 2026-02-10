@@ -2,7 +2,7 @@ import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
-from tools.repo_orchestrator.services.system_service import SystemService
+from tools.gimo_server.services.system_service import SystemService
 
 
 def test_get_status_headless():

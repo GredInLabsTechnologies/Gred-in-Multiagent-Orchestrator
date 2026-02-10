@@ -44,7 +44,7 @@ class MetricsCollector:
         )
         self.results.append(result)
 
-    def save_report(self, filepath: str = "tests/metrics/final_report.json"):
+    def save_report(self, filepath: str = "out/metrics/final_report.json"):
         summary = {
             "total_tests": len(self.results),
             "panic_count": sum(1 for r in self.results if r.panic_triggered),

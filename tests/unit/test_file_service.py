@@ -2,12 +2,12 @@ import hashlib
 from pathlib import Path
 from unittest.mock import patch
 
-from tools.repo_orchestrator.services.file_service import FileService
+from tools.gimo_server.services.file_service import FileService
 
 
 def test_tail_audit_lines_missing(tmp_path):
     with patch(
-        "tools.repo_orchestrator.services.file_service.AUDIT_LOG_PATH", tmp_path / "nonexistent.log"
+        "tools.gimo_server.services.file_service.AUDIT_LOG_PATH", tmp_path / "nonexistent.log"
     ):
         assert FileService.tail_audit_lines() == []
 
@@ -15,7 +15,7 @@ def test_tail_audit_lines_missing(tmp_path):
 def test_tail_audit_lines_success(tmp_path):
     log_file = tmp_path / "audit.log"
     log_file.write_text("line1\nline2\nline3", encoding="utf-8")
-    with patch("tools.repo_orchestrator.services.file_service.AUDIT_LOG_PATH", log_file):
+    with patch("tools.gimo_server.services.file_service.AUDIT_LOG_PATH", log_file):
         lines = FileService.tail_audit_lines(limit=2)
         assert len(lines) == 2
         assert lines == ["line2", "line3"]
@@ -24,12 +24,12 @@ def test_tail_audit_lines_success(tmp_path):
 def test_tail_audit_lines_error(tmp_path):
     log_file = tmp_path / "audit.log"
     log_file.mkdir()  # Make it a directory to cause read error
-    with patch("tools.repo_orchestrator.services.file_service.AUDIT_LOG_PATH", log_file):
+    with patch("tools.gimo_server.services.file_service.AUDIT_LOG_PATH", log_file):
         assert FileService.tail_audit_lines() == []
 
 
-@patch("tools.repo_orchestrator.services.file_service.SnapshotService.create_snapshot")
-@patch("tools.repo_orchestrator.services.file_service.audit_log")
+@patch("tools.gimo_server.services.file_service.SnapshotService.create_snapshot")
+@patch("tools.gimo_server.services.file_service.audit_log")
 def test_get_file_content(mock_audit, mock_snapshot, tmp_path):
     mock_file = tmp_path / "test.py"
     mock_file.write_text("line1\nline2\nline3\nline4", encoding="utf-8")
@@ -46,9 +46,9 @@ def test_get_file_content(mock_audit, mock_snapshot, tmp_path):
     mock_audit.assert_called_once()
 
 
-@patch("tools.repo_orchestrator.services.file_service.SnapshotService.create_snapshot")
-@patch("tools.repo_orchestrator.services.file_service.audit_log")
-@patch("tools.repo_orchestrator.services.file_service.MAX_LINES", 2)
+@patch("tools.gimo_server.services.file_service.SnapshotService.create_snapshot")
+@patch("tools.gimo_server.services.file_service.audit_log")
+@patch("tools.gimo_server.services.file_service.MAX_LINES", 2)
 def test_get_file_content_truncated_lines(mock_audit, mock_snapshot, tmp_path):
     mock_file = tmp_path / "test.py"
     mock_file.write_text("line1\nline2\nline3\nline4", encoding="utf-8")
@@ -64,9 +64,9 @@ def test_get_file_content_truncated_lines(mock_audit, mock_snapshot, tmp_path):
     assert "TRUNCATED" in content
 
 
-@patch("tools.repo_orchestrator.services.file_service.SnapshotService.create_snapshot")
-@patch("tools.repo_orchestrator.services.file_service.audit_log")
-@patch("tools.repo_orchestrator.services.file_service.MAX_BYTES", 10)
+@patch("tools.gimo_server.services.file_service.SnapshotService.create_snapshot")
+@patch("tools.gimo_server.services.file_service.audit_log")
+@patch("tools.gimo_server.services.file_service.MAX_BYTES", 10)
 def test_get_file_content_truncated_bytes(mock_audit, mock_snapshot, tmp_path):
     mock_file = tmp_path / "test.py"
     mock_file.write_text("very long content that exceeds max bytes", encoding="utf-8")

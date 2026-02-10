@@ -1,7 +1,7 @@
 import socket
 from unittest.mock import MagicMock, patch
 
-from scripts import probe_ports
+from scripts.tools import probe_ports
 
 
 def test_probe_ports_handles_open_port(capsys):

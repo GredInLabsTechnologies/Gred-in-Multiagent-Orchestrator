@@ -17,7 +17,7 @@ def verify():
 
     # 1. Test GET /file (Snapshot creation)
     print("[*] Testing GET /file (Snapshot creation)...")
-    test_file = "tools/repo_orchestrator/config.py"
+    test_file = "tools/gimo_server/config.py"
     r_get = requests.get(
         f"{ORCH_URL}/file", headers=headers, params={"path": test_file}, timeout=10
     )

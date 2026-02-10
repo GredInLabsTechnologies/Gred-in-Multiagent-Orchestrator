@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 # Ensure the project root is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from tools.repo_orchestrator.services.system_service import SystemService
+from tools.gimo_server.services.system_service import SystemService
 
 
 class TestSystemService(unittest.TestCase):
@@ -24,7 +24,7 @@ class TestSystemService(unittest.TestCase):
         elif "ORCH_HEADLESS" in os.environ:
             del os.environ["ORCH_HEADLESS"]
 
-    @patch("tools.repo_orchestrator.services.system_service.subprocess.Popen")
+    @patch("tools.gimo_server.services.system_service.subprocess.Popen")
     def test_get_status_running(self, mock_popen):
         # Mock successful sc query output
         mock_process = MagicMock()
@@ -35,14 +35,14 @@ class TestSystemService(unittest.TestCase):
         status = SystemService.get_status("TestService")
         self.assertEqual(status, "4 RUNNING")
 
-    @patch("tools.repo_orchestrator.services.system_service.subprocess.Popen")
+    @patch("tools.gimo_server.services.system_service.subprocess.Popen")
     def test_get_status_headless(self, mock_popen):
         os.environ["ORCH_HEADLESS"] = "true"
         status = SystemService.get_status("TestService")
         self.assertEqual(status, "RUNNING (MOCK)")
         mock_popen.assert_not_called()
 
-    @patch("tools.repo_orchestrator.services.system_service.subprocess.run")
+    @patch("tools.gimo_server.services.system_service.subprocess.run")
     def test_stop_service_success(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -50,7 +50,7 @@ class TestSystemService(unittest.TestCase):
         self.assertTrue(success)
         mock_run.assert_called()
 
-    @patch("tools.repo_orchestrator.services.system_service.subprocess.run")
+    @patch("tools.gimo_server.services.system_service.subprocess.run")
     def test_restart_service_success(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
 

@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-gates:
+    name: python / gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Pre-commit (repo policy + format/lint)
+        run: |
+          pre-commit run --all-files
+
+      - name: Repo policy (no generated artifacts tracked)
+        run: |
+          python scripts/ci/check_no_artifacts.py --tracked
+
+      - name: Quality gates
+        run: |
+          python scripts/ci/quality_gates.py
+
+  python-tests:
+    name: python / tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Pytest (non-integration)
+        env:
+          ORCH_TOKEN: "ci-test-token-00000000000000000000000000000000"
+          ORCH_REPO_ROOT: ${{ github.workspace }}
+        run: |
+          python -m pytest -m "not integration" -v
+
+  ui:
+    name: ui / lint-test-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: tools/orchestrator_ui/package-lock.json
+
+      - name: Install
+        working-directory: tools/orchestrator_ui
+        run: npm ci
+
+      - name: Lint
+        working-directory: tools/orchestrator_ui
+        run: npm run lint
+
+      - name: Test (coverage)
+        working-directory: tools/orchestrator_ui
+        run: npm run test:coverage
+
+      - name: Build
+        working-directory: tools/orchestrator_ui
+        run: npm run build
+
+  llm-adversarial:
+    name: llm / adversarial (required)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      ORCH_TOKEN: "ci-llm-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ORCH_TEST_TOKEN: "ci-llm-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ORCH_BASE_URL: "http://127.0.0.1:9325"
+      ORCH_REPO_ROOT: ${{ github.workspace }}
+      LM_STUDIO_REQUIRED: "1"
+      LM_STUDIO_HOST: "http://localhost:11434/v1"
+      OLLAMA_MODEL: "qwen2.5:0.5b"
+      LM_STUDIO_MODEL: "qwen2.5:0.5b"
+      LM_STUDIO_PROBE_TIMEOUT_SECONDS: "20"
+      LM_STUDIO_TIMEOUT_SECONDS: "120"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Start orchestrator (uvicorn)
+        shell: bash
+        run: |
+          python -m uvicorn tools.gimo_server.main:app --host 127.0.0.1 --port 9325 &
+          echo "Waiting for orchestrator..."
+          for i in {1..30}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9325/status || true)
+            if [[ "$code" == "200" || "$code" == "401" ]]; then
+              echo "Orchestrator ready (HTTP $code)"; exit 0
+            fi
+            sleep 1
+          done
+          echo "Orchestrator did not become ready"; exit 1
+
+      - name: Start Ollama (OpenAI-compatible)
+        shell: bash
+        run: |
+          docker run -d --name ollama -p 11434:11434 ollama/ollama
+          echo "Waiting for ollama..."
+          for i in {1..60}; do
+            if curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
+              echo "Ollama ready"; break
+            fi
+            sleep 1
+          done
+          docker exec ollama ollama pull "$OLLAMA_MODEL"
+
+      - name: Verify LLM endpoint is reachable (required)
+        shell: bash
+        run: |
+          python -c "from tests.llm.lm_studio_client import is_lm_studio_available; import os, sys; host=os.environ.get('LM_STUDIO_HOST'); ok=is_lm_studio_available(host); print('LM available:', ok, 'host:', host); sys.exit(0 if ok else 2)"
+
+      - name: LLM adversarial suites (must pass)
+        run: |
+          python -m pytest tests/adversarial -v --tb=short
+          python -m pytest tests/test_adaptive_attack_vectors.py -v --tb=short
+          python -m pytest tests/test_qwen_payload_guided.py -v --tb=short
+          # OPS v2 suite (ensures ops endpoints/roles stay gated)
+          python -m pytest tests/test_ops_v2.py -v --tb=short
+
+      - name: Upload metrics/artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-metrics
+          if-no-files-found: ignore
+          path: |
+            out/metrics/**/*.json
+            logs/llm_debug.log

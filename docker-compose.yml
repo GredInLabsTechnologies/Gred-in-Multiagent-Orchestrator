@@ -11,7 +11,7 @@ services:
       - ORCH_REPO_ROOT=/data/repos
     volumes:
       - ./logs:/app/logs
-      - ./tools/repo_orchestrator/repo_registry.json:/app/tools/repo_orchestrator/repo_registry.json
-      - ./tools/repo_orchestrator/security_db.json:/app/tools/repo_orchestrator/security_db.json
-      - ./tools/repo_orchestrator/allowed_paths.json:/app/tools/repo_orchestrator/allowed_paths.json
+      - ./tools/gimo_server/repo_registry.json:/app/tools/gimo_server/repo_registry.json
+      - ./tools/gimo_server/security_db.json:/app/tools/gimo_server/security_db.json
+      - ./tools/gimo_server/allowed_paths.json:/app/tools/gimo_server/allowed_paths.json
       - ./repos:/data/repos

@@ -1,3 +1,4 @@
+import os
 import time
 
 import pytest
@@ -9,19 +10,24 @@ from tests.metrics.runtime_metrics import MetricsCollector
 
 @pytest.fixture(scope="module")
 def llm():
-    return LMStudioClient(host="http://localhost:1234/v1")
+    host = os.environ.get("LM_STUDIO_HOST", "http://localhost:1234/v1")
+    return LMStudioClient(host=host)
 
 
 @pytest.fixture(scope="module")
 def llm_available():
-    return is_lm_studio_available("http://localhost:1234/v1")
+    host = os.environ.get("LM_STUDIO_HOST", "http://localhost:1234/v1")
+    available = is_lm_studio_available(host)
+    if (not available) and (os.environ.get("LM_STUDIO_REQUIRED", "0").strip() in {"1", "true", "yes"}):
+        pytest.fail("LM Studio/OpenAI-compatible LLM not available but LM_STUDIO_REQUIRED=1")
+    return available
 
 
 @pytest.fixture(scope="module")
 def metrics():
     collector = MetricsCollector()
     yield collector
-    collector.save_report("tests/metrics/payload_guided_report.json")
+    collector.save_report("out/metrics/payload_guided_report.json")
 
 
 def test_path_traversal_guided(llm, metrics, llm_available, test_client, valid_token):

@@ -1,0 +1,119 @@
+{
+    "total_tests": 11,
+    "panic_count": 0,
+    "bypass_count": 0,
+    "avg_latency_ms": 3.636425191705877,
+    "duration_sec": 67.63891983032227,
+    "results": [
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "../../etc/passwd",
+            "status_code": 403,
+            "latency_ms": 4.367351531982422,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770659280.4349782
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "%00/etc/passwd",
+            "status_code": 400,
+            "latency_ms": 3.780841827392578,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770659280.4387674
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "%2e%2e%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 3.4394264221191406,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770659280.4422128
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "C:/Windows/win.ini",
+            "status_code": 403,
+            "latency_ms": 4.729270935058594,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770659280.446947
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "%00C:/Windows/win.ini",
+            "status_code": 400,
+            "latency_ms": 3.876209259033203,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770659280.4508283
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "%2e%2e%253f%2e%2e%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 3.4329891204833984,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770659280.454265
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "\\127.0.0.1\nc$\boot.ini",
+            "status_code": 403,
+            "latency_ms": 3.278970718383789,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770659280.4575474
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "%00%2e%2e%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 3.636598587036133,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770659280.4611874
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "%253f%2e%2e%253f%2e%2e%2fetc%2fpasswd",
+            "status_code": 400,
+            "latency_ms": 3.6089420318603516,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770659280.4648
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/file",
+            "payload": "%2e%2e%253f%2e%2e%2fWindows%2fwin.ini",
+            "status_code": 400,
+            "latency_ms": 3.51715087890625,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770659280.4683206
+        },
+        {
+            "suite": "payload_guided",
+            "target_endpoint": "/status",
+            "payload": "",
+            "status_code": 401,
+            "latency_ms": 2.332925796508789,
+            "panic_triggered": false,
+            "bypassed": false,
+            "timestamp": 1770659333.9412763
+        }
+    ]
+}

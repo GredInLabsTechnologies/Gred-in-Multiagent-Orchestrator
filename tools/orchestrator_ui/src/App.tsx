@@ -1,4 +1,5 @@
 import { MaintenanceIsland } from './islands/system/MaintenanceIsland';
+import { OpsIsland } from './islands/system/OpsIsland';
 
 export default function App() {
     return (
@@ -15,8 +16,14 @@ export default function App() {
                 </header>
 
                 {/* Main Content */}
-                <main className="bg-[#1c1c1e] rounded-2xl shadow-2xl border border-[#38383a] p-8">
-                    <MaintenanceIsland token={import.meta.env.VITE_ORCH_TOKEN} />
+                <main className="space-y-8">
+                    <div className="bg-[#1c1c1e] rounded-2xl shadow-2xl border border-[#38383a] p-8">
+                        <MaintenanceIsland token={import.meta.env.VITE_ORCH_TOKEN} />
+                    </div>
+
+                    <div className="bg-[#1c1c1e] rounded-2xl shadow-2xl border border-[#38383a] p-8">
+                        <OpsIsland token={import.meta.env.VITE_ORCH_TOKEN} />
+                    </div>
                 </main>
 
                 {/* Footer */}

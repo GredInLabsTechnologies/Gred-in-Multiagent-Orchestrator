@@ -3,19 +3,19 @@ from unittest.mock import patch
 
 import pytest
 
-from tools.repo_orchestrator.models import RepoEntry
-from tools.repo_orchestrator.services.repo_service import RepoService
+from tools.gimo_server.models import RepoEntry
+from tools.gimo_server.services.repo_service import RepoService
 
 
 @pytest.fixture
 def mock_base_dir(tmp_path):
     base = tmp_path / "base"
     base.mkdir()
-    (base / "tools" / "repo_orchestrator").mkdir(parents=True)
+    (base / "tools" / "gimo_server").mkdir(parents=True)
     return base
 
 
-@patch("tools.repo_orchestrator.services.repo_service.GitService.list_repos")
+@patch("tools.gimo_server.services.repo_service.GitService.list_repos")
 def test_list_repos(mock_list):
     mock_list.return_value = [{"name": "repo1", "path": "/path/1"}]
     repos = RepoService.list_repos()
@@ -25,8 +25,8 @@ def test_list_repos(mock_list):
     assert isinstance(repos[0], RepoEntry)
 
 
-@patch("tools.repo_orchestrator.services.repo_service.load_repo_registry")
-@patch("tools.repo_orchestrator.services.repo_service.save_repo_registry")
+@patch("tools.gimo_server.services.repo_service.load_repo_registry")
+@patch("tools.gimo_server.services.repo_service.save_repo_registry")
 def test_ensure_repo_registry(mock_save, mock_load, tmp_path):
     repo_path = tmp_path / "new"
     # Case: active_repo not in current list
@@ -44,8 +44,8 @@ def test_ensure_repo_registry(mock_save, mock_load, tmp_path):
     mock_save.assert_called_once()
 
 
-@patch("tools.repo_orchestrator.services.repo_service.BASE_DIR")
-@patch("tools.repo_orchestrator.services.repo_service.VITAMINIZE_PACKAGE", {"file.py", "dir"})
+@patch("tools.gimo_server.services.repo_service.BASE_DIR")
+@patch("tools.gimo_server.services.repo_service.VITAMINIZE_PACKAGE", {"file.py", "dir"})
 def test_vitaminize_repo(mock_base, tmp_path):
     # Note: VITAMINIZE_PACKAGE patch with value doesn't pass a mock argument
     target = tmp_path / "target"
@@ -59,7 +59,7 @@ def test_vitaminize_repo(mock_base, tmp_path):
 
     mock_base.return_value = source_base
     # Fix: BASE_DIR in the code is used as source = BASE_DIR / rel
-    with patch("tools.repo_orchestrator.services.repo_service.BASE_DIR", source_base):
+    with patch("tools.gimo_server.services.repo_service.BASE_DIR", source_base):
         created = RepoService.vitaminize_repo(target)
         assert len(created) == 2
         assert (target / "file.py").exists()

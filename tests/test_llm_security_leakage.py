@@ -19,10 +19,10 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("ORCH_REPO_ROOT", str(Path(__file__).parent.parent.resolve()))
 
-from tools.repo_orchestrator.config import ORCH_ACTIONS_TOKEN, TOKENS
-from tools.repo_orchestrator.main import app
-from tools.repo_orchestrator.security import load_security_db, save_security_db, verify_token
-from tools.repo_orchestrator.security.auth import AuthContext
+from tools.gimo_server.config import ORCH_ACTIONS_TOKEN, TOKENS
+from tools.gimo_server.main import app
+from tools.gimo_server.security import load_security_db, save_security_db, verify_token
+from tools.gimo_server.security.auth import AuthContext
 
 
 class TestPromptInjectionAttacks:
@@ -61,7 +61,7 @@ class TestPromptInjectionAttacks:
             "..\\..\\..\\windows\\system32",
             "../../.env",
             "../.git/config",
-            "../../tools/repo_orchestrator/.orch_token",
+            "../../tools/gimo_server/.orch_token",
         ]
 
         for path in malicious_paths:
@@ -79,7 +79,7 @@ class TestPromptInjectionAttacks:
         """Test: LLM intenta leer archivo de token."""
         sensitive_files = [
             ".orch_token",
-            "tools/repo_orchestrator/.orch_token",
+            "tools/gimo_server/.orch_token",
             ".env",
             "config.py",
         ]
@@ -361,7 +361,7 @@ class TestPanicModeEvasion:
         save_security_db(db)
 
         # Ensure resolution endpoint uses a valid token
-        from tools.repo_orchestrator.config import TOKENS
+        from tools.gimo_server.config import TOKENS
 
         valid_token = next(token for token in TOKENS if token != ORCH_ACTIONS_TOKEN)
 

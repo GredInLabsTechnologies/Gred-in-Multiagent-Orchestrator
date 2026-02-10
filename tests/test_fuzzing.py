@@ -9,7 +9,7 @@ import pytest
 # Use shared token from conftest.py
 os.environ["ORCH_REPO_ROOT"] = str(Path(__file__).parent.parent.resolve())
 
-from tools.repo_orchestrator.security import rate_limit_store
+from tools.gimo_server.security import rate_limit_store
 
 
 def random_string(length: int = 10) -> str:

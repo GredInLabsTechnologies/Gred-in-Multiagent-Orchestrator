@@ -5,13 +5,13 @@
 
 This document is being rebuilt from scratch. Every claim must be backed by reproducible evidence under `docs/evidence/`.
 
-> Scope: this repo’s backend lives in `tools/repo_orchestrator/` and serves a read-only inspection API.
+> Scope: this repo’s backend lives in `tools/gimo_server/` and serves a read-only inspection API.
 
 ## Backend (Python)
 
 ```cmd
 pip install -r requirements.txt
-python -m uvicorn tools.repo_orchestrator.main:app --host 127.0.0.1 --port 9325
+python -m uvicorn tools.gimo_server.main:app --host 127.0.0.1 --port 9325
 ```
 
 ### Environment variables
@@ -21,7 +21,7 @@ Create a `.env` (see `.env.example`) or export env vars.
 Minimum required:
 
 - `ORCH_TOKEN` (Bearer token for API access). If not set, the service will auto-generate one and store it in:
-  - `tools/repo_orchestrator/.orch_token`
+  - `tools/gimo_server/.orch_token`
 - `ORCH_REPO_ROOT` (base directory where repos live; defaults to `../` of BASE_DIR)
 
 Optional (common):
@@ -58,7 +58,7 @@ Notes:
 
 ```cmd
 pip install -r requirements-dev.txt
-python scripts\quality_gates.py
+python scripts\\ci\\quality_gates.py
 ```
 
 ## Frontend (UI)

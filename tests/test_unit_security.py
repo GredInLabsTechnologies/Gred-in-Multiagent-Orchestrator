@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from tools.repo_orchestrator.security.validation import _normalize_path, validate_path
+from tools.gimo_server.security.validation import _normalize_path, validate_path
 
 
 def test_normalize_path_traversal():
@@ -24,7 +24,7 @@ def test_normalize_path_traversal():
 
 def test_normalize_path_valid():
     base_dir = Path(".").resolve()
-    requested = "tools/repo_orchestrator/main.py"
+    requested = "tools/gimo_server/main.py"
     result = _normalize_path(requested, base_dir)
     assert result is not None
     assert str(result).endswith("main.py")
@@ -45,7 +45,7 @@ def test_validate_path_denied():
 
 
 def test_security_redaction():
-    from tools.repo_orchestrator.security.audit import redact_sensitive_data
+    from tools.gimo_server.security.audit import redact_sensitive_data
 
     content = "My key is sk-123456789012345678901234567890123456789012345678"
     redacted = redact_sensitive_data(content)

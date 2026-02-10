@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tools.repo_orchestrator.services.git_service import GitService
+from tools.gimo_server.services.git_service import GitService
 
 
 def test_get_diff_success(tmp_path):
