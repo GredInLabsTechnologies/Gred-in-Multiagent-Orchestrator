@@ -21,7 +21,7 @@ class AuthContext:
 
 
 def verify_token(
-    _request: Request, credentials: HTTPAuthorizationCredentials | None = Security(security)
+    request: Request, credentials: HTTPAuthorizationCredentials | None = Security(security)
 ) -> AuthContext:
     if not credentials:
         raise HTTPException(status_code=401, detail="Token missing")
@@ -38,7 +38,7 @@ def verify_token(
     # Verify token against valid tokens (sensitive data not logged for security)
     logger.debug(f"Verifying authentication token (length: {len(token)})")
     if token not in TOKENS:
-        _trigger_panic_for_invalid_token(token)
+        _report_auth_failure(request, token)
         raise HTTPException(status_code=401, detail=INVALID_TOKEN_ERROR)
     if token == ORCH_ACTIONS_TOKEN:
         role = "actions"
@@ -49,68 +49,19 @@ def verify_token(
     return AuthContext(token=token, role=role)
 
 
-PANIC_THRESHOLD = 5  # Attempts before lockdown
-PANIC_WINDOW_SECONDS = 60  # Time window for threshold
-EVENT_RETENTION_SECONDS = 86400  # 24 hours - events older than this are cleaned up
-
-
-def _trigger_panic_for_invalid_token(token: str) -> None:
+def _report_auth_failure(request: Request, token: str) -> None:
     import hashlib
-    import threading
 
-    from tools.gimo_server.security import load_security_db, save_security_db
+    from tools.gimo_server.security import threat_engine
 
     token_hash = hashlib.sha256(token.encode("utf-8", errors="ignore")).hexdigest()
-    now = time.time()
+    client_ip = request.client.host if request.client else "unknown"
 
-    lock = getattr(_trigger_panic_for_invalid_token, "_lock", None)
-    if lock is None:
-        lock = threading.Lock()
-        _trigger_panic_for_invalid_token._lock = lock
+    threat_engine.record_auth_failure(
+        source=client_ip,
+        detail=f"Invalid token hash: {token_hash[:16]}..."
+    )
+    # Note: escalation is handled inside threat_engine. No need to loop/save here,
+    # it's shared in-memory and persisted periodically or at shutdown.
 
-    with lock:
-        db = load_security_db()
 
-        if "recent_events" not in db:
-            db["recent_events"] = []
-
-        # Clean up old events (older than retention period)
-        db["recent_events"] = [
-            e
-            for e in db["recent_events"]
-            if isinstance(e.get("timestamp"), (int, float))
-            and (now - e["timestamp"]) < EVENT_RETENTION_SECONDS
-        ]
-
-        # Count recent failed attempts within the time window
-        recent_failures = [
-            e
-            for e in db["recent_events"]
-            if e.get("type") == "PANIC_TRIGGER"
-            and isinstance(e.get("timestamp"), (int, float))
-            and (now - e["timestamp"]) < PANIC_WINDOW_SECONDS
-            and not e.get("resolved", False)
-        ]
-
-        # Add the new event
-        db["recent_events"].append(
-            {
-                "type": "PANIC_TRIGGER",
-                "timestamp": now,
-                "reason": "Invalid authentication attempt",
-                "payload_hash": token_hash,
-            }
-        )
-
-        # Only activate panic mode if threshold exceeded
-        if len(recent_failures) + 1 >= PANIC_THRESHOLD:
-            db["panic_mode"] = True
-            logger.warning(
-                f"PANIC MODE ACTIVATED: {len(recent_failures) + 1} failed attempts in {PANIC_WINDOW_SECONDS}s"
-            )
-        else:
-            logger.info(
-                f"Auth failure {len(recent_failures) + 1}/{PANIC_THRESHOLD} (window: {PANIC_WINDOW_SECONDS}s)"
-            )
-
-        save_security_db(db)

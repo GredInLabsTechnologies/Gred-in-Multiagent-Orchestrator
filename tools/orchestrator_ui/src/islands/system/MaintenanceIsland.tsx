@@ -39,11 +39,18 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
         setSearchTerm,
         refresh: refreshLogs
     } = useAuditLog(token);
-    const security = useSecurityService(token);
-    // Prefer "LOCKDOWN" terminology, but keep compatibility with older return shapes.
-    const lockdown = security.lockdown ?? security.panicMode;
-    const clearLockdown = security.clearLockdown ?? security.clearPanic;
-    const isSecurityLoading = security.isLoading;
+    const {
+        threatLevel,
+        threatLevelLabel,
+        autoDecayRemaining,
+        activeSources,
+        lockdown,
+        isLoading: isSecurityLoading,
+        clearLockdown,
+        downgrade,
+        error: securityError
+    } = useSecurityService(token);
+
     const { repos, activeRepo, bootstrap, selectRepo, isLoading: isRepoLoading } = useRepoService(token);
 
     const [selectedRepoPath, setSelectedRepoPath] = useState<string>('');
@@ -56,6 +63,47 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
             return 'API';
         }
     })();
+
+    const getSecurityTheme = () => {
+        switch (threatLevel) {
+            case 3: // LOCKDOWN
+                return {
+                    color: 'text-red-500',
+                    bg: 'bg-red-500/10',
+                    border: 'border-red-500/30',
+                    bar: 'bg-red-500',
+                    icon: <ShieldAlert className="w-6 h-6" />,
+                    message: 'PROTECTIVE LOCKDOWN: Anonymous traffic blocked.'
+                };
+            case 2: // GUARDED
+                return {
+                    color: 'text-orange-500',
+                    bg: 'bg-orange-500/10',
+                    border: 'border-orange-500/30',
+                    bar: 'bg-orange-500',
+                    icon: <ShieldAlert className="w-6 h-6" />,
+                    message: 'GUARDED: High latency enforced for unauthenticated requests.'
+                };
+            case 1: // ALERT
+                return {
+                    color: 'text-amber-500',
+                    bg: 'bg-amber-500/10',
+                    border: 'border-amber-500/30',
+                    bar: 'bg-amber-500',
+                    icon: <Activity className="w-6 h-6" />,
+                    message: 'ALERT: Suspicious activity detected. Monitoring sources.'
+                };
+            default: // NOMINAL
+                return {
+                    color: 'text-emerald-500',
+                    bg: 'bg-emerald-500/10',
+                    border: 'border-emerald-500/20',
+                    bar: 'bg-emerald-500',
+                    icon: <ShieldCheck className="w-6 h-6" />,
+                    message: 'NOMINAL: System security within normal parameters.'
+                };
+        }
+    };
 
     const getStatusTheme = () => {
         if (lockdown) return {
@@ -105,6 +153,14 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
     };
 
     const theme = getStatusTheme();
+    const sTheme = getSecurityTheme();
+
+    const formatDecay = (seconds: number | null | undefined) => {
+        if (seconds === null || seconds === undefined) return null;
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    };
 
     const getLogClass = (log: string): string => {
         if (log.includes('DENIED')) return 'text-red-400 bg-red-400/5 px-2 rounded border border-red-500/10';
@@ -126,10 +182,10 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
 
     return (
         <div className="flex flex-col space-y-8">
-            {serviceError && (
+            {(serviceError || securityError) && (
                 <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center space-x-3 text-red-400 text-xs animate-fade-in">
                     <ShieldAlert className="w-4 h-4 shrink-0" />
-                    <span className="flex-1">{serviceError}</span>
+                    <span className="flex-1">{serviceError || securityError}</span>
                 </div>
             )}
             {/* Top Grid: Status & Controls */}
@@ -183,42 +239,67 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                     </div>
                 </div>
 
-                {/* Security Lockdown Control */}
-                {lockdown ? (
-                    <div className="glass-card p-6 bg-red-500/5 border-red-500/20 flex flex-col justify-between">
-                        <div className="flex items-center space-x-3 text-red-500 mb-4">
-                            <ShieldAlert className="w-6 h-6" />
-                            <span className="text-sm font-black uppercase tracking-widest">Security: LOCKDOWN</span>
-                        </div>
-                        <p className="text-xs text-red-400 mb-6 font-medium">Lockdown is active. File access requests are blocked.</p>
-                        <button
-                            onClick={clearLockdown}
-                            disabled={isSecurityLoading}
-                            className="w-full py-3.5 bg-red-500 hover:bg-red-400 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95 disabled:opacity-50"
-                        >
-                            {isSecurityLoading ? 'Working...' : 'Clear lockdown'}
-                        </button>
-                    </div>
-                ) : (
-                    <div className="glass-card p-6 flex flex-col justify-between">
-                        <div className="flex items-center space-x-3 text-emerald-500/60 mb-4">
-                            <ShieldCheck className="w-6 h-6" />
-                            <span className="text-sm font-black uppercase tracking-widest">Security: OK</span>
-                        </div>
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-[10px] uppercase font-bold tracking-widest text-zinc-600">
-                                <span>Security profile</span>
-                                <span className="text-emerald-500">High</span>
+                {/* Adaptive Security Threat Level */}
+                <div className={`glass-card p-6 border transition-all duration-500 ${sTheme.bg} ${sTheme.border} flex flex-col justify-between`}>
+                    <div className="flex items-start justify-between">
+                        <div className="flex items-center space-x-3">
+                            <div className={`${sTheme.color}`}>
+                                {sTheme.icon}
                             </div>
-                            <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-                                <div className="h-full w-full bg-emerald-500/40 rounded-full" />
+                            <div>
+                                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-1">Security Level</h3>
+                                <div className="flex items-center space-x-2">
+                                    <span className={`text-xl font-black uppercase ${sTheme.color}`}>{threatLevelLabel}</span>
+                                    {autoDecayRemaining !== null && (
+                                        <div className="flex items-center space-x-1 px-2 py-0.5 bg-black/40 rounded-full border border-white/5 text-[9px] font-bold text-zinc-400">
+                                            <Clock className="w-2.5 h-2.5" />
+                                            <span>{formatDecay(autoDecayRemaining)}</span>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
-                        <div className="mt-4 text-[10px] text-zinc-500 font-mono">
-                            Audit integrity: verified
+                        {threatLevel > 0 && (
+                            <div className="flex space-x-2">
+                                <button
+                                    onClick={downgrade}
+                                    title="Downgrade threat level"
+                                    disabled={isSecurityLoading}
+                                    className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition-all disabled:opacity-30 group"
+                                >
+                                    <ChevronDown className="w-4 h-4 text-zinc-400 group-hover:text-white" />
+                                </button>
+                                <button
+                                    onClick={clearLockdown}
+                                    title="Reset to NOMINAL"
+                                    disabled={isSecurityLoading}
+                                    className="p-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/10 transition-all disabled:opacity-30 group"
+                                >
+                                    <ShieldCheck className="w-4 h-4 text-emerald-500/60 group-hover:text-emerald-500" />
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex-1 mt-4">
+                        <p className={`text-[11px] font-medium leading-relaxed opacity-80 ${sTheme.color}`}>
+                            {sTheme.message}
+                        </p>
+                    </div>
+
+                    <div className="mt-4 space-y-2">
+                        <div className="flex justify-between text-[9px] uppercase font-black tracking-widest text-zinc-500">
+                            <span>Threat intensity</span>
+                            <span className={sTheme.color}>{activeSources > 0 ? `${activeSources} tracked sources` : 'Verified'}</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-white/5">
+                            <div
+                                className={`h-full transition-all duration-1000 ease-out rounded-full ${sTheme.bar}`}
+                                style={{ width: `${Math.max(10, (threatLevel / 3) * 100)}%` }}
+                            />
                         </div>
                     </div>
-                )}
+                </div>
             </div>
 
             {/* Repositories Section */}

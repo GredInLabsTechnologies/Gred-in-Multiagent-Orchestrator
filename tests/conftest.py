@@ -89,17 +89,21 @@ def reset_test_state():
         load_security_db,
         rate_limit_store,
         save_security_db,
+        threat_engine
     )
 
     rate_limit_store.clear()
+    threat_engine.clear_all()
 
     # Reset panic mode AND recent_events in DB to prevent state leakage
     try:
         db = load_security_db()
-        if db.get("panic_mode") or db.get("recent_events"):
-            db["panic_mode"] = False
-            db["recent_events"] = []
-            save_security_db(db)
+        # threat_engine.clear_all() already covers the logical state, 
+        # but we also ensure the DB reflects it.
+        db["panic_mode"] = False
+        db["recent_events"] = []
+        db["threat_level"] = 0
+        save_security_db(db)
     except Exception as exc:
         import logging
 

@@ -259,27 +259,48 @@ def select_repo_handler(
     return {"status": "success", "active_repo": str(repo_path)}
 
 
-def get_security_events_handler(
-    auth: AuthContext = Depends(require_read_only_access), rl: None = Depends(check_rate_limit)
-):
-    db = load_security_db()
-    return {"panic_mode": db.get("panic_mode", False), "events": db.get("recent_events", [])}
-
-
 def resolve_security_handler(
-    action: str = Query(...), auth: AuthContext = Depends(require_read_only_access)
+    request: Request,
+    action: str = "clear_all",  # "clear_all" or "downgrade"
+    auth: AuthContext = Depends(verify_token),
 ):
-    if action != "clear_panic":
-        raise HTTPException(status_code=400, detail="Invalid action")
+    """
+    Manually resolve or downgrade security threat level.
+    Requires valid authentication.
+    """
+    from tools.gimo_server.security import save_security_db, threat_engine
 
-    db = load_security_db()
-    db["panic_mode"] = False
-    for event in db.get("recent_events", []):
-        event["resolved"] = True
-    save_security_db(db)
+    # Only operator/admin can manually clear threats
+    if auth.role not in ["operator", "admin"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: Only operators can manually resolve security threats."
+        )
 
-    audit_log("SECURITY", "PANIC_CLEARED", "SUCCESS", actor=auth.token)
-    return {"status": "panic cleared"}
+    if action == "clear_all":
+        threat_engine.clear_all()
+    elif action == "downgrade":
+        threat_engine.downgrade()
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid action: {action}")
+
+    # Persist the change
+    save_security_db()
+
+    return {
+        "status": "success",
+        "action": action,
+        "new_level": threat_engine.level_label,
+        "message": f"Threat level set to {threat_engine.level_label}"
+    }
+
+
+def get_security_events_handler(_auth: AuthContext = Depends(verify_token)):
+    """
+    Get detailed security status and recent events.
+    """
+    from tools.gimo_server.security import threat_engine
+    return threat_engine.snapshot()
 
 
 def get_service_status_handler(

@@ -1,81 +1,105 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../types';
 
 export interface SecurityEvent {
-    timestamp: string;
+    timestamp: number;
     type: string;
-    reason: string;
-    actor: string;
+    severity: string;
+    source: string;
+    detail: string;
     resolved: boolean;
 }
 
+export interface SecurityStatus {
+    threatLevel: number;
+    threatLevelLabel: string;
+    autoDecayRemaining: number | null;
+    activeSources: number;
+    panicMode: boolean; // backward compat
+    recentEventsCount: number;
+}
+
 export const useSecurityService = (token?: string) => {
-    // Server schema still uses `panic_mode`, but the UI/UX terminology is "LOCKDOWN".
-    // Use "lockdown" internally, but expose compatibility aliases for backward compatibility.
-    const [lockdown, setLockdown] = useState(false);
-    const [events, setEvents] = useState<SecurityEvent[]>([]);
+    const [status, setStatus] = useState<SecurityStatus | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const fetchSecurity = useCallback(async () => {
+    const fetchStatus = useCallback(async () => {
+        if (!token) return;
         try {
-            const headers: HeadersInit = {};
-            if (token) headers['Authorization'] = `Bearer ${token}`;
+            const response = await fetch(`${API_BASE}/ui/security/events`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
 
-            const res = await fetch(`${API_BASE}/ui/security/events`, { headers });
-            if (!res.ok) {
-                if (res.status === 503) {
-                    setLockdown(true);
-                    return;
-                }
-                throw new Error('Failed to fetch security status');
+            if (response.ok) {
+                const data = await response.json();
+                setStatus({
+                    threatLevel: data.threat_level,
+                    threatLevelLabel: data.threat_level_label,
+                    autoDecayRemaining: data.auto_decay_remaining,
+                    activeSources: data.active_sources,
+                    panicMode: data.panic_mode,
+                    recentEventsCount: data.recent_events_count
+                });
+                setError(null);
+            } else if (response.status === 503) {
+                // Lockdown detected via 503
+                setStatus(prev => prev ? { ...prev, threatLevel: 3, threatLevelLabel: 'LOCKDOWN', panicMode: true } : null);
             }
-            const data = await res.json();
-            setLockdown(Boolean(data.panic_mode));
-            setEvents(data.events || []);
-            setError(null);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Unknown error');
+            console.error('Failed to fetch security status:', err);
         }
     }, [token]);
 
-    const clearLockdown = useCallback(async () => {
+    const resolveSecurity = async (action: 'clear_all' | 'downgrade' = 'clear_all') => {
+        if (!token) return;
         setIsLoading(true);
         try {
-            const headers: HeadersInit = {};
-            if (token) headers['Authorization'] = `Bearer ${token}`;
-
-            const res = await fetch(`${API_BASE}/ui/security/resolve?action=clear_panic`, {
+            const response = await fetch(`${API_BASE}/ui/security/resolve?action=${action}`, {
                 method: 'POST',
-                headers
+                headers: { 'Authorization': `Bearer ${token}` }
             });
-            if (!res.ok) throw new Error('Failed to clear lockdown');
 
-            await fetchSecurity();
+            if (response.ok) {
+                await fetchStatus();
+            } else {
+                const data = await response.json().catch(() => ({}));
+                setError(data.detail || `Failed to ${action} security`);
+            }
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Unknown error');
+            setError(`Network error while resolving security: ${err}`);
         } finally {
             setIsLoading(false);
         }
-    }, [token, fetchSecurity]);
+    };
 
     useEffect(() => {
-        fetchSecurity();
-        const interval = setInterval(fetchSecurity, 10000);
+        fetchStatus();
+        const interval = setInterval(fetchStatus, 10000);
         return () => clearInterval(interval);
-    }, [fetchSecurity]);
+    }, [fetchStatus]);
+
+    // Handle real-time updates from other requests via X-Threat-Level header
+    useEffect(() => {
+        const handleThreatHeader = (e: CustomEvent<{ level: string }>) => {
+            if (e.detail.level !== status?.threatLevelLabel) {
+                fetchStatus();
+            }
+        };
+        window.addEventListener('threat-level-updated' as any, handleThreatHeader as any);
+        return () => window.removeEventListener('threat-level-updated' as any, handleThreatHeader as any);
+    }, [status, fetchStatus]);
 
     return {
-        // Preferred terminology
-        lockdown,
-        clearLockdown,
-
-        // Backward compatible terminology
-        panicMode: lockdown,
-        events,
+        threatLevel: status?.threatLevel ?? 0,
+        threatLevelLabel: status?.threatLevelLabel ?? 'NOMINAL',
+        autoDecayRemaining: status?.autoDecayRemaining,
+        activeSources: status?.activeSources ?? 0,
+        lockdown: (status?.threatLevel ?? 0) >= 3,
         isLoading,
         error,
-        clearPanic: clearLockdown,
-        refresh: fetchSecurity
+        clearLockdown: () => resolveSecurity('clear_all'),
+        downgrade: () => resolveSecurity('downgrade'),
+        refresh: fetchStatus
     };
 };

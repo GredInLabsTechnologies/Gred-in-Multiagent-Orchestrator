@@ -51,9 +51,29 @@ async def lifespan(app: FastAPI):
     gics_service.start_daemon()
     app.state.gics = gics_service
 
+    # Initialize Security Threat Engine
+    from tools.gimo_server.security import save_security_db, threat_engine
+    threat_engine.clear_all()  # Start clean on boot
+    save_security_db()
+
     # Start background cleanup tasks
     cleanup_task = asyncio.create_task(snapshot_cleanup_loop())
     from tools.gimo_server.services.ops_service import OpsService
+
+    async def threat_decay_loop():
+        """Periodically check for threat level decay."""
+        while True:
+            try:
+                await asyncio.sleep(30)
+                if threat_engine.tick_decay():
+                    save_security_db()
+                threat_engine.cleanup_stale_sources()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.warning("Threat decay loop error: %s", exc)
+
+    threat_cleanup_task = asyncio.create_task(threat_decay_loop())
 
     async def ops_runs_cleanup_loop():
         while True:
@@ -86,12 +106,14 @@ async def lifespan(app: FastAPI):
         app.state.gics.stop_daemon()
     await run_worker.stop()
     cleanup_task.cancel()
+    threat_cleanup_task.cancel()
     ops_cleanup_task.cancel()
     try:
         await cleanup_task
+        await threat_cleanup_task
         await ops_cleanup_task
     except asyncio.CancelledError:
-        logger.debug("Cleanup task cancelled successfully.")
+        logger.debug("Cleanup tasks cancelled successfully.")
     except Exception as exc:
         logger.error(f"Cleanup task failed during shutdown: {exc}")
 

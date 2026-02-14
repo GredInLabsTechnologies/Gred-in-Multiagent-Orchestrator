@@ -62,19 +62,20 @@ def test_verify_token_missing():
     "tools.gimo_server.security.auth.TOKENS",
     {"long-valid-token-123456", "actions-token-123456"},
 )
-@patch("tools.gimo_server.security.load_security_db")
+@patch("tools.gimo_server.security.threat_engine")
 @patch("tools.gimo_server.security.save_security_db")
-def test_verify_token_invalid_trigger_panic(mock_save, mock_load):
-    mock_load.return_value = {"panic_mode": False, "recent_events": []}
+def test_verify_token_invalid_trigger_panic(mock_save, mock_threat):
+    # Setup mock threat engine level
+    mock_threat.level = 0
+    
     credentials = MagicMock()
     credentials.credentials = "invalid-long-secret-token"
 
     with pytest.raises(HTTPException):
         verify_token(MagicMock(), credentials)
 
-    # Check panic mode only triggers after threshold reached
-    args, _ = mock_save.call_args
-    assert args[0]["panic_mode"] is False
+    # Check that record_auth_failure was called
+    mock_threat.record_auth_failure.assert_called_once()
 
 
 @patch("tools.gimo_server.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
@@ -82,28 +83,11 @@ def test_verify_token_invalid_trigger_panic(mock_save, mock_load):
     "tools.gimo_server.security.auth.TOKENS",
     {"long-valid-token-123456", "actions-token-123456"},
 )
-@patch("tools.gimo_server.security.load_security_db")
-@patch("tools.gimo_server.security.save_security_db")
-def test_verify_token_invalid_trigger_panic_no_events(mock_save, mock_load):
-    # Case: recent_events missing in DB
-    mock_load.return_value = {"panic_mode": False}  # missing recent_events
-    credentials = MagicMock()
-    credentials.credentials = "invalid-long-secret-token"
-
-    with pytest.raises(HTTPException):
-        verify_token(MagicMock(), credentials)
-
-    args, _ = mock_save.call_args
-    assert args[0]["panic_mode"] is False
-    assert "recent_events" in args[0]
-
-
-@patch("tools.gimo_server.security.auth.ORCH_ACTIONS_TOKEN", "actions-token-123456")
-@patch(
-    "tools.gimo_server.security.auth.TOKENS",
-    {"long-valid-token-123456", "actions-token-123456"},
-)
-def test_verify_token_actions_role():
+@patch("tools.gimo_server.security.threat_engine")
+def test_verify_token_actions_role(mock_threat):
+    # Setup mock threat engine
+    mock_threat.level = 0
+    
     credentials = MagicMock()
     credentials.credentials = "actions-token-123456"
     assert verify_token(MagicMock(), credentials) == AuthContext(

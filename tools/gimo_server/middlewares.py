@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 import time
@@ -11,38 +12,58 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from tools.gimo_server.config import CORS_ORIGINS, TOKENS
-from tools.gimo_server.security import load_security_db, save_security_db
-from tools.gimo_server.security.audit import log_panic
+from tools.gimo_server.security.threat_level import ThreatLevel
 
 logger = logging.getLogger("orchestrator")
 
 
-async def panic_mode_check_middleware(
+async def threat_level_middleware(
     request: Request, call_next: Callable[[Request], Coroutine[None, None, Response]]
 ) -> Response:
-    """Block unauthenticated requests during panic mode. Authenticated users can still operate."""
-    # Always allow root and resolve endpoints
+    """Adaptive security middleware based on threat levels."""
+    # Always allow root, health, and resolve endpoints
     if request.url.path in ["/", "/health", "/ui/security/resolve"]:
         return await call_next(request)
 
-    # Use the loader from the security module so tests can patch it
-    from tools.gimo_server import security as security_module
+    from tools.gimo_server.security import threat_engine
 
-    db = security_module.load_security_db()
-    if db.get("panic_mode", False):
-        # Check if request has valid token - if so, allow through
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:].strip()
-            if token in TOKENS:
-                # Valid token - allow authenticated users during lockdown
-                return await call_next(request)
+    current_level = threat_engine.level
 
-        # No valid token during lockdown - block external attackers
+    # 1. NOMINAL / ALERT: Normal operation
+    if current_level < ThreatLevel.GUARDED:
+        response = await call_next(request)
+        response.headers["X-Threat-Level"] = threat_engine.level_label
+        return response
+
+    # 2. Check if request is authenticated - auth users are NEVER blocked
+    auth_header = request.headers.get("Authorization", "")
+    is_authenticated = False
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+        if token in TOKENS:
+            is_authenticated = True
+
+    if is_authenticated:
+        response = await call_next(request)
+        response.headers["X-Threat-Level"] = threat_engine.level_label
+        return response
+
+    # 3. GUARDED: Unauthenticated requests are throttled
+    if current_level == ThreatLevel.GUARDED:
+        # Artificial delay for unauthenticated traffic
+        await asyncio.sleep(1.0)
+        response = await call_next(request)
+        response.headers["X-Threat-Level"] = threat_engine.level_label
+        return response
+
+    # 4. LOCKDOWN: Unauthenticated requests are blocked
+    if current_level >= ThreatLevel.LOCKDOWN:
         return Response(
             status_code=503,
-            content="System in LOCKDOWN. Use /ui/security/resolve to clear panic mode.",
+            content=f"System in PROTECTIVE LOCKDOWN ({threat_engine.level_label}). Authenticate to proceed.",
+            headers={"X-Threat-Level": threat_engine.level_label}
         )
+
     return await call_next(request)
 
 
@@ -107,60 +128,10 @@ async def _capture_payload_hash(request: Request) -> str:
         return "read_error"
 
 
-EXCEPTION_PANIC_THRESHOLD = 3  # Exceptions before lockdown
-EXCEPTION_WINDOW_SECONDS = 60  # Time window for threshold
-
-
-def _record_panic_event(correlation_id: str, e: Exception) -> None:
-    """Record exception event and activate panic mode only if threshold exceeded."""
-    now = time.time()
-
-    try:
-        db = load_security_db()
-        recent_events = db.get("recent_events", [])
-
-        # Count recent unhandled exceptions within time window
-        recent_exceptions = [
-            ev
-            for ev in recent_events
-            if ev.get("type") == "PANIC"
-            and isinstance(ev.get("timestamp"), (int, float))
-            and (now - ev["timestamp"]) < EXCEPTION_WINDOW_SECONDS
-            and not ev.get("resolved", False)
-        ]
-
-        # Add new event (timestamp as float for consistency)
-        recent_events.append(
-            {
-                "type": "PANIC",
-                "timestamp": now,
-                "correlation_id": correlation_id,
-                "reason": str(e)[:200],  # Truncate long messages
-                "resolved": False,
-            }
-        )
-        db["recent_events"] = recent_events
-
-        # Only activate panic if threshold exceeded
-        if len(recent_exceptions) + 1 >= EXCEPTION_PANIC_THRESHOLD:
-            db["panic_mode"] = True
-            logger.warning(
-                f"PANIC MODE ACTIVATED: {len(recent_exceptions) + 1} exceptions in {EXCEPTION_WINDOW_SECONDS}s"
-            )
-        else:
-            logger.warning(
-                f"Exception {len(recent_exceptions) + 1}/{EXCEPTION_PANIC_THRESHOLD} (window: {EXCEPTION_WINDOW_SECONDS}s)"
-            )
-
-        save_security_db(db)
-    except Exception as persistence_error:
-        logger.error(f"Failed to persist panic event: {persistence_error}")
-
-
-async def panic_catcher_middleware(
+async def adaptive_panic_catcher_middleware(
     request: Request, call_next: Callable[[Request], Coroutine[None, None, Response]]
 ) -> Response:
-    """Global exception handler that triggers Panic Mode."""
+    """Global exception handler that reports to ThreatEngine."""
     try:
         return await call_next(request)
     except Exception as e:
@@ -180,9 +151,12 @@ async def panic_catcher_middleware(
         if auth_header.lower().startswith("bearer "):
             token = auth_header[7:].strip()
         actor_snippet = "authenticated" if token else "anonymous"
+        client_ip = request.client.host if request.client else "unknown"
 
-        # 4. Log Critical Panic
-        log_panic(
+        from tools.gimo_server.security import audit, threat_engine
+
+        # 4. Log Critical Panic via Audit
+        audit.log_panic(
             correlation_id=correlation_id,
             reason=str(e),
             payload_hash=payload_hash,
@@ -190,8 +164,13 @@ async def panic_catcher_middleware(
             traceback_str=traceback.format_exc(),
         )
 
-        # 5. Persist Panic Mode (FAIL-CLOSED)
-        _record_panic_event(correlation_id, e)
+        # 5. Report to ThreatEngine (ADAPTIVE ESCALATION)
+        # Operational exceptions like ConnectionError will NOT escalate target level.
+        threat_engine.record_exception(
+            source=client_ip,
+            exc=e,
+            detail=f"Correlation ID: {correlation_id}"
+        )
 
         # 6. Return Opaque Error
         return JSONResponse(
@@ -199,7 +178,8 @@ async def panic_catcher_middleware(
             content={
                 "error": "Internal System Failure",
                 "correlation_id": correlation_id,
-                "message": "System has entered protective lockdown.",
+                "threat_level": threat_engine.level_label,
+                "message": "System has entered protective defense mode.",
             },
         )
 
@@ -210,7 +190,7 @@ def register_middlewares(app):
     The order here is significant because Starlette middlewares are processed as a stack.
     Requests pass through them in reverse order of registration.
     """
-    app.middleware("http")(panic_mode_check_middleware)
+    app.middleware("http")(threat_level_middleware)
     app.middleware("http")(allow_options_preflight_middleware)
     app.middleware("http")(correlation_id_middleware)
-    app.middleware("http")(panic_catcher_middleware)
+    app.middleware("http")(adaptive_panic_catcher_middleware)
