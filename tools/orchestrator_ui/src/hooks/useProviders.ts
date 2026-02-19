@@ -1,70 +1,13 @@
 import { useState, useCallback } from 'react';
-import { API_BASE } from '../types';
-
-export interface ProviderInfo {
-    id: string;
-    type: string;
-    is_local: boolean;
-    config: any;
-    capabilities?: Record<string, any>;
-    model?: string;
-    auth_mode?: string | null;
-    auth_ref?: string | null;
-}
-
-export interface ProviderModelInfo {
-    id: string;
-    label: string;
-    installed: boolean;
-    downloadable: boolean;
-    context_window?: number;
-    size?: string;
-    quality_tier?: string;
-}
-
-export interface ProviderCatalogResponse {
-    provider_type: string;
-    installed_models: ProviderModelInfo[];
-    available_models: ProviderModelInfo[];
-    recommended_models: ProviderModelInfo[];
-    can_install: boolean;
-    install_method: 'api' | 'command' | 'manual';
-    auth_modes_supported: string[];
-    warnings: string[];
-}
-
-export interface ProviderValidatePayload {
-    api_key?: string;
-    base_url?: string;
-    org?: string;
-    account?: string;
-}
-
-export interface ProviderValidateResult {
-    valid: boolean;
-    health: string;
-    effective_model?: string;
-    warnings: string[];
-    error_actionable?: string;
-}
-
-export interface ProviderInstallResult {
-    status: 'queued' | 'running' | 'done' | 'error';
-    message: string;
-    progress?: number;
-    job_id?: string;
-}
-
-export interface SaveActiveProviderPayload {
-    providerId: string;
-    providerType: string;
-    modelId: string;
-    authMode: string;
-    apiKey?: string;
-    account?: string;
-    baseUrl?: string;
-    org?: string;
-}
+import {
+    API_BASE,
+    ProviderCatalogResponse,
+    ProviderInfo,
+    ProviderInstallResult,
+    ProviderValidatePayload,
+    ProviderValidateResult,
+    SaveActiveProviderPayload,
+} from '../types';
 
 export const useProviders = () => {
     const [providers, setProviders] = useState<ProviderInfo[]>([]);

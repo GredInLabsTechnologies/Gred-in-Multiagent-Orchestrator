@@ -15,8 +15,10 @@ def mock_ws_manager():
 @pytest.fixture(autouse=True)
 def clear_agents():
     SubAgentManager._sub_agents.clear()
+    SubAgentManager._system_prompts.clear()
     yield
     SubAgentManager._sub_agents.clear()
+    SubAgentManager._system_prompts.clear()
 
 
 @pytest.fixture
@@ -71,3 +73,23 @@ async def test_execute_task(mock_model_service):
     assert response == "Mocked Response"
     assert agent.status == "idle"
     mock_model_service.generate.assert_called_once()
+    call_args = mock_model_service.generate.call_args
+    assert "# EJECUCIÓN" in call_args.args[0]
+    assert call_args.kwargs.get("system_prompt")
+
+
+@pytest.mark.asyncio
+async def test_create_sub_agent_stores_master_system_prompt():
+    req = DelegationRequest(
+        subTaskDescription="Implement parser",
+        modelPreference="llama3",
+        constraints={"system_prompt": "Debes reportar blockers explícitamente."},
+    )
+    agent = await SubAgentManager.create_sub_agent("parent-xyz", req)
+
+    prompt = SubAgentManager._system_prompts.get(agent.id)
+    assert prompt is not None
+    assert "Reglas obligatorias" in prompt
+    assert "parent_agent=parent-xyz" in prompt
+    assert "Implement parser" in prompt
+    assert "Debes reportar blockers explícitamente." in prompt

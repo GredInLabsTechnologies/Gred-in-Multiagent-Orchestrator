@@ -247,6 +247,7 @@ class UserEconomyConfig(BaseModel):
     cache_enabled: bool = False
     cache_ttl_hours: int = 24
     show_cost_predictions: bool = False
+    provider_model_map: Dict[str, Dict[str, str]] = Field(default_factory=dict)
 
     @field_validator("global_budget_usd")
     @classmethod

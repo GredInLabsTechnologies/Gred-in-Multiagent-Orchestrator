@@ -217,6 +217,35 @@ class ObservabilityService:
                     span.set_status(trace.Status(trace.StatusCode.ERROR))
 
     @classmethod
+    def record_handoff_event(
+        cls,
+        *,
+        workflow_id: str,
+        trace_id: str,
+        source_node: str,
+        target_node: str,
+        summary: str,
+        timestamp: str,
+    ) -> None:
+        if not cls._initialized:
+            cls._initialize_sdk()
+
+        with cls._lock:
+            cls._ui_spans.append(
+                {
+                    "kind": "handoff",
+                    "workflow_id": workflow_id,
+                    "trace_id": trace_id,
+                    "span_id": "handoff",
+                    "timestamp": timestamp,
+                    "status": "completed",
+                    "source_node": source_node,
+                    "target_node": target_node,
+                    "summary": summary,
+                }
+            )
+
+    @classmethod
     def get_metrics(cls) -> Dict[str, Any]:
         with cls._lock:
             return dict(cls._ui_metrics)

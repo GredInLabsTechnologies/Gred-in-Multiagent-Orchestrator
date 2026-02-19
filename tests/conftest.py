@@ -18,6 +18,10 @@ DEFAULT_TEST_ACTOR = os.environ.get("ORCH_TEST_ACTOR", "test_actor")
 os.environ.setdefault("ORCH_TOKEN", DEFAULT_TEST_TOKEN)
 os.environ.setdefault("ORCH_TEST_ACTOR", DEFAULT_TEST_ACTOR)
 os.environ.setdefault("ORCH_REPO_ROOT", str(Path(__file__).parent.parent.resolve()))
+# Test-safe defaults BEFORE importing app/config singletons
+os.environ.setdefault("DEBUG", "true")
+os.environ.setdefault("ORCH_LICENSE_ALLOW_DEBUG_BYPASS", "true")
+os.environ.setdefault("ORCH_AUDIT_LOG_MAX_BYTES", str(50 * 1024 * 1024))
 
 from tools.gimo_server.main import app  # noqa: E402
 

@@ -1,10 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { ProviderSettings } from '../ProviderSettings';
 
 const loadProvidersMock = vi.fn();
 const loadCatalogMock = vi.fn().mockResolvedValue({});
-const installModelMock = vi.fn().mockResolvedValue({ status: 'queued', message: 'Install queued' });
+const installModelMock = vi.fn().mockResolvedValue({ status: 'queued', message: 'Install queued', job_id: 'job-1', progress: 0 });
 const getInstallJobMock = vi.fn().mockResolvedValue({ status: 'done', message: 'ok', progress: 1, job_id: 'job-1' });
 const validateProviderMock = vi.fn().mockResolvedValue({ valid: true, health: 'ok', warnings: [] });
 const saveActiveProviderMock = vi.fn().mockResolvedValue({});
@@ -12,29 +12,56 @@ const removeProviderMock = vi.fn();
 const testProviderMock = vi.fn();
 const addToastMock = vi.fn();
 
+const mockState = {
+    providerCapabilities: {
+        openai: { auth_modes_supported: ['api_key'], requires_remote_api: true },
+        codex: { auth_modes_supported: ['api_key', 'account'], requires_remote_api: true },
+        ollama_local: { auth_modes_supported: ['none'], requires_remote_api: false },
+    },
+    effectiveState: {
+        active: 'p1',
+        model_id: 'qwen2.5-coder:7b',
+    },
+    catalogs: {
+        openai: {
+            provider_type: 'openai',
+            installed_models: [{ id: 'gpt-4o-mini', label: 'gpt-4o-mini', installed: true, downloadable: false }],
+            available_models: [{ id: 'gpt-4.1-mini', label: 'gpt-4.1-mini', installed: false, downloadable: false }],
+            recommended_models: [{ id: 'gpt-4o-mini', label: 'gpt-4o-mini', installed: true, downloadable: false }],
+            can_install: false,
+            install_method: 'manual',
+            auth_modes_supported: ['api_key'],
+            warnings: [],
+        },
+        codex: {
+            provider_type: 'codex',
+            installed_models: [{ id: 'gpt-4o-mini', label: 'gpt-4o-mini', installed: true, downloadable: false }],
+            available_models: [{ id: 'gpt-4o', label: 'gpt-4o', installed: false, downloadable: false }],
+            recommended_models: [{ id: 'gpt-4o-mini', label: 'gpt-4o-mini', installed: true, downloadable: false }],
+            can_install: false,
+            install_method: 'manual',
+            auth_modes_supported: ['api_key', 'account'],
+            warnings: [],
+        },
+        ollama_local: {
+            provider_type: 'ollama_local',
+            installed_models: [{ id: 'llama3.1:8b', label: 'llama3.1:8b', installed: true, downloadable: true }],
+            available_models: [{ id: 'qwen2.5-coder:7b', label: 'qwen2.5-coder:7b', installed: false, downloadable: true }],
+            recommended_models: [{ id: 'qwen2.5-coder:7b', label: 'qwen2.5-coder:7b', installed: false, downloadable: true }],
+            can_install: true,
+            install_method: 'command',
+            auth_modes_supported: ['none'],
+            warnings: [],
+        },
+    },
+};
+
 // Mock useProviders hook
 vi.mock('../../hooks/useProviders', () => ({
     useProviders: () => ({
-        providerCapabilities: {
-            openai: { auth_modes_supported: ['api_key'], requires_remote_api: true },
-            ollama_local: { auth_modes_supported: ['none'], requires_remote_api: false },
-        },
-        effectiveState: {
-            active: 'p1',
-            model_id: 'qwen2.5-coder:7b',
-        },
-        catalogs: {
-            openai: {
-                provider_type: 'openai',
-                installed_models: [{ id: 'gpt-4o-mini', label: 'gpt-4o-mini', installed: true, downloadable: false }],
-                available_models: [{ id: 'gpt-4.1-mini', label: 'gpt-4.1-mini', installed: false, downloadable: false }],
-                recommended_models: [{ id: 'gpt-4o-mini', label: 'gpt-4o-mini', installed: true, downloadable: false }],
-                can_install: false,
-                install_method: 'manual',
-                auth_modes_supported: ['api_key'],
-                warnings: [],
-            },
-        },
+        providerCapabilities: mockState.providerCapabilities,
+        effectiveState: mockState.effectiveState,
+        catalogs: mockState.catalogs,
         catalogLoading: {},
         providers: [
             {
@@ -83,6 +110,21 @@ const renderWithToast = () =>
     render(<ProviderSettings />);
 
 describe('ProviderSettings', () => {
+    beforeEach(() => {
+        vi.useRealTimers();
+        loadProvidersMock.mockClear();
+        loadCatalogMock.mockClear();
+        installModelMock.mockClear();
+        getInstallJobMock.mockClear();
+        validateProviderMock.mockClear();
+        saveActiveProviderMock.mockClear();
+        addToastMock.mockClear();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
     it('loads providers on mount', () => {
         renderWithToast();
         expect(loadProvidersMock).toHaveBeenCalled();
@@ -129,5 +171,51 @@ describe('ProviderSettings', () => {
         renderWithToast();
         fireEvent.click(screen.getByText('Save as active provider'));
         expect(saveActiveProviderMock).toHaveBeenCalled();
+    });
+
+    it('reloads catalog when provider type changes', async () => {
+        renderWithToast();
+        expect(loadCatalogMock).toHaveBeenCalledWith('openai');
+
+        const providerTypeSelect = screen.getByDisplayValue('openai');
+        fireEvent.change(providerTypeSelect, { target: { value: 'codex' } });
+
+        await waitFor(() => {
+            expect(loadCatalogMock).toHaveBeenCalledWith('codex');
+        });
+    });
+
+    it('shows account auth mode for providers that support it', async () => {
+        renderWithToast();
+        const providerTypeSelect = screen.getByDisplayValue('openai');
+        fireEvent.change(providerTypeSelect, { target: { value: 'codex' } });
+
+        await waitFor(() => {
+            expect(screen.getByRole('option', { name: 'account' })).toBeInTheDocument();
+        });
+    });
+
+    it('runs Download & Use and polls install job until done', async () => {
+        vi.useFakeTimers();
+        renderWithToast();
+
+        const providerTypeSelect = screen.getByDisplayValue('openai');
+        fireEvent.change(providerTypeSelect, { target: { value: 'ollama_local' } });
+
+        await waitFor(() => {
+            expect(screen.getByText('Download & Use')).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByText('Download & Use'));
+        expect(installModelMock).toHaveBeenCalledWith('ollama_local', 'qwen2.5-coder:7b');
+
+        await act(async () => {
+            vi.advanceTimersByTime(1300);
+        });
+
+        await waitFor(() => {
+            expect(getInstallJobMock).toHaveBeenCalledWith('ollama_local', 'job-1');
+        });
+        expect(addToastMock).toHaveBeenCalledWith('Modelo instalado correctamente', 'success');
     });
 });

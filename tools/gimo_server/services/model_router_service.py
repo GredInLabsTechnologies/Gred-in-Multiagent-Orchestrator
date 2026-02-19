@@ -14,6 +14,7 @@ from .cost_service import CostService
 class RoutingDecision:
     model: str
     reason: str
+    tier: Optional[str] = None
 
 
 class ModelRouterService:
@@ -68,7 +69,75 @@ class ModelRouterService:
         # 3. User Bounds (Floor/Ceiling) - ABSOLUTE ENFORCEMENT
         final_model, reason = self._apply_user_bounds(final_model, reason, config)
 
-        return RoutingDecision(model=final_model, reason=reason)
+        resolved_model, resolve_reason = self._resolve_provider_model(final_model, node, state, config)
+        if resolve_reason:
+            reason = f"{reason}|{resolve_reason}"
+
+        return RoutingDecision(model=resolved_model, reason=reason, tier=final_model)
+
+    def _resolve_provider_model(
+        self,
+        selected_tier_or_model: str,
+        node: WorkflowNode,
+        state: Dict[str, Any],
+        config: Any,
+    ) -> Tuple[str, str]:
+        """Resolve logical tier (haiku/sonnet/opus/local) to physical model id.
+
+        Sources (priority):
+        1) node.config.provider_model_map
+        2) state.provider_model_map
+        3) config.economy.provider_model_map
+        """
+        tier = str(selected_tier_or_model)
+        if tier not in self._TIERS:
+            return tier, ""
+
+        provider_type = self._resolve_active_provider_type(state)
+        if not provider_type:
+            return tier, ""
+
+        cfg = node.config if isinstance(node.config, dict) else {}
+        node_map = cfg.get("provider_model_map") if isinstance(cfg.get("provider_model_map"), dict) else {}
+        state_map = state.get("provider_model_map") if isinstance(state.get("provider_model_map"), dict) else {}
+        eco_map = {}
+        if hasattr(config, "economy") and isinstance(getattr(config.economy, "provider_model_map", None), dict):
+            eco_map = config.economy.provider_model_map
+
+        combined: Dict[str, Any] = {}
+        combined.update(eco_map)
+        combined.update(state_map)
+        combined.update(node_map)
+
+        provider_entry = combined.get(provider_type)
+        if not isinstance(provider_entry, dict):
+            return tier, ""
+
+        mapped = provider_entry.get(tier)
+        if isinstance(mapped, str) and mapped.strip():
+            return mapped.strip(), f"provider_map:{provider_type}:{tier}->{mapped.strip()}"
+
+        return tier, ""
+
+    def _resolve_active_provider_type(self, state: Dict[str, Any]) -> Optional[str]:
+        from .provider_service import ProviderService
+
+        st_provider = state.get("active_provider_type")
+        if isinstance(st_provider, str) and st_provider.strip():
+            return st_provider.strip()
+
+        cfg = ProviderService.get_config()
+        if not cfg:
+            return None
+
+        if cfg.provider_type:
+            return str(cfg.provider_type)
+
+        if cfg.active and cfg.active in cfg.providers:
+            entry = cfg.providers[cfg.active]
+            return str(entry.provider_type or entry.type)
+
+        return None
 
     def _apply_roi_routing(self, current_model: str, current_reason: str, task_type: str, config: Any) -> Tuple[str, str]:
         autonomy = config.economy.autonomy_level if hasattr(config, "economy") else "manual"

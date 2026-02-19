@@ -81,3 +81,23 @@ async def test_delegate_batch():
 
     assert len(results) == 2
     assert all(r["status"] == "completed" for r in results)
+
+
+@pytest.mark.asyncio
+async def test_execute_single_task_injects_plan_scope_system_prompt():
+    task = PlanTask(id="T1", title="Auth", description="Implement auth", status="pending", dependencies=[])
+    plan = make_plan([task], assignments=[AgentAssignment(agentId="agent-1", taskIds=["T1"])])
+
+    manager = MagicMock()
+    manager.create_sub_agent = AsyncMock(return_value=MagicMock(id="sub-1"))
+    manager.execute_task = AsyncMock(return_value="ok")
+
+    result = await PlanExecutor._execute_single_task(plan, task, manager)
+
+    assert result == "ok"
+    manager.create_sub_agent.assert_awaited_once()
+    req = manager.create_sub_agent.await_args.args[1]
+    assert isinstance(req, DelegationRequest)
+    assert "system_prompt" in req.constraints
+    assert "Plan=plan-1" in req.constraints["system_prompt"]
+    assert "Task=T1" in req.constraints["system_prompt"]
