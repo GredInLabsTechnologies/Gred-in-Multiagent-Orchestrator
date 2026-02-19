@@ -70,6 +70,7 @@ class Settings:
     license_cache_path: Path
     license_grace_days: int
     license_recheck_hours: int
+    license_allow_debug_bypass: bool
 
 
 def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_TOKEN") -> str:
@@ -213,6 +214,9 @@ def _build_settings() -> Settings:
         license_cache_path=base_dir / ".gimo_license",
         license_grace_days=int(os.environ.get("ORCH_LICENSE_GRACE_DAYS", "7")),
         license_recheck_hours=int(os.environ.get("ORCH_LICENSE_RECHECK_HOURS", "24")),
+        license_allow_debug_bypass=os.environ.get(
+            "ORCH_LICENSE_ALLOW_DEBUG_BYPASS", "false"
+        ).lower() in ("true", "1", "yes"),
     )
 
 

@@ -15,16 +15,15 @@ import socket
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("orchestrator.license")
 
 # Clave pública Ed25519 embebida como fallback si no hay env var.
-# Reemplazar con la clave generada por scripts/generate_license_keys.py
+# Generada con scripts/generate_license_keys.py — 2026-02-18
 EMBEDDED_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-PLACEHOLDER_REPLACE_WITH_REAL_KEY_FROM_generate_license_keys.py
+MCowBQYDK2VwAyEApdItyqfVuHkGDXTvzwJrfSSnL3JoXQyWtx8y1hDSA9Y=
 -----END PUBLIC KEY-----"""
 
 # Salt para derivación de clave AES del cache — fijo y embebido
@@ -44,6 +43,32 @@ class LicenseStatus:
     is_lifetime: bool = False
     installations_used: int = 0
     installations_max: int = 2
+
+
+@dataclass
+class _OnlineResponse:
+    """Estructura validada de la respuesta de /api/license/validate."""
+    valid: bool
+    token: str = ""
+    plan: str = "standard"
+    expiresAt: Optional[str] = None
+    isLifetime: bool = False
+    activeInstallations: int = 0
+    maxInstallations: int = 2
+    error: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "_OnlineResponse":
+        return cls(
+            valid=bool(data.get("valid", False)),
+            token=str(data.get("token", "")),
+            plan=str(data.get("plan", "standard")),
+            expiresAt=data.get("expiresAt"),
+            isLifetime=bool(data.get("isLifetime", False)),
+            activeInstallations=int(data.get("activeInstallations", 0)),
+            maxInstallations=int(data.get("maxInstallations", 2)),
+            error=data.get("error"),
+        )
 
 
 def _derive_cache_key(fingerprint: str) -> bytes:
@@ -109,8 +134,8 @@ def _get_public_key_pem() -> str:
 
 class LicenseGuard:
     CACHE_FILE = ".gimo_license"
-    GRACE_PERIOD_DAYS = 7
-    RECHECK_INTERVAL_HOURS = 24
+    DEFAULT_GRACE_PERIOD_DAYS = 7
+    DEFAULT_RECHECK_INTERVAL_HOURS = 24
 
     def __init__(self, settings=None):
         # Fix #2: Usar settings.* en vez de os.environ directamente
@@ -118,6 +143,12 @@ class LicenseGuard:
             self._license_key = (settings.license_key or "").strip()
             self._validate_url = settings.license_validate_url
             self._cache_path = Path(settings.license_cache_path)
+            self._grace_period_days = max(1, int(settings.license_grace_days or self.DEFAULT_GRACE_PERIOD_DAYS))
+            self._recheck_interval_hours = max(
+                1,
+                int(settings.license_recheck_hours or self.DEFAULT_RECHECK_INTERVAL_HOURS),
+            )
+            self._allow_debug_bypass = bool(getattr(settings, "license_allow_debug_bypass", False))
             # Clave pública: settings tiene precedencia, luego env/embebida
             raw_key = settings.license_public_key_pem or ""
             self._public_key_pem = raw_key.replace("\\n", "\n") if raw_key else _get_public_key_pem()
@@ -128,8 +159,19 @@ class LicenseGuard:
                 "https://gimo-web.vercel.app/api/license/validate",
             )
             self._cache_path = Path.cwd() / self.CACHE_FILE
+            self._grace_period_days = max(
+                1,
+                int(os.environ.get("ORCH_LICENSE_GRACE_DAYS", str(self.DEFAULT_GRACE_PERIOD_DAYS))),
+            )
+            self._recheck_interval_hours = max(
+                1,
+                int(os.environ.get("ORCH_LICENSE_RECHECK_HOURS", str(self.DEFAULT_RECHECK_INTERVAL_HOURS))),
+            )
+            self._allow_debug_bypass = os.environ.get(
+                "ORCH_LICENSE_ALLOW_DEBUG_BYPASS",
+                "false",
+            ).lower() in ("true", "1", "yes")
             self._public_key_pem = _get_public_key_pem()
-        self._current_token: Optional[str] = None
         # Fix #6: Cache del fingerprint para evitar subprocesos dobles (wmic en Windows)
         self._cached_fingerprint: Optional[str] = None
         # Marcador: _GUARD_VERSION cambió → se actualizó el software → forzar online
@@ -144,9 +186,16 @@ class LicenseGuard:
         debug_mode = os.environ.get("DEBUG", "false").lower() in ("true", "1")
 
         if not self._license_key:
-            if debug_mode:
-                logger.warning("LICENSE: ORCH_LICENSE_KEY not set (DEBUG mode — skipping gate)")
+            if debug_mode and self._allow_debug_bypass:
+                logger.warning(
+                    "LICENSE: ORCH_LICENSE_KEY not set (DEBUG bypass enabled by ORCH_LICENSE_ALLOW_DEBUG_BYPASS=true)"
+                )
                 return LicenseStatus(valid=True, reason="debug_mode", plan="debug")
+            if debug_mode and not self._allow_debug_bypass:
+                logger.critical(
+                    "LICENSE: ORCH_LICENSE_KEY missing in DEBUG mode. "
+                    "Bypass is disabled (set ORCH_LICENSE_ALLOW_DEBUG_BYPASS=true only for local lab)."
+                )
             return LicenseStatus(valid=False, reason="ORCH_LICENSE_KEY environment variable not set")
 
         # Verificar integridad del propio archivo
@@ -184,7 +233,7 @@ class LicenseGuard:
         """Task asyncio: re-valida online cada 24h en background."""
         while True:
             try:
-                await asyncio.sleep(self.RECHECK_INTERVAL_HOURS * 3600)
+                await asyncio.sleep(self._recheck_interval_hours * 3600)
                 result = await self._validate_online()
                 if not result.valid:
                     logger.critical("LICENSE REVOKED REMOTELY: %s — shutting down.", result.reason)
@@ -200,8 +249,11 @@ class LicenseGuard:
     # Online validation
     # ------------------------------------------------------------------
 
+    _RETRY_ATTEMPTS = 3
+    _RETRY_BASE_DELAY = 1.0  # seconds — backoff: 1s, 2s, 4s
+
     async def _validate_online(self) -> LicenseStatus:
-        """Llama a /api/license/validate en GIMO WEB."""
+        """Llama a /api/license/validate en GIMO WEB con retry + backoff exponencial."""
         import httpx
         from tools.gimo_server.security.fingerprint import (
             generate_fingerprint,
@@ -220,27 +272,40 @@ class LicenseGuard:
             "appVersion": "1.0.0",
         }
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(self._validate_url, json=payload)
+        last_error: Optional[Exception] = None
+        for attempt in range(self._RETRY_ATTEMPTS):
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(self._validate_url, json=payload)
 
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("valid"):
-                token = data.get("token", "")
-                self._current_token = token
-                self._save_cache(token, fingerprint, components)
-                return LicenseStatus(
-                    valid=True,
-                    plan=data.get("plan", "standard"),
-                    expires_at=data.get("expiresAt"),
-                    is_lifetime=data.get("isLifetime", False),
-                    installations_used=data.get("activeInstallations", 1),
-                    installations_max=data.get("maxInstallations", 2),
-                )
-            else:
-                return LicenseStatus(valid=False, reason=data.get("error", "rejected"))
-        else:
-            raise ConnectionError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+                if resp.status_code == 200:
+                    parsed = _OnlineResponse.from_dict(resp.json())
+                    if parsed.valid:
+                        self._save_cache(parsed.token, fingerprint, components)
+                        return LicenseStatus(
+                            valid=True,
+                            plan=parsed.plan,
+                            expires_at=parsed.expiresAt,
+                            is_lifetime=parsed.isLifetime,
+                            installations_used=parsed.activeInstallations,
+                            installations_max=parsed.maxInstallations,
+                        )
+                    else:
+                        # Rechazo explícito del servidor — no reintentar
+                        return LicenseStatus(valid=False, reason=parsed.error or "rejected")
+                else:
+                    last_error = ConnectionError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            except Exception as e:
+                last_error = e
+
+            # Backoff exponencial: 1s, 2s, 4s
+            if attempt < self._RETRY_ATTEMPTS - 1:
+                delay = self._RETRY_BASE_DELAY * (2 ** attempt)
+                logger.debug("LICENSE: Online attempt %d/%d failed, retrying in %.1fs...", attempt + 1, self._RETRY_ATTEMPTS, delay)
+                await asyncio.sleep(delay)
+
+        # Todos los intentos fallaron — propagar para fallback offline
+        raise last_error or ConnectionError("Online validation failed after retries")
 
     # ------------------------------------------------------------------
     # Offline validation
@@ -256,6 +321,12 @@ class LicenseGuard:
                     "Public key not configured — run scripts/generate_license_keys.py "
                     "and set ORCH_LICENSE_PUBLIC_KEY"
                 ),
+            )
+
+        if "BEGIN PUBLIC KEY" not in self._public_key_pem:
+            return LicenseStatus(
+                valid=False,
+                reason="Public key format invalid — expected PEM public key",
             )
 
         cached = self._load_cache()
@@ -278,12 +349,12 @@ class LicenseGuard:
             return LicenseStatus(valid=False, reason="System clock tampered (behind JWT issue time)")
 
         # Grace period: última validación online < 7 días
-        grace_seconds = self.GRACE_PERIOD_DAYS * 86400
+        grace_seconds = self._grace_period_days * 86400
         if now_ts - last_online > grace_seconds:
             days_ago = int((now_ts - last_online) / 86400)
             return LicenseStatus(
                 valid=False,
-                reason=f"Grace period expired ({days_ago} days since last online check, max {self.GRACE_PERIOD_DAYS})",
+                reason=f"Grace period expired ({days_ago} days since last online check, max {self._grace_period_days})",
             )
 
         # Fuzzy fingerprint check

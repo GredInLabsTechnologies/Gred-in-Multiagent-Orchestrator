@@ -60,6 +60,29 @@ Code:
 - `tools/gimo_server/middlewares.py`
 - `tools/gimo_server/security/auth.py`
 
+### License gate (startup + periodic)
+
+- Service startup enforces license validation before serving requests.
+- License is validated online against GIMO WEB and falls back to offline cache only when cryptographically valid.
+- Offline cache is AES-GCM encrypted and machine-bound (fingerprint-derived key).
+- JWT offline validation requires valid Ed25519 signature and clock sanity checks.
+- Periodic recheck interval and grace period are configurable via env:
+  - `ORCH_LICENSE_GRACE_DAYS`
+  - `ORCH_LICENSE_RECHECK_HOURS`
+
+Security defaults:
+
+- Missing `ORCH_LICENSE_KEY` fails closed.
+- DEBUG mode does **not** bypass license gate by default.
+- Optional local-lab bypass requires explicit opt-in:
+  - `ORCH_LICENSE_ALLOW_DEBUG_BYPASS=true`
+
+Required env for production license setup:
+
+- `ORCH_LICENSE_KEY`
+- `ORCH_LICENSE_URL`
+- `ORCH_LICENSE_PUBLIC_KEY`
+
 ## Allowlist (known gap)
 
 There is an allowlist mechanism intended to constrain enumeration.
