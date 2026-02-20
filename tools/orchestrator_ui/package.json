@@ -5,20 +5,17 @@
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build": "tsc && vite build",
+        "build": "tsc -p ./tsconfig.build.json && vite build",
         "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
         "preview": "vite preview",
-        "pretest": "node ./scripts/check-node-lts.mjs",
-        "pretest:ui": "node ./scripts/check-node-lts.mjs",
-        "pretest:file": "node ./scripts/check-node-lts.mjs",
-        "pretest:coverage": "node ./scripts/check-node-lts.mjs",
-        "test": "vitest run --config ./vitest.config.ts --root .",
-        "test:ui": "vitest run --config ./vitest.config.ts --root . --environment jsdom",
-        "test:file": "vitest run --config ./vitest.config.ts --root . --environment jsdom",
-        "test:coverage": "vitest run --coverage --passWithNoTests"
+        "test": "node ./scripts/run-vitest.mjs",
+        "test:ui": "node ./scripts/run-vitest.mjs --environment jsdom",
+        "test:file": "node ./scripts/run-vitest.mjs --environment jsdom",
+        "test:coverage": "node ./scripts/run-vitest.mjs --coverage --passWithNoTests",
+        "test:ci": "node ./scripts/run-vitest.mjs --reporter=dot"
     },
     "engines": {
-        "node": ">=20 <23"
+        "node": ">=20 <21 || >=22 <23 || >=24 <25"
     },
     "dependencies": {
         "@radix-ui/react-slot": "^1.2.4",

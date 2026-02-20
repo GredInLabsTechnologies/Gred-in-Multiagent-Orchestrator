@@ -1,4 +1,3 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { OrchestratorChat } from '../OrchestratorChat';
 
@@ -46,10 +45,10 @@ describe('OrchestratorChat', () => {
         fireEvent.click(screen.getByRole('button', { name: /enviar/i }));
 
         await waitFor(() => {
-            expect(screen.getByText('Intent: HELP')).toBeInTheDocument();
-            expect(screen.getByText('Ruta: direct_response')).toBeInTheDocument();
-            expect(screen.getByText(/Intención detectada: HELP/)).toBeInTheDocument();
-            expect(screen.getByText(/Draft creado: d-help/)).toBeInTheDocument();
+            expect(screen.getByText('Intent: HELP')).toBeTruthy();
+            expect(screen.getByText('Ruta: direct_response')).toBeTruthy();
+            expect(screen.getByText(/Intención detectada: HELP/)).toBeTruthy();
+            expect(screen.getByText(/Draft creado: d-help/)).toBeTruthy();
         });
     });
 
@@ -117,7 +116,7 @@ describe('OrchestratorChat', () => {
         fireEvent.click(runButton);
 
         await waitFor(() => {
-            expect(screen.getByText(/Run r-1 iniciado para approved a-1/)).toBeInTheDocument();
+            expect(screen.getByText(/Run r-1 iniciado para approved a-1/)).toBeTruthy();
             expect(fetchMock).toHaveBeenCalledWith(
                 expect.stringContaining('/ops/runs'),
                 expect.objectContaining({ method: 'POST' })

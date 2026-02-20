@@ -116,6 +116,64 @@ async def lifespan(app: FastAPI):
 
     ops_cleanup_task = asyncio.create_task(ops_runs_cleanup_loop())
 
+    async def mcp_sampling_loop():
+        """
+        Periodically checks for Runs that are blocked waiting for human/agent review (status: blocked_handover)
+        and attempts to push them to connected MCP clients via Sampling.
+        """
+        while True:
+            try:
+                await asyncio.sleep(5)
+                # Ensure the MCP server has at least one active connection
+                from tools.gimo_server.mcp_server import mcp
+                
+                # Check for handovers if clients are connected
+                from tools.gimo_server.services.ops_service import OpsService
+                from mcp.types import CreateMessageRequestParams
+                # Getting recently blocked runs 
+                # (For simplicity in this POC we query 'blocked_handover' directly from ops dir)
+                # FastMCP provides access to sessions
+                sessions = list(mcp._sessions) if hasattr(mcp, "_sessions") else []
+                
+                if not sessions:
+                    continue  # No clients to notify
+                
+                # Fetch pending runs needing handover
+                pending_runs = OpsService.get_runs_by_status("blocked_handover")
+                
+                for run in pending_runs:
+                    # Mark as 'notifying_handover' temporarily so we don't spam
+                    OpsService.update_run_status(run.id, "notifying_handover")
+                    
+                    for session in sessions:
+                        try:
+                            # Send Sampling Push Notification to Client
+                            msg = f"⚠ GIMO Orchestrator requires Intervention for Run {run.id}.\nObjective: {run.objective}\nPlease use gimo_resolve_handover to resolve this."
+                            
+                            await session.create_message(
+                                messages=[
+                                    {
+                                        "role": "user", 
+                                        "content": {
+                                            "type": "text", 
+                                            "text": msg
+                                        }
+                                    }
+                                ],
+                                maxTokens=500,
+                            )
+                            logger.info(f"Pushed Handover Sampling request for {run.id} to client via MCP")
+                        except Exception as e:
+                            logger.error(f"Failed to push Sampling to MCP client: {e}")
+                            OpsService.update_run_status(run.id, "blocked_handover") # rollback
+
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.warning("MCP sampling loop error: %s", exc)
+                
+    mcp_sampling_task = asyncio.create_task(mcp_sampling_loop())
+    
     # Start the Run Worker (processes pending runs in background)
     from tools.gimo_server.services.run_worker import RunWorker
 
@@ -132,10 +190,13 @@ async def lifespan(app: FastAPI):
     cleanup_task.cancel()
     threat_cleanup_task.cancel()
     ops_cleanup_task.cancel()
+    mcp_sampling_task.cancel()
+    
     try:
         await cleanup_task
         await threat_cleanup_task
         await ops_cleanup_task
+        await mcp_sampling_task
     except asyncio.CancelledError:
         logger.debug("Cleanup tasks cancelled successfully.")
     except Exception as exc:
@@ -156,6 +217,14 @@ def create_app() -> FastAPI:
         return JSONResponse({"status": "ok"})
 
     register_middlewares(app)
+
+    # Mount FastMCP SSE Server
+    try:
+        from tools.gimo_server.mcp_server import mcp
+        app.mount("/mcp", mcp.sse_app)
+        logger.info("Universal MCP Server mounted at /mcp")
+    except Exception as e:
+        logger.error(f"Failed to mount FastMCP Server: {e}")
 
     # Register all API routes
     register_routes(app)

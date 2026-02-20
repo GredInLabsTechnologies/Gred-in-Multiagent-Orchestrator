@@ -1,5 +1,7 @@
 from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
+import asyncio
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from .routers.ops import (
@@ -61,3 +63,35 @@ async def get_filtered_openapi(
     filtered["info"]["title"] = "Repo Orchestrator API (Actions)"
     filtered["info"]["description"] = "Filtered spec for external integrations. Admin-only endpoints excluded."
     return filtered
+
+@router.get("/stream")
+async def ops_event_stream(request: Request):
+    """
+    Subscribes to the global GIMO SSE stream.
+    Used by Master Orchestrators (IDE, Agents) to receive asynchronous 
+    events, such as 'handover_required' or 'agent_doubt'.
+    """
+    from tools.gimo_server.services.notification_service import NotificationService
+    
+    async def event_generator():
+        # Suscribir cliente a la cola
+        queue = await NotificationService.subscribe()
+        try:
+            while True:
+                # Comprobar si el cliente se desconectó
+                if await request.is_disconnected():
+                    break
+                
+                # Esperamos mensajes (usamos timeout corto para chequear is_disconnected)
+                try:
+                    message = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    yield f"data: {message}\n\n"
+                except asyncio.TimeoutError:
+                    # Keep-alive opcional, o simplemente pasamos
+                    yield ": keep-alive\n\n"
+                    
+        finally:
+            # Limpiamos cuando el stream se cae
+            NotificationService.unsubscribe(queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

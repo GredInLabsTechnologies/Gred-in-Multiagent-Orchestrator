@@ -12,6 +12,7 @@ export default defineConfig({
             '/file': 'http://127.0.0.1:9325',
             '/search': 'http://127.0.0.1:9325',
             '/diff': 'http://127.0.0.1:9325',
+            '/api': 'http://127.0.0.1:9325',
         }
     }
 })

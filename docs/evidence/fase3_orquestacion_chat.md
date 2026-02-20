@@ -86,11 +86,11 @@ Resultado:
 
 ### 3) Frontend tests (entorno actual)
 
-Comandos probados:
+Comandos probados (estándar unificado):
 
 ```bash
-cd tools/orchestrator_ui && npx vitest run src/components/__tests__/OrchestratorChat.test.tsx
-cd tools/orchestrator_ui && npx vitest run src/components/__tests__/ProviderSettings.test.tsx
+npm --prefix tools/orchestrator_ui run test:file -- src/components/__tests__/OrchestratorChat.test.tsx
+npm --prefix tools/orchestrator_ui run test:file -- src/components/__tests__/ProviderSettings.test.tsx
 ```
 
 Resultado observado en este entorno:

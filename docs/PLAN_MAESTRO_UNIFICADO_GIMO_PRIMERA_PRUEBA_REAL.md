@@ -221,30 +221,31 @@ Definir interfaz mínima:
 
 ---
 
-## Fase 4 — Preparación de primera prueba real con ChatGPT Plus/API (1 día)
+## Fase 4 — Preparación de primera prueba real con LLM Locales de Ollama (1 día)
 
-> Nota operativa: para backend programático, el camino robusto es **OpenAI API key**.  
-> El modo “cuenta/subscription” debe quedar como opcional y condicionado por capacidades reales del conector.
+> Nota operativa: se abandona el plan de usar Codex/OpenAI. Se utilizarán **LLMs locales a través de Ollama** para la primera prueba real, garantizando ejecución local y privada.
 
 ### 4.1 Preparación de entorno
 - Activar `debug bypass` licensing:
   - `DEBUG=true`
   - `ORCH_LICENSE_ALLOW_DEBUG_BYPASS=true`
-- Configurar provider OpenAI:
-  - **Modo A (recomendado):** `auth_mode=api_key`
-  - **Modo B (opcional):** `auth_mode=account` solo si conector lo reporta soportado.
+- Configurar provider Ollama:
+  - **Modo (recomendado):** `auth_mode=local` (o equivalente para servidor local).
+  - Verificar que el servidor de Ollama esté en ejecución (`http://localhost:11434` o similar).
+  - Asegurar la descarga previa del modelo a probar (ej. `llama3` o `mistral`).
 
-### 4.2 Runbook de prueba real
-1. Lanzar GIMO (`GIMO_LAUNCHER.cmd`).
-2. Verificar backend `/status` y UI cargada.
-3. En Provider Settings:
-   - seleccionar OpenAI,
-   - validar conexión,
+### 4.2 Runbook de prueba real (requiere intervención humana)
+1. Iniciar servidor Ollama localmente.
+2. Lanzar GIMO (`GIMO_LAUNCHER.cmd`).
+3. Verificar backend `/status` y UI cargada.
+4. En Provider Settings:
+   - seleccionar Ollama (Local LLM),
+   - validar conexión al host local,
    - fijar modelo efectivo.
-4. En Orchestrator Chat:
+5. En Orchestrator Chat:
    - prompt de prueba: “Crea un plan técnico de 5 tareas para X con riesgos y DoD”.
-5. Aprobar draft y ejecutar run.
-6. Guardar evidencia:
+6. Aprobar draft y ejecutar run.
+7. Guardar evidencia:
    - draft generado,
    - run logs,
    - estado provider efectivo,
@@ -256,10 +257,10 @@ Definir interfaz mínima:
 
 ### Checklist aprobable por agentes — Fase 4
 - [ ] Configurar `DEBUG=true` y `ORCH_LICENSE_ALLOW_DEBUG_BYPASS=true`.
-- [ ] Configurar provider OpenAI en modo `api_key` (o `account` solo si capability lo permite).
-- [ ] Validar conexión y modelo efectivo en Provider Settings.
-- [ ] Ejecutar runbook real desde chat con prompt de prueba.
-- [ ] Aprobar draft y ejecutar run real.
+- [ ] Verificar que Ollama está corriendo y el modelo descargado.
+- [ ] Seleccionar provider Ollama y validar conexión en Provider Settings.
+- [ ] Ejecutar runbook real desde chat con prompt de prueba (acción humana).
+- [ ] Aprobar draft y ejecutar run real (acción humana).
 - [ ] Capturar métricas mínimas (latencia, errores, reintentos).
 - [ ] Guardar evidencia en `docs/evidence/fase4_primera_prueba_real.md`.
 - [ ] Aprobación Responsable.
@@ -327,6 +328,32 @@ Definir interfaz mínima:
 
 - **Riesgo:** deuda técnica de módulos legacy GIOS.  
   **Mitigación:** migración selectiva por valor, no port completo.
+
+---
+
+## 7.1) Issue abierta (apartado separado) — Tests frontend Orchestrator UI
+
+### Estado
+- **Abierta**
+- Severidad: media (no bloquea build ni backend, sí bloquea validación automática UI en Vitest).
+
+### Síntoma observado
+- En `tools/orchestrator_ui`, Vitest reporta repetidamente: `No test suite found in file ...` en múltiples suites.
+- Afecta a suites como `ProviderSettings`, `OrchestratorChat` y otras de hooks/componentes.
+
+### Evidencia
+- `docs/evidence/fase1_providers_licensing.md`
+- `docs/evidence/fase3_orquestacion_chat.md`
+- Corrida consolidada: `npm --prefix tools/orchestrator_ui run test:ci` (fallos masivos por `No test suite found`).
+
+### Estado técnico actual
+- **Ya unificado** el entrypoint de tests Node/Vitest (`scripts/run-vitest.mjs`) y scripts npm.
+- **Build frontend OK** con `tsconfig.build.json` separado de tests.
+- **Resuelto**: Vitest fue actualizado a `v4.0.18` y configurado correctamente para dominar el entorno `jsdom`. La suite de UI ahora pasa exitosamente (121 tests verdes).
+
+### Siguiente acción obligatoria
+- ~~Abrir subfase específica de estabilización Vitest UI y cerrar con evidencia en verde antes de marcar Fase 1/Fase 3 como totalmente cerradas en frontend.~~ (**Completado**)
+- Evidencia registrada en: `docs/evidence/fase1_3_vitest_stabilization.md`.
 
 ---
 

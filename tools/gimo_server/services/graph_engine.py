@@ -121,7 +121,8 @@ class GraphEngine:
                     if isinstance(output, dict) and output.get("pause_execution"):
                         self._resume_from_node_id = node.id
                         self.state.data["execution_paused"] = True
-                        self.state.data["pause_reason"] = output.get("pause_reason", "human_review_pending")
+                        reason = output.get("pause_reason", "human_review_pending")
+                        self.state.data["pause_reason"] = reason
                         self._append_step_log(
                             step_id=step_id,
                             node=node,
@@ -129,6 +130,20 @@ class GraphEngine:
                             started_at=started_at,
                             output=output,
                         )
+                        
+                        # Trigger MCP Notification / Global SSE
+                        from tools.gimo_server.services.notification_service import NotificationService
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(NotificationService.publish("handover_required", {
+                                "workflow_id": self.graph.id,
+                                "node_id": node.id,
+                                "reason": reason,
+                                "context": output
+                            }))
+                        except Exception as ne:
+                            logger.error(f"Failed to publish notification: {ne}")
+                            
                         break
 
                     self.state.data["execution_paused"] = False

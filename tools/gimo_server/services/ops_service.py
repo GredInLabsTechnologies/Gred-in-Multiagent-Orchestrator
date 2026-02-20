@@ -345,6 +345,20 @@ class OpsService:
             return run
 
     @classmethod
+    def get_runs_by_status(cls, status: str) -> List[OpsRun]:
+        if not cls.RUNS_DIR.exists():
+            return []
+        out: List[OpsRun] = []
+        for f in cls.RUNS_DIR.glob("r_*.json"):
+            try:
+                run = OpsRun.model_validate_json(f.read_text(encoding="utf-8"))
+                if run.status == status:
+                    out.append(run)
+            except Exception:
+                continue
+        return sorted(out, key=lambda r: r.created_at)
+
+    @classmethod
     def count_active_runs(cls) -> int:
         if not cls.RUNS_DIR.exists():
             return 0

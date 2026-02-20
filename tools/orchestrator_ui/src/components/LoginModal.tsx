@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { API_BASE } from '../types';
 
 interface Props {
@@ -6,9 +6,22 @@ interface Props {
 }
 
 export function LoginModal({ onAuthenticated }: Props) {
-    const [token, setToken] = useState('');
+    // [WARNING] [SECURITY] [TEMPORAL FIX]
+    // Autocompletar el token leyendo `import.meta.env.VITE_ORCH_TOKEN` 
+    // es una regresión de seguridad si esto se transpila/expone en producción. 
+    // Este código DEBE ser eliminado antes de publicar.
+    const [token, setToken] = useState(import.meta.env.VITE_ORCH_TOKEN || '');
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+    const [autoAttempted, setAutoAttempted] = useState(false);
+
+    useEffect(() => {
+        if (token && !autoAttempted) {
+            setAutoAttempted(true);
+            const fakeEvent = { preventDefault: () => { } } as FormEvent;
+            handleSubmit(fakeEvent);
+        }
+    }, [token, autoAttempted]);
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();

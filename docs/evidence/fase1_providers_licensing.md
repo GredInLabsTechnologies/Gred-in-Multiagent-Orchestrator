@@ -72,10 +72,10 @@ Variables relevantes presentes (entre otras):
 
 ## Estado de tests UI (ProviderSettings)
 
-Comando ejecutado:
+Comando ejecutado (estándar unificado):
 
 ```bash
-npm --prefix tools/orchestrator_ui exec -- vitest --root tools/orchestrator_ui run --environment jsdom src/components/__tests__/ProviderSettings.test.tsx
+npm --prefix tools/orchestrator_ui run test:file -- src/components/__tests__/ProviderSettings.test.tsx
 ```
 
 Resultado actual:

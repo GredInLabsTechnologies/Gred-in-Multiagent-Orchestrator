@@ -1,4 +1,3 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ProviderSettings } from '../ProviderSettings';
 
@@ -116,7 +115,7 @@ describe('ProviderSettings', () => {
 
     it('renderiza y carga providers al montar', () => {
         render(<ProviderSettings />);
-        expect(screen.getByText('Provider Settings')).toBeInTheDocument();
+        expect(screen.getByText('Provider Settings')).toBeTruthy();
         expect(mocks.loadProvidersMock).toHaveBeenCalled();
     });
 

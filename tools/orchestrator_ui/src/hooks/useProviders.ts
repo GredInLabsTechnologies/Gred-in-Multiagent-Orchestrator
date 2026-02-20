@@ -149,6 +149,15 @@ export const useProviders = () => {
         return data;
     }, [loadProviders]);
 
+    const startCodexDeviceLogin = useCallback(async () => {
+        const res = await fetch(`${API_BASE}/ops/connectors/codex/login`, {
+            method: 'POST',
+            ...getRequestInit(true),
+        });
+        if (!res.ok) throw new Error('Failed to start Codex device login flow');
+        return await res.json();
+    }, []);
+
     const saveActiveProvider = useCallback(async (payload: SaveActiveProviderPayload) => {
         const currentRes = await fetch(`${API_BASE}/ops/provider`, getRequestInit());
         if (!currentRes.ok) throw new Error('Failed to read provider config');
@@ -156,14 +165,15 @@ export const useProviders = () => {
 
         const providerType = payload.providerType;
         const providerId = payload.providerId;
+        const isWorkerInfo = providerId.startsWith('ollama-worker-');
         const existing = current?.providers?.[providerId] || {};
         const capabilities = providerCapabilities[providerType] || existing.capabilities || {};
         const next = {
             ...current,
-            active: providerId,
-            provider_type: providerType,
-            model_id: payload.modelId,
-            auth_mode: payload.authMode,
+            active: isWorkerInfo ? current.active : providerId,
+            provider_type: isWorkerInfo ? current.provider_type : providerType,
+            model_id: isWorkerInfo ? current.model_id : payload.modelId,
+            auth_mode: isWorkerInfo ? current.auth_mode : payload.authMode,
             providers: {
                 ...(current.providers || {}),
                 [providerId]: {
@@ -297,6 +307,7 @@ export const useProviders = () => {
         saveActiveProvider,
         addProvider,
         removeProvider,
-        testProvider
+        testProvider,
+        startCodexDeviceLogin
     };
 };
