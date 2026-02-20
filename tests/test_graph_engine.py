@@ -531,6 +531,91 @@ async def test_graph_engine_agent_task_supervisor_workers_pattern():
 
 
 @pytest.mark.asyncio
+async def test_graph_engine_supervisor_workers_parallel_respects_limit():
+    nodes = [
+        WorkflowNode(
+            id="AG",
+            type="agent_task",
+            config={
+                "pattern": "supervisor_workers",
+                "parallel": True,
+                "max_parallel_workers": 2,
+                "workers": [
+                    {"id": "w1", "task": "t1"},
+                    {"id": "w2", "task": "t2"},
+                    {"id": "w3", "task": "t3"},
+                ],
+            },
+        )
+    ]
+    graph = WorkflowGraph(id="agent_supervisor_workers_parallel", nodes=nodes, edges=[])
+    engine = GraphEngine(graph)
+
+    counters = {"active": 0, "peak": 0}
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        worker_id = node.config.get("worker_id")
+        if worker_id:
+            counters["active"] += 1
+            counters["peak"] = max(counters["peak"], counters["active"])
+            await asyncio.sleep(0.02)
+            counters["active"] -= 1
+            return {"worker": worker_id, "done": True}
+        return {"noop": True}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["pattern"] == "supervisor_workers"
+    assert state.data["parallel"] is True
+    assert state.data["max_parallel_workers"] == 2
+    assert set(state.data["worker_results"].keys()) == {"w1", "w2", "w3"}
+    assert counters["peak"] <= 2
+
+
+@pytest.mark.asyncio
+async def test_graph_engine_supervisor_workers_collect_partial_keeps_successes():
+    nodes = [
+        WorkflowNode(
+            id="AG",
+            type="agent_task",
+            config={
+                "pattern": "supervisor_workers",
+                "parallel": True,
+                "fail_policy": "collect_partial",
+                "max_parallel_workers": 2,
+                "workers": [
+                    {"id": "w1", "task": "ok"},
+                    {"id": "w2", "task": "boom"},
+                    {"id": "w3", "task": "ok2"},
+                ],
+            },
+        )
+    ]
+    graph = WorkflowGraph(id="agent_supervisor_workers_partial", nodes=nodes, edges=[])
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        worker_id = node.config.get("worker_id")
+        if worker_id == "w2":
+            raise RuntimeError("worker failed")
+        if worker_id:
+            return {"worker": worker_id, "done": True}
+        return {"noop": True}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["pattern"] == "supervisor_workers"
+    assert state.data["fail_policy"] == "collect_partial"
+    assert state.data["partial_success"] is True
+    assert set(state.data["worker_results"].keys()) == {"w1", "w3"}
+    assert "w2" in state.data["worker_errors"]
+
+
+@pytest.mark.asyncio
 async def test_graph_engine_agent_task_reviewer_loop_stops_when_approved():
     nodes = [
         WorkflowNode(
@@ -593,6 +678,10 @@ async def test_graph_engine_agent_task_handoff_curates_context():
     state = await engine.execute(initial_state={"ticket": "SEC-2", "scope": "auth", "noise": "ignore"})
 
     assert state.data["pattern"] == "handoff"
+    assert "handoff_package" in state.data
+    assert state.data["handoff_package"]["source_node"] == "AG__source"
+    assert state.data["handoff_package"]["target_node"] == "AG__target"
+    assert state.data["handoff_package"]["context_keys"] == ["ticket", "scope"]
     assert state.data["handoff_context"] == {"ticket": "SEC-2", "scope": "auth"}
     assert state.data["source_output"]["received"] == {"ticket": "SEC-2", "scope": "auth"}
     assert state.data["target_output"]["received"] == {"ticket": "SEC-2", "scope": "auth"}

@@ -6,7 +6,7 @@ describe('Sidebar', () => {
     it('renders all tab buttons', () => {
         render(<Sidebar activeTab="graph" onTabChange={vi.fn()} />);
         expect(screen.getByTitle('Graph')).toBeInTheDocument();
-        expect(screen.getByTitle('Maintenance')).toBeInTheDocument();
+        expect(screen.getByTitle('Maint')).toBeInTheDocument();
         expect(screen.getByTitle('Logs')).toBeInTheDocument();
         expect(screen.getByTitle('Settings')).toBeInTheDocument();
     });
@@ -14,7 +14,7 @@ describe('Sidebar', () => {
     it('calls onTabChange when tab clicked', () => {
         const onTabChange = vi.fn();
         render(<Sidebar activeTab="graph" onTabChange={onTabChange} />);
-        fireEvent.click(screen.getByTitle('Maintenance'));
+        fireEvent.click(screen.getByTitle('Maint'));
         expect(onTabChange).toHaveBeenCalledWith('maintenance');
     });
 

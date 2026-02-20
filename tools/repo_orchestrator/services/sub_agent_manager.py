@@ -3,11 +3,13 @@ import logging
 from typing import Dict, List, Optional
 from tools.repo_orchestrator.models import SubAgent, SubAgentConfig, DelegationRequest
 from tools.repo_orchestrator.services.model_service import ModelService
+from tools.repo_orchestrator.services.system_prompt_service import SystemPromptService
 
 logger = logging.getLogger("orchestrator.sub_agent_manager")
 
 class SubAgentManager:
     _sub_agents: Dict[str, SubAgent] = {}
+    _system_prompts: Dict[str, str] = {}
 
     @classmethod
     async def create_sub_agent(cls, parent_id: str, request: DelegationRequest) -> SubAgent:
@@ -30,6 +32,11 @@ class SubAgentManager:
             config=config
         )
         cls._sub_agents[sub_id] = agent
+        cls._system_prompts[sub_id] = SystemPromptService.build_master_prompt(
+            parent_id=parent_id,
+            sub_task=request.subTaskDescription,
+            constraints=request.constraints,
+        )
         logger.info(f"Created sub-agent {sub_id} for parent {parent_id}")
         
         from tools.repo_orchestrator.ws.manager import manager
@@ -57,6 +64,7 @@ class SubAgentManager:
         if sub_id in cls._sub_agents:
             agent = cls._sub_agents[sub_id]
             agent.status = "terminated"
+            cls._system_prompts.pop(sub_id, None)
             logger.info(f"Terminated sub-agent {sub_id}")
             
             from tools.repo_orchestrator.ws.manager import manager
@@ -92,7 +100,21 @@ class SubAgentManager:
                 # Try to initialize default if not ready
                  ModelService.initialize()
 
-            response = await ModelService.generate(task, agent.model, temperature=agent.config.temperature)
+            system_prompt = cls._system_prompts.get(sub_id) or SystemPromptService.build_master_prompt(
+                parent_id=agent.parentId,
+                sub_task=task,
+                constraints={},
+            )
+            execution_prompt = SystemPromptService.compose_execution_prompt(
+                system_prompt=system_prompt,
+                task=task,
+            )
+            response = await ModelService.generate(
+                execution_prompt,
+                agent.model,
+                temperature=agent.config.temperature,
+                system_prompt=system_prompt,
+            )
             
             agent.status = "idle"
             agent.currentTask = None

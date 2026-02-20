@@ -8,7 +8,17 @@
         "build": "tsc && vite build",
         "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
         "preview": "vite preview",
+        "pretest": "node ./scripts/check-node-lts.mjs",
+        "pretest:ui": "node ./scripts/check-node-lts.mjs",
+        "pretest:file": "node ./scripts/check-node-lts.mjs",
+        "pretest:coverage": "node ./scripts/check-node-lts.mjs",
+        "test": "vitest run --config ./vitest.config.ts --root .",
+        "test:ui": "vitest run --config ./vitest.config.ts --root . --environment jsdom",
+        "test:file": "vitest run --config ./vitest.config.ts --root . --environment jsdom",
         "test:coverage": "vitest run --coverage --passWithNoTests"
+    },
+    "engines": {
+        "node": ">=20 <23"
     },
     "dependencies": {
         "@radix-ui/react-slot": "^1.2.4",
@@ -30,7 +40,7 @@
         "@typescript-eslint/eslint-plugin": "^7.2.0",
         "@typescript-eslint/parser": "^7.2.0",
         "@vitejs/plugin-react": "^4.2.1",
-        "@vitest/coverage-v8": "^1.4.0",
+        "@vitest/coverage-v8": "^4.0.18",
         "autoprefixer": "^10.4.18",
         "eslint": "^8.57.1",
         "eslint-plugin-react-hooks": "^7.0.1",
@@ -40,6 +50,6 @@
         "tailwindcss": "^3.4.1",
         "typescript": "^5.2.2",
         "vite": "^5.2.0",
-        "vitest": "^1.4.0"
+        "vitest": "^4.0.18"
     }
 }

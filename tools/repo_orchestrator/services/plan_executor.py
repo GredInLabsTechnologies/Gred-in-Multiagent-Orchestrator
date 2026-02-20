@@ -122,10 +122,16 @@ class PlanExecutor:
 
         agent_id = assigned_agent or "api"
 
+        plan_scope_prompt = (
+            f"Plan={plan.id}; Task={task.id}; "
+            "Debes ejecutar estrictamente este task, reportar blockers y no salir del alcance."
+        )
+
         # Create a sub-agent for this task
         req = DelegationRequest(
             subTaskDescription=f"[{task.title}] {task.description}",
             modelPreference="llama3",
+            constraints={"system_prompt": plan_scope_prompt},
         )
         sub_agent = await manager.create_sub_agent(agent_id, req)
 

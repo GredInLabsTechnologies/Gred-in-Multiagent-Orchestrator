@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Loader2, Send, Sparkles, X } from 'lucide-react';
-import { API_BASE, OpsDraft } from '../types';
+import { API_BASE, ChatExecutionStep, OpsApproveResponse, OpsDraft } from '../types';
 import { useToast } from './Toast';
 
 type ComposerMode = 'generate' | 'draft';
@@ -11,7 +11,56 @@ interface ChatMessage {
     text: string;
     ts: string;
     draftId?: string;
+    approvedId?: string;
+    runId?: string;
+    detectedIntent?: string;
+    decisionPath?: string;
+    errorActionable?: string;
+    executionSteps?: ChatExecutionStep[];
 }
+
+const buildDraftSteps = (
+    draft: OpsDraft,
+    extras?: Partial<Pick<ChatMessage, 'approvedId' | 'runId'>>
+): ChatExecutionStep[] => {
+    const intentDetected = Boolean(draft.context?.detected_intent);
+    const hasError = draft.status === 'error';
+    const hasApproval = Boolean(extras?.approvedId);
+    const hasRun = Boolean(extras?.runId);
+
+    return [
+        {
+            key: 'intent_detected',
+            label: 'Intención detectada',
+            status: intentDetected ? 'done' : 'pending',
+            detail: draft.context?.detected_intent,
+        },
+        {
+            key: 'draft_created',
+            label: 'Draft creado',
+            status: hasError ? 'error' : 'done',
+            detail: hasError ? (draft.error || 'No se pudo crear el draft') : draft.id,
+        },
+        {
+            key: 'approved',
+            label: 'Draft aprobado',
+            status: hasApproval ? 'done' : 'pending',
+            detail: extras?.approvedId,
+        },
+        {
+            key: 'run_created',
+            label: 'Run creado',
+            status: hasRun ? 'done' : 'pending',
+            detail: extras?.runId,
+        },
+        {
+            key: 'run_status',
+            label: 'Estado de run',
+            status: hasError ? 'error' : (hasRun ? 'done' : 'pending'),
+            detail: hasError ? (draft.error || draft.context?.error_actionable) : (hasRun ? 'pending' : undefined),
+        },
+    ];
+};
 
 export const OrchestratorChat: React.FC = () => {
     const [messages, setMessages] = useState<ChatMessage[]>([
@@ -68,11 +117,13 @@ export const OrchestratorChat: React.FC = () => {
 
     const approveDraft = async (draftId: string) => {
         try {
+            const currentDraft = drafts.find(d => d.id === draftId);
             const response = await fetch(`${API_BASE}/ops/drafts/${draftId}/approve`, {
                 method: 'POST',
                 credentials: 'include',
             });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data: OpsApproveResponse = await response.json();
             setDrafts(prev => prev.map(d => d.id === draftId ? { ...d, status: 'approved' } : d));
             appendMessage({
                 id: `m-approve-${Date.now()}`,
@@ -80,6 +131,22 @@ export const OrchestratorChat: React.FC = () => {
                 text: `Draft ${draftId} aprobado y listo para ejecución.`,
                 ts: new Date().toISOString(),
                 draftId,
+                approvedId: data.approved.id,
+                runId: data.run?.id,
+                detectedIntent: currentDraft?.context?.detected_intent,
+                decisionPath: currentDraft?.context?.decision_path,
+                executionSteps: buildDraftSteps(
+                    {
+                        ...(currentDraft || {
+                            id: draftId,
+                            prompt: '',
+                            status: 'approved',
+                            created_at: new Date().toISOString(),
+                        }),
+                        status: 'approved',
+                    },
+                    { approvedId: data.approved.id, runId: data.run?.id }
+                ),
             });
             addToast('Draft aprobado', 'success');
         } catch {
@@ -108,6 +175,45 @@ export const OrchestratorChat: React.FC = () => {
         }
     };
 
+    const createRunFromApproved = async (approvedId: string, sourceDraftId?: string) => {
+        try {
+            const response = await fetch(`${API_BASE}/ops/runs`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ approved_id: approvedId }),
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const run = await response.json();
+            appendMessage({
+                id: `m-run-${run.id}`,
+                role: 'system',
+                text: `Run ${run.id} iniciado para approved ${approvedId}.`,
+                ts: new Date().toISOString(),
+                draftId: sourceDraftId,
+                approvedId,
+                runId: run.id,
+                executionSteps: [
+                    {
+                        key: 'run_created',
+                        label: 'Run creado',
+                        status: 'done',
+                        detail: run.id,
+                    },
+                    {
+                        key: 'run_status',
+                        label: 'Estado de run',
+                        status: run.status === 'error' ? 'error' : 'done',
+                        detail: run.status,
+                    },
+                ],
+            });
+            addToast('Run creado', 'success');
+        } catch {
+            addToast('No se pudo crear el run', 'error');
+        }
+    };
+
     const handleSend = async () => {
         const prompt = input.trim();
         if (!prompt || isSending) return;
@@ -130,12 +236,19 @@ export const OrchestratorChat: React.FC = () => {
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const generated: OpsDraft = await response.json();
                 upsertDraft(generated);
+                const intent = generated.context?.detected_intent;
+                const decisionPath = generated.context?.decision_path;
+                const actionable = generated.context?.error_actionable || generated.error || undefined;
                 appendMessage({
                     id: `m-gen-${generated.id}`,
                     role: generated.status === 'error' ? 'system' : 'assistant',
                     text: generated.content || generated.error || 'Draft generado sin contenido.',
                     ts: generated.created_at,
                     draftId: generated.id,
+                    detectedIntent: intent,
+                    decisionPath,
+                    errorActionable: actionable,
+                    executionSteps: buildDraftSteps(generated),
                 });
                 addToast('Draft generado con IA', 'success');
             } else {
@@ -154,6 +267,7 @@ export const OrchestratorChat: React.FC = () => {
                     text: `Draft manual ${created.id} creado y pendiente de aprobación.`,
                     ts: created.created_at,
                     draftId: created.id,
+                    executionSteps: buildDraftSteps(created),
                 });
                 addToast('Draft manual creado', 'success');
             }
@@ -200,6 +314,42 @@ export const OrchestratorChat: React.FC = () => {
                                 : 'bg-[#ff9f0a]/10 border-[#ff9f0a]/20 text-[#ffb340]'
                             }`}>
                             <p className="text-xs text-[#f5f5f7] whitespace-pre-wrap">{message.text}</p>
+                            {(message.detectedIntent || message.decisionPath) && (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                    {message.detectedIntent && (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full border border-[#0a84ff]/40 bg-[#0a84ff]/10 text-[#7fc1ff]">
+                                            Intent: {message.detectedIntent}
+                                        </span>
+                                    )}
+                                    {message.decisionPath && (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full border border-[#2c2c2e] bg-[#1a1a1c] text-[#d0d0d4]">
+                                            Ruta: {message.decisionPath}
+                                        </span>
+                                    )}
+                                </div>
+                            )}
+                            {message.executionSteps && message.executionSteps.length > 0 && (
+                                <div className="mt-2 space-y-1">
+                                    {message.executionSteps.map(step => (
+                                        <div
+                                            key={`${message.id}-${step.key}`}
+                                            className={`text-[10px] rounded-md px-2 py-1 border ${step.status === 'done'
+                                                ? 'border-[#32d74b]/30 bg-[#32d74b]/10 text-[#8ae89a]'
+                                                : step.status === 'error'
+                                                    ? 'border-[#ff453a]/30 bg-[#ff453a]/10 text-[#ff8f88]'
+                                                    : 'border-[#2c2c2e] bg-[#171718] text-[#b5b5bb]'
+                                                }`}
+                                        >
+                                            {step.label}: {step.detail || (step.status === 'pending' ? 'pendiente' : step.status)}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {message.errorActionable && (
+                                <div className="mt-2 text-[10px] rounded-md border border-[#ff9f0a]/30 bg-[#ff9f0a]/10 text-[#ffbe69] px-2 py-1">
+                                    Acción sugerida: {message.errorActionable}
+                                </div>
+                            )}
                             {message.draftId && pendingDrafts.some(d => d.id === message.draftId) && (
                                 <div className="mt-2 flex items-center gap-2">
                                     <button
@@ -213,6 +363,16 @@ export const OrchestratorChat: React.FC = () => {
                                         className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-[#ff453a]/15 text-[#ff453a] border border-[#ff453a]/30"
                                     >
                                         <X size={11} /> Rechazar
+                                    </button>
+                                </div>
+                            )}
+                            {message.approvedId && !message.runId && (
+                                <div className="mt-2 flex items-center gap-2">
+                                    <button
+                                        onClick={() => void createRunFromApproved(message.approvedId!, message.draftId)}
+                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-[#0a84ff]/15 text-[#0a84ff] border border-[#0a84ff]/30"
+                                    >
+                                        <Sparkles size={11} /> Ejecutar run
                                     </button>
                                 </div>
                             )}

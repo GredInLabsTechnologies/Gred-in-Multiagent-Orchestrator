@@ -206,6 +206,71 @@ export interface ProviderCreateRequest {
     models?: string[];
 }
 
+export interface ProviderInfo {
+    id: string;
+    type: string;
+    is_local: boolean;
+    config: any;
+    capabilities?: Record<string, any>;
+    model?: string;
+    auth_mode?: string | null;
+    auth_ref?: string | null;
+}
+
+export interface ProviderModelInfo {
+    id: string;
+    label: string;
+    installed: boolean;
+    downloadable: boolean;
+    context_window?: number;
+    size?: string;
+    quality_tier?: string;
+}
+
+export interface ProviderCatalogResponse {
+    provider_type: string;
+    installed_models: ProviderModelInfo[];
+    available_models: ProviderModelInfo[];
+    recommended_models: ProviderModelInfo[];
+    can_install: boolean;
+    install_method: 'api' | 'command' | 'manual';
+    auth_modes_supported: string[];
+    warnings: string[];
+}
+
+export interface ProviderValidatePayload {
+    api_key?: string;
+    base_url?: string;
+    org?: string;
+    account?: string;
+}
+
+export interface ProviderValidateResult {
+    valid: boolean;
+    health: string;
+    effective_model?: string;
+    warnings: string[];
+    error_actionable?: string;
+}
+
+export interface ProviderInstallResult {
+    status: 'queued' | 'running' | 'done' | 'error';
+    message: string;
+    progress?: number;
+    job_id?: string;
+}
+
+export interface SaveActiveProviderPayload {
+    providerId: string;
+    providerType: string;
+    modelId: string;
+    authMode: string;
+    apiKey?: string;
+    account?: string;
+    baseUrl?: string;
+    org?: string;
+}
+
 export interface RepoInfo {
     name: string;
     path: string;
@@ -233,12 +298,34 @@ export interface OpsPlan {
 export interface OpsDraft {
     id: string;
     prompt: string;
-    context?: Record<string, unknown>;
+    context?: {
+        detected_intent?: string;
+        decision_path?: 'security_block' | 'direct_response' | 'llm_generate' | string;
+        can_bypass_llm?: boolean;
+        error_actionable?: string;
+        [key: string]: unknown;
+    };
     provider?: string | null;
     content?: string | null;
     status: 'draft' | 'rejected' | 'approved' | 'error';
     error?: string | null;
     created_at: string;
+}
+
+export type ChatExecutionStepKey =
+    | 'intent_detected'
+    | 'draft_created'
+    | 'approved'
+    | 'run_created'
+    | 'run_status';
+
+export type ChatExecutionStepStatus = 'pending' | 'done' | 'error';
+
+export interface ChatExecutionStep {
+    key: ChatExecutionStepKey;
+    label: string;
+    status: ChatExecutionStepStatus;
+    detail?: string;
 }
 
 export interface OpsApproved {
@@ -485,5 +572,7 @@ export interface MasteryRecommendation {
     suggested_model: string;
     reason: string;
 }
+
+
 
 

@@ -46,3 +46,36 @@ def test_promote_eco_mode_recommendation():
     assert rec["recommendations"]["eco"]["model"] == "sonnet"
     assert rec["recommendations"]["eco"]["impact"]["saving_pct"] > 0
     assert rec["saving_prospect"] > 0
+
+
+@pytest.mark.asyncio
+async def test_model_router_resolves_tier_to_provider_model_map():
+    service = ModelRouterService()
+    node = WorkflowNode(id="test", type="llm_call", config={"task_type": "security_review"})
+
+    mock_config = OpsConfig(
+        economy=UserEconomyConfig(
+            provider_model_map={
+                "openai": {
+                    "opus": "gpt-4.1",
+                    "sonnet": "gpt-4o",
+                    "haiku": "gpt-4o-mini",
+                }
+            }
+        )
+    )
+
+    mock_provider_cfg = MagicMock()
+    mock_provider_cfg.provider_type = "openai"
+    mock_provider_cfg.active = "openai_main"
+    mock_provider_cfg.providers = {}
+
+    with patch("tools.gimo_server.services.ops_service.OpsService") as MockOps:
+        MockOps.get_config.return_value = mock_config
+        with patch("tools.gimo_server.services.provider_service.ProviderService") as MockProvider:
+            MockProvider.get_config.return_value = mock_provider_cfg
+            decision = await service.choose_model(node, {})
+
+    assert decision.tier == "opus"
+    assert decision.model == "gpt-4.1"
+    assert "provider_map:openai:opus->gpt-4.1" in decision.reason

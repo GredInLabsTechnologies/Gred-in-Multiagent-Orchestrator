@@ -109,7 +109,9 @@ describe('MaintenanceIsland', () => {
 
     it('renders system status label', () => {
         render(<MaintenanceIsland />)
-        expect(screen.getByText('Status')).toBeInTheDocument()
+        // "Status" appears as a heading label in the system core card
+        const statusElements = screen.getAllByText('Status')
+        expect(statusElements.length).toBeGreaterThanOrEqual(1)
     })
 
     it('calls restart when restart button clicked', () => {
@@ -145,25 +147,27 @@ describe('MaintenanceIsland', () => {
         expect(screen.getByText('Service unavailable')).toBeInTheDocument()
     })
 
-    it('renders lockdown banner when lockdown is true', () => {
+    it('renders lockdown status when lockdown is true', () => {
         setLockdown(true)
         render(<MaintenanceIsland />)
-        expect(screen.getByText('Security: LOCKDOWN')).toBeInTheDocument()
-        expect(screen.getByText('Clear lockdown')).toBeInTheDocument()
+        // LOCKDOWN appears in both status and security level sections
+        const lockdownElements = screen.getAllByText('LOCKDOWN')
+        expect(lockdownElements.length).toBeGreaterThanOrEqual(1)
     })
 
-    it('calls clearLockdown when Clear lockdown clicked', () => {
+    it('calls clearLockdown when reset button clicked', () => {
         setLockdown(true)
         render(<MaintenanceIsland />)
-        const clearButton = screen.getByText('Clear lockdown')
-        fireEvent.click(clearButton)
+        const resetButton = screen.getByTitle('Reset to NOMINAL')
+        fireEvent.click(resetButton)
         expect(mockSecurityService.clearLockdown).toHaveBeenCalled()
     })
 
-    it('displays LOCKDOWN status when in lockdown', () => {
+    it('displays LOCKDOWN as status label when in lockdown', () => {
         setLockdown(true)
         render(<MaintenanceIsland />)
-        expect(screen.getByText('LOCKDOWN')).toBeInTheDocument()
+        const lockdownElements = screen.getAllByText('LOCKDOWN')
+        expect(lockdownElements.length).toBeGreaterThanOrEqual(1)
     })
 
     it('renders repository dropdown with repos', () => {
@@ -262,15 +266,15 @@ describe('MaintenanceIsland', () => {
         expect(readLog).toHaveClass('text-blue-400')
     })
 
-    it('shows Security: OK when not in lockdown', () => {
+    it('shows NOMINAL security level when not in lockdown', () => {
         render(<MaintenanceIsland />)
-        expect(screen.getByText('Security: OK')).toBeInTheDocument()
+        expect(screen.getByText('NOMINAL')).toBeInTheDocument()
     })
 
-    it('shows Security: LOCKDOWN when in lockdown', () => {
+    it('shows LOCKDOWN security level when in lockdown', () => {
         setLockdown(true)
         render(<MaintenanceIsland />)
-        expect(screen.getByText('Security: LOCKDOWN')).toBeInTheDocument()
+        expect(screen.getAllByText('LOCKDOWN').length).toBeGreaterThanOrEqual(1)
     })
 
     it('applies correct status colors for different statuses', () => {
@@ -314,10 +318,11 @@ describe('MaintenanceIsland', () => {
         expect(stopButton).toBeDisabled()
     })
 
-    it('shows Working... when security isLoading in lockdown', () => {
+    it('disables reset button when security isLoading in lockdown', () => {
         setLockdown(true, { isLoading: true })
         render(<MaintenanceIsland />)
-        expect(screen.getByText('Working...')).toBeInTheDocument()
+        const resetButton = screen.getByTitle('Reset to NOMINAL')
+        expect(resetButton).toBeDisabled()
     })
 
     it('passes token to hooks', () => {

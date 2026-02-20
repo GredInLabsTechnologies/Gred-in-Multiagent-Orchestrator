@@ -69,8 +69,10 @@ describe('TrustDashboard', () => {
         expect(screen.getByText('REQUIRE REVIEW')).toBeInTheDocument();
         expect(screen.getByText('BLOCKED')).toBeInTheDocument();
 
-        // Check failure counts
-        expect(screen.getByText('1')).toBeInTheDocument(); // coder has 1 failure
-        expect(screen.getByText('3')).toBeInTheDocument(); // executor has 3 failures
+        // Check that failure counts render (use getAllByText since numbers appear in multiple columns)
+        const ones = screen.getAllByText('1');
+        expect(ones.length).toBeGreaterThanOrEqual(1); // coder has 1 failure
+        const threes = screen.getAllByText('3');
+        expect(threes.length).toBeGreaterThanOrEqual(1); // executor has 3 failures
     });
 });

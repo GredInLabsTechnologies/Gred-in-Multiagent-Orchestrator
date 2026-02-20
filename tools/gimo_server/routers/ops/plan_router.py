@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.ops_models import OpsDraft, OpsPlan, OpsCreateDraftRequest, OpsUpdateDraftRequest
+from tools.gimo_server.services.cognitive import CognitiveService
 from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.provider_service import ProviderService
 from .common import _require_role, _actor_label
@@ -117,17 +118,45 @@ async def generate_draft(
         _require_role(auth, "operator")
     else:
         _require_role(auth, "admin")
+    cognitive = CognitiveService()
     try:
         OpsService.set_gics(getattr(request.app.state, "gics", None))
-        resp = await ProviderService.static_generate(prompt, context={})
-        provider_name = resp["provider"]
-        content = resp["content"]
-        draft = OpsService.create_draft(
-            prompt,
-            provider=provider_name,
-            content=content,
-            status="draft",
-        )
+        decision = cognitive.evaluate(prompt, context={"prompt": prompt})
+        context_payload = dict(decision.context_updates)
+        context_payload.setdefault("detected_intent", decision.intent.name)
+        context_payload.setdefault("decision_path", decision.decision_path)
+        context_payload.setdefault("can_bypass_llm", decision.can_bypass_llm)
+        if decision.error_actionable:
+            context_payload.setdefault("error_actionable", decision.error_actionable)
+
+        if decision.decision_path == "security_block":
+            draft = OpsService.create_draft(
+                prompt,
+                context=context_payload,
+                provider=None,
+                content=None,
+                status="error",
+                error=(decision.error_actionable or "Solicitud bloqueada por seguridad")[:200],
+            )
+        elif decision.can_bypass_llm and decision.direct_content:
+            draft = OpsService.create_draft(
+                prompt,
+                context=context_payload,
+                provider="cognitive_direct_response",
+                content=decision.direct_content,
+                status="draft",
+            )
+        else:
+            resp = await ProviderService.static_generate(prompt, context={})
+            provider_name = resp["provider"]
+            content = resp["content"]
+            draft = OpsService.create_draft(
+                prompt,
+                context=context_payload,
+                provider=provider_name,
+                content=content,
+                status="draft",
+            )
     except Exception as exc:
         draft = OpsService.create_draft(
             prompt,
