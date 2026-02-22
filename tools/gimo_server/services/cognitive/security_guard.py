@@ -19,7 +19,9 @@ class RuleBasedSecurityGuard:
     """
 
     # Minimal set — only real LLM backend jailbreak patterns.
-    # DO NOT add 'system prompt', 'act as a', 'ignore instructions' — those are valid ops.
+    # NOTE: 'act as a' and 'system prompt' alone are valid operator commands.
+    # 'ignore previous instructions' IS blocked because it's a canonical prompt-injection
+    # attack vector, not a legitimate architectural command.
     _BLOCK_PATTERNS: tuple = (
         "jailbreak",
         "dan mode",
@@ -28,6 +30,10 @@ class RuleBasedSecurityGuard:
         "mode: enabled",
         "[dan]",
         "[jailbreak]",
+        "ignore previous instructions",
+        "ignore all previous instructions",
+        "disregard previous instructions",
+        "forget your instructions",
     )
 
     def evaluate(self, input_text: str, context: Dict[str, Any]) -> SecurityDecision:

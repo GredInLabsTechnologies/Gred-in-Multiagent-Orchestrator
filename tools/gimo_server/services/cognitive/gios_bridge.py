@@ -170,6 +170,9 @@ class GiosSecurityGuard:
         "mode: unrestricted",
         "[dan]",
         "[jailbreak]",
+        "ignore all previous instructions",
+        "disregard previous instructions",
+        "forget your instructions",
     )
 
     def evaluate(self, input_text: str, context: dict) -> SecurityDecision:
