@@ -120,6 +120,7 @@ class SubAgent(BaseModel):
     currentTask: Optional[str] = None
     config: SubAgentConfig
     result: Optional[str] = None
+    worktreePath: Optional[str] = None
 
 class DelegationRequest(BaseModel):
     subTaskDescription: str

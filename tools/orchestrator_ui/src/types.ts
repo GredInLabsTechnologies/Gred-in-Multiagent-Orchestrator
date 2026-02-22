@@ -22,6 +22,18 @@ export interface GraphNode {
         pendingQuestions?: AgentQuestion[];
         quality?: QualityMetrics;
         subAgents?: SubAgent[];
+        // Disruptive Observatory Fields
+        system_prompt?: string;
+        agent_config?: {
+            model: string;
+            role: string;
+            goal: string;
+            backstory?: string;
+        };
+        task_description?: string;
+        depends_on?: string[];
+        estimated_tokens?: number;
+        editable?: boolean;
     };
     position: { x: number; y: number };
 }
@@ -61,6 +73,7 @@ export interface AgentThought {
 
 export interface AgentPlan {
     id: string;
+    draft_id?: string;
     tasks: AgentTask[];
     currentStep?: number;
     reasoning?: AgentThought[];
@@ -572,7 +585,64 @@ export interface MasteryRecommendation {
     suggested_model: string;
     reason: string;
 }
+// --- Phase 5: Skills System ---
 
+export interface Skill {
+    id: string;
+    name: string;
+    description: string;
+    icon: string;
+    category: string;
+    prompt_template: string;
+    tags: string[];
+    created_at: string;
+    updated_at: string;
+    last_run_at?: string | null;
+    run_count: number;
+}
 
+export interface SkillTriggerResponse {
+    draft_id: string;
+    skill_id: string;
+}
+// --- Phase 6: Custom Graph Plans ---
 
+export interface CustomPlanNode {
+    id: string;
+    label: string;
+    prompt: string;
+    model: string;
+    provider: string;
+    role: string;
+    depends_on: string[];
+    status: 'pending' | 'running' | 'done' | 'error' | 'skipped';
+    output?: string;
+    error?: string;
+    position: { x: number; y: number };
+    config: Record<string, any>;
+}
 
+export interface CustomPlanEdge {
+    id: string;
+    source: string;
+    target: string;
+}
+
+export interface CustomPlan {
+    id: string;
+    name: string;
+    description: string;
+    nodes: CustomPlanNode[];
+    edges: CustomPlanEdge[];
+    status: 'draft' | 'approved' | 'running' | 'done' | 'error';
+    created_at: string;
+    updated_at: string;
+    run_log: Array<{ ts: string; level: string; msg: string }>;
+}
+
+export interface CreateCustomPlanRequest {
+    name: string;
+    description: string;
+    nodes: CustomPlanNode[];
+    edges: CustomPlanEdge[];
+}

@@ -17,6 +17,50 @@ ProviderType = Literal[
 ]
 
 
+GimoItemType = Literal["text", "tool_call", "tool_result", "diff", "thought", "error"]
+GimoItemStatus = Literal["started", "delta", "completed", "error"]
+GimoThreadStatus = Literal["active", "archived", "deleted"]
+
+
+import uuid
+
+class GimoItem(BaseModel):
+    id: str = Field(default_factory=lambda: f"item_{uuid.uuid4().hex[:8]}")
+    type: GimoItemType
+    content: str = ""
+    status: GimoItemStatus = "completed"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class GimoTurn(BaseModel):
+    id: str = Field(default_factory=lambda: f"turn_{uuid.uuid4().hex[:8]}")
+    agent_id: str
+    items: List[GimoItem] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class GimoThread(BaseModel):
+    id: str = Field(default_factory=lambda: f"thread_{uuid.uuid4().hex[:8]}")
+    title: str = "New Conversation"
+    workspace_root: str
+    turns: List[GimoTurn] = Field(default_factory=list)
+    status: GimoThreadStatus = "active"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class AgentProfile(BaseModel):
+    role: str
+    goal: str
+    backstory: Optional[str] = None
+    model: str = "qwen2.5-coder:32b"
+    system_prompt: str
+    instructions: List[str] = []
+
+
 class OpsTask(BaseModel):
     id: str
     title: str
@@ -24,6 +68,7 @@ class OpsTask(BaseModel):
     depends: List[str] = []
     status: Literal["pending", "in_progress", "done", "blocked"] = "pending"
     description: str
+    agent_assignee: Optional[AgentProfile] = None
 
 
 class OpsPlan(BaseModel):

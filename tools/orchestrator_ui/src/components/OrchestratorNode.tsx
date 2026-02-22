@@ -1,46 +1,60 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { Handle, Position } from 'reactflow';
-import { Cpu } from 'lucide-react';
-import { QualityIndicator } from './QualityIndicator';
 import { ConfidenceMeter } from './ConfidenceMeter';
+import { AgentHoverCard } from './AgentHoverCard';
 
-const getStatusColor = (status: string) => {
-    if (status === 'doubt' || status === 'agent_doubt') return 'text-[#ffd60a]';
-    if (status === 'failed') return 'text-[#ff453a]';
-    return 'text-[#32d74b]';
+const getStatusColor = (status?: string) => {
+    switch (status) {
+        case 'running': return 'text-blue-400';
+        case 'done': return 'text-emerald-400';
+        case 'failed': return 'text-rose-400';
+        case 'doubt': return 'text-amber-400';
+        default: return 'text-white/40';
+    }
 };
 
 export const OrchestratorNode = memo(({ data, selected }: any) => {
-    const isDoubt = data.status === 'doubt' || data.status === 'agent_doubt';
+    const [isHovered, setIsHovered] = useState(false);
+    const isDoubt = data.status === 'doubt';
 
     return (
-        <div className={`
-            px-5 py-4 rounded-xl bg-[#141414] border-2 transition-all duration-200 min-w-[180px]
-            ${selected
-                ? 'border-[#0a84ff] shadow-[0_0_30px_rgba(10,132,255,0.4)]'
-                : 'border-[#0a84ff]/40 shadow-[0_0_15px_rgba(10,132,255,0.15)]'}
-        `}>
-            <div className="flex items-center gap-3">
-                <div className="relative">
-                    <div className="w-10 h-10 rounded-xl bg-[#0a84ff]/20 flex items-center justify-center ring-1 ring-[#0a84ff]/30">
-                        <Cpu size={20} className="text-[#0a84ff]" />
-                    </div>
-                    <div className="absolute -top-1 -right-1">
-                        <QualityIndicator quality={data.quality} size="sm" />
-                    </div>
-                </div>
+        <div
+            className={`group relative px-5 py-4 rounded-2xl bg-[#141414]/90 backdrop-blur-md border-[1.5px] transition-all duration-300
+                ${selected ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)] scale-[1.02]' : 'border-white/10 hover:border-white/20'}`}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+        >
+            <AgentHoverCard data={data} isVisible={isHovered} />
+
+            <div className="flex items-center gap-4">
+                <div className={`w-2 h-2 rounded-full ${data.status === 'running' ? 'bg-blue-400 animate-pulse' : 'bg-white/20'}`} />
                 <div>
-                    <div className="text-sm font-semibold text-[#f5f5f7]">{data.label}</div>
+                    <div className="text-sm font-bold text-[#f5f5f7] tracking-tight">{data.label}</div>
                     <div className="flex items-center gap-2 mt-1">
-                        <div className={`text-[10px] uppercase tracking-wider font-bold font-mono ${getStatusColor(data.status)}`}>
-                            {isDoubt ? 'DUDAS' : data.status}
+                        <div className={`text-[9px] uppercase tracking-widest font-black font-mono ${getStatusColor(data.status)}`}>
+                            {isDoubt ? 'DUDAS' : (data.status || 'PENDING')}
                         </div>
                         {data.confidence && <ConfidenceMeter data={data.confidence} />}
                     </div>
                 </div>
             </div>
-            <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-[#0a84ff] !border-[#141414] !border-2" />
-            <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-[#32d74b] !border-[#141414] !border-2" />
+
+            {/* Quality & Meta indicators */}
+            {data.agent_config && (
+                <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between gap-4">
+                    <div className="text-[10px] text-white/30 font-medium truncate max-w-[100px]">
+                        {data.agent_config.role}
+                    </div>
+                    {data.estimated_tokens && (
+                        <div className="text-[10px] text-blue-400/60 font-mono whitespace-nowrap">
+                            {data.estimated_tokens}t
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-blue-500 !border-0 -translate-x-1" />
+            <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-blue-500 !border-0 translate-x-1" />
         </div>
     );
 });

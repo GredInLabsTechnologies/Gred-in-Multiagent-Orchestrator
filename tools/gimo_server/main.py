@@ -65,6 +65,7 @@ async def lifespan(app: FastAPI):
     (settings.ops_data_dir / "drafts").mkdir(parents=True, exist_ok=True)
     (settings.ops_data_dir / "approved").mkdir(parents=True, exist_ok=True)
     (settings.ops_data_dir / "runs").mkdir(parents=True, exist_ok=True)
+    (settings.ops_data_dir / "threads").mkdir(parents=True, exist_ok=True)
     # provider.json template
     from tools.gimo_server.services.provider_service import ProviderService
 
@@ -221,7 +222,7 @@ def create_app() -> FastAPI:
     # Mount FastMCP SSE Server
     try:
         from tools.gimo_server.mcp_server import mcp
-        app.mount("/mcp", mcp.sse_app)
+        app.mount("/mcp", mcp.sse_app())
         logger.info("Universal MCP Server mounted at /mcp")
     except Exception as e:
         logger.error(f"Failed to mount FastMCP Server: {e}")

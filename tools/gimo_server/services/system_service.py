@@ -9,7 +9,7 @@ class SystemService:
     """Service to handle Windows system service operations (sc.exe)."""
 
     @staticmethod
-    def get_status(service_name: str = "GILOrchestrator") -> str:
+    def get_status(service_name: str = "GIMO") -> str:
         """Query the state of a Windows service and return a canonical status."""
         try:
             # Headless mode: never touch the OS
@@ -46,7 +46,7 @@ class SystemService:
         return "UNKNOWN"
 
     @staticmethod
-    def restart(service_name: str = "GILOrchestrator", actor: str = "system") -> bool:
+    def restart(service_name: str = "GIMO", actor: str = "system") -> bool:
         """Restart a Windows service."""
         if os.environ.get("ORCH_HEADLESS") == "true":
             audit_log(
@@ -93,7 +93,7 @@ class SystemService:
             return False
 
     @staticmethod
-    def stop(service_name: str = "GILOrchestrator", actor: str = "system") -> bool:
+    def stop(service_name: str = "GIMO", actor: str = "system") -> bool:
         """Stop a Windows service."""
         if os.environ.get("ORCH_HEADLESS") == "true":
             audit_log(

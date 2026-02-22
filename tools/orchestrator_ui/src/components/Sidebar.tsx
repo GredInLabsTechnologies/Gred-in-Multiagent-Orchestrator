@@ -1,7 +1,6 @@
-import React from 'react';
-import { Network, Wrench, ScrollText, Settings, ClipboardList, BarChart2, Activity, ShieldAlert, Wallet } from 'lucide-react';
+import { Network, Wrench, ScrollText, Settings, ClipboardList, BarChart2, Activity, ShieldAlert, Wallet, Zap, Layout, MessageSquare } from 'lucide-react';
 
-export type SidebarTab = 'graph' | 'plans' | 'evals' | 'metrics' | 'security' | 'maintenance' | 'logs' | 'settings' | 'mastery';
+export type SidebarTab = 'graph' | 'plans' | 'composer' | 'threads' | 'skills' | 'evals' | 'metrics' | 'security' | 'maintenance' | 'logs' | 'settings' | 'mastery';
 
 interface SidebarProps {
     activeTab: SidebarTab;
@@ -11,6 +10,9 @@ interface SidebarProps {
 const primaryTabs: { id: SidebarTab; icon: typeof Network; label: string }[] = [
     { id: 'graph', icon: Network, label: 'Graph' },
     { id: 'plans', icon: ClipboardList, label: 'Plans' },
+    { id: 'composer', icon: Layout, label: 'Composer' },
+    { id: 'threads', icon: MessageSquare, label: 'Threads' },
+    { id: 'skills', icon: Zap, label: 'Skills' },
     { id: 'evals', icon: BarChart2, label: 'Evals' },
     { id: 'metrics', icon: Activity, label: 'Metrics' },
     { id: 'mastery', icon: Wallet, label: 'Mastery' },

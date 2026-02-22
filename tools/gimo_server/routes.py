@@ -27,8 +27,11 @@ from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.file_service import FileService
 from tools.gimo_server.services.repo_service import RepoService
 from tools.gimo_server.services.system_service import SystemService
+from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.plan_graph_builder import build_graph_from_ops_plan
 from tools.gimo_server.routers.ops.common import _WORKFLOW_ENGINES
 from tools.gimo_server.version import __version__
+from datetime import datetime, timezone
 
 READ_ONLY_ACTIONS_PATHS = {
     "/file",
@@ -196,7 +199,16 @@ def get_ui_graph_handler(
         engine = list(_WORKFLOW_ENGINES.values())[-1]
 
     if not engine:
-        # Fallback to a basic structural view if no active engine
+        # Disruptive Fallback: Check for structured drafts to visualize pre-execution
+        drafts = OpsService.list_drafts()
+        structured_drafts = [d for d in drafts if d.context.get("structured") and d.status == "draft"]
+        
+        if structured_drafts:
+            # Use the most recent structured draft
+            latest = structured_drafts[0]
+            nodes, edges = build_graph_from_ops_plan(latest.content, draft_id=latest.id)
+            return {"nodes": nodes, "edges": edges}
+
         return {"nodes": [], "edges": []}
 
     graph = engine.graph
@@ -519,6 +531,112 @@ def register_routes(app: FastAPI):
     app.post("/ui/repos/open")(open_repo_handler)
     app.post("/ui/repos/select")(select_repo_handler)
     app.get("/ui/graph")(get_ui_graph_handler)
+
+    @app.post("/ui/plan/create")
+    async def create_plan_handler(
+        request: Request,
+        auth: AuthContext = Depends(require_read_only_access),
+        rl: None = Depends(check_rate_limit),
+    ):
+        """Creates a structured plan from UI and returns it as a draft."""
+        if auth.role not in ("operator", "admin"):
+            raise HTTPException(status_code=403, detail="operator or admin role required")
+
+        body = await request.json()
+        prompt = str(body.get("prompt") or body.get("instructions") or "").strip()
+        if not prompt:
+            raise HTTPException(status_code=400, detail="prompt is required")
+
+        from tools.gimo_server.services.provider_service import ProviderService
+        from tools.gimo_server.ops_models import OpsPlan
+
+        # Generate structured plan via LLM
+        system_msg = (
+            "You are a multi-agent orchestration planner. Given a task, produce a JSON plan with "
+            "the schema: {\"id\": \"plan_xxx\", \"tasks\": [{\"id\": \"t1\", \"title\": \"...\", "
+            "\"description\": \"...\", \"depends\": [], \"status\": \"pending\", "
+            "\"agent_assignee\": {\"role\": \"...\", \"goal\": \"...\", \"model\": \"qwen2.5-coder:32b\", "
+            "\"system_prompt\": \"...\", \"instructions\": [\"...\"]}}]}. "
+            "First task should be the orchestrator. Remaining tasks are workers. "
+            "Return ONLY valid JSON, no markdown."
+        )
+
+        try:
+            response = await ProviderService.static_generate(
+                prompt=f"{system_msg}\n\nTask: {prompt}",
+                context={"task_type": "planning"}
+            )
+            raw = response.get("content", "{}")
+
+            # Try to extract JSON from response
+            import re as _re
+            json_match = _re.search(r'\{.*\}', raw, _re.DOTALL)
+            plan_json = json_match.group(0) if json_match else raw
+
+            plan_data = OpsPlan.model_validate_json(plan_json)
+        except Exception:
+            # Fallback: create a simple 2-node plan
+            import uuid
+            plan_data = OpsPlan(
+                id=f"plan_{uuid.uuid4().hex[:8]}",
+                tasks=[
+                    __import__('tools.gimo_server.ops_models', fromlist=['OpsTask']).OpsTask(
+                        id="t1", title="Orquestador", description=prompt,
+                        depends=[], status="pending",
+                        agent_assignee=__import__('tools.gimo_server.ops_models', fromlist=['AgentProfile']).AgentProfile(
+                            role="orchestrator", goal="Coordinate the plan",
+                            model="qwen2.5-coder:32b",
+                            system_prompt=f"You are the orchestrator for: {prompt}",
+                        )
+                    ),
+                    __import__('tools.gimo_server.ops_models', fromlist=['OpsTask']).OpsTask(
+                        id="t2", title="Worker", description=f"Execute: {prompt}",
+                        depends=["t1"], status="pending",
+                        agent_assignee=__import__('tools.gimo_server.ops_models', fromlist=['AgentProfile']).AgentProfile(
+                            role="worker", goal=prompt,
+                            model="qwen2.5-coder:32b",
+                            system_prompt=f"You are a specialist worker. Your task: {prompt}",
+                        )
+                    ),
+                ]
+            )
+
+        from tools.gimo_server.mcp_server import _generate_mermaid_graph
+        graph = _generate_mermaid_graph(plan_data)
+
+        draft = OpsService.create_draft(
+            prompt=prompt,
+            content=plan_data.model_dump_json(indent=2),
+            context={"structured": True, "mermaid": graph},
+            provider="ui_plan_builder"
+        )
+
+        audit_log("UI", "PLAN_CREATE", draft.id, actor=auth.token)
+        return {
+            "id": draft.id,
+            "status": draft.status,
+            "prompt": draft.prompt,
+            "content": draft.content,
+            "mermaid": graph,
+        }
+
+    @app.post("/ui/drafts/{draft_id}/reject")
+    async def reject_draft_handler(
+        draft_id: str,
+        auth: AuthContext = Depends(require_read_only_access),
+        rl: None = Depends(check_rate_limit),
+    ):
+        """Rejects a draft plan."""
+        if auth.role not in ("operator", "admin"):
+            raise HTTPException(status_code=403, detail="operator or admin role required")
+
+        draft = OpsService.get_draft(draft_id)
+        if not draft:
+            raise HTTPException(status_code=404, detail="Draft not found")
+
+        OpsService.update_draft(draft_id, status="rejected")
+        audit_log("UI", "PLAN_REJECT", draft_id, actor=auth.token)
+        return {"status": "rejected", "id": draft_id}
 
     @app.get("/ui/providers")
     async def list_ui_providers_bridge(

@@ -79,7 +79,7 @@ async def update_draft(
     auth: AuthContext = Depends(verify_token),
     rl: None = Depends(check_rate_limit),
 ):
-    _require_role(auth, "admin")
+    _require_role(auth, "operator")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     try:
         updated = OpsService.update_draft(

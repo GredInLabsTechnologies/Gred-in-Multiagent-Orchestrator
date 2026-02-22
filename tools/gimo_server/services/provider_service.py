@@ -32,8 +32,8 @@ class ProviderService:
                     provider_type="ollama_local",
                     display_name="Ollama Local",
                     base_url="http://localhost:11434/v1",
-                    model="qwen2.5-coder:7b",
-                    model_id="qwen2.5-coder:7b",
+                    model="qwen2.5-coder:3b",
+                    model_id="qwen2.5-coder:3b",
                     api_key=None,
                     capabilities=cls.capabilities_for("ollama_local"),
                 )
@@ -107,13 +107,14 @@ class ProviderService:
     def get_config(cls) -> Optional[ProviderConfig]:
         cls.ensure_default_config()
         try:
-            cfg = ProviderConfig.model_validate_json(cls.CONFIG_FILE.read_text(encoding="utf-8"))
+            content = cls.CONFIG_FILE.read_text(encoding="utf-8").lstrip('\ufeff')
+            cfg = ProviderConfig.model_validate_json(content)
             normalized_cfg = cls._normalize_config(cfg)
             if normalized_cfg.model_dump() != cfg.model_dump():
                 cls.CONFIG_FILE.write_text(normalized_cfg.model_dump_json(indent=2), encoding="utf-8")
             return normalized_cfg
         except Exception as exc:
-            logger.error("Failed to load provider config: %s", exc)
+            logger.error(f"Failed to load provider config from {cls.CONFIG_FILE}: {exc}", exc_info=True)
             return None
 
     @classmethod

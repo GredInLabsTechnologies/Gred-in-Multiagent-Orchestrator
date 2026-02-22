@@ -61,9 +61,6 @@
 }
 
 /* ---- Glow utilities ---- */
-.glow-blue {
-    box-shadow: 0 0 20px rgba(10, 132, 255, 0.2);
-}
 
 .glow-green {
     box-shadow: 0 0 20px rgba(50, 215, 75, 0.2);
@@ -164,11 +161,38 @@
 }
 
 .glass {
-    @apply bg-opacity-60 backdrop-blur-xl border border-white border-opacity-10;
+    background-color: var(--surface-2);
+    border: 1px solid var(--border-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .glow-blue {
-    box-shadow: 0 0 20px rgba(10, 132, 255, 0.2);
+    box-shadow: 0 0 30px rgba(10, 132, 255, 0.25);
+}
+
+/* Diff Animations */
+@keyframes diffIn {
+    from {
+        transform: translateY(10px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.animate-diff-in {
+    animation: diffIn 0.4s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.diff-added {
+    @apply bg-green-500/10 text-green-400 border-l-2 border-green-500/50;
+}
+
+.diff-removed {
+    @apply bg-red-500/10 text-red-400 border-l-2 border-red-500/50;
 }
 
 /* Custom Scrollbar */

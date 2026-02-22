@@ -61,3 +61,25 @@ class FileService:
         )
 
         return content, content_hash
+
+    @staticmethod
+    def write_file(target_path: Path, content: str, token: str) -> str:
+        """
+        Writes content to a file, creating parent directories if needed.
+        Logs the operation in the audit trail.
+        """
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(content, encoding="utf-8")
+            
+            content_hash = hashlib.sha256(content.encode()).hexdigest()
+            audit_log(
+                str(target_path),
+                "0",
+                content_hash,
+                operation="WRITE_FILE",
+                actor=token,
+            )
+            return f"Successfully wrote to {target_path}"
+        except Exception as e:
+            raise IOError(f"Failed to write to {target_path}: {e}")

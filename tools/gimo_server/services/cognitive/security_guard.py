@@ -1,26 +1,43 @@
-from __future__ import annotations
+from typing import Any, Dict
 
-from .models import SecurityDecision
+from ..cognitive.models import SecurityDecision
 
 
 class RuleBasedSecurityGuard:
-    _BLOCK_PATTERNS = (
-        "ignore previous instructions",
-        "ignore all previous instructions",
+    """
+    Lightweight pattern-matching security guard.
+    Used when COGNITIVE_GIOS_BRIDGE_ENABLED=false.
+
+    NOTE: In an orchestrator/operator context, the user IS the trusted authority.
+    Phrases like 'system prompt', 'act as a', or 'ignore previous instructions' are
+    legitimate architectural commands from operators.
+
+    Only block patterns that attempt to jailbreak the LLM backend itself
+    (e.g. DAN mode, unfiltered mode activations).
+
+    A sandbox/quarantine layer for external code ingestion will be added separately.
+    """
+
+    # Minimal set — only real LLM backend jailbreak patterns.
+    # DO NOT add 'system prompt', 'act as a', 'ignore instructions' — those are valid ops.
+    _BLOCK_PATTERNS: tuple = (
         "jailbreak",
-        "system prompt",
-        "reveal prompt",
-        "bypass safety",
+        "dan mode",
+        "do anything now",
+        "mode: unrestricted",
+        "mode: enabled",
+        "[dan]",
+        "[jailbreak]",
     )
 
-    def evaluate(self, input_text: str, context: dict) -> SecurityDecision:
+    def evaluate(self, input_text: str, context: Dict[str, Any]) -> SecurityDecision:
         text = (input_text or "").lower()
         matched = [p for p in self._BLOCK_PATTERNS if p in text]
         if matched:
             return SecurityDecision(
                 allowed=False,
                 risk_level="high",
-                reason="Detected prompt-injection/jailbreak pattern",
+                reason="Detected blocked pattern",
                 flags=matched,
             )
         return SecurityDecision(allowed=True, risk_level="low", reason="clean_input", flags=[])

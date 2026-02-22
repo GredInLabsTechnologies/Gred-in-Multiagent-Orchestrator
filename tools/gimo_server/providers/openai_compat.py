@@ -20,7 +20,7 @@ class OpenAICompatAdapter(ProviderAdapter):
         base_url: str,
         model: str,
         api_key: Optional[str] = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: int = 300,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model

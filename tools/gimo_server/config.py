@@ -74,6 +74,7 @@ class Settings:
     license_grace_days: int
     license_recheck_hours: int
     license_allow_debug_bypass: bool
+    worktrees_dir: Path
 
 
 def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_TOKEN") -> str:
@@ -115,7 +116,7 @@ def _build_settings() -> Settings:
         "scripts/ops/start_orch.cmd",
         "scripts/ops/launch_orchestrator.ps1",
     }
-    service_name = os.environ.get("ORCH_SERVICE_NAME", "GILOrchestrator")
+    service_name = os.environ.get("ORCH_SERVICE_NAME", "GIMO")
     allowed_extensions = {".ts", ".tsx", ".py", ".go", ".rs", ".c", ".cpp", ".json", ".yaml"}
     denied_extensions = {
         ".md",
@@ -167,7 +168,8 @@ def _build_settings() -> Settings:
     audit_log_path = base_dir / "logs" / "orchestrator_audit.log"
     audit_log_max_bytes = int(os.environ.get("ORCH_AUDIT_LOG_MAX_BYTES", str(5 * 1024 * 1024)))
     audit_log_backup_count = int(os.environ.get("ORCH_AUDIT_LOG_BACKUP_COUNT", "5"))
-    ops_data_dir = base_dir / ".orch_data" / "ops"
+    ops_data_dir = repo_root_dir / ".orch_data" / "ops"
+    worktrees_dir = repo_root_dir / ".orch_data" / "worktrees"
     ops_run_ttl = int(os.environ.get("ORCH_OPS_RUN_TTL", "86400"))
     debug = os.environ.get("DEBUG", "false").lower() in ("true", "1", "yes")
     log_level = os.environ.get("LOG_LEVEL", "DEBUG" if debug else "INFO").upper()
@@ -220,6 +222,7 @@ def _build_settings() -> Settings:
         license_allow_debug_bypass=os.environ.get(
             "ORCH_LICENSE_ALLOW_DEBUG_BYPASS", "false"
         ).lower() in ("true", "1", "yes"),
+        worktrees_dir=worktrees_dir,
     )
 
 
@@ -264,5 +267,6 @@ GICS_DAEMON_SCRIPT = _SETTINGS.gics_daemon_script
 GICS_SOCKET_PATH = _SETTINGS.gics_socket_path
 GICS_TOKEN_PATH = _SETTINGS.gics_token_path
 DATA_DIR = _SETTINGS.data_dir
+WORKTREES_DIR = _SETTINGS.worktrees_dir
 DEBUG = _SETTINGS.debug
 LOG_LEVEL = _SETTINGS.log_level

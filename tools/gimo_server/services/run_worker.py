@@ -81,6 +81,142 @@ class RunWorker:
         run = OpsService.get_run(run_id)
         return run is not None and run.status in ("pending", "running")
 
+    @staticmethod
+    def _extract_filename(text: str) -> Optional[str]:
+        """Extract a filename from task description or system prompt text."""
+        import re
+        # Match patterns like 'qwen_popup.bat', 'hello.txt', 'script.py', etc.
+        patterns = [
+            r"['\"]([a-zA-Z0-9_\-]+\.\w{1,5})['\"]",   # quoted filenames
+            r"(?:file|named?|llamado|archivo)\s+['\"]?([a-zA-Z0-9_\-]+\.\w{1,5})",  # "file named X"
+            r"(?:create|crear|write|escribir)\s+['\"]?([a-zA-Z0-9_\-]+\.\w{1,5})",  # "create X.bat"
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
+
+    @staticmethod
+    def _extract_file_content(system_prompt: str, filename: str) -> Optional[str]:
+        """Try to extract inline file content from the system prompt."""
+        import re
+        # Look for content between code block markers or after "content:" indicators
+        patterns = [
+            # Content after "content:" or "contenido:"
+            r"(?:content|contenido)[:\s]+(.+?)(?:\n\n|\Z)",
+            # Content between @echo and the end (for .bat files)
+            r"(@echo\s+off\b.*?)(?:\n\n|\Z)",
+            # Content in code blocks
+            r"```\w*\n(.*?)```",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, system_prompt, re.IGNORECASE | re.DOTALL)
+            if match:
+                return match.group(1).strip()
+        return None
+
+    async def _execute_file_task(
+        self,
+        run_id: str,
+        task_id: str,
+        title: str,
+        description: str,
+        system_prompt: str,
+        model: str,
+        instructions: list,  # noqa: ARG002
+        base_path: Optional[Path] = None,
+    ) -> bool:
+        """
+        Execute a file-write task. Returns True if handled, False to fall through.
+
+        Strategy:
+        1. Extract filename from description or system_prompt
+        2. Extract inline content from system_prompt, or call LLM to generate it
+        3. Write via FileService
+        """
+        from .file_service import FileService
+        from ..config import get_settings
+
+        combined_text = f"{title} {description} {system_prompt}"
+        filename = self._extract_filename(combined_text)
+
+        if not filename:
+            OpsService.append_log(
+                run_id, level="WARN",
+                msg=f"Task {task_id}: Detected file op but couldn't extract filename. Skipping."
+            )
+            return False
+
+        settings = get_settings()
+        repo_root = base_path or settings.repo_root_dir
+        target_path = repo_root / filename
+
+        OpsService.append_log(
+            run_id, level="INFO",
+            msg=f"Task {task_id}: File target → {target_path} (model: {model})"
+        )
+
+        # Try to extract content directly from the system prompt
+        content = self._extract_file_content(system_prompt, filename)
+
+        if content:
+            OpsService.append_log(
+                run_id, level="INFO",
+                msg=f"Task {task_id}: Extracted inline content ({len(content)} chars)"
+            )
+        else:
+            # Call the LLM worker to generate the content
+            try:
+                OpsService.append_log(
+                    run_id, level="INFO",
+                    msg=f"Task {task_id}: No inline content — calling LLM ({model}) to generate..."
+                )
+                generation_prompt = (
+                    f"{system_prompt}\n\n"
+                    f"Generate ONLY the raw file content for '{filename}'. "
+                    f"Do not include explanations, markdown fences, or anything else — "
+                    f"just the exact content that should be written to the file."
+                )
+                llm_resp = await asyncio.wait_for(
+                    ProviderService.static_generate(
+                        prompt=generation_prompt,
+                        context={"mode": "worker_file_gen", "model": model}
+                    ),
+                    timeout=DEFAULT_RUN_TIMEOUT,
+                )
+                content = llm_resp.get("content", "").strip()
+                # Clean markdown code fences if the LLM wrapped it
+                if content.startswith("```"):
+                    import re
+                    content = re.sub(r"```\w*\n?|```", "", content).strip()
+
+                OpsService.append_log(
+                    run_id, level="INFO",
+                    msg=f"Task {task_id}: LLM generated content ({len(content)} chars)"
+                )
+            except Exception as e:
+                OpsService.append_log(
+                    run_id, level="ERROR",
+                    msg=f"Task {task_id}: LLM generation failed: {e}. Using fallback."
+                )
+                content = f"REM Generated by GIMO worker ({model})\nREM Task: {title}\necho Task executed\npause\n"
+
+        # Write the file
+        try:
+            FileService.write_file(target_path, content, f"gimo_worker_{model}")
+            OpsService.append_log(
+                run_id, level="INFO",
+                msg=f"Task {task_id}: ✅ File written → {target_path}"
+            )
+            return True
+        except Exception as write_err:
+            OpsService.append_log(
+                run_id, level="ERROR",
+                msg=f"Task {task_id}: ❌ File write failed: {write_err}"
+            )
+            return False
+
     async def _execute_run(self, run_id: str) -> None:
         try:
             OpsService.update_run_status(run_id, "running", msg="Execution started")
@@ -102,6 +238,76 @@ class RunWorker:
             )
 
             try:
+                # 1. Check if content is a structured JSON plan
+                is_structured = False
+                import json
+                try:
+                    plan_data = json.loads(approved.content)
+                    if isinstance(plan_data, dict) and "tasks" in plan_data:
+                        is_structured = True
+                except:
+                    pass
+
+                if is_structured:
+                    OpsService.append_log(run_id, level="INFO", msg="Detected structured plan. Executing steps...")
+                    for task in plan_data["tasks"]:
+                        tid = task.get("id", "??")
+                        title = task.get("title", "")
+                        desc = task.get("description", "")
+                        combined = f"{title} {desc}".lower()
+                        agent = task.get("agent_assignee", {})
+                        agent_model = agent.get("model", "qwen2.5-coder:3b")
+                        agent_prompt = agent.get("system_prompt", "")
+                        agent_instructions = agent.get("instructions", [])
+
+                        OpsService.append_log(run_id, level="INFO", msg=f"Executing Task {tid}: {title}")
+
+                        # Skip orchestrator-type tasks (they coordinate, not execute)
+                        if any(kw in combined for kw in ["orchestr", "coordinat", "lead", "monitor"]):
+                            OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Orchestrator role — delegation noted.")
+                            continue
+
+                        # Detect file write/create tasks
+                        if any(kw in combined for kw in ["escribir", "write", "crear", "create", "generar", "generate", ".bat", ".txt", ".py", ".sh"]):
+                            # Attempt to find if this assignee has an isolated worktree
+                            base_path = None
+                            if agent.get("id"):
+                                from .sub_agent_manager import SubAgentManager
+                                sa = SubAgentManager.get_sub_agent(agent.get("id"))
+                                if sa and sa.worktreePath:
+                                    base_path = Path(sa.worktreePath)
+                                    OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Using isolated worktree at {base_path}")
+
+                            file_result = await self._execute_file_task(
+                                run_id, tid, title, desc, agent_prompt, agent_model, agent_instructions,
+                                base_path=base_path
+                            )
+                            if file_result:
+                                continue
+
+                        # For other tasks, attempt LLM execution or simulate
+                        if agent_prompt:
+                            try:
+                                OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Sending to LLM ({agent_model})...")
+                                llm_resp = await asyncio.wait_for(
+                                    ProviderService.static_generate(
+                                        prompt=agent_prompt,
+                                        context={"mode": "worker_execute", "model": agent_model}
+                                    ),
+                                    timeout=DEFAULT_RUN_TIMEOUT,
+                                )
+                                result_content = llm_resp.get("content", "")[:500]
+                                OpsService.append_log(run_id, level="INFO", msg=f"Task {tid} LLM result: {result_content}")
+                            except Exception as llm_err:
+                                OpsService.append_log(run_id, level="WARN", msg=f"Task {tid} LLM call failed: {llm_err}")
+                        else:
+                            OpsService.append_log(run_id, level="INFO", msg=f"Task {tid} (Simulation): Success.")
+
+                    OpsService.update_run_status(run_id, "done", msg="Structured plan execution completed")
+                    return
+
+
+                # 2. Legacy/Simple execution (via LLM generation)
                 resp = await asyncio.wait_for(
                     ProviderService.static_generate(prompt, context={"mode": "execute"}),
                     timeout=DEFAULT_RUN_TIMEOUT,
@@ -122,6 +328,6 @@ class RunWorker:
             try:
                 OpsService.update_run_status(run_id, "error", msg="Internal worker error")
             except Exception:
-                pass
+                logger.debug("Could not update error status for run %s", run_id)
         finally:
             self._running_ids.discard(run_id)

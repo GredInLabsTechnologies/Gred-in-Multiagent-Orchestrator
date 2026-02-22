@@ -53,3 +53,77 @@ class GitService:
             if item.is_dir() and not item.name.startswith("."):
                 entries.append({"name": item.name, "path": str(item.resolve())})
         return sorted(entries, key=lambda x: x["name"].lower())
+
+    @staticmethod
+    def add_worktree(base_dir: Path, worktree_path: Path, branch: str = None) -> None:
+        """Adds a new git worktree at the specified path."""
+        try:
+            cmd = ["git", "worktree", "add", str(worktree_path)]
+            if branch:
+                cmd.append(_sanitize_git_ref(branch))
+            else:
+                # If no branch, we might want --detach or just current HEAD
+                # For isolation, we usually want to work on a specific branch or a detached HEAD
+                cmd.append("--detach")
+
+            process = subprocess.Popen(
+                cmd,
+                cwd=base_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            _, stderr = process.communicate(timeout=SUBPROCESS_TIMEOUT)
+            if process.returncode != 0:
+                raise RuntimeError(f"Git worktree add error: {stderr.strip()}")
+        except Exception as e:
+            raise RuntimeError(f"Internal git worktree add error: {str(e)}")
+
+    @staticmethod
+    def remove_worktree(base_dir: Path, worktree_path: Path) -> None:
+        """Removes a git worktree and cleans up the directory."""
+        try:
+            # Running from base_dir ensures git knows the context
+            process = subprocess.Popen(
+                ["git", "worktree", "remove", "--force", str(worktree_path)],
+                cwd=base_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            _, stderr = process.communicate(timeout=SUBPROCESS_TIMEOUT)
+            if process.returncode != 0:
+                # If it's already gone, we don't necessarily want to fail
+                if "is not a working tree" in stderr:
+                    return
+                raise RuntimeError(f"Git worktree remove error: {stderr.strip()}")
+            
+            # Additional cleanup for Windows or stubborn directories
+            import shutil
+            if worktree_path.exists():
+                shutil.rmtree(worktree_path, ignore_errors=True)
+        except Exception as e:
+            raise RuntimeError(f"Internal git worktree remove error: {str(e)}")
+
+    @staticmethod
+    def list_worktrees(base_dir: Path) -> list[str]:
+        """Lists active git worktrees."""
+        try:
+            process = subprocess.Popen(
+                ["git", "worktree", "list", "--porcelain"],
+                cwd=base_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            stdout, stderr = process.communicate(timeout=SUBPROCESS_TIMEOUT)
+            if process.returncode != 0:
+                raise RuntimeError(f"Git worktree list error: {stderr.strip()}")
+            
+            worktrees = []
+            for line in stdout.splitlines():
+                if line.startswith("worktree "):
+                    worktrees.append(line.split("worktree ", 1)[1])
+            return worktrees
+        except Exception as e:
+            raise RuntimeError(f"Internal git worktree list error: {str(e)}")

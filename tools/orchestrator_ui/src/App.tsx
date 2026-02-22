@@ -9,6 +9,8 @@ import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { UiStatusResponse, PlanCreateRequest, API_BASE } from './types';
 import { usePlanEngine } from './hooks/usePlanEngine';
 import { PlansPanel } from './components/PlansPanel';
+import { SkillsPanel } from './components/SkillsPanel';
+import { PlanComposer } from './components/PlanComposer';
 import { ReactFlowProvider } from 'reactflow';
 import { EvalDashboard } from './components/evals/EvalDashboard';
 import { ObservabilityPanel } from './components/observability/ObservabilityPanel';
@@ -19,6 +21,7 @@ import { OrchestratorChat } from './components/OrchestratorChat';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { CommandPalette } from './components/Shell/CommandPalette';
 import { useToast } from './components/Toast';
+import { ThreadView } from './components/ThreadView';
 
 export default function App() {
     const [authenticated, setAuthenticated] = useState<boolean | null>(null);
@@ -127,6 +130,36 @@ export default function App() {
         }
     };
 
+    const handleApprovePlanFromGraph = async (draftId: string) => {
+        try {
+            const res = await fetch(`${API_BASE}/ops/drafts/${draftId}/approve`, {
+                method: 'POST',
+                credentials: 'include',
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            addToast('Plan aprobado exitosamente', 'success');
+            setGraphNodeCount(-1); // Force refresh
+        } catch (err) {
+            console.error('Failed to approve plan:', err);
+            addToast('Error al aprobar el plan', 'error');
+        }
+    };
+
+    const handleRejectPlan = async (draftId: string) => {
+        try {
+            const res = await fetch(`${API_BASE}/ui/drafts/${draftId}/reject`, {
+                method: 'POST',
+                credentials: 'include',
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            addToast('Plan rechazado', 'info');
+            setGraphNodeCount(0); // Clear graph
+        } catch (err) {
+            console.error('Failed to reject plan:', err);
+            addToast('Error al rechazar el plan', 'error');
+        }
+    };
+
     const openGlobalPlanBuilder = () => setActiveTab('plans');
 
     const handleSelectView = (tab: SidebarTab) => {
@@ -208,6 +241,9 @@ export default function App() {
             case 'view_plan':
                 setActiveTab('plans');
                 break;
+            case 'goto_threads':
+                setActiveTab('threads');
+                break;
             default:
                 break;
         }
@@ -232,6 +268,10 @@ export default function App() {
                                         onNodeSelect={handleNodeSelect}
                                         selectedNodeId={selectedNodeId}
                                         onNodeCountChange={setGraphNodeCount}
+                                        onApprovePlan={handleApprovePlanFromGraph}
+                                        onRejectPlan={handleRejectPlan}
+                                        onEditPlan={openGlobalPlanBuilder}
+                                        planLoading={loading}
                                     />
                                 </div>
                                 <div className="h-2/5 min-h-[260px] overflow-hidden">
@@ -257,6 +297,15 @@ export default function App() {
                         onApprovePlan={handleApprovePlan}
                     />
                 );
+
+            case 'skills':
+                return <SkillsPanel />;
+
+            case 'composer':
+                return <PlanComposer />;
+
+            case 'threads':
+                return <ThreadView />;
 
             case 'evals':
                 return <EvalDashboard />;

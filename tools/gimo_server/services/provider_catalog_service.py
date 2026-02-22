@@ -4,6 +4,9 @@ import asyncio
 import hashlib
 import shutil
 import time
+import os
+import sys
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import httpx
@@ -179,10 +182,73 @@ class ProviderCatalogService:
         )
 
     @classmethod
-    async def _ollama_list_installed(cls) -> List[NormalizedModelInfo]:
-        # Prefer local API tags as source of truth for installed models.
+    def _get_ollama_manifest_dir(cls) -> Optional[Path]:
+        """Attempts to locate the Ollama models manifest directory."""
+        # 1. Check environment variable (OLLAMA_MODELS usually points to /models)
+        env_val = os.environ.get("OLLAMA_MODELS")
+        if env_val:
+            path = Path(env_val)
+            if (path / "manifests").exists():
+                return path / "manifests"
+            if path.name == "models" and path.exists():
+                 # Sometimes it points to the models folder itself
+                 if (path / "manifests").exists():
+                     return path / "manifests"
+        
+        # 2. Known custom path on this machine (discovered via research)
+        special_path = Path("D:/Ollama/models/manifests")
+        if special_path.exists():
+            return special_path
+
+        # 3. Default Windows/Local paths
+        defaults = [
+            Path(os.environ.get("USERPROFILE", "")) / ".ollama" / "models" / "manifests",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Ollama" / "models" / "manifests",
+        ]
+        for p in defaults:
+            if p.exists():
+                return p
+        return None
+
+    @classmethod
+    def _ollama_list_from_disk(cls) -> List[NormalizedModelInfo]:
+        """Scans the manifest directory for installed models without needing the daemon."""
+        manifest_dir = cls._get_ollama_manifest_dir()
+        if not manifest_dir:
+            return []
+
+        models: List[NormalizedModelInfo] = []
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            # Structure: manifests/registry.ollama.ai/library/[model]/[tag]
+            lib_path = manifest_dir / "registry.ollama.ai" / "library"
+            if not lib_path.exists():
+                return []
+            
+            for model_dir in lib_path.iterdir():
+                if model_dir.is_dir():
+                    model_name = model_dir.name
+                    for tag_file in model_dir.iterdir():
+                        if tag_file.is_file():
+                            tag = tag_file.name
+                            model_id = f"{model_name}:{tag}"
+                            # We don't have metadata easily without parsing the JSON manifest,
+                            # but for discovery, the ID is enough.
+                            models.append(
+                                cls._normalize_model(
+                                    model_id=model_id,
+                                    installed=True,
+                                    downloadable=True
+                                )
+                            )
+            return models
+        except Exception:
+            return []
+
+    @classmethod
+    async def _ollama_list_installed(cls) -> List[NormalizedModelInfo]:
+        # 1. Try local API tags first (most accurate for running state)
+        try:
+            async with httpx.AsyncClient(timeout=2) as client:
                 resp = await client.get("http://localhost:11434/api/tags")
                 if 200 <= resp.status_code < 300:
                     data = resp.json() if resp.content else {}
@@ -207,40 +273,76 @@ class ProviderCatalogService:
         except Exception:
             pass
 
-        # Fallback to CLI parsing when API is not reachable.
+        # 2. Robust Fallback: CLI parsing when API is not reachable.
         if shutil.which("ollama") is None:
-            return []
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "ollama",
-                "list",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _stderr = await proc.communicate()
-            if proc.returncode != 0:
-                return []
-            lines = stdout.decode("utf-8", errors="ignore").splitlines()
-            models: List[NormalizedModelInfo] = []
-            for idx, line in enumerate(lines):
-                if idx == 0 and "NAME" in line.upper():
-                    continue
-                parts = [p for p in line.strip().split() if p]
-                if not parts:
-                    continue
-                model_id = parts[0]
-                size = parts[2] if len(parts) >= 3 else None
-                models.append(
-                    cls._normalize_model(
-                        model_id=model_id,
-                        installed=True,
-                        downloadable=True,
-                        size=size,
-                    )
+            pass # Continue to disk scan
+        else:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ollama",
+                    "list",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                 )
-            return models
+                stdout, _stderr = await proc.communicate()
+                if proc.returncode == 0:
+                    lines = stdout.decode("utf-8", errors="ignore").splitlines()
+                    models: List[NormalizedModelInfo] = []
+                    for idx, line in enumerate(lines):
+                        if idx == 0 and "NAME" in line.upper():
+                            continue
+                        parts = [p for p in line.strip().split() if p]
+                        if not parts:
+                            continue
+                        model_id = parts[0]
+                        size = parts[2] if len(parts) >= 3 else None
+                        models.append(
+                            cls._normalize_model(
+                                model_id=model_id,
+                                installed=True,
+                                downloadable=True,
+                                size=size,
+                            )
+                        )
+                    if models:
+                        return models
+            except Exception:
+                pass
+
+        # 3. Final Fallback: Direct Manifest Scanning (Truly Offline)
+        return cls._ollama_list_from_disk()
+
+    @classmethod
+    async def ensure_ollama_ready(cls) -> bool:
+        """Checks if Ollama is running; if not, attempts to start it in the background."""
+        if await cls._ollama_health():
+            return True
+
+        # Service is down, attempt to wake it up
+        if shutil.which("ollama") is None:
+            return False
+
+        try:
+            # Start 'ollama serve' in background
+            # Note: On Windows, we use CREATE_NO_WINDOW or similar via subproc flags if needed,
+            # but a simple detached start usually works for Ollama's design.
+            import subprocess
+            subprocess.Popen(
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                start_new_session=True
+            )
+            
+            # Poll for readiness (max 30s)
+            for _ in range(30):
+                await asyncio.sleep(1.0)
+                if await cls._ollama_health():
+                    return True
+            return False
         except Exception:
-            return []
+            return False
 
     @classmethod
     async def list_installed_models(cls, provider_type: str) -> List[NormalizedModelInfo]:

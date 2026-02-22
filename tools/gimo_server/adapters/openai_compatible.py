@@ -63,7 +63,7 @@ class OpenAICompatibleSession(AgentSession):
                         # Phi-3.5 and Qwen support tools usually.
                         # For robustness, let's prompt for JSON tool calls if not using native tools.
                     },
-                    timeout=60.0
+                    timeout=300.0
                 )
                 response.raise_for_status()
                 data = response.json()

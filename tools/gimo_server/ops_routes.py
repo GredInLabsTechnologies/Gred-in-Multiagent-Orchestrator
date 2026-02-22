@@ -5,7 +5,7 @@ import asyncio
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from .routers.ops import (
-    plan_router, run_router, eval_router, trust_router, config_router, observability_router, mastery_router
+    plan_router, run_router, eval_router, trust_router, config_router, observability_router, mastery_router, skills_router, custom_plan_router, conversation_router
 )
 from .routers.ops.common import _ROLE_LEVEL, _ACTIONS_SAFE_PATHS, _ACTIONS_SAFE_PATH_PREFIXES
 
@@ -19,6 +19,9 @@ router.include_router(trust_router.router)
 router.include_router(config_router.router)
 router.include_router(observability_router.router)
 router.include_router(mastery_router.router)
+router.include_router(skills_router.router)
+router.include_router(custom_plan_router.router)
+router.include_router(conversation_router.router)
 
 @router.get("/openapi.json")
 async def get_filtered_openapi(

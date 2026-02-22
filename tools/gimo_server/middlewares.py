@@ -178,6 +178,7 @@ async def adaptive_panic_catcher_middleware(
         )
 
         # 6. Return Opaque Error
+
         return JSONResponse(
             status_code=500,
             content={

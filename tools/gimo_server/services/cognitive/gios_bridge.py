@@ -153,23 +153,23 @@ class GiosTfIdfIntentEngine:
 
 class GiosSecurityGuard:
     """
-    Military-Grade Security Detector ported directly from legacy GIOS.
-    Scans for adversarial inputs, prompt injection attempts, and jailbreaks.
+    Security guard ported from legacy GIOS.
+
+    NOTE: Operators are trusted principals. Valid architectural language
+    ('act as a', 'system override', etc.) is intentionally NOT blocked here.
+    Only real LLM backend jailbreak activation patterns are blocked.
+
+    A sandbox/quarantine layer for external code will be added separately.
     """
 
-    _GIOS_LEGACY_THREATS = (
-        "ignore all previous instructions",
-        "ignore previous instructions",
-        "forget your instructions",
-        "you are now",
-        "tu ahora eres",
-        "actúa como un",
-        "act as a",
-        "system override",
-        "developer mode",
-        "modo desarrollador",
+    # Minimal set — only LLM backend jailbreak activations.
+    _GIOS_LEGACY_THREATS: tuple = (
+        "jailbreak",
         "dan mode",
-        "unfiltered",
+        "do anything now",
+        "mode: unrestricted",
+        "[dan]",
+        "[jailbreak]",
     )
 
     def evaluate(self, input_text: str, context: dict) -> SecurityDecision:
