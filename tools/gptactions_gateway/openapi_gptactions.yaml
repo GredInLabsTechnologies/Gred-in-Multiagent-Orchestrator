@@ -1,0 +1,421 @@
+openapi: 3.1.0
+
+info:
+  title: GPT Actions Gateway
+  description: |
+    Gateway de solo-propuesta para ChatGPT Actions.
+
+    ## Principio de diseño
+    Actions **propone**, nunca **ejecuta**.
+    Todos los cambios propuestos pasan por:
+    1. Validación automática independiente (SAST + secret scan + dependency gate)
+    2. Attestation firmada con Ed25519
+    3. Aprobación humana explícita antes de aplicarse
+
+    ## Seguridad
+    - Todas las peticiones requieren autenticación Bearer
+    - Solo IPs de egress de OpenAI son aceptadas
+    - Cada POST/PUT es `x-openai-isConsequential: true` (requiere confirmación)
+    - El filesystem accesible está limitado al manifest publicado
+    - Los patches se confinan al jail y nunca se aplican automáticamente
+
+  version: 1.0.0
+  contact:
+    name: Soporte GIMO
+  license:
+    name: Privado
+
+servers:
+  - url: https://tu-gateway.ejemplo.com
+    description: Producción (sustituir con la URL real + TLS)
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Token Bearer configurado en GPTGW_TOKEN
+
+  schemas:
+    Error:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+
+    ManifestEntry:
+      type: object
+      required: [path, size_bytes, extension]
+      properties:
+        path:
+          type: string
+          description: Ruta relativa al repositorio
+        size_bytes:
+          type: integer
+        extension:
+          type: string
+
+    ManifestResponse:
+      type: object
+      required: [total_files, files, generated_at]
+      properties:
+        total_files:
+          type: integer
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManifestEntry'
+        generated_at:
+          type: string
+          format: date-time
+
+    FileResponse:
+      type: object
+      required: [path, content, total_lines, truncated, content_hash]
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+          description: Contenido del archivo (máx 64KB / 500 líneas)
+        total_lines:
+          type: integer
+        truncated:
+          type: boolean
+        content_hash:
+          type: string
+          description: SHA-256 del contenido devuelto
+
+    Hunk:
+      type: object
+      required: [start_line, end_line, old_lines, new_lines]
+      properties:
+        start_line:
+          type: integer
+          minimum: 1
+          description: Línea de inicio del hunk (1-based)
+        end_line:
+          type: integer
+          minimum: 1
+          description: Línea de fin del hunk (1-based, inclusive)
+        old_lines:
+          type: array
+          items:
+            type: string
+          maxItems: 100
+          description: Líneas originales exactas a reemplazar
+        new_lines:
+          type: array
+          items:
+            type: string
+          maxItems: 100
+          description: Líneas de reemplazo
+
+    TargetFile:
+      type: object
+      required: [path, hunks]
+      properties:
+        path:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: Ruta relativa al repositorio (debe estar en el manifest)
+        hunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Hunk'
+          minItems: 1
+          maxItems: 20
+
+    PatchProposal:
+      type: object
+      required: [schema_version, change_type, risk_level, rationale, target_files]
+      properties:
+        schema_version:
+          type: string
+          enum: ["1.0"]
+          description: Versión del schema de propuesta
+        change_type:
+          type: string
+          enum: [code_modification, test_addition, refactor, config_change]
+          description: Tipo de cambio propuesto
+        risk_level:
+          type: string
+          enum: [low, medium]
+          description: |
+            Nivel de riesgo estimado por Actions.
+            'high' no está permitido — requiere iniciativa humana directa.
+        rationale:
+          type: string
+          minLength: 10
+          maxLength: 500
+          description: Justificación del cambio (texto plano, sin instrucciones)
+        target_files:
+          type: array
+          items:
+            $ref: '#/components/schemas/TargetFile'
+          minItems: 1
+          maxItems: 5
+        override_reason:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Justificación para tocar rutas protegidas (aun requiere aprobación manual)
+
+    ProposeResponse:
+      type: object
+      required: [patch_id, status, message, requires_manual_override, warnings, created_at]
+      properties:
+        patch_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending]
+        message:
+          type: string
+        requires_manual_override:
+          type: boolean
+          description: True si el patch toca rutas protegidas y requiere revisión manual
+        warnings:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    PatchStatus:
+      type: object
+      required: [patch_id, status, created_at, size_bytes, requires_manual_override]
+      properties:
+        patch_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, validated, rejected, archived, manual_required]
+        created_at:
+          type: string
+          format: date-time
+        size_bytes:
+          type: integer
+        requires_manual_override:
+          type: boolean
+
+security:
+  - bearerAuth: []
+
+paths:
+  /repo/manifest:
+    get:
+      operationId: getManifest
+      summary: Lista de archivos que Actions puede leer
+      description: |
+        Devuelve el catálogo de archivos disponibles para lectura.
+        Actions NO puede explorar rutas fuera de esta lista.
+      responses:
+        '200':
+          description: Manifest de archivos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManifestResponse'
+        '403':
+          description: No autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Servicio no disponible (allowlist de IPs obsoleto)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /repo/file:
+    get:
+      operationId: readFile
+      summary: Leer contenido de un archivo del manifest
+      description: |
+        Lee el contenido de un archivo listado en el manifest.
+        Limitado a 500 líneas / 64KB. Devuelve `truncated: true` si se cortó.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 512
+          description: Ruta relativa del archivo (debe estar en el manifest)
+        - name: start_line
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Línea de inicio de lectura (1-based)
+      responses:
+        '200':
+          description: Contenido del archivo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileResponse'
+        '403':
+          description: Archivo no en manifest o ruta no permitida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Archivo no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /patch/propose:
+    post:
+      operationId: proposePatch
+      summary: Proponer un cambio de código
+      description: |
+        Crea una propuesta de patch en el jail de filesystem.
+        **La propuesta NUNCA se aplica automáticamente.**
+
+        El ciclo completo es:
+        1. Actions propone aquí (esta llamada)
+        2. El validador independiente ejecuta SAST + secret scan
+        3. Si pasa, el humano revisa y el integrador aplica
+
+        **Nota:** `x-openai-isConsequential: true` — ChatGPT pedirá confirmación al usuario.
+      x-openai-isConsequential: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchProposal'
+            example:
+              schema_version: "1.0"
+              change_type: "code_modification"
+              risk_level: "low"
+              rationale: "Corregir el bug de validación de path que omite extensiones vacías"
+              target_files:
+                - path: "tools/gimo_server/security/validation.py"
+                  hunks:
+                    - start_line: 42
+                      end_line: 44
+                      old_lines:
+                        - "        if not path_str:"
+                        - "            return None"
+                        - ""
+                      new_lines:
+                        - "        if not path_str or path_str.strip() == '':"
+                        - "            return None"
+                        - ""
+      responses:
+        '200':
+          description: Propuesta recibida y encolada para validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposeResponse'
+        '400':
+          description: Body no es JSON válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: IP no en allowlist o violación de seguridad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Schema de propuesta inválido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    type: array
+                    items:
+                      type: string
+        '429':
+          description: Rate limit de patches alcanzado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /patch/status/{patch_id}:
+    get:
+      operationId: getPatchStatus
+      summary: Estado de una propuesta de patch
+      description: Consulta el estado actual de un patch propuesto.
+      parameters:
+        - name: patch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Estado del patch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatchStatus'
+        '404':
+          description: Patch no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /status:
+    get:
+      operationId: getGatewayStatus
+      summary: Estado del gateway
+      description: Información operacional básica (sin datos sensibles).
+      responses:
+        '200':
+          description: Estado del servicio
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service:
+                    type: string
+                  version:
+                    type: string
+                  ip_allowlist:
+                    type: object
+                    properties:
+                      cidrs_loaded:
+                        type: integer
+                      is_stale:
+                        type: boolean
+                  jail:
+                    type: object
+                    properties:
+                      pending_patches:
+                        type: integer
+                  audit_chain:
+                    type: object
+                    properties:
+                      intact:
+                        type: boolean
+                      message:
+                        type: string
