@@ -221,4 +221,55 @@ Run quality gates:
 python scripts\\ci\\quality_gates.py
 ```
 
+## Appendix B — Component Architecture
 
+### Capas
+0. **GICS Daemon (Node.js)** - Storage distribuido propietario
+1. **Services (Python)** - 30+ servicios, GraphEngine es el nucleo
+2. **REST API (FastAPI)** - ~95 endpoints en `/ops/*`, `/ui/*`, `/auth/*`
+3. **MCP Server (FastMCP)** - 14 tools para IDEs via stdio/SSE
+4. **Frontend (React+Vite)** - Dashboard en puerto 5173
+
+### Sistema de Storage
+- **Actual**: SQLite predominante en varios storages (`cost_storage`, `trust_storage`, `eval_storage`, etc.).
+- **GICS**: Daemon Node.js para almacenamiento. Tiene conectividad via socket y tiers de storage (hot/warm/cold).
+- **Pendiente**: Migrar todo el almacenamiento de SQLite a GICS para tener a GICS como unico origen de datos.
+
+### Flujo Principal Detallado
+1. **Draft**: Se recibe un prompt o intenct y se genera un borrador (`ExecutionPlanDraft`).
+2. **Approved**: El usuario (o regla automatica) aprueba el plan.
+3. **Run**: El draft se convierte en un plan de ejecucion en el `GraphEngine`.
+4. **RunWorker**: El worker asincrono toma los nodos del grafo y delega el trabajo real.
+5. **ProviderService / LLM**: Se solicita inferencia al proveedor (ej. Qwen via Ollama, Groq, Codex).
+
+IDE → MCP tool → OpsService → RunWorker → ProviderService → LLM
+
+## Appendix C — LLM Adapters & Connectivity
+
+Desde esta fase, la **fuente unica de verdad** para providers es OPS (`/ops/provider`, `/ops/connectors`, etc.).
+Taxonomia canonica `provider_type`:
+- `ollama_local`, `openai`, `codex`, `groq`, `openrouter`, `custom_openai_compatible`
+
+### Matriz de Adaptadores (Compatibilidad)
+- **OpenAICompatibleAdapter**: Ollama, LM Studio, vLLM, DeepSeek, OpenAI (HTTP/JSON, Streaming, Tools limitados)
+- **ClaudeCodeAdapter**: Claude Code CLI (Stdio/MCP, Streaming, Tools)
+- **GeminiAdapter**: Gemini CLI (Stdio/JSON, Streaming, Tools)
+- **CodexAdapter**: Custom Codex CLI (Stdio/JSON, Streaming, Tools)
+- **GenericCLIAdapter**: Any CLI (Stdio/Text, Streaming)
+
+### Capability Matrix
+Cada provider declara `auth_modes_supported`, `can_install`, `install_method`, `supports_account_mode`, `supports_recommended_models`, `requires_remote_api`.
+
+## Appendix D — Sub-Delegation Protocol
+El protocolo define como un Primary Agent (e.g., Claude/GPT-4) delega sub-tareas a Sub-Agents (e.g., Ollama/CodeLlama).
+1. **Delegation Request**: POST `/api/agent/{agentId}/delegate`
+2. **Approval & Instantiation**: Orchestrator verifica TrustLevel. Instancia el Sub-Agent y lo anade al Graph.
+3. **Execution & Reporting**: Streaming output al contexto del Primary Agent.
+4. **Completion**: Retorna artefacto final como "tool result". Success or Failure.
+
+## Appendix E - Real State Map Priorities
+Prioridades basadas en el mapa de estado real de GIMO (P0/P1/P2/P3):
+- **P0**: Fix `gics_service.py` (import errors), fix `gimo_run_task()` (draft vacio), fix `custom_plan_router.py` (asyncio).
+- **P1**: Exponer ~80 endpoints faltantes via MCP bridge. Arreglar hooks frontend vacios y path mismatches.
+- **P2**: Migrar queries de agregacion (cost/trust/evals) de SQLite a GICS.
+- **P3**: Eliminar dependencias de servicios legacy. Actualizar `setup_mcp.py` para todos los IDEs.
