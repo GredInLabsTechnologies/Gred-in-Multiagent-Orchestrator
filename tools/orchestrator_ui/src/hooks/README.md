@@ -18,5 +18,5 @@
 - useAgentQuality: metricas de agente (endpoints no existen)
 - useSubAgents: delegacion (endpoints no existen)
 
-## Path Mismatch (necesita arreglo)
-- usePlanEngine: usa /ui/plan/* pero backend tiene /ops/drafts/*
+## Path Mismatch (resuelto)
+- usePlanEngine: ✅ corregido, usa /ops/drafts/* (fetch, approve, update)

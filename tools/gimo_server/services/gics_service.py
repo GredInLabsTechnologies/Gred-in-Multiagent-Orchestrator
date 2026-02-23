@@ -221,13 +221,5 @@ class GicsService:
         return []
 
     def flush(self) -> Any:
-         # Trigger a manual flush to warm
-         # This isn't exposed in the switch-case in server.js explicitly? 
-         # Checked server.js: it does NOT have a 'flush' method in handleRequest!
-         # It has: put, get, getInsight, getInsights, reportOutcome, subscribe, unsubscribe...
-         # But flushMemTableToWarm is internal. 'put' can trigger auto-flush.
-         # So we cannot force flush via public key unless we add it to server.js or it's implicitly doing it.
-         # Wait, I checked server.js lines 620+. 
-         # There is NO 'flush' case.
-         # So we can't manually flush. We just trust the daemon's wal and auto-flush logic.
-         pass
+        """No-op: GICS daemon auto-flushes. Manual flush not exposed via JSON-RPC."""
+        pass

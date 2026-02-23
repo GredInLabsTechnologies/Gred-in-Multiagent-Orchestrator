@@ -223,13 +223,47 @@ def register_native_tools(mcp: FastMCP):
         from tools.gimo_server.services.provider_service import ProviderService
         from tools.gimo_server.ops_models import OpsPlan
         import json, time, re
-        
-        sys_prompt = f"You are a senior systems architect.\\nTask: '{task_instructions}'\\n1. tasks[0] MUST be Orchestrator.\\n2. JSON Output.\\n"
+
+        sys_prompt = (
+            "You are a senior systems architect. Generate a JSON execution plan.\n"
+            "RULES:\n"
+            "- tasks[0] MUST have role 'Lead Orchestrator' with scope 'bridge'\n"
+            "- Each worker task must have a unique id, title, description, and agent_assignee\n"
+            "- agent_assignee must have: role, goal, backstory, model, system_prompt, instructions\n"
+            "- Output ONLY valid JSON, no markdown, no explanations\n\n"
+            f"Task: {task_instructions}\n\n"
+            'JSON schema:\n'
+            '{"id":"plan_...","title":"...","workspace":"...","created":"...","objective":"...",'
+            '"tasks":[{"id":"t_orch","title":"[ORCH] ...","scope":"bridge","depends":[],"status":"pending",'
+            '"description":"...","agent_assignee":{"role":"Lead Orchestrator","goal":"...","backstory":"...",'
+            '"model":"qwen2.5-coder:3b","system_prompt":"...","instructions":["..."]}},'
+            '{"id":"t_worker_1","title":"[WORKER] ...","scope":"file_write","depends":["t_orch"],'
+            '"status":"pending","description":"...","agent_assignee":{...}}],"constraints":[]}\n'
+        )
+        from pathlib import Path
+        debug_path = Path(__file__).resolve().parents[3] / "gimo_debug.log"
         try:
             response = await ProviderService.static_generate(prompt=sys_prompt, context={"task_type": "disruptive_planning"})
-            raw = re.sub(r"```(json)?\\n?|```", "", response.get("content", "").strip()).strip()
-            return OpsPlan.model_validate(json.loads(raw))
-        except Exception:
+            raw = response.get("content", "").strip()
+            debug_path.write_text(f"RAW:\n{raw[:2000]}\n\nPROVIDER: {response.get('provider')}\nMODEL: {response.get('model')}", encoding="utf-8")
+            # Strip markdown fences
+            raw = re.sub(r"```(?:json)?\s*\n?", "", raw).strip()
+            if raw.endswith("```"):
+                raw = raw[:-3].strip()
+            # Find first { to last }
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start >= 0 and end > start:
+                raw = raw[start:end + 1]
+            parsed = json.loads(raw)
+            return OpsPlan.model_validate(parsed)
+        except Exception as exc:
+            logger.error("Plan generation failed: %s", exc, exc_info=True)
+            import traceback
+            try:
+                debug_path.write_text(f"EXCEPTION: {exc}\n\n{traceback.format_exc()}", encoding="utf-8")
+            except Exception:
+                pass
             from datetime import datetime
             return OpsPlan(id=f"plan_{int(time.time())}", title="[FALLBACK] Plan", workspace="", created=datetime.now().isoformat(), objective=task_instructions, tasks=[], constraints=[])
 

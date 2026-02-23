@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useMemo } from 'react';
+import React, { useEffect, useCallback, useMemo, useRef } from 'react';
 import ReactFlow, {
     Background,
     Controls,
@@ -44,13 +44,31 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 }) => {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+    const hasFitView = useRef(false);
+    const userPositions = useRef<Record<string, { x: number; y: number }>>({});
+    const prevNodeIds = useRef<string>('');
 
-    // Extract draft info from node data (if nodes came from a structured draft)
+    // Track user-moved node positions
+    const handleNodesChange = useCallback((changes: any[]) => {
+        onNodesChange(changes);
+        for (const change of changes) {
+            if (change.type === 'position' && change.position) {
+                userPositions.current[change.id] = { ...change.position };
+            }
+        }
+    }, [onNodesChange]);
+
+    // Extract draft info — only show overlay for pending drafts, not completed runs
     const draftInfo = useMemo(() => {
         const firstNode = nodes.find(n => n.data?.plan?.draft_id);
         if (!firstNode) return null;
+        const draftId = firstNode.data.plan.draft_id as string;
+        // Don't show plan overlay for runs (r_...) or if all nodes are done
+        if (draftId.startsWith('r_')) return null;
+        const allDone = nodes.every(n => n.data?.status === 'done');
+        if (allDone) return null;
         return {
-            draftId: firstNode.data.plan.draft_id as string,
+            draftId,
             prompt: firstNode.data.task_description || firstNode.data.label || '',
         };
     }, [nodes]);
@@ -61,7 +79,6 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 credentials: 'include'
             });
 
-            // 401/403 = not authenticated, don't treat as empty graph
             if (response.status === 401 || response.status === 403) {
                 onNodeCountChange?.(-1);
                 return;
@@ -88,12 +105,14 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 },
             }));
 
+            // Merge server data with user-moved positions
             const nodesWithLiveState = data.nodes.map((n: any) => {
+                const userPos = userPositions.current[n.id];
                 return {
                     ...n,
+                    position: userPos || n.position,
                     data: {
                         ...n.data,
-                        // Backend now provides these fields dynamically
                         status: n.data.status || 'pending',
                         confidence: n.data.confidence,
                         pendingQuestions: n.data.pendingQuestions,
@@ -105,6 +124,15 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             });
 
             onNodeCountChange?.(nodesWithLiveState.length);
+
+            // Check if the node set changed (new plan / different nodes)
+            const newNodeIds = nodesWithLiveState.map((n: any) => n.id).sort().join(',');
+            if (newNodeIds !== prevNodeIds.current) {
+                // New graph — reset positions and trigger fitView
+                userPositions.current = {};
+                hasFitView.current = false;
+                prevNodeIds.current = newNodeIds;
+            }
 
             setNodes(nodesWithLiveState);
             setEdges(formattedEdges);
@@ -133,13 +161,17 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             <ReactFlow
                 nodes={nodes.map(n => ({ ...n, selected: n.id === selectedNodeId }))}
                 edges={edges}
-                onNodesChange={onNodesChange}
+                onNodesChange={handleNodesChange}
                 onEdgesChange={onEdgesChange}
                 nodeTypes={nodeTypes}
                 onNodeClick={onNodeClick}
                 onPaneClick={onPaneClick}
-                fitView
+                fitView={!hasFitView.current}
+                onInit={() => { hasFitView.current = true; }}
                 proOptions={{ hideAttribution: true }}
+                minZoom={0.3}
+                maxZoom={2}
+                defaultViewport={{ x: 0, y: 0, zoom: 0.85 }}
             >
                 <Background color="#1c1c1e" gap={24} size={1} />
                 <Controls showInteractive={false} />
@@ -175,4 +207,3 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         </div>
     );
 };
-

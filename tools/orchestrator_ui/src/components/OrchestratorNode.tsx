@@ -19,17 +19,17 @@ export const OrchestratorNode = memo(({ data, selected }: any) => {
 
     return (
         <div
-            className={`group relative px-5 py-4 rounded-2xl bg-[#141414]/90 backdrop-blur-md border-[1.5px] transition-all duration-300
+            className={`group relative px-3 py-2.5 rounded-xl bg-[#141414]/90 backdrop-blur-md border-[1.5px] transition-all duration-300 max-w-[220px]
                 ${selected ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)] scale-[1.02]' : 'border-white/10 hover:border-white/20'}`}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
         >
             <AgentHoverCard data={data} isVisible={isHovered} />
 
-            <div className="flex items-center gap-4">
-                <div className={`w-2 h-2 rounded-full ${data.status === 'running' ? 'bg-blue-400 animate-pulse' : 'bg-white/20'}`} />
-                <div>
-                    <div className="text-sm font-bold text-[#f5f5f7] tracking-tight">{data.label}</div>
+            <div className="flex items-center gap-2.5">
+                <div className={`w-2 h-2 rounded-full shrink-0 ${data.status === 'running' ? 'bg-blue-400 animate-pulse' : data.status === 'done' ? 'bg-emerald-400' : 'bg-white/20'}`} />
+                <div className="min-w-0">
+                    <div className="text-[11px] font-bold text-[#f5f5f7] tracking-tight truncate">{data.label}</div>
                     <div className="flex items-center gap-2 mt-1">
                         <div className={`text-[9px] uppercase tracking-widest font-black font-mono ${getStatusColor(data.status)}`}>
                             {isDoubt ? 'DUDAS' : (data.status || 'PENDING')}

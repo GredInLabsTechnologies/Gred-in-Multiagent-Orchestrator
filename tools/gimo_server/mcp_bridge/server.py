@@ -11,7 +11,8 @@ _active_run_worker = None
 
 def _register_dynamic():
     from tools.gimo_server.mcp_bridge.registrar import register_all
-    from tools.gimo_server.mcp_bridge.resources import register_resources, register_prompts
+    from tools.gimo_server.mcp_bridge.resources import register_resources
+    from tools.gimo_server.mcp_bridge.prompts import register_prompts
     
     register_all(mcp)
     register_resources(mcp)

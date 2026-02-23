@@ -106,6 +106,71 @@ async def reject_draft(
     audit_log("OPS", f"/ops/drafts/{draft_id}/reject", updated.id, operation="WRITE", actor=_actor_label(auth))
     return updated
 
+@router.post("/generate-plan", response_model=OpsDraft, status_code=201)
+async def generate_structured_plan(
+    request: Request,
+    prompt: str = Query(..., min_length=1, max_length=8000),
+    auth: AuthContext = Depends(verify_token),
+    rl: None = Depends(check_rate_limit),
+):
+    """Generate a structured multi-task plan with Mermaid graph via LLM."""
+    import json, re
+    _require_role(auth, "operator")
+    OpsService.set_gics(getattr(request.app.state, "gics", None))
+
+    sys_prompt = (
+        "You are a senior systems architect. Generate a JSON execution plan.\n"
+        "RULES:\n"
+        "- tasks[0] MUST have role 'Lead Orchestrator' with scope 'bridge'\n"
+        "- Each worker task must have a unique id, title, description, and agent_assignee\n"
+        "- agent_assignee must have: role, goal, backstory, model, system_prompt, instructions\n"
+        "- Output ONLY valid JSON, no markdown, no explanations\n\n"
+        f"Task: {prompt}\n\n"
+        'JSON schema:\n'
+        '{"id":"plan_...","title":"...","workspace":"...","created":"...","objective":"...",'
+        '"tasks":[{"id":"t_orch","title":"[ORCH] ...","scope":"bridge","depends":[],"status":"pending",'
+        '"description":"...","agent_assignee":{"role":"Lead Orchestrator","goal":"...","backstory":"...",'
+        '"model":"qwen2.5-coder:3b","system_prompt":"...","instructions":["..."]}},'
+        '{"id":"t_worker_1","title":"[WORKER] ...","scope":"file_write","depends":["t_orch"],'
+        '"status":"pending","description":"...","agent_assignee":{...}}],"constraints":[]}\n'
+    )
+    try:
+        resp = await ProviderService.static_generate(sys_prompt, context={"task_type": "disruptive_planning"})
+        raw = resp.get("content", "").strip()
+        raw = re.sub(r"```(?:json)?\s*\n?", "", raw).strip()
+        if raw.endswith("```"):
+            raw = raw[:-3].strip()
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start >= 0 and end > start:
+            raw = raw[start:end + 1]
+        plan = OpsPlan.model_validate(json.loads(raw))
+
+        # Generate mermaid graph
+        lines = ["graph TD"]
+        for task in plan.tasks:
+            nid = task.id.replace("-", "_")
+            lines.append(f'    {nid}["{task.title}<br/>[{task.status}]"]')
+            for dep in task.depends:
+                lines.append(f"    {dep.replace('-', '_')} --> {nid}")
+        mermaid = "\n".join(lines)
+
+        draft = OpsService.create_draft(
+            prompt,
+            content=plan.model_dump_json(indent=2),
+            context={"structured": True, "mermaid": mermaid},
+            provider=resp.get("provider", "local_ollama"),
+            status="draft",
+        )
+    except Exception as exc:
+        draft = OpsService.create_draft(
+            prompt, provider=None, content=None, status="error",
+            error=f"Plan generation failed: {str(exc)[:180]}",
+        )
+    audit_log("OPS", "/ops/generate-plan", draft.id, operation="WRITE", actor=_actor_label(auth))
+    return draft
+
+
 @router.post("/generate", response_model=OpsDraft, status_code=201)
 async def generate_draft(
     request: Request,

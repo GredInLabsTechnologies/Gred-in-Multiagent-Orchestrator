@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Optional
 
 from .ops_service import OpsService
@@ -82,38 +83,27 @@ class RunWorker:
         return run is not None and run.status in ("pending", "running")
 
     @staticmethod
-    def _extract_filename(text: str) -> Optional[str]:
-        """Extract a filename from task description or system prompt text."""
+    def _extract_target_path(text: str) -> Optional[str]:
+        """Extract a full target file path (TARGET_FILE: ...) or a filename."""
         import re
-        # Match patterns like 'qwen_popup.bat', 'hello.txt', 'script.py', etc.
+        # Priority 1: Explicit TARGET_FILE directive with full path
+        m = re.search(r"TARGET_FILE:\s*(\S+)", text)
+        if m:
+            return m.group(1).strip()
+        # Priority 2: Full absolute/relative paths
+        m = re.search(r"([A-Za-z]:[/\\][^\s\"']+\.\w{1,5})", text)
+        if m:
+            return m.group(1).strip()
+        # Priority 3: Simple filenames
         patterns = [
-            r"['\"]([a-zA-Z0-9_\-]+\.\w{1,5})['\"]",   # quoted filenames
-            r"(?:file|named?|llamado|archivo)\s+['\"]?([a-zA-Z0-9_\-]+\.\w{1,5})",  # "file named X"
-            r"(?:create|crear|write|escribir)\s+['\"]?([a-zA-Z0-9_\-]+\.\w{1,5})",  # "create X.bat"
+            r"['\"]([a-zA-Z0-9_\-]+\.\w{1,5})['\"]",
+            r"(?:file|named?|llamado|archivo)\s+['\"]?([a-zA-Z0-9_\-]+\.\w{1,5})",
+            r"(?:create|crear|write|escribir)\s+['\"]?([a-zA-Z0-9_\-]+\.\w{1,5})",
         ]
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 return match.group(1)
-        return None
-
-    @staticmethod
-    def _extract_file_content(system_prompt: str, filename: str) -> Optional[str]:
-        """Try to extract inline file content from the system prompt."""
-        import re
-        # Look for content between code block markers or after "content:" indicators
-        patterns = [
-            # Content after "content:" or "contenido:"
-            r"(?:content|contenido)[:\s]+(.+?)(?:\n\n|\Z)",
-            # Content between @echo and the end (for .bat files)
-            r"(@echo\s+off\b.*?)(?:\n\n|\Z)",
-            # Content in code blocks
-            r"```\w*\n(.*?)```",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, system_prompt, re.IGNORECASE | re.DOTALL)
-            if match:
-                return match.group(1).strip()
         return None
 
     async def _execute_file_task(
@@ -128,83 +118,79 @@ class RunWorker:
         base_path: Optional[Path] = None,
     ) -> bool:
         """
-        Execute a file-write task. Returns True if handled, False to fall through.
+        Execute a file-write task via LLM. Returns True if handled.
 
         Strategy:
-        1. Extract filename from description or system_prompt
-        2. Extract inline content from system_prompt, or call LLM to generate it
+        1. Extract target path from description or system_prompt
+        2. Always call the LLM to generate the file content
         3. Write via FileService
         """
         from .file_service import FileService
         from ..config import get_settings
+        import re
 
         combined_text = f"{title} {description} {system_prompt}"
-        filename = self._extract_filename(combined_text)
+        target = self._extract_target_path(combined_text)
 
-        if not filename:
+        if not target:
             OpsService.append_log(
                 run_id, level="WARN",
-                msg=f"Task {task_id}: Detected file op but couldn't extract filename. Skipping."
+                msg=f"Task {task_id}: Detected file op but couldn't extract target path. Skipping."
             )
             return False
 
-        settings = get_settings()
-        repo_root = base_path or settings.repo_root_dir
-        target_path = repo_root / filename
+        # Determine full path: absolute path or relative to repo root
+        target_path = Path(target)
+        if not target_path.is_absolute():
+            settings = get_settings()
+            repo_root = base_path or settings.repo_root_dir
+            target_path = repo_root / target
 
         OpsService.append_log(
             run_id, level="INFO",
             msg=f"Task {task_id}: File target → {target_path} (model: {model})"
         )
 
-        # Try to extract content directly from the system prompt
-        content = self._extract_file_content(system_prompt, filename)
-
-        if content:
+        # Always call the LLM to generate the file content
+        try:
             OpsService.append_log(
                 run_id, level="INFO",
-                msg=f"Task {task_id}: Extracted inline content ({len(content)} chars)"
+                msg=f"Task {task_id}: Calling LLM ({model}) to generate file content..."
             )
-        else:
-            # Call the LLM worker to generate the content
-            try:
-                OpsService.append_log(
-                    run_id, level="INFO",
-                    msg=f"Task {task_id}: No inline content — calling LLM ({model}) to generate..."
-                )
-                generation_prompt = (
-                    f"{system_prompt}\n\n"
-                    f"Generate ONLY the raw file content for '{filename}'. "
-                    f"Do not include explanations, markdown fences, or anything else — "
-                    f"just the exact content that should be written to the file."
-                )
-                llm_resp = await asyncio.wait_for(
-                    ProviderService.static_generate(
-                        prompt=generation_prompt,
-                        context={"mode": "worker_file_gen", "model": model}
-                    ),
-                    timeout=DEFAULT_RUN_TIMEOUT,
-                )
-                content = llm_resp.get("content", "").strip()
-                # Clean markdown code fences if the LLM wrapped it
-                if content.startswith("```"):
-                    import re
-                    content = re.sub(r"```\w*\n?|```", "", content).strip()
+            generation_prompt = (
+                f"{system_prompt}\n\n"
+                f"Generate ONLY the raw file content for '{target_path.name}'. "
+                f"Do not include explanations, markdown fences, or anything else — "
+                f"just the exact content that should be written to the file."
+            )
+            llm_resp = await asyncio.wait_for(
+                ProviderService.static_generate(
+                    prompt=generation_prompt,
+                    context={"mode": "worker_file_gen", "model": model}
+                ),
+                timeout=DEFAULT_RUN_TIMEOUT,
+            )
+            content = llm_resp.get("content", "").strip()
+            llm_model_used = llm_resp.get("model", model)
+            # Clean markdown code fences if the LLM wrapped it
+            if content.startswith("```"):
+                content = re.sub(r"```\w*\n?|```", "", content).strip()
 
-                OpsService.append_log(
-                    run_id, level="INFO",
-                    msg=f"Task {task_id}: LLM generated content ({len(content)} chars)"
-                )
-            except Exception as e:
-                OpsService.append_log(
-                    run_id, level="ERROR",
-                    msg=f"Task {task_id}: LLM generation failed: {e}. Using fallback."
-                )
-                content = f"REM Generated by GIMO worker ({model})\nREM Task: {title}\necho Task executed\npause\n"
+            OpsService.append_log(
+                run_id, level="INFO",
+                msg=f"Task {task_id}: LLM ({llm_model_used}) generated content ({len(content)} chars)"
+            )
+        except Exception as e:
+            OpsService.append_log(
+                run_id, level="ERROR",
+                msg=f"Task {task_id}: LLM generation failed: {e}"
+            )
+            return False
 
         # Write the file
         try:
-            FileService.write_file(target_path, content, f"gimo_worker_{model}")
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            FileService.write_file(target_path, content, f"gimo_worker_{llm_model_used}")
             OpsService.append_log(
                 run_id, level="INFO",
                 msg=f"Task {task_id}: ✅ File written → {target_path}"

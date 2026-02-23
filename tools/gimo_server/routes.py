@@ -187,6 +187,44 @@ def get_ui_allowlist_handler(
     return {"paths": safe_items}
 
 
+def _overlay_run_status(nodes: list, run) -> None:
+    """Update node statuses based on run logs (which tasks completed/failed)."""
+    completed_tasks = set()
+    running_task = None
+    for entry in (run.log or []):
+        msg = entry.get("msg", "")
+        # Detect completed tasks from log messages
+        if "✅" in msg or "delegation noted" in msg:
+            for node in nodes:
+                if node["id"] in msg or node["data"].get("label", "") in msg:
+                    completed_tasks.add(node["id"])
+        if "Executing Task" in msg:
+            for node in nodes:
+                if node["id"] in msg:
+                    running_task = node["id"]
+
+    for node in nodes:
+        nid = node["id"]
+        if run.status == "done":
+            node["data"]["status"] = "done"
+        elif run.status == "error":
+            if nid in completed_tasks:
+                node["data"]["status"] = "done"
+            elif nid == running_task:
+                node["data"]["status"] = "error"
+            else:
+                node["data"]["status"] = "pending"
+        elif run.status == "running":
+            if nid in completed_tasks:
+                node["data"]["status"] = "done"
+            elif nid == running_task:
+                node["data"]["status"] = "running"
+            else:
+                node["data"]["status"] = "pending"
+        elif run.status == "pending":
+            node["data"]["status"] = "pending"
+
+
 def get_ui_graph_handler(
     auth: AuthContext = Depends(require_read_only_access),
     rl: None = Depends(check_rate_limit),
@@ -199,15 +237,54 @@ def get_ui_graph_handler(
         engine = list(_WORKFLOW_ENGINES.values())[-1]
 
     if not engine:
-        # Disruptive Fallback: Check for structured drafts to visualize pre-execution
-        drafts = OpsService.list_drafts()
-        structured_drafts = [d for d in drafts if d.context.get("structured") and d.status == "draft"]
-        
-        if structured_drafts:
-            # Use the most recent structured draft
-            latest = structured_drafts[0]
-            nodes, edges = build_graph_from_ops_plan(latest.content, draft_id=latest.id)
-            return {"nodes": nodes, "edges": edges}
+        # Priority 1: Active runs (pending/running) — show live execution
+        runs = []
+        try:
+            runs = OpsService.list_runs()
+            active_runs = [r for r in runs if r.status in ("pending", "running")]
+            if active_runs:
+                latest_run = active_runs[0]
+                approved = OpsService.get_approved(latest_run.approved_id)
+                if approved and approved.content:
+                    nodes, edges = build_graph_from_ops_plan(approved.content, draft_id=latest_run.id)
+                    _overlay_run_status(nodes, latest_run)
+                    return {"nodes": nodes, "edges": edges}
+        except Exception:
+            pass
+
+        # Priority 2: Pending drafts — new plan awaiting approval
+        try:
+            drafts = OpsService.list_drafts()
+            pending_drafts = [d for d in drafts if d.context.get("structured") and d.status == "draft" and d.content]
+            if pending_drafts:
+                latest = pending_drafts[0]
+                nodes, edges = build_graph_from_ops_plan(latest.content, draft_id=latest.id)
+                return {"nodes": nodes, "edges": edges}
+        except Exception:
+            pass
+
+        # Priority 3: Most recent completed/errored run — post-execution view
+        try:
+            recent_done = [r for r in runs if r.status in ("done", "error")]
+            if recent_done:
+                latest_done = recent_done[0]
+                approved = OpsService.get_approved(latest_done.approved_id)
+                if approved and approved.content:
+                    nodes, edges = build_graph_from_ops_plan(approved.content, draft_id=latest_done.id)
+                    _overlay_run_status(nodes, latest_done)
+                    return {"nodes": nodes, "edges": edges}
+        except Exception:
+            pass
+
+        # Priority 4: Approved drafts waiting for run
+        try:
+            approved_drafts = [d for d in drafts if d.context.get("structured") and d.status == "approved" and d.content]
+            if approved_drafts:
+                latest = approved_drafts[0]
+                nodes, edges = build_graph_from_ops_plan(latest.content, draft_id=latest.id)
+                return {"nodes": nodes, "edges": edges}
+        except Exception:
+            pass
 
         return {"nodes": [], "edges": []}
 
