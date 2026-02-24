@@ -23,7 +23,7 @@ rich==14.3.2
 # Observability (OpenTelemetry)
 opentelemetry-api==1.27.0
 opentelemetry-sdk==1.27.0
-opentelemetry-exporter-otlp==1.27.0
+opentelemetry-exporter-otlp==1.39.1
 opentelemetry-instrumentation-fastapi==0.48b0
 
 # Multipart Form Data (for file uploads)
