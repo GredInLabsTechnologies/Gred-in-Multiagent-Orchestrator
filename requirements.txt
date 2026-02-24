@@ -18,7 +18,7 @@ pydantic==2.11.2
 requests==2.32.4
 anthropic==0.79.0
 python-dotenv==1.2.1
-rich==14.3.2
+rich==14.3.3
 
 # Observability (OpenTelemetry)
 opentelemetry-api==1.27.0
