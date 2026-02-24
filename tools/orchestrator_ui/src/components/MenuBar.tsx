@@ -116,7 +116,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 ))}
             </div>
 
-            <div className="text-[10px] text-[#86868b] font-mono uppercase tracking-wider">GIMO PHOENIX</div>
+            <div className="text-[10px] text-[#86868b] font-mono uppercase tracking-wider">GIMO</div>
 
             {isAboutOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -125,7 +125,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                             <div className="w-16 h-16 bg-[#2c2c2e] rounded-3xl flex items-center justify-center mx-auto mb-2 text-[#0a84ff]">
                                 <span className="text-2xl font-bold">G</span>
                             </div>
-                            <h2 className="text-xl font-bold text-[#f5f5f7]">GIMO Phoenix UI</h2>
+                            <h2 className="text-xl font-bold text-[#f5f5f7]">Interfaz de Usuario GIMO Phoenix</h2>
                             <p className="text-xs text-[#86868b] px-4">Aumentando la orquestación multi-agente con capacidades avanzadas.</p>
 
                             <div className="bg-black/30 rounded-xl p-4 border border-white/5 space-y-3 mt-4 text-left">
@@ -138,7 +138,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                     <span className="text-[11px] font-mono text-emerald-400">{status?.service_status || 'Operativo'}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-white/5 pb-2">
-                                    <span className="text-xs text-[#86868b]">Uptime</span>
+                                    <span className="text-xs text-[#86868b]">Tiempo Activo</span>
                                     <span className="text-[11px] font-mono text-[#f5f5f7]">{status?.uptime ? `${Math.floor(status.uptime / 3600)}h ${Math.floor((status.uptime % 3600) / 60)}m` : '0h 0m'}</span>
                                 </div>
                                 <div className="flex justify-between items-center">

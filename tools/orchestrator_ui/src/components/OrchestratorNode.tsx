@@ -13,59 +13,62 @@ const getStatusColor = (status?: string) => {
     }
 };
 
-export const OrchestratorNode = memo(({ data, selected }: any) => {
+const getStatusLabel = (status?: string) => {
+    switch (status) {
+        case 'running': return 'ejecutando';
+        case 'done': return 'finalizado';
+        case 'failed': return 'fallido';
+        case 'doubt': return 'dudas';
+        default: return 'esperando';
+    }
+};
+
+export const OrchestratorNode = memo(({ data }: { data: any }) => {
     const [isHovered, setIsHovered] = useState(false);
-    const isDoubt = data.status === 'doubt';
+    const statusColor = getStatusColor(data.status);
+    const statusLabel = getStatusLabel(data.status);
 
     return (
         <div
-            className={`group relative px-3 py-2.5 rounded-xl bg-[#141414]/90 backdrop-blur-md border-[1.5px] transition-all duration-300 max-w-[220px]
-                ${selected ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.3)] scale-[1.02]'
-                    : data.status === 'running' ? 'border-blue-500/80 shadow-[0_0_15px_rgba(59,130,246,0.4)] ring-1 ring-blue-500/50'
-                        : 'border-white/10 hover:border-white/20'}`}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
+            className={`px-4 py-3 rounded-xl bg-[#141414] border-2 shadow-2xl transition-all min-w-[200px] cursor-default relative ${data.status === 'running' ? 'border-blue-500/50 shadow-blue-500/10' : 'border-white/5 hover:border-white/20'}`}
         >
-            <AgentHoverCard data={data} isVisible={isHovered} />
+            <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-zinc-600 border-none" />
 
-            <div className="flex items-center gap-2.5">
-                <div className={`w-2 h-2 rounded-full shrink-0 ${data.status === 'running' ? 'bg-blue-400 animate-pulse' : data.status === 'done' ? 'bg-emerald-400' : 'bg-white/20'}`} />
-                <div className="min-w-0">
-                    <div className="text-[11px] font-bold text-[#f5f5f7] tracking-tight truncate">{data.label}</div>
-                    <div className="flex items-center gap-2 mt-1">
-                        <div className={`text-[9px] uppercase tracking-widest font-black font-mono ${getStatusColor(data.status)}`}>
-                            {isDoubt ? 'DUDAS' : (data.status || 'PENDING')}
-                        </div>
-                        {data.confidence && <ConfidenceMeter data={data.confidence} />}
-                    </div>
+            <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">{data.type || 'Agente'}</span>
+                    <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/40 border border-white/5 ${statusColor}`}>
+                        {statusLabel}
+                    </span>
                 </div>
+
+                <div className="flex items-center gap-2 group">
+                    <h3 className="text-sm font-bold text-white truncate max-w-[140px]">{data.label}</h3>
+                    <AgentHoverCard data={data} isVisible={isHovered} />
+                </div>
+
+                {data.confidence !== undefined && (
+                    <div className="mt-2 space-y-1">
+                        <div className="flex justify-between text-[9px] font-bold text-zinc-500 uppercase tracking-tighter">
+                            <span>Confianza</span>
+                            <span>{Math.round(data.confidence * 100)}%</span>
+                        </div>
+                        <ConfidenceMeter data={data.confidence} />
+                    </div>
+                )}
+
+                {data.latest_log && (
+                    <div className="mt-2 p-2 rounded-lg bg-black/40 border border-white/5">
+                        <p className="text-[9px] font-mono text-zinc-400 line-clamp-2 leading-relaxed italic">
+                            {data.latest_log}
+                        </p>
+                    </div>
+                )}
             </div>
 
-            {/* Live Logs */}
-            {data.status === 'running' && data.latest_log && (
-                <div className="mt-2 pt-2 border-t border-blue-500/20">
-                    <div className="text-[9px] text-blue-300/80 font-mono leading-tight line-clamp-2">
-                        {data.latest_log}
-                    </div>
-                </div>
-            )}
-
-            {/* Quality & Meta indicators */}
-            {data.agent_config && (
-                <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between gap-4">
-                    <div className="text-[10px] text-white/30 font-medium truncate max-w-[100px]">
-                        {data.agent_config.role}
-                    </div>
-                    {data.estimated_tokens && (
-                        <div className="text-[10px] text-blue-400/60 font-mono whitespace-nowrap">
-                            {data.estimated_tokens}t
-                        </div>
-                    )}
-                </div>
-            )}
-
-            <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-blue-500 !border-0 -translate-x-1" />
-            <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-blue-500 !border-0 translate-x-1" />
+            <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-zinc-600 border-none" />
         </div>
     );
 });

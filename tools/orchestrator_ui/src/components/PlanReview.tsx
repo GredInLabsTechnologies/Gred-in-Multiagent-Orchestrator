@@ -25,7 +25,7 @@ export const PlanReview: React.FC<PlanReviewProps> = ({ plan, onApprove, onModif
                                     {plan.status}
                                 </span>
                                 <span className="text-[10px] text-[#424245] flex items-center gap-1">
-                                    <Clock size={10} /> {plan.tasks.length} sub-tasks
+                                    <Clock size={10} /> {plan.tasks.length} sub-tareas
                                 </span>
                             </div>
                         </div>
@@ -34,7 +34,7 @@ export const PlanReview: React.FC<PlanReviewProps> = ({ plan, onApprove, onModif
 
                 <div className="space-y-4">
                     <div className="text-[10px] uppercase tracking-widest font-bold text-[#86868b] pl-1">
-                        Task Sequence
+                        Secuencia de Tareas
                     </div>
                     {plan.tasks.map((task, idx) => (
                         <div key={task.id} className="relative pl-8 pb-6 last:pb-0">
@@ -71,9 +71,9 @@ export const PlanReview: React.FC<PlanReviewProps> = ({ plan, onApprove, onModif
                 <div className="p-4 rounded-xl bg-[#ff9f0a]/5 border border-[#ff9f0a]/20 flex gap-3">
                     <AlertCircle size={14} className="text-[#ff9f0a] shrink-0 mt-0.5" />
                     <div>
-                        <h4 className="text-[10px] font-bold text-[#ff9f0a] uppercase tracking-wider mb-1">Safety Advisory</h4>
+                        <h4 className="text-[10px] font-bold text-[#ff9f0a] uppercase tracking-wider mb-1">Aviso de Seguridad</h4>
                         <p className="text-[10px] text-[#ff9f0a]/80 leading-relaxed">
-                            This plan will execute with <b>Supervised</b> trust. GIMO will wait for your confirmation before finalizing any file changes.
+                            Este plan se ejecutará con confianza <b>Supervisada</b>. GIMO esperará tu confirmación antes de finalizar cualquier cambio en los archivos.
                         </p>
                     </div>
                 </div>
@@ -85,7 +85,7 @@ export const PlanReview: React.FC<PlanReviewProps> = ({ plan, onApprove, onModif
                     className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest text-[#86868b] border border-[#2c2c2e] hover:bg-[#1c1c1e] transition-all"
                 >
                     <Edit2 size={12} />
-                    Modify Plan
+                    Modificar Plan
                 </button>
                 <button
                     onClick={onApprove}
@@ -97,7 +97,7 @@ export const PlanReview: React.FC<PlanReviewProps> = ({ plan, onApprove, onModif
                     ) : (
                         <>
                             <Play size={14} fill="currentColor" />
-                            Approve & Launch
+                            Aprobar y Lanzar
                         </>
                     )}
                 </button>

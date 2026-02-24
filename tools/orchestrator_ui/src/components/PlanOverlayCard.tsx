@@ -24,7 +24,7 @@ export const PlanOverlayCard: React.FC<PlanOverlayCardProps> = ({
     const { models, loading: modelsLoading } = useAvailableModels();
 
     return (
-        <Panel position="top-right" className="!m-4">
+        <Panel position="bottom-right" className="!m-4">
             <div className="w-[340px] bg-[#141414]/95 backdrop-blur-xl rounded-2xl border border-[#2c2c2e] shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
                 {/* Header */}
                 <div className="px-4 pt-3 pb-2 border-b border-[#1c1c1e] flex items-center gap-2">
@@ -66,9 +66,11 @@ export const PlanOverlayCard: React.FC<PlanOverlayCardProps> = ({
                         >
                             <option value="auto">⚡ Auto (Orquestador decide)</option>
                             {modelsLoading && <option disabled>Cargando modelos...</option>}
-                            {models.map(m => (
-                                <option key={m.id} value={m.id}>{m.label || m.id} {m.installed ? ' (Local)' : ''}</option>
-                            ))}
+                            {[...models]
+                                .sort((a, b) => (a.label || a.id).localeCompare(b.label || b.id))
+                                .map(m => (
+                                    <option key={m.id} value={m.id}>{m.label || m.id} {m.installed ? ' (Local)' : ''}</option>
+                                ))}
                         </select>
                     )}
                 </div>

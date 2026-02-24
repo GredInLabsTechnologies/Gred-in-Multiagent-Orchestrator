@@ -117,29 +117,75 @@ def reset_test_state():
     yield
 
 
-@pytest.fixture(autouse=True)
-def disable_observability_sdk():
-    """Disable OpenTelemetry SDK initialization during tests and mock counters."""
-    from tools.gimo_server.services.observability_service import ObservabilityService
+@pytest.fixture(scope="session", autouse=True)
+def init_forensic_state():
+    """Forensic initialization of system state without mocks."""
+    from tools.gimo_server import config
+    from tools.gimo_server.ops_models import OpsConfig, ProviderConfig, ToolEntry, UserEconomyConfig
+    from tools.gimo_server.services.tool_registry_service import ToolRegistryService
+    from tools.gimo_server.services.provider_service import ProviderService
+    import json
+    import sys
+
+    # 1. Ensure tokens are registered in global config
+    test_tokens = {
+        DEFAULT_TEST_TOKEN,
+        "test-operator-token-777",
+        "test-actions-token-888"
+    }
+    config.TOKENS.update(test_tokens)
+
+    # 2. Initialize Ops Data Directory
+    ops_dir = config.OPS_DATA_DIR
+    ops_dir.mkdir(parents=True, exist_ok=True)
+
+    # 3. Force-merge forensic tool into registry
+    registry_file = ToolRegistryService.REGISTRY_PATH
+    registry_data = {}
+    if registry_file.exists():
+        try:
+            registry_data = json.loads(registry_file.read_text(encoding="utf-8"))
+        except: pass
     
-    # Mock the counters so record_* methods don't crash
-    with patch.object(ObservabilityService, "_initialize_sdk", return_value=None):
-        ObservabilityService._workflows_counter = MagicMock()
-        ObservabilityService._nodes_counter = MagicMock()
-        ObservabilityService._nodes_failed_counter = MagicMock()
-        ObservabilityService._tokens_counter = MagicMock()
-        ObservabilityService._cost_counter = MagicMock()
-        ObservabilityService._tracer = MagicMock()
-        # Ensure start_span returns a context manager mock
-        ObservabilityService._tracer.start_span.return_value = MagicMock()
-        ObservabilityService._tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
-        
-        yield
-        
-        # Reset (though autouse=True session/function scope might handle it, explicit is better)
-        ObservabilityService._workflows_counter = None
-        ObservabilityService._nodes_counter = None
-        ObservabilityService._nodes_failed_counter = None
-        ObservabilityService._tokens_counter = None
-        ObservabilityService._cost_counter = None
-        ObservabilityService._tracer = None
+    test_tool = ToolEntry(
+        name="t1", 
+        description="Test Tool", 
+        metadata={"mcp_server": "s1", "mcp_tool": "real_t1"},
+        allowed_roles=["operator", "admin"]
+    )
+    registry_data["t1"] = test_tool.model_dump()
+    registry_file.write_text(json.dumps(registry_data, indent=2), encoding="utf-8")
+
+    # 4. Create real provider config with s1 server
+    provider_file = ops_dir / "provider.json"
+    mcp_script = os.path.normpath(os.path.abspath(os.path.join(Path(__file__).parent.resolve(), "test_mcp_server.py")))
+    prov_cfg = ProviderConfig(
+        active="openai",
+        providers={"openai": {"type": "openai", "model": "gpt-4o"}},
+        mcp_servers={"s1": {"command": "python", "args": [mcp_script], "enabled": True}}
+    )
+    if provider_file.exists():
+        try:
+            # Merge existing servers
+            old_cfg = ProviderConfig.model_validate_json(provider_file.read_text(encoding="utf-8"))
+            prov_cfg.providers.update(old_cfg.providers)
+            prov_cfg.mcp_servers.update(old_cfg.mcp_servers)
+        except: pass
+    provider_file.write_text(prov_cfg.model_dump_json(indent=2), encoding="utf-8")
+
+    # 5. Disable economy budgets for tests (including anthropic for CostService hardcoded checks)
+    config_file = ops_dir / "config.json"
+    from tools.gimo_server.ops_models import ProviderBudget
+    economy = UserEconomyConfig(
+        global_budget_usd=1000000.0,
+        provider_budgets=[
+            ProviderBudget(provider="openai", max_cost_usd=1000000.0),
+            ProviderBudget(provider="anthropic", max_cost_usd=1000000.0),
+            ProviderBudget(provider="local", max_cost_usd=1000000.0),
+        ],
+        cache_enabled=False
+    )
+    ops_cfg = OpsConfig(economy=economy)
+    config_file.write_text(ops_cfg.model_dump_json(indent=2), encoding="utf-8")
+
+    yield

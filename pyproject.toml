@@ -64,7 +64,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["tools", "scripts"]
+source = ["tools"]
 omit = [
     "*/tests/*",
     "*/test_*.py",

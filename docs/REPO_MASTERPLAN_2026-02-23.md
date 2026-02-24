@@ -220,6 +220,7 @@ scripts/
 | `docs/API.md` | Contratos API (merge de API_CONTRACTS + OPERATIONS) | ≤200 |
 | `docs/SECURITY.md` | Auth, trust, policies | ≤150 |
 | `docs/UI_IMPROVEMENT_PLAN_2026-02-23.md` | Plan de mejoras frontend activo | (ya existe) |
+- [x] Fase 6: Mejoras Frontend (Optimización, UX, Traducción) - **ESTADO: COMPLETADO**
 | `docs/REPO_MASTERPLAN_2026-02-23.md` | Este documento | (ya existe) |
 | `docs/CHANGELOG.md` | Historial de cambios por versión | Crear nuevo |
 
@@ -505,7 +506,7 @@ Esta fase es el documento separado `docs/UI_IMPROVEMENT_PLAN_2026-02-23.md` con 
 
 ---
 
-## FASE 7 — Polish Final
+## FASE 7 — Polish Final [COMPLETADO]
 
 ### 7.1 README.md reescrito
 ```markdown

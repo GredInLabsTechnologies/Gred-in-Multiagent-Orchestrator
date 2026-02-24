@@ -62,9 +62,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                 body: JSON.stringify(economyConfig),
             });
             if (!res.ok) throw new Error('save_failed');
-            setEconomyMessage('Economy guardada.');
+            setEconomyMessage('Economía guardada.');
         } catch {
-            setEconomyMessage('No se pudo guardar Economy.');
+            setEconomyMessage('No se pudo guardar la configuración de Economía.');
         } finally {
             setEconomySaving(false);
         }
@@ -79,12 +79,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                         <h2 className="text-sm font-black uppercase tracking-widest text-[#f5f5f7]">General</h2>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-                        <SettingCell label="Tema" value="macOS Dark" />
+                        <SettingCell label="Tema" value="macOS Oscuro" />
                         <SettingCell label="Idioma" value="es" />
-                        <SettingCell label="Auto-run" value={config?.default_auto_run ? 'enabled' : 'disabled'} />
+                        <SettingCell label="Auto-ejecución" value={config?.default_auto_run ? 'activado' : 'desactivado'} />
                         <SettingCell label="Concurrencia" value={String(config?.max_concurrent_runs ?? '—')} />
-                        <SettingCell label="TTL drafts" value={`${config?.draft_cleanup_ttl_days ?? '—'} días`} />
-                        <SettingCell label="Operator generate" value={config?.operator_can_generate ? 'enabled' : 'disabled'} />
+                        <SettingCell label="TTL borradores" value={`${config?.draft_cleanup_ttl_days ?? '—'} días`} />
+                        <SettingCell label="Operador genera" value={config?.operator_can_generate ? 'activado' : 'desactivado'} />
                     </div>
                 </section>
 
@@ -105,9 +105,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                                         className="mt-1 w-full bg-[#1c1c1e] border border-[#2c2c2e] rounded px-2 py-1 text-xs text-[#f5f5f7]"
                                     >
                                         <option value="manual">manual</option>
-                                        <option value="advisory">advisory</option>
-                                        <option value="guided">guided</option>
-                                        <option value="autonomous">autonomous</option>
+                                        <option value="advisory">consultivo</option>
+                                        <option value="guided">guiado</option>
+                                        <option value="autonomous">autónomo</option>
                                     </select>
                                 </div>
 
@@ -134,7 +134,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                                 </div>
 
                                 <div className="rounded-xl border border-[#2c2c2e] bg-[#101011] p-3">
-                                    <div className="text-[10px] uppercase tracking-widest text-[#86868b]">Flags</div>
+                                    <div className="text-[10px] uppercase tracking-widest text-[#86868b]">Indicadores</div>
                                     <div className="mt-1 space-y-1 text-xs text-[#f5f5f7]">
                                         <label className="flex items-center gap-2">
                                             <input
@@ -183,7 +183,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                         <h2 className="text-sm font-black uppercase tracking-widest text-[#f5f5f7]">Seguridad</h2>
                     </div>
                     <p className="text-xs text-[#86868b]">
-                        Las políticas, circuit breakers y trust dimensions se gestionan desde la vista Security.
+                        Las políticas, interruptores de circuito y dimensiones de confianza se gestionan desde la vista de Seguridad.
                     </p>
                 </section>
 

@@ -29,6 +29,19 @@ export const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
 
                     <button
                         onClick={() => {
+                            setPrompt(initialPrompt);
+                            setIsDirty(false);
+                        }}
+                        disabled={!isDirty}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all
+                            ${isDirty
+                                ? 'bg-white/5 text-[#86868b] hover:bg-white/10'
+                                : 'bg-white/5 text-white/5 cursor-not-allowed'}`}
+                    >
+                        RESTAURAR
+                    </button>
+                    <button
+                        onClick={() => {
                             onSave(prompt);
                             setIsDirty(false);
                         }}
@@ -39,7 +52,7 @@ export const SystemPromptEditor: React.FC<SystemPromptEditorProps> = ({
                                 : 'bg-white/5 text-white/20 cursor-not-allowed'}`}
                     >
                         <Save size={12} />
-                        SAVE CHANGES
+                        GUARDAR
                     </button>
                 </div>
             </div>

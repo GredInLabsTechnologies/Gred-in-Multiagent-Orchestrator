@@ -111,40 +111,60 @@ export const PlansPanel: React.FC<PlansPanelProps> = ({
                 <aside className="bg-[#101011] border border-[#2c2c2e] rounded-2xl p-5 flex flex-col min-h-[560px]">
                     <div className="mb-4">
                         <h2 className="text-sm uppercase tracking-widest font-black text-[#f5f5f7]">Historial de Planes</h2>
-                        <p className="text-xs text-[#86868b] mt-1">Drafts, aprobaciones y ejecuciones en una sola timeline.</p>
+                        <p className="text-xs text-[#86868b] mt-1">Borradores, aprobaciones y ejecuciones en una sola línea de tiempo.</p>
                     </div>
 
                     <div className="space-y-3 overflow-y-auto custom-scrollbar pr-1">
                         {timeline.length === 0 && (
                             <div className="h-40 flex items-center justify-center text-xs text-[#86868b] border border-dashed border-[#2c2c2e] rounded-xl">
-                                Sin historial todavía.
+                                Aún no hay historial.
                             </div>
                         )}
 
-                        {timeline.map((item) => (
-                            <div key={`${item.type}-${item.id}`} className="rounded-xl border border-[#2c2c2e] bg-[#141414] p-3">
-                                <div className="flex items-start gap-2">
-                                    <div className="mt-0.5 text-[#86868b]">
-                                        {item.type === 'draft' && <FileText size={14} />}
-                                        {item.type === 'approved' && <CheckCircle2 size={14} />}
-                                        {item.type === 'run' && <PlayCircle size={14} />}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <span className="text-xs text-[#f5f5f7] font-medium truncate">{item.title}</span>
-                                            <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-[#1c1c1e] text-[#86868b] border border-[#2c2c2e]">
-                                                {item.status}
-                                            </span>
+                        {timeline.map((item) => {
+                            const statusMap: Record<string, string> = {
+                                'draft': 'borrador',
+                                'approved': 'aprobado',
+                                'running': 'ejecutando',
+                                'done': 'finalizado',
+                                'failed': 'fallido',
+                                'doubt': 'con dudas'
+                            };
+                            const displayStatus = statusMap[item.status.toLowerCase()] || item.status;
+
+                            return (
+                                <div key={`${item.type}-${item.id}`} className="rounded-xl border border-[#2c2c2e] bg-[#141414] p-3">
+                                    <div className="flex items-start gap-2">
+                                        <div className="mt-0.5 text-[#86868b]">
+                                            {item.type === 'draft' && <FileText size={14} />}
+                                            {item.type === 'approved' && <CheckCircle2 size={14} />}
+                                            {item.type === 'run' && <PlayCircle size={14} />}
                                         </div>
-                                        {item.subtitle && <p className="text-[10px] text-[#86868b] mt-0.5">{item.subtitle}</p>}
-                                        <div className="mt-1.5 text-[10px] text-[#86868b] flex items-center gap-1">
-                                            <Clock3 size={10} />
-                                            {new Date(item.createdAt).toLocaleString()}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="text-xs text-[#f5f5f7] font-medium truncate">{item.title}</span>
+                                                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-[#1c1c1e] text-[#86868b] border border-[#2c2c2e]">
+                                                    {displayStatus}
+                                                </span>
+                                            </div>
+                                            {item.subtitle && (
+                                                <p className="text-[10px] text-[#86868b] mt-0.5">
+                                                    <span className="opacity-50">
+                                                        {item.type === 'approved' ? 'Borrador: ' : ''}
+                                                        {item.type === 'run' ? 'Aprobado: ' : ''}
+                                                    </span>
+                                                    {item.subtitle.replace('Draft: ', '').replace('Approved: ', '')}
+                                                </p>
+                                            )}
+                                            <div className="mt-1.5 text-[10px] text-[#86868b] flex items-center gap-1">
+                                                <Clock3 size={10} />
+                                                {new Date(item.createdAt).toLocaleString()}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </aside>
             </div>

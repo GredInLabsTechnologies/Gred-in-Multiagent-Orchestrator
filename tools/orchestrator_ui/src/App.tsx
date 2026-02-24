@@ -19,6 +19,7 @@ import { OrchestratorChat } from './components/OrchestratorChat';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { CommandPalette } from './components/Shell/CommandPalette';
 import { useToast } from './components/Toast';
+import { Panel as ResizePanel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 
 export default function App() {
     const [authenticated, setAuthenticated] = useState<boolean | null>(null);
@@ -258,27 +259,59 @@ export default function App() {
                             />
                         ) : (
                             <div className="h-full flex flex-col min-h-0 relative">
-                                <div className={`min-h-0 overflow-hidden border-b border-[#2c2c2e] transition-all duration-300 ${isChatCollapsed ? 'h-[calc(100%-56px)]' : 'h-3/5'}`}>
-                                    <GraphCanvas
-                                        onNodeSelect={handleNodeSelect}
-                                        selectedNodeId={selectedNodeId}
-                                        onNodeCountChange={setGraphNodeCount}
-                                        onApprovePlan={handleApprovePlanFromGraph}
-                                        onRejectPlan={handleRejectPlan}
-                                        onEditPlan={openGlobalPlanBuilder}
-                                        planLoading={loading}
-                                    />
-                                </div>
-                                <div className={`relative overflow-hidden transition-all duration-300 bg-[#0a0a0a] ${isChatCollapsed ? 'h-14 min-h-[56px] border-t border-[#2c2c2e]' : 'h-2/5 min-h-[260px] border-t-0'}`}>
-                                    <div
-                                        className="absolute top-0 right-8 w-12 h-4 bg-[#141414] border border-[#2c2c2e] border-t-0 rounded-b-md flex items-center justify-center cursor-pointer hover:bg-[#1c1c1e] z-50 group transition-colors"
-                                        onClick={() => setIsChatCollapsed(!isChatCollapsed)}
-                                        title={isChatCollapsed ? "Expandir chat" : "Colapsar chat"}
+                                <PanelGroup orientation="vertical">
+                                    <ResizePanel
+                                        defaultSize={60}
+                                        minSize={20}
+                                        className="min-h-0 overflow-hidden relative"
                                     >
-                                        <div className={`w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-[#86868b] transition-transform ${isChatCollapsed ? 'rotate-180' : ''}`} />
+                                        <GraphCanvas
+                                            onNodeSelect={handleNodeSelect}
+                                            selectedNodeId={selectedNodeId}
+                                            onNodeCountChange={setGraphNodeCount}
+                                            onApprovePlan={handleApprovePlanFromGraph}
+                                            onRejectPlan={handleRejectPlan}
+                                            onEditPlan={openGlobalPlanBuilder}
+                                            planLoading={loading}
+                                        />
+                                    </ResizePanel>
+
+                                    {!isChatCollapsed && (
+                                        <>
+                                            <PanelResizeHandle className="h-1 bg-[#1c1c1e] hover:bg-[#0a84ff]/50 transition-colors cursor-row-resize flex items-center justify-center">
+                                                <div className="w-8 h-0.5 bg-[#2c2c2e] rounded-full" />
+                                            </PanelResizeHandle>
+                                            <ResizePanel
+                                                defaultSize={40}
+                                                minSize={20}
+                                                className="relative overflow-hidden bg-[#0a0a0a] border-t border-[#2c2c2e]"
+                                            >
+                                                <div
+                                                    className="absolute top-0 right-8 w-12 h-4 bg-[#141414] border border-[#2c2c2e] border-t-0 rounded-b-md flex items-center justify-center cursor-pointer hover:bg-[#1c1c1e] z-50 group transition-colors"
+                                                    onClick={() => setIsChatCollapsed(true)}
+                                                    title="Colapsar chat"
+                                                >
+                                                    <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-[#86868b] transition-transform" />
+                                                </div>
+                                                <OrchestratorChat isCollapsed={false} />
+                                            </ResizePanel>
+                                        </>
+                                    )}
+                                </PanelGroup>
+
+                                {isChatCollapsed && (
+                                    <div className="h-14 min-h-[56px] border-t border-[#2c2c2e] relative overflow-hidden bg-[#0a0a0a] shrink-0">
+                                        <div
+                                            className="absolute top-0 right-8 w-12 h-4 bg-[#141414] border border-[#2c2c2e] border-t-0 rounded-b-md flex items-center justify-center cursor-pointer hover:bg-[#1c1c1e] z-50 group transition-colors"
+                                            onClick={() => setIsChatCollapsed(false)}
+                                            title="Expandir chat"
+                                        >
+                                            <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-[#86868b] transition-transform rotate-180" />
+                                        </div>
+                                        <OrchestratorChat isCollapsed={true} />
                                     </div>
-                                    <OrchestratorChat isCollapsed={isChatCollapsed} />
-                                </div>
+                                )}
+
                                 <div className={`absolute right-0 top-0 bottom-0 z-40 transition-transform duration-300 ease-in-out ${selectedNodeId ? 'translate-x-0' : 'translate-x-full pointer-events-none'}`}>
                                     <InspectPanel
                                         selectedNodeId={selectedNodeId}

@@ -22,9 +22,9 @@ class FileService:
     @staticmethod
     def get_file_content(
         target_path: Path,
-        start_line: int,
-        end_line: int,
-        token: str,
+        start_line: int = 1,
+        end_line: int = MAX_LINES,
+        token: str = "",
         truncated_marker: str = "\n# ... [TRUNCATED] ...\n",
     ) -> Tuple[str, str]:
         """

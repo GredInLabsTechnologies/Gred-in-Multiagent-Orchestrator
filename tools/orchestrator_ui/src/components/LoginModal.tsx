@@ -6,10 +6,7 @@ interface Props {
 }
 
 export function LoginModal({ onAuthenticated }: Props) {
-    // [WARNING] [SECURITY] [TEMPORAL FIX]
-    // Autocompletar el token leyendo `import.meta.env.VITE_ORCH_TOKEN` 
-    // es una regresión de seguridad si esto se transpila/expone en producción. 
-    // Este código DEBE ser eliminado antes de publicar.
+    // El acceso requiere un token manual por seguridad.
     const [token, setToken] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);

@@ -25,22 +25,22 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onCreate, loading }) =
                         <ClipboardList size={20} />
                     </div>
                     <div>
-                        <h2 className="text-lg font-semibold text-[#f5f5f7]">New Orchestrated Plan</h2>
-                        <p className="text-xs text-[#86868b]">Define a task for the orchestrator to solve</p>
+                        <h2 className="text-lg font-semibold text-[#f5f5f7]">Nuevo Plan Orquestado</h2>
+                        <p className="text-xs text-[#86868b]">Define una tarea para que el orquestador la resuelva</p>
                     </div>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-1.5">
                         <label htmlFor="plan-title" className="text-[10px] uppercase tracking-widest font-bold text-[#86868b] pl-1">
-                            Plan Title
+                            Título del Plan
                         </label>
                         <input
                             id="plan-title"
                             type="text"
                             value={title}
                             onChange={(e) => setTitle(e.target.value)}
-                            placeholder="e.g., Refactor Auth Module"
+                            placeholder="ej., Refactorizar Módulo de Autenticación"
                             className="w-full bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl px-4 py-2.5 text-sm text-[#f5f5f7] focus:outline-none focus:border-[#0a84ff] transition-all placeholder:text-[#424245]"
                             required
                         />
@@ -48,13 +48,13 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onCreate, loading }) =
 
                     <div className="space-y-1.5">
                         <label htmlFor="plan-desc" className="text-[10px] uppercase tracking-widest font-bold text-[#86868b] pl-1">
-                            Task Description
+                            Descripción de la Tarea
                         </label>
                         <textarea
                             id="plan-desc"
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
-                            placeholder="Describe what you want GIMO to do..."
+                            placeholder="Describe qué quieres que haga GIMO..."
                             rows={6}
                             className="w-full bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl px-4 py-3 text-sm text-[#f5f5f7] focus:outline-none focus:border-[#0a84ff] transition-all placeholder:text-[#424245] resize-none"
                             required
@@ -76,7 +76,7 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onCreate, loading }) =
                         ) : (
                             <>
                                 <Send size={14} />
-                                Generate Plan
+                                Generar Plan
                             </>
                         )}
                     </button>
@@ -84,13 +84,13 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onCreate, loading }) =
             </div>
 
             <div className="mt-auto p-6 border-t border-[#1c1c1e] bg-[#000000]/30 mr-2 rounded-tr-3xl">
-                <h3 className="text-[10px] uppercase tracking-widest font-bold text-[#424245] mb-2 text-center">How it works</h3>
+                <h3 className="text-[10px] uppercase tracking-widest font-bold text-[#424245] mb-2 text-center">Cómo funciona</h3>
                 <div className="grid grid-cols-2 gap-4">
                     <div className="text-[10px] text-[#86868b] leading-relaxed">
-                        <span className="text-[#f5f5f7] font-semibold block mb-0.5">1. Analysis</span> GIMO will scan the codebase and evaluate current state.
+                        <span className="text-[#f5f5f7] font-semibold block mb-0.5">1. Análisis</span> GIMO escaneará el código y evaluará el estado actual.
                     </div>
                     <div className="text-[10px] text-[#86868b] leading-relaxed">
-                        <span className="text-[#f5f5f7] font-semibold block mb-0.5">2. Delegation</span> It will break tasks down and assign them to specialized agents.
+                        <span className="text-[#f5f5f7] font-semibold block mb-0.5">2. Delegación</span> Desglosará las tareas y las asignará a agentes especializados.
                     </div>
                 </div>
             </div>

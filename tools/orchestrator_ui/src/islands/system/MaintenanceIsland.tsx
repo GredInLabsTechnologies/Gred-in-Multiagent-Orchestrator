@@ -85,7 +85,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
 
                 const data = await response.json() as { uptime_seconds?: number };
                 if (!cancelled) {
-                    setUptimeLabel(formatUptime(data.uptime_seconds ?? NaN));
+                    setUptimeLabel(formatUptime(data.uptime_seconds ?? Number.NaN));
                 }
             } catch {
                 if (!cancelled) setUptimeLabel('—');
@@ -118,7 +118,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                     border: 'border-red-500/30',
                     bar: 'bg-red-500',
                     icon: <ShieldAlert className="w-6 h-6" />,
-                    message: 'PROTECTIVE LOCKDOWN: Anonymous traffic blocked.'
+                    message: 'BLOQUEO PROTECTIVO: Tráfico anónimo bloqueado.'
                 };
             case 2: // GUARDED
                 return {
@@ -127,7 +127,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                     border: 'border-orange-500/30',
                     bar: 'bg-orange-500',
                     icon: <ShieldAlert className="w-6 h-6" />,
-                    message: 'GUARDED: High latency enforced for unauthenticated requests.'
+                    message: 'PROTEGIDO: Latencia forzada para peticiones no autenticadas.'
                 };
             case 1: // ALERT
                 return {
@@ -136,7 +136,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                     border: 'border-amber-500/30',
                     bar: 'bg-amber-500',
                     icon: <Activity className="w-6 h-6" />,
-                    message: 'ALERT: Suspicious activity detected. Monitoring sources.'
+                    message: 'ALERTA: Actividad sospechosa detectada. Monitoreando fuentes.'
                 };
             default: // NOMINAL
                 return {
@@ -145,7 +145,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                     border: 'border-emerald-500/20',
                     bar: 'bg-emerald-500',
                     icon: <ShieldCheck className="w-6 h-6" />,
-                    message: 'NOMINAL: System security within normal parameters.'
+                    message: 'NOMINAL: Seguridad del sistema dentro de parámetros normales.'
                 };
         }
     };
@@ -155,7 +155,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
             color: 'text-red-500',
             bg: 'bg-red-500/10',
             border: 'border-red-500/30',
-            label: 'LOCKDOWN'
+            label: 'BLOQUEO'
         };
 
         switch (status) {
@@ -164,35 +164,35 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                     color: 'text-emerald-400',
                     bg: 'bg-emerald-500/10',
                     border: 'border-emerald-500/20',
-                    label: 'RUNNING'
+                    label: 'EJECUTANDO'
                 };
             case 'STARTING':
                 return {
                     color: 'text-amber-400',
                     bg: 'bg-amber-500/10',
                     border: 'border-amber-500/20',
-                    label: 'STARTING'
+                    label: 'INICIANDO'
                 };
             case 'STOPPING':
                 return {
                     color: 'text-amber-400',
                     bg: 'bg-amber-500/10',
                     border: 'border-amber-500/20',
-                    label: 'STOPPING'
+                    label: 'DETENIENDO'
                 };
             case 'STOPPED':
                 return {
                     color: 'text-red-400',
                     bg: 'bg-red-500/10',
                     border: 'border-red-500/20',
-                    label: 'STOPPED'
+                    label: 'DETENIDO'
                 };
             default:
                 return {
                     color: 'text-zinc-500',
                     bg: 'bg-zinc-500/10',
                     border: 'border-zinc-500/20',
-                    label: 'UNKNOWN'
+                    label: 'DESCONOCIDO'
                 };
         }
     };
@@ -235,8 +235,8 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
             )}
 
             <div className="p-3 rounded-xl border border-[#2c2c2e] bg-[#141414] text-xs text-[#86868b]">
-                <strong className="text-[#f5f5f7]">Nota:</strong> <span className="text-[#f5f5f7]">Status</span> (servicio RUNNING/STOPPED)
-                {' '}y <span className="text-[#f5f5f7]">Security Level</span> (NOMINAL/ALERT/GUARDED/LOCKDOWN) son métricas independientes.
+                <strong className="text-[#f5f5f7]">Nota:</strong> <span className="text-[#f5f5f7]">Estado</span> (servicio EJECUTANDO/DETENIDO)
+                {' '}y <span className="text-[#f5f5f7]">Nivel de Seguridad</span> (NOMINAL/ALERTA/PROTEGIDO/BLOQUEO) son métricas independientes.
             </div>
 
             {/* Top Grid: Status & Controls */}
@@ -252,7 +252,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                                 )}
                             </div>
                             <div>
-                                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-1">Status</h3>
+                                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-1">Estado</h3>
                                 <div className="flex items-center space-x-2">
                                     <span className={`text-xl font-black ${theme.color}`}>{theme.label}</span>
                                     {!isServiceLoading && <div className={`w-1.5 h-1.5 rounded-full ${status === 'RUNNING' ? 'bg-emerald-500' : 'bg-red-500'}`} />}
@@ -262,7 +262,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                         <div className="flex space-x-2">
                             <button
                                 onClick={restart}
-                                title="Restart Service"
+                                title="Reiniciar Servicio"
                                 disabled={isServiceLoading || lockdown}
                                 className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition-all disabled:opacity-30 group"
                             >
@@ -270,7 +270,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                             </button>
                             <button
                                 onClick={stop}
-                                title="Stop Service"
+                                title="Detener Servicio"
                                 disabled={isServiceLoading || status === 'STOPPED' || lockdown}
                                 className="p-2.5 rounded-xl bg-red-500/5 hover:bg-red-500/10 border border-red-500/10 transition-all disabled:opacity-30 group"
                             >
@@ -281,7 +281,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                     <div className="mt-6 flex items-center justify-between text-[11px] font-medium text-zinc-500">
                         <div className="flex items-center space-x-2">
                             <Clock className="w-3 h-3 opacity-40" />
-                            <span>Uptime: {uptimeLabel}</span>
+                            <span>Actividad: {uptimeLabel}</span>
                         </div>
                         <div className="flex items-center space-x-2">
                             <Database className="w-3 h-3 opacity-40" />
@@ -298,7 +298,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                                 {sTheme.icon}
                             </div>
                             <div>
-                                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-1">Security Level</h3>
+                                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-1">Nivel de Seguridad</h3>
                                 <div className="flex items-center space-x-2">
                                     <span className={`text-xl font-black uppercase ${sTheme.color}`}>{threatLevelLabel}</span>
                                     {autoDecayRemaining !== null && (
@@ -314,7 +314,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                             <div className="flex space-x-2">
                                 <button
                                     onClick={downgrade}
-                                    title="Downgrade threat level"
+                                    title="Bajar nivel de amenaza"
                                     disabled={isSecurityLoading}
                                     className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition-all disabled:opacity-30 group"
                                 >
@@ -322,7 +322,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                                 </button>
                                 <button
                                     onClick={clearLockdown}
-                                    title="Reset to NOMINAL"
+                                    title="Restablecer a NOMINAL"
                                     disabled={isSecurityLoading}
                                     className="p-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/10 transition-all disabled:opacity-30 group"
                                 >
@@ -340,8 +340,8 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
 
                     <div className="mt-4 space-y-2">
                         <div className="flex justify-between text-[9px] uppercase font-black tracking-widest text-zinc-500">
-                            <span>Threat intensity</span>
-                            <span className={sTheme.color}>{activeSources > 0 ? `${activeSources} tracked sources` : 'Verified'}</span>
+                            <span>Intensidad de amenaza</span>
+                            <span className={sTheme.color}>{activeSources > 0 ? `${activeSources} fuentes rastreadas` : 'Verificado'}</span>
                         </div>
                         <div className="h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-white/5">
                             <div
@@ -358,7 +358,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                 <div className="p-6 border-b border-white/5 flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                         <Database className="w-5 h-5 text-blue-400" />
-                        <h3 className="text-xs font-black uppercase tracking-widest text-[#f5f5f7]">Active Repository</h3>
+                        <h3 className="text-xs font-black uppercase tracking-widest text-[#f5f5f7]">Repositorio Activo</h3>
                     </div>
                     {activeRepo && (
                         <div className="flex items-center space-x-2 text-[10px] font-mono text-zinc-500 bg-black/40 px-3 py-1.5 rounded-lg border border-white/5">
@@ -370,7 +370,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                 <div className="p-8">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-end">
                         <div className="space-y-3">
-                            <label htmlFor="repo-select" className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Target Repository</label>
+                            <label htmlFor="repo-select" className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Repositorio Destino</label>
                             <div className="relative group">
                                 <select
                                     id="repo-select"
@@ -378,7 +378,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                                     onChange={(e) => setSelectedRepoPath(e.target.value)}
                                     className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-sm text-white appearance-none focus:border-blue-500/40 outline-none transition-all cursor-pointer group-hover:border-white/20"
                                 >
-                                    <option value="">Select a repository...</option>
+                                    <option value="">Seleccionar un repositorio...</option>
                                     {repos.map((repo) => (
                                         <option key={repo.path} value={repo.path}>
                                             {repo.name} ({repo.path})
@@ -394,7 +394,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                                 disabled={!selectedRepoPath || isRepoLoading || selectedRepoPath === activeRepo}
                                 className="flex-1 bg-blue-500 hover:bg-blue-400 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all disabled:opacity-30 active:scale-95"
                             >
-                                Activate
+                                Activar
                             </button>
                             <button
                                 onClick={() => bootstrap(selectedRepoPath)}
@@ -402,7 +402,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                                 className="flex-1 bg-white/5 hover:bg-white/10 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all border border-white/10 disabled:opacity-30 active:scale-95 flex items-center justify-center space-x-2"
                             >
                                 <FlaskConical className="w-4 h-4" />
-                                <span>Bootstrap files</span>
+                                <span>Inicializar archivos</span>
                             </button>
                         </div>
                     </div>
@@ -414,14 +414,14 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                 <div className="p-6 border-b border-white/5 bg-white/[0.02] flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                         <Terminal className="w-5 h-5 text-amber-500" />
-                        <h3 className="text-xs font-black uppercase tracking-widest text-[#f5f5f7]">Audit log</h3>
+                        <h3 className="text-xs font-black uppercase tracking-widest text-[#f5f5f7]">Registro de auditoría</h3>
                     </div>
                     <div className="flex items-center space-x-3">
                         <div className="relative flex items-center">
                             <Search className="absolute left-3 w-3.5 h-3.5 text-zinc-500" />
                             <input
                                 type="text"
-                                placeholder="Search logs..."
+                                placeholder="Buscar logs..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 className="bg-black/40 border border-white/5 rounded-xl pl-9 pr-4 py-2 text-xs text-zinc-300 focus:border-amber-500/40 outline-none w-48 transition-all"
@@ -432,21 +432,21 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                             onChange={(e) => setFilter(e.target.value as AuditFilter)}
                             className="bg-black/40 border border-white/5 rounded-xl px-3 py-2 text-[10px] font-bold text-zinc-400 outline-none hover:border-white/10 transition-all uppercase"
                         >
-                            <option value="all">ANY</option>
-                            <option value="read">READ</option>
-                            <option value="deny">DENY</option>
-                            <option value="system">SYS</option>
+                            <option value="all">CUALQUIERA</option>
+                            <option value="read">LECTURA</option>
+                            <option value="deny">DENEGAR</option>
+                            <option value="system">SISTEMA</option>
                         </select>
                         <button
                             onClick={refreshLogs}
-                            title="Refresh Logs"
+                            title="Refrescar Logs"
                             className="p-2 rounded-xl bg-zinc-900/50 border border-white/5 hover:bg-white/5 transition-all"
                         >
                             <RefreshCcw className="w-3.5 h-3.5 text-zinc-500" />
                         </button>
                         <button
                             onClick={handleExport}
-                            title="Export Logs"
+                            title="Exportar Logs"
                             className="p-2 rounded-xl bg-zinc-900/50 border border-white/5 hover:bg-white/5 transition-all"
                         >
                             <Download className="w-3.5 h-3.5 text-zinc-500" />
@@ -458,7 +458,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                     {logs.length > 0 ? (
                         <div className="space-y-1.5">
                             {logs.map((log, i) => (
-                                <div key={i} className={`break-all leading-relaxed ${getLogClass(log)} transition-colors`}>
+                                <div key={`${i}-${log.slice(0, 10)}`} className={`break-all leading-relaxed ${getLogClass(log)} transition-colors`}>
                                     {log}
                                 </div>
                             ))}
@@ -466,7 +466,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                     ) : (
                         <div className="h-full flex flex-col items-center justify-center text-zinc-600 space-y-3 opacity-40">
                             <FileText className="w-8 h-8" />
-                            <span className="text-[10px] font-black uppercase tracking-widest">No matching events</span>
+                            <span className="text-[10px] font-black uppercase tracking-widest">No hay eventos coincidentes</span>
                         </div>
                     )}
                 </div>

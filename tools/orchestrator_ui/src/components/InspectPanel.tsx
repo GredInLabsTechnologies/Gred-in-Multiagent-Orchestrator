@@ -9,7 +9,6 @@ import { useNodes } from 'reactflow';
 import { GraphNode, API_BASE } from '../types';
 import { SystemPromptEditor } from './SystemPromptEditor';
 import { useAvailableModels } from '../hooks/useAvailableModels';
-import { AgentQuestionCard } from './AgentQuestionCard';
 
 interface InspectPanelProps {
     selectedNodeId: string | null;
@@ -31,21 +30,6 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
     const [view, setView] = useState<'overview' | 'plan' | 'quality' | 'chat' | 'delegation' | 'prompt' | 'config'>('overview');
     const { models, loading: modelsLoading } = useAvailableModels();
 
-    /**
-     * Stub for answering a pending agent question.
-     * To be implemented when backend query mutation is available.
-     */
-    const handleAnswerQuestion = (questionId: string, answer: string) => {
-        console.debug('stub: handleAnswerQuestion', { questionId, answer });
-    };
-
-    /**
-     * Stub for dismissing a pending agent question.
-     * To be implemented when backend query mutation is available.
-     */
-    const handleDismissQuestion = (questionId: string) => {
-        console.debug('stub: handleDismissQuestion', { questionId });
-    };
 
     const handleSavePrompt = async (newPrompt: string) => {
         if (!selectedNodeId || !selectedNode?.data?.plan?.draft_id) return;
@@ -173,18 +157,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
             <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-6">
                 {selectedNodeId ? (
                     <>
-                        {selectedNode?.data?.pendingQuestions && selectedNode.data.pendingQuestions.length > 0 && (
-                            <div className="space-y-3 mb-6">
-                                {selectedNode.data.pendingQuestions.map(q => (
-                                    <AgentQuestionCard
-                                        key={q.id}
-                                        question={q}
-                                        onAnswer={handleAnswerQuestion}
-                                        onDismiss={handleDismissQuestion}
-                                    />
-                                ))}
-                            </div>
-                        )}
+                        {/* Bloque de Preguntas oculto hasta soporte backend */}
 
                         {view === 'plan' && <AgentPlanPanel plan={planData} />}
                         {view === 'prompt' && (
@@ -244,12 +217,6 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                                             readOnly
                                         />
                                     </div>
-
-                                    {/* <div className="pt-2">
-                                        <button className="w-full py-2 bg-blue-600/10 border border-blue-500/20 rounded-xl text-[10px] font-bold text-blue-400 hover:bg-blue-600/20 transition-all">
-                                            SWAP AGENT INHERITANCE
-                                        </button>
-                                    </div> */}
                                 </div>
                             </div>
                         )}

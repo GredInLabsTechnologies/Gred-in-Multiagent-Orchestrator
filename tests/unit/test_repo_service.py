@@ -1,5 +1,6 @@
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+import hashlib
 
 import pytest
 
@@ -116,3 +117,39 @@ def test_should_skip_dir():
     assert RepoService._should_skip_dir(".git") == True
     assert RepoService._should_skip_dir("node_modules") == True
     assert RepoService._should_skip_dir("src") == False
+
+# ── Git & File Services ───────────────────────────────────
+
+class TestGitService:
+    def test_get_diff_success(self, tmp_path):
+        with patch("subprocess.Popen") as mock_popen:
+            mock_process = MagicMock()
+            mock_process.communicate.return_value = ("diff data", "")
+            mock_process.returncode = 0
+            mock_popen.return_value = mock_process
+            from tools.gimo_server.services.git_service import GitService
+            assert GitService.get_diff(tmp_path) == "diff data"
+
+    def test_list_repos_git(self, tmp_path):
+        (tmp_path / "r1").mkdir()
+        from tools.gimo_server.services.git_service import GitService
+        repos = GitService.list_repos(tmp_path)
+        assert len(repos) == 1
+        assert repos[0]["name"] == "r1"
+
+class TestFileService:
+    def test_tail_audit_lines(self, tmp_path):
+        log = tmp_path / "audit.log"
+        log.write_text("l1\nl2\nl3")
+        with patch("tools.gimo_server.services.file_service.AUDIT_LOG_PATH", log):
+            from tools.gimo_server.services.file_service import FileService
+            assert FileService.tail_audit_lines(limit=2) == ["l2", "l3"]
+
+    def test_get_file_content_sanitized(self, tmp_path):
+        f = tmp_path / "test.py"
+        f.write_text("line1\nline2")
+        with patch("tools.gimo_server.services.file_service.SnapshotService.create_snapshot", return_value=f):
+            from tools.gimo_server.services.file_service import FileService
+            content, h = FileService.get_file_content(Path("dummy.py"), token="t")
+            assert "line1" in content
+            assert len(h) == 64

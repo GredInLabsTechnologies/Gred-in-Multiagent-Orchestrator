@@ -8,7 +8,7 @@ interface SidebarProps {
 }
 
 const primaryTabs: { id: SidebarTab; icon: typeof Network; label: string }[] = [
-    { id: 'graph', icon: Network, label: 'Graph' },
+    { id: 'graph', icon: Network, label: 'Grafo' },
     { id: 'plans', icon: ClipboardList, label: 'Planes' },
     { id: 'evals', icon: BarChart2, label: 'Evals' },
     { id: 'metrics', icon: Activity, label: 'Métricas' },

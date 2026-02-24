@@ -238,14 +238,10 @@ def register_native_tools(mcp: FastMCP):
             '"description":"...","agent_assignee":{"role":"Lead Orchestrator","goal":"...","backstory":"...",'
             '"model":"qwen2.5-coder:3b","system_prompt":"...","instructions":["..."]}},'
             '{"id":"t_worker_1","title":"[WORKER] ...","scope":"file_write","depends":["t_orch"],'
-            '"status":"pending","description":"...","agent_assignee":{...}}],"constraints":[]}\n'
         )
-        from pathlib import Path
-        debug_path = Path(__file__).resolve().parents[3] / "gimo_debug.log"
         try:
             response = await ProviderService.static_generate(prompt=sys_prompt, context={"task_type": "disruptive_planning"})
             raw = response.get("content", "").strip()
-            debug_path.write_text(f"RAW:\n{raw[:2000]}\n\nPROVIDER: {response.get('provider')}\nMODEL: {response.get('model')}", encoding="utf-8")
             # Strip markdown fences
             raw = re.sub(r"```(?:json)?\s*\n?", "", raw).strip()
             if raw.endswith("```"):
@@ -259,11 +255,6 @@ def register_native_tools(mcp: FastMCP):
             return OpsPlan.model_validate(parsed)
         except Exception as exc:
             logger.error("Plan generation failed: %s", exc, exc_info=True)
-            import traceback
-            try:
-                debug_path.write_text(f"EXCEPTION: {exc}\n\n{traceback.format_exc()}", encoding="utf-8")
-            except Exception:
-                pass
             from datetime import datetime
             return OpsPlan(id=f"plan_{int(time.time())}", title="[FALLBACK] Plan", workspace="", created=datetime.now().isoformat(), objective=task_instructions, tasks=[], constraints=[])
 

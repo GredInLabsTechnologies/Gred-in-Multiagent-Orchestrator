@@ -189,7 +189,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                     id: `manual_${Date.now()}`,
                     type: 'orchestrator',
                     position,
-                    data: { label: 'Manual Node', status: 'pending' },
+                    data: { label: 'Nodo Manual', status: 'pending' },
                 };
                 setNodes((nds) => nds.concat(newNode));
             }
@@ -210,8 +210,13 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    nodes: nodes.map(n => ({ id: n.id, data: n.data })),
-                    edges: edges.map(e => ({ source: e.source, target: e.target }))
+                    prompt: `Edición manual de grafo (${new Date().toLocaleString()})`,
+                    context: {
+                        manual_graph: {
+                            nodes: nodes.map(n => ({ id: n.id, type: n.type, position: n.position, data: n.data })),
+                            edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target }))
+                        }
+                    }
                 }),
                 credentials: 'include'
             });
@@ -266,7 +271,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                         position="top-left"
                         className="bg-[#141414]/90 backdrop-blur-xl px-3 py-1.5 rounded-lg border border-[#2c2c2e] text-[10px] text-[#86868b] font-mono uppercase tracking-wider"
                     >
-                        Live Orchestration Graph
+                        Grafo de Orquestación
                     </Panel>
                 )}
 
@@ -299,7 +304,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                                 className="flex items-center gap-2 px-4 py-2 hover:bg-[#1c1c1e] text-[#86868b] hover:text-[#f5f5f7] rounded-full transition-colors text-[11px] font-medium"
                             >
                                 <Edit2 size={14} />
-                                Start Edit Mode
+                                Modo Edición
                             </button>
                         ) : (
                             <>
@@ -308,7 +313,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                                     className="flex items-center gap-2 px-4 py-2 bg-[#32d74b]/10 text-[#32d74b] hover:bg-[#32d74b]/20 rounded-full transition-colors text-[11px] font-bold tracking-wide mr-1"
                                 >
                                     <Save size={14} />
-                                    Save Draft
+                                    Guardar Borrador
                                 </button>
                                 <button
                                     onClick={() => {
@@ -316,6 +321,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                                         fetchGraphData(); // reload normal graph
                                     }}
                                     className="flex items-center justify-center w-8 h-8 hover:bg-[#ff453a]/10 text-[#86868b] hover:text-[#ff453a] rounded-full transition-colors"
+                                    title="Cancelar edición"
                                 >
                                     <X size={14} />
                                 </button>
