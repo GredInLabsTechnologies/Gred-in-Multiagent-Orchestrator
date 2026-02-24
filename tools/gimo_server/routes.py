@@ -646,14 +646,22 @@ def register_routes(app: FastAPI):
         from tools.gimo_server.services.provider_service import ProviderService
         from tools.gimo_server.ops_models import OpsPlan
 
+        workspace = str(body.get("workspace") or ".")
+
         # Generate structured plan via LLM
         system_msg = (
             "You are a multi-agent orchestration planner. Given a task, produce a JSON plan with "
-            "the schema: {\"id\": \"plan_xxx\", \"tasks\": [{\"id\": \"t1\", \"title\": \"...\", "
+            "the schema: {\"id\": \"plan_xxx\", \"title\": \"Short plan title\", "
+            "\"workspace\": \".\", \"created\": \"2026-01-01\", \"objective\": \"...\", "
+            "\"tasks\": [{\"id\": \"t1\", \"title\": \"...\", \"scope\": \"bridge\", "
             "\"description\": \"...\", \"depends\": [], \"status\": \"pending\", "
-            "\"agent_assignee\": {\"role\": \"...\", \"goal\": \"...\", \"model\": \"qwen2.5-coder:32b\", "
+            "\"agent_assignee\": {\"role\": \"orchestrator\", \"goal\": \"...\", \"model\": \"qwen2.5-coder:32b\", "
+            "\"system_prompt\": \"...\", \"instructions\": [\"...\"]}}, "
+            "{\"id\": \"t2\", \"title\": \"...\", \"scope\": \"file_write\", "
+            "\"description\": \"...\", \"depends\": [\"t1\"], \"status\": \"pending\", "
+            "\"agent_assignee\": {\"role\": \"worker\", \"goal\": \"...\", \"model\": \"qwen2.5-coder:32b\", "
             "\"system_prompt\": \"...\", \"instructions\": [\"...\"]}}]}. "
-            "First task should be the orchestrator. Remaining tasks are workers. "
+            "First task is always the orchestrator (scope=bridge). Remaining tasks are workers (scope=file_write). "
             "Return ONLY valid JSON, no markdown."
         )
 
@@ -670,25 +678,34 @@ def register_routes(app: FastAPI):
             plan_json = json_match.group(0) if json_match else raw
 
             plan_data = OpsPlan.model_validate_json(plan_json)
-        except Exception:
+        except Exception as _plan_err:
             # Fallback: create a simple 2-node plan
+            import logging as _log
+            _log.getLogger("orchestrator").warning("Plan LLM failed, using fallback: %s", _plan_err)
             import uuid
+            from datetime import datetime, timezone
+            from tools.gimo_server.ops_models import OpsTask, AgentProfile
             plan_data = OpsPlan(
                 id=f"plan_{uuid.uuid4().hex[:8]}",
+                title=prompt[:80],
+                workspace=workspace,
+                created=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                objective=prompt,
                 tasks=[
-                    __import__('tools.gimo_server.ops_models', fromlist=['OpsTask']).OpsTask(
-                        id="t1", title="Orquestador", description=prompt,
-                        depends=[], status="pending",
-                        agent_assignee=__import__('tools.gimo_server.ops_models', fromlist=['AgentProfile']).AgentProfile(
+                    OpsTask(
+                        id="t1", title="Orquestador", scope="bridge",
+                        description=prompt, depends=[], status="pending",
+                        agent_assignee=AgentProfile(
                             role="orchestrator", goal="Coordinate the plan",
                             model="qwen2.5-coder:32b",
                             system_prompt=f"You are the orchestrator for: {prompt}",
                         )
                     ),
-                    __import__('tools.gimo_server.ops_models', fromlist=['OpsTask']).OpsTask(
-                        id="t2", title="Worker", description=f"Execute: {prompt}",
+                    OpsTask(
+                        id="t2", title="Worker", scope="file_write",
+                        description=f"Execute: {prompt}",
                         depends=["t1"], status="pending",
-                        agent_assignee=__import__('tools.gimo_server.ops_models', fromlist=['AgentProfile']).AgentProfile(
+                        agent_assignee=AgentProfile(
                             role="worker", goal=prompt,
                             model="qwen2.5-coder:32b",
                             system_prompt=f"You are a specialist worker. Your task: {prompt}",
@@ -697,8 +714,15 @@ def register_routes(app: FastAPI):
                 ]
             )
 
-        from tools.gimo_server.mcp_server import _generate_mermaid_graph
-        graph = _generate_mermaid_graph(plan_data)
+        # Generate mermaid graph from plan
+        lines = ["graph TD"]
+        for task in plan_data.tasks:
+            node_id = task.id.replace("-", "_")
+            label = f'"{task.title}<br/>[{task.status}]"'
+            lines.append(f"    {node_id}[{label}]")
+            for dep in task.depends:
+                lines.append(f"    {dep.replace('-', '_')} --> {node_id}")
+        graph = "\n".join(lines)
 
         draft = OpsService.create_draft(
             prompt=prompt,

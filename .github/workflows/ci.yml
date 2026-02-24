@@ -172,15 +172,15 @@ jobs:
       - name: Verify LLM endpoint is reachable (required)
         shell: bash
         run: |
-          python -c "from tests.llm.lm_studio_client import is_lm_studio_available; import os, sys; host=os.environ.get('LM_STUDIO_HOST'); ok=is_lm_studio_available(host); print('LM available:', ok, 'host:', host); sys.exit(0 if ok else 2)"
+          python -c "from tests.fixtures.lm_studio_client import is_lm_studio_available; import os, sys; host=os.environ.get('LM_STUDIO_HOST'); ok=is_lm_studio_available(host); print('LM available:', ok, 'host:', host); sys.exit(0 if ok else 2)"
 
       - name: LLM adversarial suites (must pass)
         run: |
-          python -m pytest tests/adversarial -v --tb=short
-          python -m pytest tests/test_adaptive_attack_vectors.py -v --tb=short
-          python -m pytest tests/test_qwen_payload_guided.py -v --tb=short
-          # OPS v2 suite (ensures ops endpoints/roles stay gated)
-          python -m pytest tests/test_ops_v2.py -v --tb=short
+          python -m pytest tests/integration/test_adversarial_e2e.py -v --tb=short
+          python -m pytest tests/integration/test_adversarial_int.py -v --tb=short
+          python -m pytest tests/integration/test_qwen_payload.py -v --tb=short
+          # Auth/RBAC suite (ensures ops endpoints/roles stay gated)
+          python -m pytest tests/unit/test_auth.py -v --tb=short
 
       - name: Upload metrics/artifacts
         if: always()

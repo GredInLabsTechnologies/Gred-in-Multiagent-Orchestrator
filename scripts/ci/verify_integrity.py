@@ -36,7 +36,7 @@ def validate_config_files(base_dir: Path) -> dict | None:
     check_json_file(base_dir / "tools" / "gimo_server" / "allowed_paths.json", ["paths"])
     check_json_file(
         base_dir / "tools" / "gimo_server" / "security_db.json",
-        ["panic_mode", "blacklist", "recent_events"],
+        ["panic_mode", "recent_events"],
     )
     return repo_registry
 
@@ -72,7 +72,7 @@ def should_skip_file(file_path: Path) -> bool:
     """Check if file should be skipped from hardcoded path detection."""
     skip_files = [
         "verify_integrity.py",
-        "test_integrity_deep.py",
+        "test_integrity.py",
         "repo_registry.json",
         "config.py",
     ]

@@ -56,6 +56,13 @@ repos:
         language: system
         pass_filenames: false
 
+      - id: gimo-repo-structure-guard
+        name: "Enforce repo structure invariants (tools, tests, scripts, docs)"
+        entry: python scripts/ci/repo_structure_guard.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
 # Configuration for pre-commit CI
 ci:
   autofix_commit_msg: 'style: auto fixes from pre-commit hooks'

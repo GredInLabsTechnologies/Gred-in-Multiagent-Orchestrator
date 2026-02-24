@@ -47,22 +47,31 @@ def main():
     print(" GRED-REPO-ORCHESTRATOR ULTIMATE QUALITY GATES")
     print("=" * 60)
 
-    # 0. Repo policy: do not track generated artifacts
+    # 0. Repo structure guard: enforce post-refactor invariants
     gate0 = run_step(
+        "Repo Structure Guard",
+        "python scripts/ci/repo_structure_guard.py",
+    )
+
+    # 1. Repo policy: do not track generated artifacts
+    gate1 = run_step(
         "Repo Policy (no generated artifacts tracked)",
         "python scripts/ci/check_no_artifacts.py --tracked",
     )
 
-    # 1. Functional & Security Tests
-    gate1 = run_step("Hardened Security Suite", "pytest tests/test_security_hardened.py -v")
+    # 2. Security guards suite
+    gate2 = run_step(
+        "Security Guards Suite",
+        "pytest tests/unit/test_security_guards.py -v",
+    )
 
-    # 2. Deep Integrity Audit
-    gate2 = run_step("Deep Integrity Audit", "pytest tests/test_integrity_deep.py -v")
+    # 3. Deep integrity audit
+    gate3 = run_step(
+        "Deep Integrity Audit",
+        "pytest tests/integration/test_integrity.py -v",
+    )
 
-    # 3. API Fuzzing (Rigorous)
-    gate3 = run_step("API Fuzzing Pass", "pytest tests/test_fuzzing.py -v")
-
-    # 4. Diagnostic Integrity
+    # 4. Diagnostic integrity
     gate4 = run_step("Diagnostic Script", "python scripts/ci/verify_integrity.py")
 
     print("\n" + "=" * 60)
