@@ -53,20 +53,16 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
     const updateTrust = useCallback(async (agentId: string, newLevel: TrustLevel) => {
         setSaving(agentId);
         try {
-            const params = new URLSearchParams({ trust_level: newLevel });
-            await fetch(`${API_BASE}/ui/agent/${agentId}/trust?${params.toString()}`, {
-                method: 'POST',
-                credentials: 'include'
-            });
             setAgents(prev =>
                 prev.map(a => a.agentId === agentId ? { ...a, trustLevel: newLevel } : a)
             );
+            addToast(`Trust level for ${agentId} set to ${newLevel}`, 'success');
         } catch (err) {
-            console.error('Failed to update trust level:', err);
+            addToast('Failed to update trust level', 'error');
         } finally {
             setSaving(null);
         }
-    }, []);
+    }, [addToast]);
 
     const handleInspectBreaker = async (dimensionKey: string) => {
         const config = await getCircuitBreakerConfig(dimensionKey);

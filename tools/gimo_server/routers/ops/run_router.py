@@ -24,9 +24,9 @@ router = APIRouter()
 async def approve_draft(
     request: Request,
     draft_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
     auto_run: Annotated[Optional[bool], Query(description="Override default_auto_run from config")] = None,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None,
-    rl: Annotated[None, Depends(check_rate_limit)] = None,
 ):
     _require_role(auth, "operator")
     actor = _actor_label(auth)
@@ -50,8 +50,8 @@ async def approve_draft(
 @router.get("/approved", response_model=List[OpsApproved])
 async def list_approved(
     request: Request,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None,
-    rl: Annotated[None, Depends(check_rate_limit)] = None,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     return OpsService.list_approved()
@@ -64,8 +64,8 @@ async def list_approved(
 async def get_approved(
     request: Request,
     approved_id: str,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None,
-    rl: Annotated[None, Depends(check_rate_limit)] = None,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     approved = OpsService.get_approved(approved_id)
@@ -85,8 +85,8 @@ async def get_approved(
 async def create_run(
     request: Request,
     body: OpsCreateRunRequest,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None,
-    rl: Annotated[None, Depends(check_rate_limit)] = None,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
@@ -102,8 +102,8 @@ async def create_run(
 @router.get("/runs", response_model=List[OpsRun])
 async def list_runs(
     request: Request,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None,
-    rl: Annotated[None, Depends(check_rate_limit)] = None,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     return OpsService.list_runs()
@@ -116,8 +116,8 @@ async def list_runs(
 async def get_run(
     request: Request,
     run_id: str,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None,
-    rl: Annotated[None, Depends(check_rate_limit)] = None,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     run = OpsService.get_run(run_id)
@@ -136,8 +136,8 @@ async def get_run(
 async def cancel_run(
     request: Request,
     run_id: str,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None,
-    rl: Annotated[None, Depends(check_rate_limit)] = None,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     actor = _actor_label(auth)
@@ -158,8 +158,8 @@ async def cancel_run(
 async def execute_workflow(
     request: Request,
     body: WorkflowExecuteRequest,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None,
-    rl: Annotated[None, Depends(check_rate_limit)] = None,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     storage = StorageService(gics=getattr(request.app.state, "gics", None))
@@ -185,8 +185,8 @@ async def execute_workflow(
 async def list_workflow_checkpoints(
     request: Request,
     workflow_id: str,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None,
-    rl: Annotated[None, Depends(check_rate_limit)] = None,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     storage = StorageService(gics=getattr(request.app.state, "gics", None))
@@ -205,9 +205,9 @@ async def list_workflow_checkpoints(
 async def resume_workflow(
     request: Request,
     workflow_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
     from_checkpoint: Annotated[int, Query(description="Checkpoint index to resume from (default: last)")] = -1,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None,
-    rl: Annotated[None, Depends(check_rate_limit)] = None,
 ):
     _require_role(auth, "operator")
     storage = StorageService(gics=getattr(request.app.state, "gics", None))

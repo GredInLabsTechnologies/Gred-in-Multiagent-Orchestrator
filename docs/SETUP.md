@@ -80,6 +80,69 @@ Known inconsistency:
 
 - The UI no longer hard-codes a port in the dashboard; it derives the display label from `VITE_API_URL`/fallback.
 
+## MCP Integrations (Claude/Cline/Cursor/Antigravity)
+
+### Recommended MCP wiring (Cline ↔ GIMO)
+
+```text
+Cline/Antigravity (MCP client)
+        │
+        │ reads mcp_config.json
+        ▼
+"gimo" server entry
+  command: python
+  args: -m tools.gimo_server.mcp_bridge.server
+  cwd:  C:\Users\shilo\Documents\Github\gred_in_multiagent_orchestrator
+        │
+        ▼
+tools.gimo_server.mcp_bridge.server (FastMCP stdio)
+        ├─ dynamic tools (registrar.py)
+        ├─ resources (resources.py)
+        └─ native tools (native_tools.py)
+```
+
+### Minimal `gimo` config
+
+```json
+{
+  "mcpServers": {
+    "gimo": {
+      "command": "python",
+      "args": ["-m", "tools.gimo_server.mcp_bridge.server"],
+      "cwd": "C:\\Users\\shilo\\Documents\\Github\\gred_in_multiagent_orchestrator",
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "ORCH_REPO_ROOT": "C:\\Users\\shilo\\Documents\\Github\\gred_in_multiagent_orchestrator"
+      }
+    }
+  }
+}
+```
+
+### Config locations (Windows)
+
+In this environment, the active paths are:
+
+- `C:\Users\shilo\.gemini\antigravity\mcp_config.json`
+- `C:\Users\shilo\.gemini\mcp_config.json`
+
+### Automatic registration
+
+```cmd
+python scripts\setup_mcp.py
+```
+
+Validation without modifying config:
+
+```cmd
+python scripts\setup_mcp.py --check
+```
+
+### Critical rule
+
+After changing MCP config, restart the client session (Cline/Antigravity).
+Without restart, you may see: `No connection found for server: gimo`.
+
 ## Secure Launcher (`GIMO_LAUNCHER.cmd`)
 The launcher provides a safe development experience:
 - **Authentication**: Generates a 32-byte secure token on first run (`ORCH_TOKEN`).

@@ -31,7 +31,7 @@ export default function App() {
     const [graphNodeCount, setGraphNodeCount] = useState(-1);
     const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
     const [isChatCollapsed, setIsChatCollapsed] = useState(false);
-    const { currentPlan, loading, createPlan, approvePlan } = usePlanEngine();
+    const { currentPlan, loading, createPlan, approvePlan, setCurrentPlan } = usePlanEngine();
     const { addToast } = useToast();
 
     const handleMcpSync = useCallback(async () => {
@@ -330,6 +330,7 @@ export default function App() {
                         loading={loading}
                         onCreatePlan={handleCreatePlan}
                         onApprovePlan={handleApprovePlan}
+                        onDiscardPlan={() => setCurrentPlan(null)}
                     />
                 );
 

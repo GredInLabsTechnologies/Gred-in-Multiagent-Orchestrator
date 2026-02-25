@@ -10,6 +10,7 @@ interface PlansPanelProps {
     loading: boolean;
     onCreatePlan: (req: PlanCreateRequest) => Promise<void>;
     onApprovePlan: () => Promise<void>;
+    onDiscardPlan?: () => void;
 }
 
 type TimelineItem = {
@@ -26,6 +27,7 @@ export const PlansPanel: React.FC<PlansPanelProps> = ({
     loading,
     onCreatePlan,
     onApprovePlan,
+    onDiscardPlan,
 }) => {
     const { addToast } = useToast();
     const [drafts, setDrafts] = useState<OpsDraft[]>([]);
@@ -100,7 +102,7 @@ export const PlansPanel: React.FC<PlansPanelProps> = ({
                         <PlanReview
                             plan={currentPlan}
                             onApprove={onApprovePlan}
-                            onModify={() => void 0}
+                            onModify={() => onDiscardPlan?.()}
                             loading={loading}
                         />
                     ) : (

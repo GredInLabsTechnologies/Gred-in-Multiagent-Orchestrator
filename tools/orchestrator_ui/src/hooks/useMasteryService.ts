@@ -26,7 +26,7 @@ export function useMasteryService() {
 
     const fetchConfig = useCallback(async (): Promise<UserEconomyConfig> => {
         return apiCall(async () => {
-            const res = await fetch(`${API_BASE}/mastery/config/economy`, fetchOpts);
+            const res = await fetch(`${API_BASE}/ops/mastery/config/economy`, fetchOpts);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
         }, 'Economy Config');
@@ -34,7 +34,7 @@ export function useMasteryService() {
 
     const saveConfig = useCallback(async (config: UserEconomyConfig): Promise<UserEconomyConfig> => {
         return apiCall(async () => {
-            const res = await fetch(`${API_BASE}/mastery/config/economy`, {
+            const res = await fetch(`${API_BASE}/ops/mastery/config/economy`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
@@ -47,7 +47,7 @@ export function useMasteryService() {
 
     const fetchStatus = useCallback(async (): Promise<MasteryStatus> => {
         return apiCall(async () => {
-            const res = await fetch(`${API_BASE}/mastery/status`, fetchOpts);
+            const res = await fetch(`${API_BASE}/ops/mastery/status`, fetchOpts);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
         }, 'Mastery Status');
@@ -55,7 +55,7 @@ export function useMasteryService() {
 
     const fetchAnalytics = useCallback(async (days = 30): Promise<CostAnalytics> => {
         return apiCall(async () => {
-            const res = await fetch(`${API_BASE}/mastery/analytics?days=${days}`, fetchOpts);
+            const res = await fetch(`${API_BASE}/ops/mastery/analytics?days=${days}`, fetchOpts);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
         }, 'Analytics');
@@ -63,7 +63,7 @@ export function useMasteryService() {
 
     const fetchForecast = useCallback(async (): Promise<BudgetForecast[]> => {
         return apiCall(async () => {
-            const res = await fetch(`${API_BASE}/mastery/forecast`, fetchOpts);
+            const res = await fetch(`${API_BASE}/ops/mastery/forecast`, fetchOpts);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
         }, 'Budget Forecast');
@@ -71,7 +71,7 @@ export function useMasteryService() {
 
     const fetchRecommendations = useCallback(async (): Promise<MasteryRecommendation[]> => {
         return apiCall(async () => {
-            const res = await fetch(`${API_BASE}/mastery/recommendations`, fetchOpts);
+            const res = await fetch(`${API_BASE}/ops/mastery/recommendations`, fetchOpts);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             return data.recommendations || [];

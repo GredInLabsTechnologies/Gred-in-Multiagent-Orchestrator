@@ -89,7 +89,7 @@ export const ProviderSettings: React.FC = () => {
         }
     }, [catalog]);
 
-    const selectedModelInstalled = modelGroups.installed.some((m) => m.id === modelId);
+    const selectedModelInstalados = modelGroups.installed.some((m) => m.id === modelId);
 
     const handleInstallAndUse = async () => {
         if (!modelId) {
@@ -124,6 +124,7 @@ export const ProviderSettings: React.FC = () => {
                 }
             } catch {
                 if (!cancelled) {
+                    addToast('Se perdió la conexión con el progreso de instalación', 'error');
                     clearInterval(timer);
                 }
             }
@@ -207,7 +208,7 @@ export const ProviderSettings: React.FC = () => {
             <div className="flex items-center justify-between">
                 <h2 className="text-xl font-bold flex items-center gap-2">
                     <Server className="w-5 h-5 text-indigo-400" />
-                    Provider Settings
+                    Configuración de Providers
                 </h2>
             </div>
 
@@ -381,17 +382,17 @@ export const ProviderSettings: React.FC = () => {
                                 >
                                     <option value="">{isLoadingCatalog ? 'Cargando catálogo...' : 'Selecciona modelo'}</option>
                                     {modelGroups.installed.length > 0 && (
-                                        <optgroup label="Installed">
+                                        <optgroup label="Instalados">
                                             {modelGroups.installed.map((m) => <option key={`i-${m.id}`} value={m.id}>{m.label}</option>)}
                                         </optgroup>
                                     )}
                                     {modelGroups.available.length > 0 && (
-                                        <optgroup label="Available to download">
+                                        <optgroup label="Disponibles para descargar">
                                             {modelGroups.available.map((m) => <option key={`a-${m.id}`} value={m.id}>{m.label}</option>)}
                                         </optgroup>
                                     )}
                                     {modelGroups.recommended.length > 0 && (
-                                        <optgroup label="Recommended">
+                                        <optgroup label="Recomendados">
                                             {modelGroups.recommended.map((m) => <option key={`r-${m.id}`} value={m.id}>{m.label}</option>)}
                                         </optgroup>
                                     )}
@@ -399,7 +400,7 @@ export const ProviderSettings: React.FC = () => {
                             </div>
 
                             <div>
-                                <label htmlFor="authModeSelect" className="block text-xs text-[#86868b] mb-1">Auth mode</label>
+                                <label htmlFor="authModeSelect" className="block text-xs text-[#86868b] mb-1">Modo auth</label>
                                 <select
                                     id="authModeSelect"
                                     value={authMode}
@@ -472,10 +473,10 @@ export const ProviderSettings: React.FC = () => {
                             )}
 
                             <Button onClick={handleTestConnection} className="bg-[#2c2c2e] hover:bg-[#3a3a3c] text-white">
-                                Test connection
+                                Probar conexión
                             </Button>
                             <Button onClick={handleSaveAsActive} className="bg-indigo-600 hover:bg-indigo-500 text-white">
-                                Save as active provider
+                                Guardar como provider activo
                             </Button>
                         </>
                     )}
@@ -491,12 +492,12 @@ export const ProviderSettings: React.FC = () => {
                     <div className="mt-3 text-xs text-[#ff9f0a]">Modo cuenta no disponible en este entorno; usa API key.</div>
                 )}
 
-                {!selectedModelInstalled && supportsInstall && modelId ? (
+                {!selectedModelInstalados && supportsInstall && modelId ? (
                     <div className="mt-4 p-3 rounded border border-[#2c2c2e] bg-[#0a0a0a] flex items-center justify-between gap-3">
                         <div className="text-xs text-[#f5f5f7]">Modelo no instalado. ¿Quieres descargarlo ahora?</div>
                         <Button onClick={handleInstallAndUse} className="bg-[#0a84ff] hover:bg-[#409cff] text-white text-xs px-3 py-2">
                             <Download className="w-3.5 h-3.5 mr-1" />
-                            Download & Use
+                            Descargar y usar
                         </Button>
                     </div>
                 ) : null}
@@ -549,10 +550,10 @@ export const ProviderSettings: React.FC = () => {
             </div>
 
             <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-[#86868b] uppercase tracking-wider">Active Providers</h3>
+                <h3 className="text-sm font-semibold text-[#86868b] uppercase tracking-wider">Providers Activos</h3>
                 {providers.length === 0 && (
                     <div className="text-[#86868b] text-center py-6 bg-[#0a0a0a]/60 rounded border border-dashed border-[#2c2c2e]">
-                        No providers configured. Gred will perform limited local mocking.
+                        Sin providers configurados. Gred funcionará en modo local limitado.
                     </div>
                 )}
                 {providers.map((p) => (

@@ -1,5 +1,6 @@
-from typing import Annotated, Any, Dict
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated, Any, Dict, List
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import ValidationError
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from ...ops_models import WorkflowNode, UserEconomyConfig, MasteryStatus, BudgetForecast, CostAnalytics
@@ -36,7 +37,7 @@ async def update_economy_config(
     return current_ops_config.economy
 
 
-@router.post("/recommend")
+@router.post("/recommend", response_model=Dict[str, Any])
 async def get_model_recommendations(
     node: WorkflowNode,
     state: Dict[str, Any],
@@ -108,7 +109,7 @@ async def get_mastery_status(auth: Annotated[AuthContext, Depends(verify_token)]
     }
 
 
-@router.get("/recommendations")
+@router.get("/recommendations", response_model=Dict[str, Any])
 async def get_mastery_recommendations(
     auth: Annotated[AuthContext, Depends(verify_token)]
 ):
@@ -142,7 +143,7 @@ async def get_mastery_recommendations(
     }
 
 
-@router.post("/predict")
+@router.post("/predict", response_model=Dict[str, Any])
 async def predict_workflow_cost(
     request: Dict[str, Any],
     auth: Annotated[AuthContext, Depends(verify_token)]
@@ -151,19 +152,21 @@ async def predict_workflow_cost(
     from ...services.ops_service import OpsService
     from ...services.cost_predictor import CostPredictor
     from ...ops_models import WorkflowNode
-    
+
     nodes_data = request.get("nodes", [])
     state = request.get("initial_state", {})
-    
-    # Convert data to WorkflowNode models
-    nodes = [WorkflowNode(**n) for n in nodes_data]
-    
+
+    try:
+        nodes = [WorkflowNode(**n) for n in nodes_data]
+    except (ValidationError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid workflow node data: {str(exc)[:200]}")
+
     config = OpsService.get_config()
     if not config.economy.show_cost_predictions:
         raise HTTPException(status_code=403, detail="Cost predictions are disabled in economy settings.")
-        
+
     predictor = CostPredictor()
-    
+
     prediction = predictor.predict_workflow_cost(nodes, state, config.economy)
     return prediction
 
@@ -171,7 +174,7 @@ async def predict_workflow_cost(
 @router.get("/analytics", response_model=CostAnalytics)
 async def get_mastery_analytics(
     auth: Annotated[AuthContext, Depends(verify_token)],
-    days: int = 30
+    days: int = Query(30, ge=1, le=365)
 ):
     """Returns detailed analytics for the dashboard."""
     from ...services.storage_service import StorageService
@@ -189,7 +192,7 @@ async def get_mastery_analytics(
     )
 
 
-@router.get("/forecast", response_model=list[BudgetForecast])
+@router.get("/forecast", response_model=List[BudgetForecast])
 async def get_budget_forecast(auth: Annotated[AuthContext, Depends(verify_token)]):
     """Returns budget forecast global + per-provider."""
     from ...services.ops_service import OpsService

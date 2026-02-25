@@ -3,7 +3,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
 from tools.gimo_server.config import BASE_DIR, DEBUG, LOG_LEVEL, get_settings
@@ -216,6 +216,24 @@ def create_app() -> FastAPI:
         if index_file.exists():
             return FileResponse(str(index_file))
         return JSONResponse({"status": "ok"})
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(ws: WebSocket):
+        """Real-time event stream via WebSocket (mirrors /ops/stream SSE)."""
+        from tools.gimo_server.services.notification_service import NotificationService
+        await ws.accept()
+        queue = await NotificationService.subscribe()
+        try:
+            while True:
+                try:
+                    message = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    await ws.send_text(message)
+                except asyncio.TimeoutError:
+                    await ws.send_text('{"type":"ping"}')
+        except (WebSocketDisconnect, Exception):
+            pass
+        finally:
+            NotificationService.unsubscribe(queue)
 
     register_middlewares(app)
 

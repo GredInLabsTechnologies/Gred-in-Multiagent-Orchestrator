@@ -11,7 +11,7 @@ export const QualityAlertPanel: React.FC<QualityAlertPanelProps> = ({ quality })
         return (
             <div className="p-8 text-center">
                 <Info size={32} className="mx-auto text-[#2c2c2e] mb-3" />
-                <div className="text-sm text-[#86868b]">No quality metrics available for this node.</div>
+                <div className="text-sm text-[#86868b]">Sin métricas de calidad disponibles para este nodo.</div>
             </div>
         );
     }
@@ -20,11 +20,11 @@ export const QualityAlertPanel: React.FC<QualityAlertPanelProps> = ({ quality })
 
     const getAlertLabel = (flag: DegradationFlag) => {
         switch (flag) {
-            case 'repetition': return 'Repetition Detected';
-            case 'coherence': return 'Coherence Warning';
-            case 'relevance': return 'Task Irrelevance';
-            case 'latency': return 'High Latency';
-            default: return 'Unknown Issue';
+            case 'repetition': return 'Repetición detectada';
+            case 'coherence': return 'Alerta de coherencia';
+            case 'relevance': return 'Irrelevancia de tarea';
+            case 'latency': return 'Latencia alta';
+            default: return 'Problema desconocido';
         }
     };
 
@@ -44,13 +44,13 @@ export const QualityAlertPanel: React.FC<QualityAlertPanelProps> = ({ quality })
         <div className="p-4 space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <div className="text-[10px] text-[#86868b] uppercase tracking-widest font-bold mb-1">Reasoning Quality</div>
+                    <div className="text-[10px] text-[#86868b] uppercase tracking-widest font-bold mb-1">Calidad de Razonamiento</div>
                     <div className={`text-3xl font-bold ${getAlertSeverityColor(score)}`}>
                         {score}%
                     </div>
                 </div>
                 <div className="text-right">
-                    <div className="text-[10px] text-[#86868b] uppercase tracking-widest font-bold mb-1">Last Analysis</div>
+                    <div className="text-[10px] text-[#86868b] uppercase tracking-widest font-bold mb-1">Último Análisis</div>
                     <div className="text-xs text-[#f5f5f7] font-mono">
                         {new Date(lastCheck).toLocaleTimeString()}
                     </div>
@@ -67,12 +67,12 @@ export const QualityAlertPanel: React.FC<QualityAlertPanelProps> = ({ quality })
 
             {/* Alerts Section */}
             <div className="space-y-3">
-                <div className="text-[10px] text-[#86868b] uppercase tracking-widest font-bold">Health Status</div>
+                <div className="text-[10px] text-[#86868b] uppercase tracking-widest font-bold">Estado de Salud</div>
 
                 {alerts.length === 0 ? (
                     <div className="flex items-center gap-3 p-3 rounded-lg bg-[#32d74b]/10 border border-[#32d74b]/20">
                         <CheckCircle size={16} className="text-[#32d74b]" />
-                        <div className="text-xs text-[#32d74b]">All metrics within nominal range.</div>
+                        <div className="text-xs text-[#32d74b]">Todas las métricas dentro del rango nominal.</div>
                     </div>
                 ) : (
                     alerts.map((alert) => (

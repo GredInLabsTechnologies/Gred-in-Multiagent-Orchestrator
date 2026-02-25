@@ -9,6 +9,7 @@ import { useNodes } from 'reactflow';
 import { GraphNode, API_BASE } from '../types';
 import { SystemPromptEditor } from './SystemPromptEditor';
 import { useAvailableModels } from '../hooks/useAvailableModels';
+import { useToast } from './Toast';
 
 interface InspectPanelProps {
     selectedNodeId: string | null;
@@ -29,6 +30,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
 
     const [view, setView] = useState<'overview' | 'plan' | 'quality' | 'chat' | 'delegation' | 'prompt' | 'config'>('overview');
     const { models, loading: modelsLoading } = useAvailableModels();
+    const { addToast } = useToast();
 
 
     const handleSavePrompt = async (newPrompt: string) => {
@@ -63,10 +65,9 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
             });
 
             if (!saveResp.ok) throw new Error('Failed to save draft');
-            console.log('Prompt saved successfully');
+            addToast('Prompt guardado correctamente', 'success');
         } catch (err) {
-            console.error('Error saving prompt:', err);
-            alert('Failed to save prompt: ' + (err instanceof Error ? err.message : String(err)));
+            addToast('Error al guardar prompt: ' + (err instanceof Error ? err.message : String(err)), 'error');
         }
     };
 
@@ -95,9 +96,9 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                     content: JSON.stringify(plan, null, 2)
                 })
             });
-            console.log('Model updated successfully');
-        } catch (err) {
-            console.error('Error updating model:', err);
+            addToast('Modelo actualizado', 'success');
+        } catch {
+            addToast('Error al actualizar modelo', 'error');
         }
     };
 
@@ -193,10 +194,10 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                                                 onChange={(e) => handleModelChange(e.target.value)}
                                                 disabled={modelsLoading}
                                             >
-                                                <option value="auto" className="text-amber-400">⚡ Auto (Orchestrator selects)</option>
+                                                <option value="auto" className="text-amber-400">⚡ Auto (selección del orquestador)</option>
                                                 {modelsLoading && <option disabled>Cargando...</option>}
                                                 {models.map(m => (
-                                                    <option key={m.id} value={m.id}>{m.label || m.id} {m.installed ? ' (Local)' : ''}</option>
+                                                    <option key={m.id} value={m.id}>{m.label || m.id} {m.installed ? ' (local)' : ''}</option>
                                                 ))}
                                             </select>
                                         )}

@@ -54,7 +54,7 @@ export const EvalDashboard: React.FC = () => {
             <div className="p-6 border-b border-[#1c1c1e] shrink-0">
                 <div className="flex items-center justify-between mb-4">
                     <div>
-                        <h1 className="text-2xl font-bold text-[#f5f5f7]">Evaluations</h1>
+                        <h1 className="text-2xl font-bold text-[#f5f5f7]">Evaluaciones</h1>
                         <p className="text-[#86868b] mt-1">Test regression de workflows contra datasets golden.</p>
                     </div>
                     <button
@@ -62,7 +62,7 @@ export const EvalDashboard: React.FC = () => {
                         className="flex items-center gap-2 px-4 py-2 bg-[#0a84ff] hover:bg-[#0071e3] text-white rounded-lg font-medium transition-colors shadow-lg shadow-[#0a84ff]/20"
                     >
                         <Plus size={16} />
-                        New Dataset
+                        Nuevo Dataset
                     </button>
                 </div>
             </div>
@@ -78,11 +78,11 @@ export const EvalDashboard: React.FC = () => {
                     </div>
                     <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
                         {isLoading && (
-                            <div className="text-center text-[#86868b] py-8">Loading...</div>
+                            <div className="text-center text-[#86868b] py-8">Cargando...</div>
                         )}
 
                         {!isLoading && safeDatasets.length === 0 && (
-                            <div className="text-center text-[#86868b] py-8 text-sm">No datasets found</div>
+                            <div className="text-center text-[#86868b] py-8 text-sm">Sin datasets</div>
                         )}
 
                         {!isLoading && safeDatasets.map((d: EvalDataset) => (
@@ -111,18 +111,18 @@ export const EvalDashboard: React.FC = () => {
                     <div className="p-4 border-b border-[#1c1c1e] bg-[#141414]">
                         <div className="flex items-center gap-2 text-[#f5f5f7] font-semibold">
                             <BarChart2 size={16} className="text-[#32d74b]" />
-                            Recent Runs
+                            Ejecuciones Recientes
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="text-[10px] uppercase text-[#86868b] font-bold border-b border-[#2c2c2e]">
-                                    <th className="pb-3 pl-4">Status</th>
+                                    <th className="pb-3 pl-4">Estado</th>
                                     <th className="pb-3">Dataset</th>
-                                    <th className="pb-3">Pass Rate</th>
-                                    <th className="pb-3">Date</th>
-                                    <th className="pb-3 pr-4 text-right">Action</th>
+                                    <th className="pb-3">Tasa de éxito</th>
+                                    <th className="pb-3">Fecha</th>
+                                    <th className="pb-3 pr-4 text-right">Acción</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#1c1c1e]">
@@ -146,13 +146,13 @@ export const EvalDashboard: React.FC = () => {
                                                 <span className="text-xs text-[#86868b] font-mono">{r.pass_rate.toFixed(0)}%</span>
                                             </div>
                                         </td>
-                                        <td className="py-4 text-xs text-[#86868b]">{new Date(r.created_at).toLocaleDateString()}</td>
+                                        <td className="py-4 text-xs text-[#86868b]">{new Fecha(r.created_at).toLocaleFechaString()}</td>
                                         <td className="py-4 pr-4 text-right">
                                             <button
                                                 onClick={() => handleViewRun(r.run_id)}
                                                 className="text-[#0a84ff] hover:text-[#0071e3] text-xs font-medium opacity-0 group-hover:opacity-100 transition-all flex items-center justify-end gap-1 ml-auto"
                                             >
-                                                View Report
+                                                Ver Reporte
                                                 <ChevronRight size={12} />
                                             </button>
                                         </td>
@@ -160,7 +160,7 @@ export const EvalDashboard: React.FC = () => {
                                 ))}
                                 {!isLoading && safeRuns.length === 0 && (
                                     <tr>
-                                        <td colSpan={5} className="py-8 text-center text-[#86868b] text-sm">No runs recorded yet</td>
+                                        <td colSpan={5} className="py-8 text-center text-[#86868b] text-sm">Sin ejecuciones registradas</td>
                                     </tr>
                                 )}
                             </tbody>

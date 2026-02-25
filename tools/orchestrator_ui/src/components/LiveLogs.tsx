@@ -57,7 +57,7 @@ export const LiveLogs = () => {
                     </div>
                 ))}
                 {logs.length === 0 && (
-                    <div className="text-[#86868b] italic">No active audit logs...</div>
+                    <div className="text-[#86868b] italic">Sin logs de auditoría activos...</div>
                 )}
             </div>
         </div>

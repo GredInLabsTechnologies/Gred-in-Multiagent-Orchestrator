@@ -34,7 +34,7 @@ def check_tools_directory():
     """tools/ must contain ONLY gimo_server/ and orchestrator_ui/."""
     print("\n1. Tools Directory Structure")
     tools = BASE_DIR / "tools"
-    allowed = {"gimo_server", "orchestrator_ui", "__pycache__"}
+    allowed = {"gimo_server", "orchestrator_ui"}
     actual = {d.name for d in tools.iterdir() if d.is_dir()}
     extra = actual - allowed
     check("tools/ has no extra directories", len(extra) == 0,
@@ -45,7 +45,7 @@ def check_tests_directory():
     """tests/ must follow unit/ + integration/ structure."""
     print("\n2. Tests Directory Structure")
     tests = BASE_DIR / "tests"
-    allowed_dirs = {"unit", "integration", "fixtures", "__pycache__"}
+    allowed_dirs = {"unit", "integration", "fixtures"}
     allowed_root_files = {
         "conftest.py", "integrity_manifest.json", "test_mcp_server.py",
         "__init__.py",
@@ -162,6 +162,21 @@ def check_pycache_not_tracked():
         check("no __pycache__ tracked in git (git unavailable)", True)
 
 
+def check_no_pycache_dirs_present():
+    """No __pycache__ dirs should exist in repository workspace."""
+    print("\n8. Workspace Hygiene")
+    excluded_parts = {".git", "node_modules", ".venv", "venv", "venv_test", "dist", "build"}
+    pycache_dirs = []
+    for d in BASE_DIR.rglob("__pycache__"):
+        rel = d.relative_to(BASE_DIR)
+        if any(part in excluded_parts for part in rel.parts):
+            continue
+        pycache_dirs.append(str(rel))
+
+    check("no __pycache__ directories present", len(pycache_dirs) == 0,
+          f"found: {pycache_dirs[:10]}" if pycache_dirs else "")
+
+
 def main():
     print("=" * 55)
     print(" GIMO REPO STRUCTURE GUARD")
@@ -174,6 +189,7 @@ def main():
     check_root_cleanliness()
     check_dead_imports()
     check_pycache_not_tracked()
+    check_no_pycache_dirs_present()
 
     print(f"\n{'=' * 55}")
     print(f" RESULT: {PASS} passed, {FAIL} failed")

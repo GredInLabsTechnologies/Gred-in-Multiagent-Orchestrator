@@ -889,9 +889,16 @@ def register_routes(app: FastAPI):
         return {}
     
     @app.get("/ui/cost/compare")
-    async def compare_costs(model_a: str, model_b: str):
+    async def compare_costs(
+        model_a: str = Query(..., min_length=1),
+        model_b: str = Query(..., min_length=1),
+        auth: AuthContext = Depends(verify_token),
+    ):
         from tools.gimo_server.services.cost_service import CostService
-        return CostService.get_impact_comparison(model_a, model_b)
+        try:
+            return CostService.get_impact_comparison(model_a, model_b)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     app.get("/ui/security/events")(get_security_events_handler)
     app.post("/ui/security/resolve")(resolve_security_handler)

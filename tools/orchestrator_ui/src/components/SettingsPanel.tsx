@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { API_BASE, UserEconomyConfig } from '../types';
 import { ProviderSettings } from './ProviderSettings';
 import { Shield, SlidersHorizontal, Coins, Info, ArrowRight } from 'lucide-react';
+import { useToast } from './Toast';
 
 interface SettingsPanelProps {
     onOpenMastery: () => void;
@@ -15,6 +16,7 @@ interface OpsConfig {
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) => {
+    const { addToast } = useToast();
     const [config, setConfig] = useState<OpsConfig | null>(null);
     const [statusInfo, setStatusInfo] = useState<{ version?: string; uptime_seconds?: number } | null>(null);
     const [economyConfig, setEconomyConfig] = useState<UserEconomyConfig | null>(null);
@@ -32,7 +34,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                 if (configRes.ok) setConfig(await configRes.json());
                 if (statusRes.ok) setStatusInfo(await statusRes.json());
 
-                const economyRes = await fetch(`${API_BASE}/mastery/config/economy`, { credentials: 'include' });
+                const economyRes = await fetch(`${API_BASE}/ops/mastery/config/economy`, { credentials: 'include' });
                 if (economyRes.ok) setEconomyConfig(await economyRes.json());
             } catch {
                 // non-blocking for settings UI
@@ -50,12 +52,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
         return `${hours}h ${minutes}m`;
     };
 
+    const toggleConfig = useCallback(async (key: keyof OpsConfig, value: boolean) => {
+        if (!config) return;
+        const updated = { ...config, [key]: value };
+        setConfig(updated);
+        try {
+            const res = await fetch(`${API_BASE}/ops/config`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify(updated),
+            });
+            if (!res.ok) throw new Error();
+            addToast(`${key} ${value ? 'activado' : 'desactivado'}`, 'success');
+        } catch {
+            setConfig(config);
+            addToast('No se pudo guardar la configuración.', 'error');
+        }
+    }, [config, addToast]);
+
     const saveEconomy = async () => {
         if (!economyConfig) return;
         setEconomySaving(true);
         setEconomyMessage('');
         try {
-            const res = await fetch(`${API_BASE}/mastery/config/economy`, {
+            const res = await fetch(`${API_BASE}/ops/mastery/config/economy`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
@@ -81,10 +102,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
                         <SettingCell label="Tema" value="macOS Oscuro" />
                         <SettingCell label="Idioma" value="es" />
-                        <SettingCell label="Auto-ejecución" value={config?.default_auto_run ? 'activado' : 'desactivado'} />
+                        <ToggleCell
+                            label="Auto-ejecución"
+                            checked={config?.default_auto_run ?? false}
+                            onChange={(v) => toggleConfig('default_auto_run', v)}
+                        />
                         <SettingCell label="Concurrencia" value={String(config?.max_concurrent_runs ?? '—')} />
                         <SettingCell label="TTL borradores" value={`${config?.draft_cleanup_ttl_days ?? '—'} días`} />
-                        <SettingCell label="Operador genera" value={config?.operator_can_generate ? 'activado' : 'desactivado'} />
+                        <ToggleCell
+                            label="Operador genera"
+                            checked={config?.operator_can_generate ?? false}
+                            onChange={(v) => toggleConfig('operator_can_generate', v)}
+                        />
                     </div>
                 </section>
 
@@ -167,7 +196,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                                     onClick={onOpenMastery}
                                     className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-[#1c1c1e] text-[#86868b] border border-[#2c2c2e] hover:text-[#f5f5f7]"
                                 >
-                                    Abrir Token Mastery
+                                    Panel de Economía
                                     <ArrowRight size={12} />
                                 </button>
                             </div>
@@ -195,7 +224,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                         <SettingCell label="Versión" value={statusInfo?.version ?? '—'} />
                         <SettingCell label="Uptime" value={formatUptime(statusInfo?.uptime_seconds)} />
-                        <SettingCell label="Endpoints" value="/ui/* + /ops/* + /mastery/*" />
+                        <SettingCell label="Endpoints" value="/ui/* + /ops/*" />
                     </div>
                 </section>
 
@@ -209,5 +238,23 @@ const SettingCell: React.FC<{ label: string; value: string }> = ({ label, value 
     <div className="rounded-xl border border-[#2c2c2e] bg-[#101011] p-3">
         <div className="text-[10px] uppercase tracking-widest text-[#86868b] mb-1">{label}</div>
         <div className="text-[#f5f5f7] font-medium">{value}</div>
+    </div>
+);
+
+const ToggleCell: React.FC<{ label: string; checked: boolean; onChange: (v: boolean) => void }> = ({ label, checked, onChange }) => (
+    <div className="rounded-xl border border-[#2c2c2e] bg-[#101011] p-3 flex items-center justify-between">
+        <div>
+            <div className="text-[10px] uppercase tracking-widest text-[#86868b] mb-1">{label}</div>
+            <div className="text-[#f5f5f7] font-medium text-xs">{checked ? 'activado' : 'desactivado'}</div>
+        </div>
+        <button
+            type="button"
+            role="switch"
+            aria-checked={checked}
+            onClick={() => onChange(!checked)}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${checked ? 'bg-[#0a84ff]' : 'bg-[#3a3a3c]'}`}
+        >
+            <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-0'}`} />
+        </button>
     </div>
 );

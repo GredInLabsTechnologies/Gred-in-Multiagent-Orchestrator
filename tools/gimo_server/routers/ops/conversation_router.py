@@ -10,8 +10,8 @@ router = APIRouter(prefix="/threads", tags=["conversation"])
 
 @router.get("", response_model=List[GimoThread])
 async def list_threads(
+    auth: Annotated[AuthContext, Depends(verify_token)],
     workspace_root: Annotated[Optional[str], Query()] = None,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None
 ):
     """Lists all conversation threads."""
     return ConversationService.list_threads(workspace_root=workspace_root)
@@ -19,8 +19,8 @@ async def list_threads(
 @router.post("", response_model=GimoThread, status_code=201)
 async def create_thread(
     workspace_root: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
     title: str = "New Conversation",
-    auth: Annotated[AuthContext, Depends(verify_token)] = None
 ):
     """Creates a new conversation thread."""
     _require_role(auth, "operator")
@@ -29,7 +29,7 @@ async def create_thread(
 @router.get("/{thread_id}", response_model=GimoThread, responses={404: {"description": "Thread not found"}})
 async def get_thread(
     thread_id: str,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None
+    auth: Annotated[AuthContext, Depends(verify_token)]
 ):
     """Retrieves a specific thread by ID."""
     thread = ConversationService.get_thread(thread_id)
@@ -41,7 +41,7 @@ async def get_thread(
 async def add_turn(
     thread_id: str,
     agent_id: str,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None
+    auth: Annotated[AuthContext, Depends(verify_token)]
 ):
     """Adds a new turn to a thread."""
     _require_role(auth, "operator")
@@ -55,8 +55,8 @@ async def add_item(
     thread_id: str,
     turn_id: str,
     type: GimoItemType,
+    auth: Annotated[AuthContext, Depends(verify_token)],
     content: str = "",
-    auth: Annotated[AuthContext, Depends(verify_token)] = None
 ):
     """Adds an atomic item to a turn."""
     _require_role(auth, "operator")
@@ -71,9 +71,9 @@ async def update_item(
     thread_id: str,
     turn_id: str,
     item_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
     delta: str = "",
     status: Optional[str] = None,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None
 ):
     """Updates an item (streaming delta or status change)."""
     _require_role(auth, "operator")
@@ -86,8 +86,8 @@ async def update_item(
 async def fork_thread(
     thread_id: str,
     turn_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
     title: Optional[str] = None,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None
 ):
     """Forks a thread from a specific turn."""
     _require_role(auth, "operator")
@@ -100,7 +100,7 @@ async def fork_thread(
 async def post_message(
     thread_id: str,
     content: str,
-    auth: Annotated[AuthContext, Depends(verify_token)] = None
+    auth: Annotated[AuthContext, Depends(verify_token)]
 ):
     """Post a new message to a thread (as the user)."""
     _require_role(auth, "operator")

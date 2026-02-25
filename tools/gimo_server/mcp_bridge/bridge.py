@@ -1,3 +1,4 @@
+import os
 import httpx
 import logging
 
@@ -5,6 +6,23 @@ logger = logging.getLogger("mcp_bridge")
 
 # Default local backend URL
 BACKEND_URL = "http://127.0.0.1:9325"
+
+
+def _get_auth_token() -> str | None:
+    """Read ORCH_TOKEN from env or token file (same logic as config.py)."""
+    token = os.environ.get("ORCH_TOKEN", "").strip()
+    if token:
+        return token
+    # Fallback: read from .orch_token file next to the server
+    from pathlib import Path
+    token_file = Path(__file__).resolve().parent.parent / ".orch_token"
+    if token_file.exists():
+        try:
+            return token_file.read_text(encoding="utf-8").strip() or None
+        except Exception:
+            pass
+    return None
+
 
 async def proxy_to_api(method: str, path: str, **kwargs) -> str:
     """
@@ -15,11 +33,17 @@ async def proxy_to_api(method: str, path: str, **kwargs) -> str:
     path_params = kwargs.pop("__path_params", {})
     for k, v in path_params.items():
         url_path = url_path.replace(f"{{{k}}}", str(v))
-        
+
     url = f"{BACKEND_URL}{url_path}"
-    
+
     query_params = kwargs.pop("__query", {})
     body = kwargs.pop("__body", None)
+
+    # Attach auth token
+    headers = {}
+    token = _get_auth_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -27,7 +51,8 @@ async def proxy_to_api(method: str, path: str, **kwargs) -> str:
                 method=method,
                 url=url,
                 params=query_params,
-                json=body
+                json=body,
+                headers=headers,
             )
             response = await client.send(request)
             

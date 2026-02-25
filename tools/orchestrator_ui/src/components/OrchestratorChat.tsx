@@ -76,6 +76,7 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
     const [mode, setMode] = useState<ComposerMode>('generate');
     const [isSending, setIsSending] = useState(false);
     const [isLoadingDrafts, setIsLoadingDrafts] = useState(false);
+    const [approvingId, setApprovingId] = useState<string | null>(null);
     const { addToast } = useToast();
 
     const pendingDrafts = useMemo(
@@ -116,6 +117,8 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
     }, [fetchDrafts]);
 
     const approveDraft = async (draftId: string) => {
+        if (approvingId) return;
+        setApprovingId(draftId);
         try {
             const currentDraft = drafts.find(d => d.id === draftId);
             const response = await fetch(`${API_BASE}/ops/drafts/${draftId}/approve`, {
@@ -151,6 +154,8 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
             addToast('Draft aprobado', 'success');
         } catch {
             addToast('No se pudo aprobar el draft', 'error');
+        } finally {
+            setApprovingId(null);
         }
     };
 
@@ -357,9 +362,10 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                                     <div className="mt-2 flex items-center gap-2">
                                         <button
                                             onClick={() => approveDraft(message.draftId!)}
-                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-[#32d74b]/15 text-[#32d74b] border border-[#32d74b]/30"
+                                            disabled={approvingId === message.draftId}
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-[#32d74b]/15 text-[#32d74b] border border-[#32d74b]/30 disabled:opacity-50"
                                         >
-                                            <Check size={11} /> Aprobar
+                                            <Check size={11} /> {approvingId === message.draftId ? 'Aprobando...' : 'Aprobar'}
                                         </button>
                                         <button
                                             onClick={() => rejectDraft(message.draftId!)}
@@ -426,7 +432,7 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                                     <div className="text-xs text-[#f5f5f7] line-clamp-3">{draft.prompt}</div>
                                 </div>
                                 <div className="flex gap-1.5">
-                                    <button onClick={() => void approveDraft(draft.id)} className="flex-1 h-7 rounded-md bg-[#32d74b]/15 border border-[#32d74b]/30 text-[#32d74b] text-[10px]">
+                                    <button onClick={() => void approveDraft(draft.id)} disabled={!!approvingId} className="flex-1 h-7 rounded-md bg-[#32d74b]/15 border border-[#32d74b]/30 text-[#32d74b] text-[10px] disabled:opacity-50">
                                         Aprobar
                                     </button>
                                     <button onClick={() => void rejectDraft(draft.id)} className="flex-1 h-7 rounded-md bg-[#ff453a]/15 border border-[#ff453a]/30 text-[#ff453a] text-[10px]">

@@ -28,6 +28,7 @@ export const GraphView = () => {
             const response = await fetch(`${API_BASE}/ui/graph`, {
                 credentials: 'include',
             });
+            if (!response.ok) return;
             const data = await response.json();
 
             const formattedEdges = data.edges.map((e: any) => ({
