@@ -11,37 +11,37 @@ export const CircuitBreakerPanel: React.FC<CircuitBreakerPanelProps> = ({ record
     const activeBreakers = records.filter(r => r.circuit_state !== 'closed' || r.failures > 0);
 
     const getStatusColor = (state: string, failures: number) => {
-        if (state === 'open') return 'text-red-500';
-        if (state === 'half_open') return 'text-yellow-500';
-        if (failures > 0) return 'text-orange-400';
-        return 'text-green-500';
+        if (state === 'open') return 'text-accent-alert';
+        if (state === 'half_open') return 'text-accent-warning';
+        if (failures > 0) return 'text-accent-warning';
+        return 'text-accent-trust';
     };
 
     return (
-        <div className="bg-[#141414] rounded-xl border border-[#1c1c1e] overflow-hidden">
+        <div className="bg-surface-2 rounded-xl border border-border-subtle overflow-hidden">
             <div className="overflow-x-auto">
                 <table className="w-full text-left">
                     <thead>
-                        <tr className="border-b border-[#1c1c1e] bg-[#0a0a0a]">
-                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-[#86868b] font-semibold">Dimension</th>
-                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-[#86868b] font-semibold">State</th>
-                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-[#86868b] font-semibold text-right">Score</th>
-                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-[#86868b] font-semibold text-right">Failures</th>
-                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-[#86868b] font-semibold text-right">Action</th>
+                        <tr className="border-b border-border-subtle bg-surface-0">
+                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-text-secondary font-semibold">Dimension</th>
+                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-text-secondary font-semibold">State</th>
+                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-text-secondary font-semibold text-right">Score</th>
+                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-text-secondary font-semibold text-right">Failures</th>
+                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-text-secondary font-semibold text-right">Action</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#1c1c1e]">
+                    <tbody className="divide-y divide-border-subtle">
                         {activeBreakers.length === 0 ? (
                             <tr>
-                                <td colSpan={5} className="px-4 py-8 text-center text-[#86868b] text-xs">
-                                    <CheckCircle size={16} className="mx-auto mb-2 text-[#32d74b] opacity-50" />
+                                <td colSpan={5} className="px-4 py-8 text-center text-text-secondary text-xs">
+                                    <CheckCircle size={16} className="mx-auto mb-2 text-accent-trust opacity-50" />
                                     All circuits nominal. No active failures detected.
                                 </td>
                             </tr>
                         ) : (
-                            activeBreakers.map((record) => (
-                                <tr key={record.dimension_key} className="hover:bg-[#1c1c1e]/50 transition-colors">
-                                    <td className="px-4 py-3 text-xs font-mono text-[#f5f5f7]">
+                            activeBreakers.map((record, index) => (
+                                <tr key={record.dimension_key} style={{ ['--i' as any]: index }} className="hover:bg-surface-3/50 transition-colors animate-slide-in-up">
+                                    <td className="px-4 py-3 text-xs font-mono text-text-primary">
                                         {record.dimension_key}
                                     </td>
                                     <td className="px-4 py-3 text-xs">
@@ -52,16 +52,16 @@ export const CircuitBreakerPanel: React.FC<CircuitBreakerPanelProps> = ({ record
                                             <span className="capitalize">{record.circuit_state}</span>
                                         </div>
                                     </td>
-                                    <td className="px-4 py-3 text-xs text-[#f5f5f7] text-right">
+                                    <td className="px-4 py-3 text-xs text-text-primary text-right">
                                         {(record.score * 100).toFixed(1)}%
                                     </td>
-                                    <td className="px-4 py-3 text-xs text-[#f5f5f7] text-right">
+                                    <td className="px-4 py-3 text-xs text-text-primary text-right">
                                         {record.failures}
                                     </td>
                                     <td className="px-4 py-3 text-right">
                                         <button
                                             onClick={() => onInspect(record.dimension_key)}
-                                            className="text-[#0a84ff] hover:text-[#32d74b] text-xs font-medium transition-colors"
+                                            className="text-accent-primary hover:text-accent-trust text-xs font-medium transition-colors"
                                         >
                                             Inspect
                                         </button>

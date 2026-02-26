@@ -25,19 +25,19 @@ export const PlanOverlayCard: React.FC<PlanOverlayCardProps> = ({
 
     return (
         <Panel position="bottom-right" className="!m-4">
-            <div className="w-[340px] bg-[#141414]/95 backdrop-blur-xl rounded-2xl border border-[#2c2c2e] shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="w-[340px] bg-surface-2/95 backdrop-blur-xl rounded-2xl border border-border-primary shadow-2xl overflow-hidden animate-slide-in-up duration-300">
                 {/* Header */}
-                <div className="px-4 pt-3 pb-2 border-b border-[#1c1c1e] flex items-center gap-2">
-                    <div className="p-1 rounded-md bg-[#0a84ff]/10 text-[#0a84ff]">
+                <div className="px-4 pt-3 pb-2 border-b border-border-subtle flex items-center gap-2">
+                    <div className="p-1 rounded-md bg-accent-primary/10 text-accent-primary">
                         <FileText size={14} />
                     </div>
-                    <span className="text-[10px] font-black text-[#86868b] uppercase tracking-widest">Plan</span>
-                    <span className="ml-auto text-[9px] font-mono text-[#424245]">{draftId.slice(0, 12)}</span>
+                    <span className="text-[10px] font-black text-text-secondary uppercase tracking-widest">Plan</span>
+                    <span className="ml-auto text-[9px] font-mono text-text-tertiary">{draftId.slice(0, 12)}</span>
                 </div>
 
                 {/* Plan text */}
                 <div className="px-4 py-3">
-                    <p className="text-xs text-[#f5f5f7] leading-relaxed line-clamp-3 font-medium">
+                    <p className="text-xs text-text-primary leading-relaxed line-clamp-3 font-medium">
                         {prompt}
                     </p>
                 </div>
@@ -80,7 +80,7 @@ export const PlanOverlayCard: React.FC<PlanOverlayCardProps> = ({
                     <button
                         onClick={() => onApprove(orchestratorModel === 'auto' ? undefined : orchestratorModel)}
                         disabled={loading}
-                        className="flex-1 h-8 rounded-xl bg-[#32d74b]/10 border border-[#32d74b]/20 text-[#32d74b] text-[10px] font-black uppercase tracking-wider hover:bg-[#32d74b]/20 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                        className="flex-1 h-8 rounded-xl bg-accent-approval/10 border border-accent-approval/30 text-accent-approval text-[10px] font-black uppercase tracking-wider hover:bg-accent-approval/20 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 hover:animate-glow-breath-approval"
                     >
                         <CheckCircle2 size={12} />
                         Aprobar
@@ -88,7 +88,7 @@ export const PlanOverlayCard: React.FC<PlanOverlayCardProps> = ({
                     <button
                         onClick={onReject}
                         disabled={loading}
-                        className="flex-1 h-8 rounded-xl bg-[#ff453a]/10 border border-[#ff453a]/20 text-[#ff453a] text-[10px] font-black uppercase tracking-wider hover:bg-[#ff453a]/20 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                        className="flex-1 h-8 rounded-xl bg-accent-alert/10 border border-accent-alert/30 text-accent-alert text-[10px] font-black uppercase tracking-wider hover:bg-accent-alert/20 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
                     >
                         <XCircle size={12} />
                         Denegar
@@ -96,7 +96,7 @@ export const PlanOverlayCard: React.FC<PlanOverlayCardProps> = ({
                     <button
                         onClick={onEdit}
                         disabled={loading}
-                        className="h-8 px-3 rounded-xl bg-[#1c1c1e] border border-[#2c2c2e] text-[#86868b] text-[10px] font-black uppercase tracking-wider hover:text-[#f5f5f7] hover:border-[#3c3c3e] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                        className="h-8 px-3 rounded-xl bg-surface-3 border border-border-primary text-text-secondary text-[10px] font-black uppercase tracking-wider hover:text-text-primary hover:border-border-focus transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
                     >
                         <Pencil size={12} />
                         Editar

@@ -12,23 +12,23 @@ export const TrustBadge: React.FC<TrustBadgeProps> = ({ level, size = 12, showLa
     const config = {
         autonomous: {
             icon: ShieldCheck,
-            color: 'text-[#32d74b]',
-            bg: 'bg-[#32d74b]/10',
-            border: 'border-[#32d74b]/20',
+            color: 'text-accent-trust',
+            bg: 'bg-accent-trust/10',
+            border: 'border-accent-trust/30',
             label: 'Autonomous'
         },
         supervised: {
             icon: ShieldQuestion,
-            color: 'text-[#ff9f0a]',
-            bg: 'bg-[#ff9f0a]/10',
-            border: 'border-[#ff9f0a]/20',
+            color: 'text-accent-warning',
+            bg: 'bg-accent-warning/10',
+            border: 'border-accent-warning/30',
             label: 'Supervised'
         },
         restricted: {
             icon: ShieldAlert,
-            color: 'text-[#ff453a]',
-            bg: 'bg-[#ff453a]/10',
-            border: 'border-[#ff453a]/20',
+            color: 'text-accent-alert',
+            bg: 'bg-accent-alert/10',
+            border: 'border-accent-alert/30',
             label: 'Restricted'
         }
     };

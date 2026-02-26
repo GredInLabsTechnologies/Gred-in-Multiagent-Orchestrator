@@ -290,21 +290,21 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
     };
 
     return (
-        <section className="h-full bg-[#0a0a0a] flex min-h-0">
-            <div className={`border-r border-[#2c2c2e] flex flex-col min-h-0 ${isCollapsed ? 'w-full border-r-0' : 'w-2/3'}`}>
+        <section className="h-full bg-surface-1 flex min-h-0">
+            <div className={`border-r border-border-primary flex flex-col min-h-0 ${isCollapsed ? 'w-full border-r-0' : 'w-2/3'}`}>
                 {!isCollapsed && (
-                    <div className="h-11 px-4 border-b border-[#2c2c2e] flex items-center justify-between shrink-0">
-                        <div className="text-xs uppercase tracking-wider font-semibold text-[#f5f5f7]">Orchestrator Chat</div>
-                        <div className="flex items-center gap-1 rounded-lg border border-[#2c2c2e] bg-[#141414] p-1">
+                    <div className="h-11 px-4 border-b border-border-primary flex items-center justify-between shrink-0">
+                        <div className="text-xs uppercase tracking-wider font-semibold text-text-primary">Orchestrator Chat</div>
+                        <div className="flex items-center gap-1 rounded-lg border border-border-primary bg-surface-2 p-1">
                             <button
                                 onClick={() => setMode('generate')}
-                                className={`px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider ${mode === 'generate' ? 'bg-[#0a84ff]/20 text-[#0a84ff]' : 'text-[#86868b]'}`}
+                                className={`px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider ${mode === 'generate' ? 'bg-accent-primary/20 text-accent-primary' : 'text-text-secondary'}`}
                             >
                                 <Sparkles size={12} className="inline mr-1" />IA
                             </button>
                             <button
                                 onClick={() => setMode('draft')}
-                                className={`px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider ${mode === 'draft' ? 'bg-[#0a84ff]/20 text-[#0a84ff]' : 'text-[#86868b]'}`}
+                                className={`px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider ${mode === 'draft' ? 'bg-accent-primary/20 text-accent-primary' : 'text-text-secondary'}`}
                             >
                                 Draft
                             </button>
@@ -315,22 +315,22 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                 {!isCollapsed && (
                     <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                         {messages.map(message => (
-                            <div key={message.id} className={`rounded-xl px-3 py-2 border ${message.role === 'user'
-                                ? 'bg-[#0a84ff]/10 border-[#0a84ff]/20 ml-14'
+                            <div key={message.id} className={`rounded-xl px-3 py-2 border animate-slide-in-up ${message.role === 'user'
+                                ? 'bg-accent-primary/10 border-accent-primary/20 ml-14'
                                 : message.role === 'assistant'
-                                    ? 'bg-[#141414] border-[#2c2c2e] mr-14'
-                                    : 'bg-[#ff9f0a]/10 border-[#ff9f0a]/20 text-[#ffb340]'
+                                    ? 'bg-surface-2 border-border-primary mr-14'
+                                    : 'bg-accent-warning/10 border-accent-warning/20 text-accent-warning'
                                 }`}>
-                                <p className="text-xs text-[#f5f5f7] whitespace-pre-wrap">{message.text}</p>
+                                <p className="text-xs text-text-primary whitespace-pre-wrap">{message.text}</p>
                                 {(message.detectedIntent || message.decisionPath) && (
                                     <div className="mt-2 flex flex-wrap gap-1.5">
                                         {message.detectedIntent && (
-                                            <span className="text-[10px] px-2 py-0.5 rounded-full border border-[#0a84ff]/40 bg-[#0a84ff]/10 text-[#7fc1ff]">
+                                            <span className="text-[10px] px-2 py-0.5 rounded-full border border-accent-primary/40 bg-accent-primary/10 text-accent-primary">
                                                 Intent: {message.detectedIntent}
                                             </span>
                                         )}
                                         {message.decisionPath && (
-                                            <span className="text-[10px] px-2 py-0.5 rounded-full border border-[#2c2c2e] bg-[#1a1a1c] text-[#d0d0d4]">
+                                            <span className="text-[10px] px-2 py-0.5 rounded-full border border-border-primary bg-surface-3 text-text-secondary">
                                                 Ruta: {message.decisionPath}
                                             </span>
                                         )}
@@ -342,10 +342,10 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                                             <div
                                                 key={`${message.id}-${step.key}`}
                                                 className={`text-[10px] rounded-md px-2 py-1 border ${step.status === 'done'
-                                                    ? 'border-[#32d74b]/30 bg-[#32d74b]/10 text-[#8ae89a]'
+                                                    ? 'border-accent-trust/30 bg-accent-trust/10 text-accent-trust'
                                                     : step.status === 'error'
-                                                        ? 'border-[#ff453a]/30 bg-[#ff453a]/10 text-[#ff8f88]'
-                                                        : 'border-[#2c2c2e] bg-[#171718] text-[#b5b5bb]'
+                                                        ? 'border-accent-alert/30 bg-accent-alert/10 text-accent-alert'
+                                                        : 'border-border-primary bg-surface-3 text-text-secondary'
                                                     }`}
                                             >
                                                 {step.label}: {step.detail || (step.status === 'pending' ? 'pendiente' : step.status)}
@@ -354,7 +354,7 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                                     </div>
                                 )}
                                 {message.errorActionable && (
-                                    <div className="mt-2 text-[10px] rounded-md border border-[#ff9f0a]/30 bg-[#ff9f0a]/10 text-[#ffbe69] px-2 py-1">
+                                    <div className="mt-2 text-[10px] rounded-md border border-accent-warning/30 bg-accent-warning/10 text-accent-warning px-2 py-1">
                                         Acción sugerida: {message.errorActionable}
                                     </div>
                                 )}
@@ -363,13 +363,13 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                                         <button
                                             onClick={() => approveDraft(message.draftId!)}
                                             disabled={approvingId === message.draftId}
-                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-[#32d74b]/15 text-[#32d74b] border border-[#32d74b]/30 disabled:opacity-50"
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-accent-trust/15 text-accent-trust border border-accent-trust/30 disabled:opacity-50"
                                         >
                                             <Check size={11} /> {approvingId === message.draftId ? 'Aprobando...' : 'Aprobar'}
                                         </button>
                                         <button
                                             onClick={() => rejectDraft(message.draftId!)}
-                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-[#ff453a]/15 text-[#ff453a] border border-[#ff453a]/30"
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-accent-alert/15 text-accent-alert border border-accent-alert/30"
                                         >
                                             <X size={11} /> Rechazar
                                         </button>
@@ -379,7 +379,7 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                                     <div className="mt-2 flex items-center gap-2">
                                         <button
                                             onClick={() => void createRunFromApproved(message.approvedId!, message.draftId)}
-                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-[#0a84ff]/15 text-[#0a84ff] border border-[#0a84ff]/30"
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] bg-accent-primary/15 text-accent-primary border border-accent-primary/30"
                                         >
                                             <Sparkles size={11} /> Ejecutar run
                                         </button>
@@ -390,7 +390,7 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                     </div>
                 )}
 
-                <div className={`p-3 flex items-center gap-2 shrink-0 ${isCollapsed ? 'border-t-0 h-full items-center pl-16' : 'border-t border-[#2c2c2e]'}`}>
+                <div className={`p-3 flex items-center gap-2 shrink-0 ${isCollapsed ? 'border-t-0 h-full items-center pl-16' : 'border-t border-border-primary'}`}>
                     <input
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
@@ -401,12 +401,12 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                             }
                         }}
                         placeholder={mode === 'generate' ? 'Describe el workflow para generar un draft...' : 'Crear draft manual...'}
-                        className="flex-1 h-10 rounded-xl bg-[#141414] border border-[#2c2c2e] px-3 text-sm text-[#f5f5f7] placeholder:text-[#86868b] outline-none focus:border-[#0a84ff]"
+                        className="flex-1 h-10 rounded-xl bg-surface-2 border border-border-primary px-3 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-accent-primary transition-colors duration-200"
                     />
                     <button
                         onClick={() => void handleSend()}
                         disabled={isSending || !input.trim()}
-                        className="h-10 px-3 rounded-xl bg-[#0a84ff] hover:bg-[#0071e3] disabled:opacity-50 disabled:cursor-not-allowed text-white inline-flex items-center gap-2"
+                        className="h-10 px-3 rounded-xl bg-accent-primary hover:bg-accent-primary/85 disabled:opacity-50 disabled:cursor-not-allowed text-white inline-flex items-center gap-2 active:scale-[0.97]"
                     >
                         {isSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                         <span className="text-xs font-medium">Enviar</span>
@@ -415,27 +415,27 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
             </div>
 
             {!isCollapsed && (
-                <aside className="w-1/3 min-w-[280px] max-w-[420px] bg-[#0d0d0e] flex flex-col min-h-0">
-                    <div className="h-11 px-4 border-b border-[#2c2c2e] flex items-center justify-between shrink-0">
-                        <span className="text-xs uppercase tracking-wider text-[#86868b]">Drafts pendientes</span>
-                        <button onClick={() => void fetchDrafts()} className="text-[10px] text-[#0a84ff] hover:underline">
+                <aside className="w-1/3 min-w-[280px] max-w-[420px] bg-surface-0 flex flex-col min-h-0">
+                    <div className="h-11 px-4 border-b border-border-primary flex items-center justify-between shrink-0">
+                        <span className="text-xs uppercase tracking-wider text-text-secondary">Drafts pendientes</span>
+                        <button onClick={() => void fetchDrafts()} className="text-[10px] text-accent-primary hover:underline">
                             {isLoadingDrafts ? 'Actualizando…' : 'Actualizar'}
                         </button>
                     </div>
                     <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 custom-scrollbar">
                         {pendingDrafts.length === 0 ? (
-                            <p className="text-xs text-[#86868b]">No hay drafts en estado draft.</p>
+                            <p className="text-xs text-text-secondary">No hay drafts en estado draft.</p>
                         ) : pendingDrafts.map(draft => (
-                            <div key={draft.id} className="rounded-xl border border-[#2c2c2e] bg-[#141414] p-2.5 space-y-2">
+                            <div key={draft.id} className="rounded-xl border border-border-primary bg-surface-2 p-2.5 space-y-2">
                                 <div>
-                                    <div className="text-[10px] text-[#86868b]">{new Date(draft.created_at).toLocaleString()}</div>
-                                    <div className="text-xs text-[#f5f5f7] line-clamp-3">{draft.prompt}</div>
+                                    <div className="text-[10px] text-text-secondary">{new Date(draft.created_at).toLocaleString()}</div>
+                                    <div className="text-xs text-text-primary line-clamp-3">{draft.prompt}</div>
                                 </div>
                                 <div className="flex gap-1.5">
-                                    <button onClick={() => void approveDraft(draft.id)} disabled={!!approvingId} className="flex-1 h-7 rounded-md bg-[#32d74b]/15 border border-[#32d74b]/30 text-[#32d74b] text-[10px] disabled:opacity-50">
+                                    <button onClick={() => void approveDraft(draft.id)} disabled={!!approvingId} className="flex-1 h-7 rounded-md bg-accent-trust/15 border border-accent-trust/30 text-accent-trust text-[10px] disabled:opacity-50">
                                         Aprobar
                                     </button>
-                                    <button onClick={() => void rejectDraft(draft.id)} className="flex-1 h-7 rounded-md bg-[#ff453a]/15 border border-[#ff453a]/30 text-[#ff453a] text-[10px]">
+                                    <button onClick={() => void rejectDraft(draft.id)} className="flex-1 h-7 rounded-md bg-accent-alert/15 border border-accent-alert/30 text-accent-alert text-[10px]">
                                         Rechazar
                                     </button>
                                 </div>

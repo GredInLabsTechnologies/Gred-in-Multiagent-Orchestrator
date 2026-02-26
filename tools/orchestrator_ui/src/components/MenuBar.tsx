@@ -92,15 +92,15 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     const profileInitial = (profileLabel || 'U').trim().charAt(0).toUpperCase();
 
     return (
-        <header className="h-10 border-b border-[#2c2c2e] bg-[#000000]/90 backdrop-blur-xl px-3 flex items-center justify-between shrink-0 z-50">
+        <header className="h-10 border-b border-border-primary bg-surface-0/90 backdrop-blur-xl px-3 flex items-center justify-between shrink-0 z-50">
             <div ref={rootRef} className="flex items-center gap-1">
                 {(Object.keys(labels) as MenuId[]).map((id) => (
                     <div key={id} className="relative">
                         <button
                             onClick={() => setOpenMenu(prev => prev === id ? null : id)}
-                            className={`h-7 px-2.5 rounded-md text-xs font-medium inline-flex items-center gap-1 transition-colors ${openMenu === id
-                                ? 'bg-[#1c1c1e] text-[#f5f5f7]'
-                                : 'text-[#86868b] hover:text-[#f5f5f7] hover:bg-[#1c1c1e]'
+                            className={`h-7 px-2.5 rounded-md text-xs font-medium inline-flex items-center gap-1 transition-colors active:scale-[0.97] ${openMenu === id
+                                ? 'bg-surface-3 text-text-primary'
+                                : 'text-text-secondary hover:text-text-primary hover:bg-surface-3/70'
                                 }`}
                         >
                             {labels[id]}
@@ -108,7 +108,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         </button>
 
                         {openMenu === id && (
-                            <div className="absolute top-full left-0 mt-1 w-56 rounded-xl border border-[#2c2c2e] bg-[#101011] shadow-2xl overflow-hidden">
+                            <div className="absolute top-full left-0 mt-1 w-56 rounded-xl border border-border-primary bg-surface-2 shadow-2xl overflow-hidden animate-slide-in-down">
                                 {menus[id].map((entry) => (
                                     <button
                                         key={entry.label}
@@ -116,7 +116,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                             entry.onClick();
                                             setOpenMenu(null);
                                         }}
-                                        className="w-full text-left px-3 py-2 text-xs text-[#f5f5f7] hover:bg-[#1c1c1e]"
+                                        className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-surface-3 transition-colors duration-100"
                                     >
                                         {entry.label}
                                     </button>
@@ -127,7 +127,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 ))}
             </div>
 
-            <div className="text-[10px] text-[#86868b] font-mono uppercase tracking-wider">GIMO</div>
+            <div className="text-[10px] text-text-secondary font-mono uppercase tracking-wider">GIMO</div>
 
             <div className="flex items-center gap-2 min-w-[140px] justify-end">
                 <button
@@ -135,55 +135,55 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         setOpenMenu(null);
                         onOpenProfile?.();
                     }}
-                    className="inline-flex items-center gap-2 rounded-full pl-1 pr-2 py-1 border border-[#2c2c2e] bg-[#101011] hover:bg-[#1c1c1e] transition-colors"
+                    className="inline-flex items-center gap-2 rounded-full pl-1 pr-2 py-1 border border-border-primary bg-surface-1 hover:bg-surface-3 transition-colors"
                     title="Abrir Mi Perfil"
                 >
-                    <span className="w-7 h-7 rounded-full overflow-hidden border border-[#2c2c2e] bg-[#1c1c1e] flex items-center justify-center text-[11px] font-bold text-[#f5f5f7]">
+                    <span className="w-7 h-7 rounded-full overflow-hidden border border-border-primary bg-surface-3 flex items-center justify-center text-[11px] font-bold text-text-primary">
                         {userPhotoUrl ? (
                             <img src={userPhotoUrl} alt="Avatar" className="w-full h-full object-cover" />
                         ) : (
                             profileInitial
                         )}
                     </span>
-                    <span className="max-w-[120px] truncate text-xs text-[#f5f5f7]">{profileLabel}</span>
+                    <span className="max-w-[120px] truncate text-xs text-text-primary">{profileLabel}</span>
                 </button>
             </div>
 
             {isAboutOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-[#1c1c1e] border border-[#38383a] rounded-2xl w-96 overflow-hidden shadow-2xl relative">
+                    <div className="bg-surface-2 border border-border-primary rounded-2xl w-96 overflow-hidden shadow-2xl relative">
                         <div className="p-6 text-center space-y-4">
-                            <div className="w-16 h-16 bg-[#2c2c2e] rounded-3xl flex items-center justify-center mx-auto mb-2 text-[#0a84ff]">
+                            <div className="w-16 h-16 bg-surface-3 rounded-3xl flex items-center justify-center mx-auto mb-2 text-accent-primary">
                                 <span className="text-2xl font-bold">G</span>
                             </div>
-                            <h2 className="text-xl font-bold text-[#f5f5f7]">Interfaz de Usuario GIMO Phoenix</h2>
-                            <p className="text-xs text-[#86868b] px-4">Aumentando la orquestación multi-agente con capacidades avanzadas.</p>
+                            <h2 className="text-xl font-bold text-text-primary">Interfaz de Usuario GIMO Phoenix</h2>
+                            <p className="text-xs text-text-secondary px-4">Aumentando la orquestación multi-agente con capacidades avanzadas.</p>
 
                             <div className="bg-black/30 rounded-xl p-4 border border-white/5 space-y-3 mt-4 text-left">
                                 <div className="flex justify-between items-center border-b border-white/5 pb-2">
-                                    <span className="text-xs text-[#86868b]">Versión</span>
-                                    <span className="text-[11px] font-mono text-[#0a84ff]">v{status?.version || '1.0.0-rc.1'}</span>
+                                    <span className="text-xs text-text-secondary">Versión</span>
+                                    <span className="text-[11px] font-mono text-accent-primary">v{status?.version || '1.0.0-rc.1'}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-white/5 pb-2">
-                                    <span className="text-xs text-[#86868b]">Estado del Servicio</span>
+                                    <span className="text-xs text-text-secondary">Estado del Servicio</span>
                                     <span className="text-[11px] font-mono text-emerald-400">{status?.service_status || 'Operativo'}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-white/5 pb-2">
-                                    <span className="text-xs text-[#86868b]">Tiempo Activo</span>
-                                    <span className="text-[11px] font-mono text-[#f5f5f7]">{status?.uptime ? `${Math.floor(status.uptime / 3600)}h ${Math.floor((status.uptime % 3600) / 60)}m` : '0h 0m'}</span>
+                                    <span className="text-xs text-text-secondary">Tiempo Activo</span>
+                                    <span className="text-[11px] font-mono text-text-primary">{status?.uptime ? `${Math.floor(status.uptime / 3600)}h ${Math.floor((status.uptime % 3600) / 60)}m` : '0h 0m'}</span>
                                 </div>
                                 <div className="flex justify-between items-center">
-                                    <span className="text-xs text-[#86868b]">Repositorio Activo</span>
-                                    <span className="text-[10px] font-mono text-[#f5f5f7] truncate max-w-[140px]" title={status?.active_workspace || 'N/A'}>
+                                    <span className="text-xs text-text-secondary">Repositorio Activo</span>
+                                    <span className="text-[10px] font-mono text-text-primary truncate max-w-[140px]" title={status?.active_workspace || 'N/A'}>
                                         {status?.active_workspace ? status.active_workspace.split(/[\\/]/).pop() : 'N/A'}
                                     </span>
                                 </div>
                             </div>
                         </div>
-                        <div className="px-6 py-4 bg-[#2c2c2e]/50 border-t border-[#3c3c3e] flex justify-end">
+                        <div className="px-6 py-4 bg-surface-3/50 border-t border-border-primary flex justify-end">
                             <button
                                 onClick={() => setIsAboutOpen(false)}
-                                className="px-5 py-2 bg-[#0a84ff] hover:bg-[#007ad9] text-white rounded-xl text-xs font-bold transition-all hover:scale-105 active:scale-95"
+                                className="px-5 py-2 bg-accent-primary hover:bg-accent-primary/85 text-white rounded-xl text-xs font-bold transition-all hover:scale-105 active:scale-95"
                             >
                                 Continuar
                             </button>

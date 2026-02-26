@@ -79,7 +79,6 @@ export default function App() {
             );
             setActiveTab('operations');
         } catch (error) {
-            console.error('MCP sync failed', error);
             addToast('Falló MCP Sync. Revisa configuración de server en Settings.', 'error');
         }
     }, [addToast]);
@@ -132,7 +131,7 @@ export default function App() {
                 setBootState('ready');
                 setBootError(null);
             } catch (error) {
-                console.error('Error fetching status:', error);
+                addToast('No hay conexión con el backend.', 'error');
                 setBootState('offline');
                 setBootError('No hay conexión con el backend.');
             }
@@ -167,7 +166,6 @@ export default function App() {
             addToast('Plan aprobado exitosamente', 'success');
             setGraphNodeCount(-1); // Force refresh
         } catch (err) {
-            console.error('Failed to approve plan:', err);
             addToast('Error al aprobar el plan', 'error');
         }
     };
@@ -182,7 +180,6 @@ export default function App() {
             addToast('Plan rechazado', 'info');
             setGraphNodeCount(0); // Clear graph
         } catch (err) {
-            console.error('Failed to reject plan:', err);
             addToast('Error al rechazar el plan', 'error');
         }
     };
@@ -327,20 +324,20 @@ export default function App() {
 
                                     {!isChatCollapsed && (
                                         <>
-                                            <PanelResizeHandle className="h-1 bg-[#1c1c1e] hover:bg-[#0a84ff]/50 transition-colors cursor-row-resize flex items-center justify-center">
-                                                <div className="w-8 h-0.5 bg-[#2c2c2e] rounded-full" />
+                                            <PanelResizeHandle className="h-1 bg-surface-3 hover:bg-accent-primary/50 transition-colors cursor-row-resize flex items-center justify-center">
+                                                <div className="w-8 h-0.5 bg-border-primary rounded-full" />
                                             </PanelResizeHandle>
                                             <ResizePanel
                                                 defaultSize={40}
                                                 minSize={20}
-                                                className="relative overflow-hidden bg-[#0a0a0a] border-t border-[#2c2c2e]"
+                                                className="relative overflow-hidden bg-surface-0 border-t border-border-primary"
                                             >
                                                 <div
-                                                    className="absolute top-0 right-8 w-12 h-4 bg-[#141414] border border-[#2c2c2e] border-t-0 rounded-b-md flex items-center justify-center cursor-pointer hover:bg-[#1c1c1e] z-50 group transition-colors"
+                                                    className="absolute top-0 right-8 w-12 h-4 bg-surface-2 border border-border-primary border-t-0 rounded-b-md flex items-center justify-center cursor-pointer hover:bg-surface-3 z-50 group transition-colors"
                                                     onClick={() => setIsChatCollapsed(true)}
                                                     title="Colapsar chat"
                                                 >
-                                                    <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-[#86868b] transition-transform" />
+                                                    <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-text-secondary transition-transform" />
                                                 </div>
                                                 <OrchestratorChat isCollapsed={false} />
                                             </ResizePanel>
@@ -349,13 +346,13 @@ export default function App() {
                                 </PanelGroup>
 
                                 {isChatCollapsed && (
-                                    <div className="h-14 min-h-[56px] border-t border-[#2c2c2e] relative overflow-hidden bg-[#0a0a0a] shrink-0">
+                                    <div className="h-14 min-h-[56px] border-t border-border-primary relative overflow-hidden bg-surface-0 shrink-0">
                                         <div
-                                            className="absolute top-0 right-8 w-12 h-4 bg-[#141414] border border-[#2c2c2e] border-t-0 rounded-b-md flex items-center justify-center cursor-pointer hover:bg-[#1c1c1e] z-50 group transition-colors"
+                                            className="absolute top-0 right-8 w-12 h-4 bg-surface-2 border border-border-primary border-t-0 rounded-b-md flex items-center justify-center cursor-pointer hover:bg-surface-3 z-50 group transition-colors"
                                             onClick={() => setIsChatCollapsed(false)}
                                             title="Expandir chat"
                                         >
-                                            <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-[#86868b] transition-transform rotate-180" />
+                                            <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-text-secondary transition-transform rotate-180" />
                                         </div>
                                         <OrchestratorChat isCollapsed={true} />
                                     </div>
@@ -391,7 +388,7 @@ export default function App() {
 
             case 'security':
                 return (
-                    <div className="h-full overflow-y-auto custom-scrollbar p-6 bg-[#0a0a0a]">
+                    <div className="h-full overflow-y-auto custom-scrollbar p-6 bg-surface-0">
                         <div className="max-w-6xl mx-auto">
                             <TrustSettings />
                         </div>
@@ -400,7 +397,7 @@ export default function App() {
 
             case 'operations':
                 return (
-                    <div className="h-full overflow-y-auto custom-scrollbar p-6 bg-[#0a0a0a]">
+                    <div className="h-full overflow-y-auto custom-scrollbar p-6 bg-surface-0">
                         <MaintenanceIsland />
                     </div>
                 );
@@ -413,7 +410,7 @@ export default function App() {
 
             case 'mastery':
                 return (
-                    <div className="h-full overflow-y-auto custom-scrollbar bg-[#0a0a0a]">
+                    <div className="h-full overflow-y-auto custom-scrollbar bg-surface-0">
                         <TokenMastery />
                     </div>
                 );
@@ -423,27 +420,27 @@ export default function App() {
     // Loading state
     if (bootState === 'checking' || authenticated === null) {
         return (
-            <div className="min-h-screen bg-[#1c1c1e] flex items-center justify-center">
-                <div className="w-6 h-6 border-2 border-[#0a84ff] border-t-transparent rounded-full animate-spin" />
+            <div className="min-h-screen bg-surface-3 flex items-center justify-center">
+                <div className="w-6 h-6 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />
             </div>
         );
     }
 
     if (bootState === 'offline') {
         return (
-            <div className="min-h-screen bg-[#0a0a0a] text-[#f5f5f7] flex items-center justify-center p-6">
-                <div className="w-full max-w-lg rounded-2xl border border-[#2c2c2e] bg-[#141414] p-8 space-y-5">
-                    <div className="flex items-center gap-3 text-[#ff9f0a]">
+            <div className="min-h-screen bg-surface-0 text-text-primary flex items-center justify-center p-6">
+                <div className="w-full max-w-lg rounded-2xl border border-border-primary bg-surface-2 p-8 space-y-5">
+                    <div className="flex items-center gap-3 text-accent-warning">
                         <AlertTriangle size={20} />
                         <h1 className="text-lg font-semibold">Backend no disponible</h1>
                     </div>
-                    <p className="text-sm text-[#86868b]">
+                    <p className="text-sm text-text-secondary">
                         {bootError || 'No se pudo conectar con los servicios de GIMO.'}
                     </p>
                     <div className="flex gap-3">
                         <button
                             onClick={checkSession}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0a84ff] hover:bg-[#0071e3] text-white text-sm font-medium"
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-accent-primary hover:bg-accent-primary/85 text-white text-sm font-medium"
                         >
                             <RefreshCw size={14} />
                             Reintentar conexión
@@ -463,7 +460,7 @@ export default function App() {
     const email = profile?.user?.email || sessionUser?.email;
 
     return (
-        <div className="min-h-screen bg-[#000000] text-[#f5f5f7] font-sans selection:bg-[#0a84ff] selection:text-white flex flex-col">
+        <div className="min-h-screen bg-surface-0 text-text-primary font-sans selection:bg-accent-primary selection:text-white flex flex-col">
             <MenuBar
                 status={status}
                 onNewPlan={openGlobalPlanBuilder}
@@ -486,13 +483,13 @@ export default function App() {
                 </main>
             </div>
 
-            <footer role="contentinfo" className="h-8 border-t border-[#2c2c2e] bg-[#0a0a0a] flex items-center justify-between px-4 text-[10px] text-[#424245] uppercase tracking-widest shrink-0">
+            <footer role="contentinfo" className="h-8 border-t border-border-primary bg-surface-1 flex items-center justify-between px-4 text-[10px] text-text-tertiary uppercase tracking-widest shrink-0">
                 <div className="flex items-center gap-4">
                     <span>Gred In Labs</span>
-                    <span className="text-[#1c1c1e]">|</span>
+                    <span className="text-border-subtle">|</span>
                     <span>v{status?.version || '1.0.0'}</span>
                 </div>
-                <div className="font-mono lowercase italic opacity-60 text-[#86868b]">
+                <div className="font-mono lowercase italic opacity-60 text-text-secondary">
                     {status?.service_status || 'connecting...'}
                 </div>
             </footer>

@@ -20,6 +20,7 @@ import { ClusterNode } from './ClusterNode';
 import { PlanOverlayCard } from './PlanOverlayCard';
 import { API_BASE } from '../types';
 import { Edit2, Save, X } from 'lucide-react';
+import { useToast } from './Toast';
 
 const nodeTypes = {
     bridge: BridgeNode,
@@ -47,6 +48,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     onEditPlan,
     planLoading,
 }) => {
+    const { addToast } = useToast();
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
     const [isEditMode, setIsEditMode] = useState(false);
@@ -92,7 +94,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             }
 
             if (!response.ok) {
-                console.error(`Graph fetch error: ${response.status}`);
+                addToast(`Error al cargar el grafo (HTTP ${response.status})`, 'error');
                 onNodeCountChange?.(0);
                 return;
             }
@@ -103,12 +105,12 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 ...e,
                 animated: true,
                 style: {
-                    stroke: e.style?.stroke || (e.source === 'tunnel' ? '#0a84ff' : '#32d74b'),
+                    stroke: e.style?.stroke || (e.source === 'tunnel' ? 'var(--status-running)' : 'var(--status-done)'),
                     strokeWidth: e.style?.strokeWidth || 2,
                 },
                 markerEnd: {
                     type: MarkerType.ArrowClosed,
-                    color: e.style?.stroke || (e.source === 'tunnel' ? '#0a84ff' : '#32d74b'),
+                    color: e.style?.stroke || (e.source === 'tunnel' ? 'var(--status-running)' : 'var(--status-done)'),
                 },
             }));
 
@@ -144,10 +146,10 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             setNodes(nodesWithLiveState);
             setEdges(formattedEdges);
         } catch (error) {
-            console.error('Error fetching graph data:', error);
+            addToast('Error al cargar datos del grafo', 'error');
             onNodeCountChange?.(0);
         }
-    }, [setNodes, setEdges, onNodeCountChange]);
+    }, [setNodes, setEdges, onNodeCountChange, addToast]);
 
     const hasRunningNodes = useMemo(() => nodes.some(n => n.data?.status === 'running'), [nodes]);
 
@@ -176,37 +178,54 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         onNodeSelect(node.id);
     }, [onNodeSelect]);
 
+    const createManualNodeAtClientPoint = useCallback((event: React.MouseEvent) => {
+        const target = event.target as HTMLElement;
+        if (!target.closest('.react-flow__pane')) return;
+
+        const reactFlowBounds = target.closest('.react-flow')?.getBoundingClientRect();
+        if (!reactFlowBounds) return;
+
+        const position = project({
+            x: event.clientX - reactFlowBounds.left,
+            y: event.clientY - reactFlowBounds.top,
+        });
+
+        const newNode = {
+            id: `manual_${Date.now()}`,
+            type: 'orchestrator',
+            position,
+            data: { label: 'Nodo Manual', status: 'pending', trustLevel: 'supervised' },
+        };
+
+        setNodes((nds) => nds.concat(newNode));
+        addToast('Nodo manual creado', 'info');
+    }, [project, setNodes, addToast]);
+
     const onPaneClick = useCallback((event: React.MouseEvent) => {
         if (isEditMode) {
-            const target = event.target as HTMLElement;
-            const reactFlowBounds = target.closest('.react-flow')?.getBoundingClientRect();
-            if (reactFlowBounds) {
-                const position = project({
-                    x: event.clientX - reactFlowBounds.left,
-                    y: event.clientY - reactFlowBounds.top,
-                });
-                const newNode = {
-                    id: `manual_${Date.now()}`,
-                    type: 'orchestrator',
-                    position,
-                    data: { label: 'Nodo Manual', status: 'pending' },
-                };
-                setNodes((nds) => nds.concat(newNode));
+            if (event.detail >= 2) {
+                createManualNodeAtClientPoint(event);
             }
-        } else {
-            onNodeSelect(null);
+            return;
         }
-    }, [isEditMode, project, setNodes, onNodeSelect]);
+
+        onNodeSelect(null);
+    }, [isEditMode, onNodeSelect, createManualNodeAtClientPoint]);
 
     const onConnect = useCallback((params: Connection) => {
-        if (isEditMode) {
-            setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#86868b', strokeWidth: 2 } }, eds));
+        if (isEditMode && params.source && params.target) {
+            setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: 'var(--status-pending)', strokeWidth: 2 } }, eds));
         }
     }, [isEditMode, setEdges]);
 
-    const handleSaveDraft = async () => {
+    const handleSaveDraft = useCallback(async () => {
+        if (nodes.length === 0) {
+            addToast('No hay nodos para guardar en borrador manual', 'error');
+            return;
+        }
+
         try {
-            await fetch(`${API_BASE}/ops/drafts`, {
+            const response = await fetch(`${API_BASE}/ops/drafts`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -220,14 +239,21 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 }),
                 credentials: 'include'
             });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
             setIsEditMode(false);
+            addToast('Borrador manual guardado', 'success');
+            await fetchGraphData();
         } catch (error) {
-            console.error('Failed to save manual draft:', error);
+            addToast('No se pudo guardar el borrador manual', 'error');
         }
-    };
+    }, [nodes, edges, addToast, fetchGraphData]);
 
     return (
-        <div className="w-full h-full bg-[#0a0a0a]">
+        <div className="w-full h-full bg-surface-1">
             <ReactFlow
                 nodes={nodes.map(n => ({ ...n, selected: n.id === selectedNodeId }))}
                 edges={edges}
@@ -244,17 +270,17 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 maxZoom={2}
                 defaultViewport={{ x: 0, y: 0, zoom: 0.85 }}
             >
-                <Background color="#1c1c1e" gap={24} size={1} />
+                <Background color="var(--border-subtle)" gap={24} size={1} />
                 <Controls showInteractive={false} />
                 <MiniMap
                     nodeColor={(node) => {
-                        if (node.type === 'orchestrator') return '#0a84ff';
-                        if (node.type === 'bridge') return '#0a84ff';
-                        if (node.type === 'repo') return '#5e5ce6';
-                        return '#86868b';
+                        if (node.type === 'orchestrator') return 'var(--status-running)';
+                        if (node.type === 'bridge') return 'var(--status-running)';
+                        if (node.type === 'repo') return 'var(--accent-purple)';
+                        return 'var(--status-pending)';
                     }}
                     maskColor="rgba(0, 0, 0, 0.7)"
-                    className="!bg-[#0a0a0a] !border-[#2c2c2e] !rounded-xl"
+                    className="!bg-[var(--surface-2)] !border-[var(--border-primary)] !rounded-xl"
                     style={{ width: 140, height: 90 }}
                 />
                 {draftInfo ? (
@@ -269,26 +295,26 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 ) : (
                     <Panel
                         position="top-left"
-                        className="bg-[#141414]/90 backdrop-blur-xl px-3 py-1.5 rounded-lg border border-[#2c2c2e] text-[10px] text-[#86868b] font-mono uppercase tracking-wider"
+                        className="bg-surface-2/90 backdrop-blur-xl px-3 py-1.5 rounded-lg border border-border-primary text-[10px] text-text-secondary font-mono uppercase tracking-wider"
                     >
                         Grafo de Orquestación
                     </Panel>
                 )}
 
                 {progressStats && (
-                    <Panel position="top-center" className="bg-[#141414]/90 backdrop-blur-xl px-4 py-2 rounded-xl border border-[#2c2c2e] min-w-[200px] shadow-lg">
+                    <Panel position="top-center" className="bg-surface-2/90 backdrop-blur-xl px-4 py-2 rounded-xl border border-border-primary min-w-[200px] shadow-lg">
                         <div className="flex justify-between items-center mb-1.5">
-                            <span className="text-[10px] text-[#f5f5f7] font-semibold uppercase tracking-wider flex items-center gap-1.5">
-                                <div className="w-1.5 h-1.5 rounded-full bg-[#0a84ff] animate-pulse" />
+                            <span className="text-[10px] text-text-primary font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                                <div className="w-1.5 h-1.5 rounded-full bg-status-running animate-status-pulse" />
                                 Ejecución en progreso
                             </span>
-                            <span className="text-[10px] text-[#86868b] font-mono">
+                            <span className="text-[10px] text-text-secondary font-mono">
                                 {progressStats.done} / {progressStats.total}
                             </span>
                         </div>
-                        <div className="h-1 w-full bg-[#1c1c1e] rounded-full overflow-hidden">
+                        <div className="h-1 w-full bg-surface-3 rounded-full overflow-hidden">
                             <div
-                                className="h-full bg-[#0a84ff] transition-all duration-500 ease-out"
+                                className="h-full bg-accent-primary transition-all duration-500 ease-out"
                                 style={{ width: `${progressStats.percent}%` }}
                             />
                         </div>
@@ -297,20 +323,23 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
                 {/* Edit Mode Toolbar */}
                 <Panel position="bottom-center" className="mb-4">
-                    <div className="flex bg-[#141414]/90 backdrop-blur-xl rounded-full border border-[#2c2c2e] p-1.5 shadow-xl">
+                    <div className="flex bg-surface-2/90 backdrop-blur-xl rounded-full border border-border-primary p-1.5 shadow-xl">
                         {!isEditMode ? (
                             <button
                                 onClick={() => setIsEditMode(true)}
-                                className="flex items-center gap-2 px-4 py-2 hover:bg-[#1c1c1e] text-[#86868b] hover:text-[#f5f5f7] rounded-full transition-colors text-[11px] font-medium"
+                                className="flex items-center gap-2 px-4 py-2 hover:bg-surface-3 text-text-secondary hover:text-text-primary rounded-full transition-colors text-[11px] font-medium"
                             >
                                 <Edit2 size={14} />
                                 Modo Edición
                             </button>
                         ) : (
                             <>
+                                <div className="px-3 py-1 text-[10px] text-text-secondary flex items-center">
+                                    Doble click en canvas = crear nodo · arrastra handles = crear edge
+                                </div>
                                 <button
                                     onClick={handleSaveDraft}
-                                    className="flex items-center gap-2 px-4 py-2 bg-[#32d74b]/10 text-[#32d74b] hover:bg-[#32d74b]/20 rounded-full transition-colors text-[11px] font-bold tracking-wide mr-1"
+                                    className="flex items-center gap-2 px-4 py-2 bg-accent-trust/10 text-accent-trust hover:bg-accent-trust/20 rounded-full transition-colors text-[11px] font-bold tracking-wide mr-1"
                                 >
                                     <Save size={14} />
                                     Guardar Borrador
@@ -320,7 +349,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                                         setIsEditMode(false);
                                         fetchGraphData(); // reload normal graph
                                     }}
-                                    className="flex items-center justify-center w-8 h-8 hover:bg-[#ff453a]/10 text-[#86868b] hover:text-[#ff453a] rounded-full transition-colors"
+                                    className="flex items-center justify-center w-8 h-8 hover:bg-accent-alert/10 text-text-secondary hover:text-accent-alert rounded-full transition-colors"
                                     title="Cancelar edición"
                                 >
                                     <X size={14} />

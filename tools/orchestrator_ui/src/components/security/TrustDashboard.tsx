@@ -7,24 +7,24 @@ interface TrustDashboardProps {
 }
 
 const getScoreBarColorClass = (score: number) => {
-    if (score >= 0.9) return 'bg-[#32d74b]';
-    if (score >= 0.7) return 'bg-[#32d74b] opacity-80';
-    if (score >= 0.5) return 'bg-[#ff9f0a]';
-    return 'bg-[#ff453a]';
+    if (score >= 0.9) return 'bg-accent-trust';
+    if (score >= 0.7) return 'bg-accent-trust opacity-80';
+    if (score >= 0.5) return 'bg-accent-warning';
+    return 'bg-accent-alert';
 };
 
 const getScoreTextColorClass = (score: number) => {
-    if (score >= 0.9) return 'text-[#32d74b]';
-    if (score >= 0.7) return 'text-[#32d74b]';
-    if (score >= 0.5) return 'text-[#ff9f0a]';
-    return 'text-[#ff453a]';
+    if (score >= 0.9) return 'text-accent-trust';
+    if (score >= 0.7) return 'text-accent-trust';
+    if (score >= 0.5) return 'text-accent-warning';
+    return 'text-accent-alert';
 };
 
 const getPolicyBadgeClass = (policy: string) => {
     switch (policy) {
-        case 'auto_approve': return 'bg-[#32d74b]/10 text-[#32d74b] border border-[#32d74b]/20';
-        case 'require_review': return 'bg-[#ff9f0a]/10 text-[#ff9f0a] border border-[#ff9f0a]/20';
-        case 'blocked': return 'bg-[#ff453a]/10 text-[#ff453a] border border-[#ff453a]/20';
+        case 'auto_approve': return 'bg-accent-trust/10 text-accent-trust border border-accent-trust/30';
+        case 'require_review': return 'bg-accent-warning/10 text-accent-warning border border-accent-warning/30';
+        case 'blocked': return 'bg-accent-alert/10 text-accent-alert border border-accent-alert/30';
         default: return 'bg-gray-500/10 text-gray-500 border-gray-500/20';
     }
 };
@@ -35,36 +35,36 @@ const getPolicyLabel = (policy: string) => {
 
 export const TrustDashboard: React.FC<TrustDashboardProps> = ({ records }) => {
     return (
-        <div className="bg-[#141414] rounded-xl border border-[#1c1c1e] overflow-hidden">
+        <div className="bg-surface-2 rounded-xl border border-border-subtle overflow-hidden">
             <div className="overflow-x-auto">
                 <table className="w-full text-left">
                     <thead>
-                        <tr className="border-b border-[#1c1c1e] bg-[#0a0a0a]">
-                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-[#86868b] font-semibold">Dimension</th>
-                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-[#86868b] font-semibold">Trust Score</th>
-                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-[#86868b] font-semibold text-right">Approve</th>
-                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-[#86868b] font-semibold text-right">Reject</th>
-                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-[#86868b] font-semibold text-right">Fail</th>
-                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-[#86868b] font-semibold text-right">Policy</th>
+                        <tr className="border-b border-border-subtle bg-surface-0">
+                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-text-secondary font-semibold">Dimension</th>
+                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-text-secondary font-semibold">Trust Score</th>
+                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-text-secondary font-semibold text-right">Approve</th>
+                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-text-secondary font-semibold text-right">Reject</th>
+                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-text-secondary font-semibold text-right">Fail</th>
+                            <th className="px-4 py-3 text-[10px] uppercase tracking-widest text-text-secondary font-semibold text-right">Policy</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#1c1c1e]">
+                    <tbody className="divide-y divide-border-subtle">
                         {records.length === 0 ? (
                             <tr>
-                                <td colSpan={6} className="px-4 py-8 text-center text-[#86868b] text-xs">
+                                <td colSpan={6} className="px-4 py-8 text-center text-text-secondary text-xs">
                                     <ShieldAlert size={16} className="mx-auto mb-2 opacity-50" />
                                     No trust records found.
                                 </td>
                             </tr>
                         ) : (
-                            records.map((record) => (
-                                <tr key={record.dimension_key} className="hover:bg-[#1c1c1e]/50 transition-colors">
-                                    <td className="px-4 py-3 text-xs font-mono text-[#f5f5f7] max-w-[150px] truncate" title={record.dimension_key}>
+                            records.map((record, index) => (
+                                <tr key={record.dimension_key} style={{ ['--i' as any]: index }} className="hover:bg-surface-3/50 transition-colors animate-slide-in-up">
+                                    <td className="px-4 py-3 text-xs font-mono text-text-primary max-w-[150px] truncate" title={record.dimension_key}>
                                         {record.dimension_key}
                                     </td>
                                     <td className="px-4 py-3">
                                         <div className="flex items-center gap-2">
-                                            <div className="flex-1 h-1.5 bg-[#2c2c2e] rounded-full overflow-hidden min-w-[60px]">
+                                            <div className="flex-1 h-1.5 bg-surface-3 rounded-full overflow-hidden min-w-[60px]">
                                                 <div
                                                     className={`h-full rounded-full transition-all duration-500 ${getScoreBarColorClass(record.score)}`}
                                                     style={{ width: `${record.score * 100}%` }}
@@ -75,13 +75,13 @@ export const TrustDashboard: React.FC<TrustDashboardProps> = ({ records }) => {
                                             </span>
                                         </div>
                                     </td>
-                                    <td className="px-4 py-3 text-xs text-[#86868b] text-right">{record.approvals}</td>
-                                    <td className="px-4 py-3 text-xs text-[#86868b] text-right">{record.rejections}</td>
+                                    <td className="px-4 py-3 text-xs text-text-secondary text-right">{record.approvals}</td>
+                                    <td className="px-4 py-3 text-xs text-text-secondary text-right">{record.rejections}</td>
                                     <td className="px-4 py-3 text-xs text-right">
                                         {record.failures > 0 ? (
-                                            <span className="text-[#ff453a] font-medium">{record.failures}</span>
+                                            <span className="text-accent-alert font-medium">{record.failures}</span>
                                         ) : (
-                                            <span className="text-[#86868b]">-</span>
+                                            <span className="text-text-secondary">-</span>
                                         )}
                                     </td>
                                     <td className="px-4 py-3 text-right">

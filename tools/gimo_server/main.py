@@ -40,14 +40,65 @@ async def lifespan(app: FastAPI):
 
     # Ensure OPS storage dirs exist
     settings = get_settings()
+    app.state.limited_mode = False
+    app.state.limited_reason = ""
+
+    # ── RUNTIME GUARD + INTEGRITY (pre-license hardening) ─────────────
+    import sys as _sys
+    from tools.gimo_server.security.runtime_guard import RuntimeGuard
+    from tools.gimo_server.security.integrity import IntegrityVerifier
+
+    _runtime_report = RuntimeGuard(settings).evaluate()
+    app.state.runtime_guard_report = {
+        "debugger_detected": _runtime_report.debugger_detected,
+        "vm_detected": _runtime_report.vm_detected,
+        "vm_indicators": _runtime_report.vm_indicators,
+        "blocked": _runtime_report.blocked,
+        "reasons": _runtime_report.reasons,
+    }
+    if _runtime_report.blocked:
+        logger.critical("RUNTIME GUARD BLOCKED STARTUP: %s", ",".join(_runtime_report.reasons))
+        _sys.exit(1)
+
+    _integrity_ok, _integrity_reason = IntegrityVerifier(settings).verify_manifest()
+    if not _integrity_ok:
+        logger.critical("INTEGRITY CHECK FAILED: %s", _integrity_reason)
+        _sys.exit(1)
+    logger.info("INTEGRITY: %s", _integrity_reason)
+
+    async def integrity_recheck_loop():
+        """Periodic integrity verification (defense-in-depth)."""
+        while True:
+            try:
+                await asyncio.sleep(6 * 3600)
+                ok, reason = IntegrityVerifier(settings).verify_manifest()
+                if not ok:
+                    logger.critical("INTEGRITY RECHECK FAILED: %s", reason)
+                    _sys.exit(1)
+                logger.debug("INTEGRITY RECHECK: %s", reason)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.warning("Integrity recheck loop error: %s", exc)
 
     # ── LICENSE GATE ──────────────────────────────────────────────────
     # Must pass before ANY other service starts.
     from tools.gimo_server.security.license_guard import LicenseGuard
-    import sys as _sys
     _guard = LicenseGuard(settings)
     _license_status = await _guard.validate()
     if not _license_status.valid:
+        if settings.cold_room_enabled and _license_status.reason == "cold_room_renewal_required":
+            app.state.limited_mode = True
+            app.state.limited_reason = _license_status.reason
+            app.state.license_guard = _guard
+            logger.warning("=" * 60)
+            logger.warning("  LIMITED MODE ENABLED (Cold Room renewal required)")
+            logger.warning("  Reason: %s", _license_status.reason)
+            logger.warning("  Only /auth/cold-room/* endpoints are available")
+            logger.warning("=" * 60)
+            yield
+            logger.info("Shutting down Repo Orchestrator (limited mode)...")
+            return
         logger.critical("=" * 60)
         logger.critical("  LICENSE VALIDATION FAILED")
         logger.critical("  Reason: %s", _license_status.reason)
@@ -116,6 +167,7 @@ async def lifespan(app: FastAPI):
                 logger.warning("OPS run cleanup loop error: %s", exc)
 
     ops_cleanup_task = asyncio.create_task(ops_runs_cleanup_loop())
+    integrity_task = asyncio.create_task(integrity_recheck_loop())
 
     async def mcp_sampling_loop():
         """
@@ -192,12 +244,14 @@ async def lifespan(app: FastAPI):
     threat_cleanup_task.cancel()
     ops_cleanup_task.cancel()
     mcp_sampling_task.cancel()
+    integrity_task.cancel()
     
     try:
         await cleanup_task
         await threat_cleanup_task
         await ops_cleanup_task
         await mcp_sampling_task
+        await integrity_task
     except asyncio.CancelledError:
         logger.debug("Cleanup tasks cancelled successfully.")
     except Exception as exc:
@@ -236,6 +290,22 @@ def create_app() -> FastAPI:
             NotificationService.unsubscribe(queue)
 
     register_middlewares(app)
+
+    @app.middleware("http")
+    async def limited_mode_guard(request, call_next):
+        if getattr(app.state, "limited_mode", False):
+            if request.url.path.startswith("/auth/cold-room/"):
+                return await call_next(request)
+            return JSONResponse(
+                {
+                    "detail": "Cold Room renewal required",
+                    "reason": getattr(app.state, "limited_reason", "cold_room_renewal_required"),
+                    "limited_mode": True,
+                    "allowed": ["/auth/cold-room/status", "/auth/cold-room/info", "/auth/cold-room/activate", "/auth/cold-room/renew"],
+                },
+                status_code=503,
+            )
+        return await call_next(request)
 
     # Mount FastMCP SSE Server
     try:

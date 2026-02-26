@@ -92,12 +92,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
     };
 
     return (
-        <div className="h-full overflow-y-auto custom-scrollbar p-6 bg-[#0a0a0a]">
+        <div className="h-full overflow-y-auto custom-scrollbar p-6 bg-surface-0">
             <div className="max-w-6xl mx-auto space-y-6">
-                <section className="rounded-2xl border border-[#2c2c2e] bg-[#141414] p-5">
+                <section className="rounded-2xl border border-border-primary bg-surface-2 p-5">
                     <div className="flex items-center gap-2 mb-4">
-                        <SlidersHorizontal size={16} className="text-[#0a84ff]" />
-                        <h2 className="text-sm font-black uppercase tracking-widest text-[#f5f5f7]">General</h2>
+                        <SlidersHorizontal size={16} className="text-accent-primary" />
+                        <h2 className="text-sm font-black uppercase tracking-widest text-text-primary">General</h2>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
                         <SettingCell label="Tema" value="macOS Oscuro" />
@@ -117,21 +117,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                     </div>
                 </section>
 
-                <section className="rounded-2xl border border-[#2c2c2e] bg-[#141414] p-5">
+                <section className="rounded-2xl border border-border-primary bg-surface-2 p-5">
                     <div className="flex items-center gap-2 mb-4">
-                        <Coins size={16} className="text-[#af52de]" />
-                        <h2 className="text-sm font-black uppercase tracking-widest text-[#f5f5f7]">Economía</h2>
+                        <Coins size={16} className="text-accent-purple" />
+                        <h2 className="text-sm font-black uppercase tracking-widest text-text-primary">Economía</h2>
                     </div>
                     {economyConfig ? (
                         <div className="space-y-3">
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                                <div className="rounded-xl border border-[#2c2c2e] bg-[#101011] p-3">
-                                    <label htmlFor="settings-autonomy" className="text-[10px] uppercase tracking-widest text-[#86868b]">Autonomía</label>
+                                <div className="rounded-xl border border-border-primary bg-surface-1 p-3">
+                                    <label htmlFor="settings-autonomy" className="text-[10px] uppercase tracking-widest text-text-secondary">Autonomía</label>
                                     <select
                                         id="settings-autonomy"
                                         value={economyConfig.autonomy_level}
                                         onChange={(e) => setEconomyConfig({ ...economyConfig, autonomy_level: e.target.value as UserEconomyConfig['autonomy_level'] })}
-                                        className="mt-1 w-full bg-[#1c1c1e] border border-[#2c2c2e] rounded px-2 py-1 text-xs text-[#f5f5f7]"
+                                        className="mt-1 w-full bg-surface-3 border border-border-primary rounded px-2 py-1 text-xs text-text-primary"
                                     >
                                         <option value="manual">manual</option>
                                         <option value="advisory">consultivo</option>
@@ -140,31 +140,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                                     </select>
                                 </div>
 
-                                <div className="rounded-xl border border-[#2c2c2e] bg-[#101011] p-3">
-                                    <label htmlFor="settings-budget" className="text-[10px] uppercase tracking-widest text-[#86868b]">Presupuesto Global (USD)</label>
+                                <div className="rounded-xl border border-border-primary bg-surface-1 p-3">
+                                    <label htmlFor="settings-budget" className="text-[10px] uppercase tracking-widest text-text-secondary">Presupuesto Global (USD)</label>
                                     <input
                                         id="settings-budget"
                                         type="number"
                                         value={economyConfig.global_budget_usd ?? ''}
                                         onChange={(e) => setEconomyConfig({ ...economyConfig, global_budget_usd: e.target.value ? Number(e.target.value) : null })}
-                                        className="mt-1 w-full bg-[#1c1c1e] border border-[#2c2c2e] rounded px-2 py-1 text-xs text-[#f5f5f7]"
+                                        className="mt-1 w-full bg-surface-3 border border-border-primary rounded px-2 py-1 text-xs text-text-primary"
                                     />
                                 </div>
 
-                                <div className="rounded-xl border border-[#2c2c2e] bg-[#101011] p-3">
-                                    <label htmlFor="settings-cache-ttl" className="text-[10px] uppercase tracking-widest text-[#86868b]">TTL Caché (h)</label>
+                                <div className="rounded-xl border border-border-primary bg-surface-1 p-3">
+                                    <label htmlFor="settings-cache-ttl" className="text-[10px] uppercase tracking-widest text-text-secondary">TTL Caché (h)</label>
                                     <input
                                         id="settings-cache-ttl"
                                         type="number"
                                         value={economyConfig.cache_ttl_hours}
                                         onChange={(e) => setEconomyConfig({ ...economyConfig, cache_ttl_hours: Number(e.target.value) || 0 })}
-                                        className="mt-1 w-full bg-[#1c1c1e] border border-[#2c2c2e] rounded px-2 py-1 text-xs text-[#f5f5f7]"
+                                        className="mt-1 w-full bg-surface-3 border border-border-primary rounded px-2 py-1 text-xs text-text-primary"
                                     />
                                 </div>
 
-                                <div className="rounded-xl border border-[#2c2c2e] bg-[#101011] p-3">
-                                    <div className="text-[10px] uppercase tracking-widest text-[#86868b]">Indicadores</div>
-                                    <div className="mt-1 space-y-1 text-xs text-[#f5f5f7]">
+                                <div className="rounded-xl border border-border-primary bg-surface-1 p-3">
+                                    <div className="text-[10px] uppercase tracking-widest text-text-secondary">Indicadores</div>
+                                    <div className="mt-1 space-y-1 text-xs text-text-primary">
                                         <label className="flex items-center gap-2">
                                             <input
                                                 type="checkbox"
@@ -187,14 +187,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                                 <button
                                     onClick={saveEconomy}
                                     disabled={economySaving}
-                                    className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-[#af52de]/15 text-[#d4a5f2] border border-[#af52de]/30 hover:bg-[#af52de]/25 disabled:opacity-50"
+                                    className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-accent-purple/15 text-accent-purple border border-accent-purple/30 hover:bg-accent-purple/25 disabled:opacity-50"
                                 >
                                     Guardar Economía
                                 </button>
-                                {economyMessage && <span className="text-xs text-[#86868b]">{economyMessage}</span>}
+                                {economyMessage && <span className="text-xs text-text-secondary">{economyMessage}</span>}
                                 <button
                                     onClick={onOpenMastery}
-                                    className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-[#1c1c1e] text-[#86868b] border border-[#2c2c2e] hover:text-[#f5f5f7]"
+                                    className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-surface-3 text-text-secondary border border-border-primary hover:text-text-primary"
                                 >
                                     Panel de Economía
                                     <ArrowRight size={12} />
@@ -202,24 +202,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                             </div>
                         </div>
                     ) : (
-                        <p className="text-xs text-[#86868b]">Configuración de Economía no disponible.</p>
+                        <p className="text-xs text-text-secondary">Configuración de Economía no disponible.</p>
                     )}
                 </section>
 
-                <section className="rounded-2xl border border-[#2c2c2e] bg-[#141414] p-5">
+                <section className="rounded-2xl border border-border-primary bg-surface-2 p-5">
                     <div className="flex items-center gap-2 mb-4">
-                        <Shield size={16} className="text-[#ff9f0a]" />
-                        <h2 className="text-sm font-black uppercase tracking-widest text-[#f5f5f7]">Seguridad</h2>
+                        <Shield size={16} className="text-accent-warning" />
+                        <h2 className="text-sm font-black uppercase tracking-widest text-text-primary">Seguridad</h2>
                     </div>
-                    <p className="text-xs text-[#86868b]">
+                    <p className="text-xs text-text-secondary">
                         Las políticas, interruptores de circuito y dimensiones de confianza se gestionan desde la vista de Seguridad.
                     </p>
                 </section>
 
-                <section className="rounded-2xl border border-[#2c2c2e] bg-[#141414] p-5">
+                <section className="rounded-2xl border border-border-primary bg-surface-2 p-5">
                     <div className="flex items-center gap-2 mb-4">
-                        <Info size={16} className="text-[#32d74b]" />
-                        <h2 className="text-sm font-black uppercase tracking-widest text-[#f5f5f7]">Acerca de</h2>
+                        <Info size={16} className="text-accent-trust" />
+                        <h2 className="text-sm font-black uppercase tracking-widest text-text-primary">Acerca de</h2>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                         <SettingCell label="Versión" value={statusInfo?.version ?? '—'} />
@@ -235,24 +235,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
 };
 
 const SettingCell: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-    <div className="rounded-xl border border-[#2c2c2e] bg-[#101011] p-3">
-        <div className="text-[10px] uppercase tracking-widest text-[#86868b] mb-1">{label}</div>
-        <div className="text-[#f5f5f7] font-medium">{value}</div>
+    <div className="rounded-xl border border-border-primary bg-surface-1 p-3">
+        <div className="text-[10px] uppercase tracking-widest text-text-secondary mb-1">{label}</div>
+        <div className="text-text-primary font-medium">{value}</div>
     </div>
 );
 
 const ToggleCell: React.FC<{ label: string; checked: boolean; onChange: (v: boolean) => void }> = ({ label, checked, onChange }) => (
-    <div className="rounded-xl border border-[#2c2c2e] bg-[#101011] p-3 flex items-center justify-between">
+    <div className="rounded-xl border border-border-primary bg-surface-1 p-3 flex items-center justify-between">
         <div>
-            <div className="text-[10px] uppercase tracking-widest text-[#86868b] mb-1">{label}</div>
-            <div className="text-[#f5f5f7] font-medium text-xs">{checked ? 'activado' : 'desactivado'}</div>
+            <div className="text-[10px] uppercase tracking-widest text-text-secondary mb-1">{label}</div>
+            <div className="text-text-primary font-medium text-xs">{checked ? 'activado' : 'desactivado'}</div>
         </div>
         <button
             type="button"
             role="switch"
             aria-checked={checked}
             onClick={() => onChange(!checked)}
-            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${checked ? 'bg-[#0a84ff]' : 'bg-[#3a3a3c]'}`}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${checked ? 'bg-accent-primary' : 'bg-surface-3'}`}
         >
             <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-0'}`} />
         </button>

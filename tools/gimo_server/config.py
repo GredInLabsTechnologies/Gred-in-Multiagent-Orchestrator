@@ -77,6 +77,17 @@ class Settings:
     worktrees_dir: Path
     gimo_web_url: str
     gimo_internal_key: str
+    # Cold Room (air-gapped) support
+    cold_room_enabled: bool
+    cold_room_license_path: Path
+    cold_room_secret_path: Path
+    cold_room_renewal_days: int
+    cold_room_public_key_pem: str
+    integrity_manifest_path: Path
+    integrity_check_enabled: bool
+    integrity_public_key_pem: str
+    runtime_guard_enabled: bool
+    runtime_guard_block_debugger: bool
 
 
 def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_TOKEN") -> str:
@@ -227,6 +238,19 @@ def _build_settings() -> Settings:
         worktrees_dir=worktrees_dir,
         gimo_web_url=os.environ.get("GIMO_WEB_URL", "https://gimo-web.vercel.app"),
         gimo_internal_key=os.environ.get("GIMO_INTERNAL_KEY", ""),
+        cold_room_enabled=os.environ.get("ORCH_COLD_ROOM_ENABLED", "false").lower() in ("true", "1", "yes"),
+        cold_room_license_path=base_dir / ".gimo_cold_room",
+        cold_room_secret_path=base_dir / ".gimo_cold_room",
+        cold_room_renewal_days=int(os.environ.get("ORCH_COLD_ROOM_RENEWAL_DAYS", "30")),
+        cold_room_public_key_pem=os.environ.get("ORCH_COLD_ROOM_PUBLIC_KEY", ""),
+        integrity_manifest_path=base_dir / ".gimo_manifest",
+        integrity_check_enabled=os.environ.get("ORCH_INTEGRITY_CHECK", "true").lower()
+        in ("true", "1", "yes"),
+        integrity_public_key_pem=os.environ.get("ORCH_INTEGRITY_PUBLIC_KEY", ""),
+        runtime_guard_enabled=os.environ.get("ORCH_RUNTIME_GUARD", "true").lower()
+        in ("true", "1", "yes"),
+        runtime_guard_block_debugger=os.environ.get("ORCH_BLOCK_DEBUGGER", "false").lower()
+        in ("true", "1", "yes"),
     )
 
 

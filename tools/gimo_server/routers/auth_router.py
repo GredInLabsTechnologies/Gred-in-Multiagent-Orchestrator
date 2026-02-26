@@ -1,16 +1,18 @@
 import logging
+from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response  # noqa: F811
 from pydantic import BaseModel
 
-from ..config import GIMO_INTERNAL_KEY, GIMO_WEB_URL, TOKENS
+from ..config import GIMO_INTERNAL_KEY, GIMO_WEB_URL, TOKENS, get_settings
 from ..security.auth import (
     FIREBASE_SESSION_TTL,
     SESSION_COOKIE_NAME,
     _resolve_role,
     session_store,
 )
+from ..security.cold_room import ColdRoomManager
 
 logger = logging.getLogger("orchestrator.auth_router")
 
@@ -30,6 +32,14 @@ class FirebaseLoginRequest(BaseModel):
     idToken: str
 
 
+class ColdRoomActivateRequest(BaseModel):
+    license_blob: str
+
+
+class ColdRoomRenewRequest(BaseModel):
+    license_blob: str
+
+
 def _is_secure_request(request: Request) -> bool:
     forwarded_proto = request.headers.get("x-forwarded-proto", "").lower()
     if forwarded_proto == "https":
@@ -45,6 +55,15 @@ def _map_firebase_role_to_session_role(firebase_role: str) -> str:
     if firebase_role == "admin":
         return "admin"
     return "operator"
+
+
+def _get_cold_room_manager() -> ColdRoomManager:
+    settings = get_settings()
+    return ColdRoomManager(settings)
+
+
+def _cold_room_enabled() -> bool:
+    return bool(getattr(get_settings(), "cold_room_enabled", False))
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -98,7 +117,23 @@ async def firebase_login(body: FirebaseLoginRequest, response: Response, request
     if verify_response.status_code in (401, 403):
         raise HTTPException(status_code=401, detail="Invalid Firebase token")
     if verify_response.status_code >= 400:
-        raise HTTPException(status_code=502, detail="Auth upstream rejected request")
+        upstream_detail = ""
+        try:
+            parsed = verify_response.json()
+            if isinstance(parsed, dict):
+                upstream_detail = str(parsed.get("error") or parsed.get("detail") or "")
+        except Exception:
+            upstream_detail = (verify_response.text or "").strip()
+
+        logger.warning(
+            "Auth upstream rejected request (status=%s, detail=%s)",
+            verify_response.status_code,
+            upstream_detail or "<empty>",
+        )
+        detail = f"Auth upstream rejected request ({verify_response.status_code})"
+        if upstream_detail:
+            detail = f"{detail}: {upstream_detail}"
+        raise HTTPException(status_code=502, detail=detail)
 
     payload = verify_response.json()
     firebase_role = payload.get("role") if payload.get("role") in ("admin", "user") else "user"
@@ -149,6 +184,86 @@ async def logout(request: Request, response: Response):
         session_store.revoke(cookie_value)
     response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
     return {"message": "Logged out"}
+
+
+@router.get("/cold-room/status")
+async def cold_room_status() -> dict[str, Any]:
+    """Pre-auth endpoint: return cold-room capability and status."""
+    if not _cold_room_enabled():
+        return {
+            "enabled": False,
+            "paired": False,
+        }
+
+    manager = _get_cold_room_manager()
+    status = manager.get_status()
+    status["enabled"] = True
+    return status
+
+
+@router.post("/cold-room/activate")
+async def cold_room_activate(body: ColdRoomActivateRequest) -> dict[str, Any]:
+    """Pre-auth endpoint: activate machine with a signed cold-room license blob."""
+    if not _cold_room_enabled():
+        raise HTTPException(status_code=404, detail="Cold Room disabled")
+
+    license_blob = body.license_blob.strip()
+    if not license_blob:
+        raise HTTPException(status_code=400, detail="license_blob is required")
+
+    manager = _get_cold_room_manager()
+    ok, reason = manager.activate(license_blob)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+
+    status = manager.get_status()
+    status["enabled"] = True
+    return {
+        "paired": True,
+        "machine_id": status.get("machine_id"),
+        "vm_detected": status.get("vm_detected", False),
+        "expires_at": status.get("expires_at"),
+        "renewal_valid": status.get("renewal_valid"),
+        "renewal_needed": status.get("renewal_needed"),
+        "days_remaining": status.get("days_remaining"),
+    }
+
+
+@router.get("/cold-room/info")
+async def cold_room_info() -> dict[str, Any]:
+    """Pre-auth endpoint: return machine and current cold-room license info."""
+    if not _cold_room_enabled():
+        raise HTTPException(status_code=404, detail="Cold Room disabled")
+
+    manager = _get_cold_room_manager()
+    return manager.get_info()
+
+
+@router.post("/cold-room/renew")
+async def cold_room_renew(body: ColdRoomRenewRequest) -> dict[str, Any]:
+    """Pre-auth endpoint: renew machine with a newly signed cold-room license blob."""
+    if not _cold_room_enabled():
+        raise HTTPException(status_code=404, detail="Cold Room disabled")
+
+    manager = _get_cold_room_manager()
+    license_blob = body.license_blob.strip()
+    if not license_blob:
+        raise HTTPException(status_code=400, detail="license_blob is required")
+
+    renewed, reason = manager.renew(license_blob)
+    if not renewed:
+        raise HTTPException(status_code=400, detail=reason)
+
+    status = manager.get_status()
+    return {
+        "renewed": renewed,
+        "vm_detected": status.get("vm_detected", False),
+        "renewal_valid": status.get("renewal_valid", False),
+        "renewal_needed": status.get("renewal_needed", False),
+        "expires_at": status.get("expires_at"),
+        "days_remaining": status.get("days_remaining", 0),
+        "machine_id": status.get("machine_id"),
+    }
 
 
 @router.get("/check")

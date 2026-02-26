@@ -7,17 +7,17 @@ interface ThreatLevelIndicatorProps {
 }
 
 export const ThreatLevelIndicator: React.FC<ThreatLevelIndicatorProps> = ({ level, label, lockdown }) => {
-    let colorClass = 'bg-green-100 text-green-800 border-green-200';
+    let colorClass = 'bg-accent-trust/10 text-accent-trust border-accent-trust/30';
     let icon = '🛡️';
 
     if (lockdown) {
-        colorClass = 'bg-red-900 text-white border-red-700 animate-pulse';
+        colorClass = 'bg-accent-alert/15 text-accent-alert border-accent-alert/50 animate-status-pulse';
         icon = '🔒';
     } else if (level >= 2) {
-        colorClass = 'bg-red-100 text-red-800 border-red-200';
+        colorClass = 'bg-accent-warning/10 text-accent-warning border-accent-warning/30 animate-status-pulse';
         icon = '⚠️';
     } else if (level === 1) {
-        colorClass = 'bg-yellow-100 text-yellow-800 border-yellow-200';
+        colorClass = 'bg-accent-warning/10 text-accent-warning border-accent-warning/30';
         icon = '👁️';
     }
 

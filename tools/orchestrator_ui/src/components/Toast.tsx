@@ -42,12 +42,12 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 {toasts.map(toast => (
                     <div
                         key={toast.id}
-                        className={`toast-enter px-4 py-2.5 rounded-xl border text-xs font-medium shadow-2xl backdrop-blur-xl cursor-pointer
+                        className={`toast-enter animate-slide-in-right px-4 py-2.5 rounded-xl border text-xs font-medium shadow-2xl backdrop-blur-xl cursor-pointer
                             ${toast.type === 'success'
-                                ? 'bg-[#32d74b]/10 border-[#32d74b]/20 text-[#32d74b]'
+                                ? 'bg-accent-trust/10 border-accent-trust/30 text-accent-trust'
                                 : toast.type === 'error'
-                                    ? 'bg-[#ff3b30]/10 border-[#ff3b30]/20 text-[#ff3b30]'
-                                    : 'bg-[#0a84ff]/10 border-[#0a84ff]/20 text-[#0a84ff]'
+                                    ? 'bg-accent-alert/10 border-accent-alert/30 text-accent-alert'
+                                    : 'bg-accent-primary/10 border-accent-primary/30 text-accent-primary'
                             }`}
                         onClick={() => removeToast(toast.id)}
                     >

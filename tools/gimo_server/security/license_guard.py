@@ -134,7 +134,7 @@ def _get_public_key_pem() -> str:
 
 class LicenseGuard:
     CACHE_FILE = ".gimo_license"
-    DEFAULT_GRACE_PERIOD_DAYS = 7
+    DEFAULT_GRACE_PERIOD_DAYS = 3
     DEFAULT_RECHECK_INTERVAL_HOURS = 24
 
     def __init__(self, settings=None):
@@ -198,6 +198,26 @@ class LicenseGuard:
                 )
             return LicenseStatus(valid=False, reason="ORCH_LICENSE_KEY environment variable not set")
 
+        # ── Cold Room: air-gapped environment support ──
+        try:
+            from tools.gimo_server.security.cold_room import ColdRoomManager
+            settings = None
+            try:
+                from tools.gimo_server.config import get_settings
+                settings = get_settings()
+            except Exception:
+                pass
+            if settings and settings.cold_room_enabled:
+                cr = ColdRoomManager(settings)
+                if cr.is_paired():
+                    if cr.is_renewal_valid():
+                        logger.info("LICENSE: Cold Room validation OK")
+                        return LicenseStatus(valid=True, plan="cold_room", reason="cold_room_active")
+                    else:
+                        return LicenseStatus(valid=False, reason="cold_room_renewal_required")
+        except ImportError:
+            pass
+
         # Verificar integridad del propio archivo
         if not self._verify_file_integrity():
             return LicenseStatus(valid=False, reason="License guard file integrity check failed (anti-tamper)")
@@ -233,6 +253,15 @@ class LicenseGuard:
         """Task asyncio: re-valida online cada 24h en background."""
         while True:
             try:
+                # Skip periodic recheck in cold room mode
+                try:
+                    from tools.gimo_server.config import get_settings
+                    s = get_settings()
+                    if s.cold_room_enabled:
+                        await asyncio.sleep(self._recheck_interval_hours * 3600)
+                        continue
+                except Exception:
+                    pass
                 await asyncio.sleep(self._recheck_interval_hours * 3600)
                 result = await self._validate_online()
                 if not result.valid:

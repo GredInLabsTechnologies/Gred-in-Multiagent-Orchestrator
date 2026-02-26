@@ -80,19 +80,19 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
         <div className="space-y-8 animate-fade-in pb-10 px-1">
             {/* Header with Threat Level */}
             <div
-                className="group/threat relative flex items-center justify-between bg-[#141414] p-5 rounded-xl border border-[#1c1c1e]"
+                className="group/threat relative flex items-center justify-between bg-surface-2 p-5 rounded-xl border border-border-primary"
             >
-                <div className="invisible group-hover/threat:visible absolute -bottom-12 left-4 right-4 z-50 p-2 rounded-lg bg-[#2c2c2e] border border-[#3c3c3e] text-[10px] text-[#86868b] shadow-xl transition-opacity">
+                <div className="invisible group-hover/threat:visible absolute -bottom-12 left-4 right-4 z-50 p-2 rounded-lg bg-surface-3 border border-border-primary text-[10px] text-text-secondary shadow-xl transition-opacity">
                     Threat Level indica el riesgo global actual del sistema (NOMINAL → ALERT → GUARDED → LOCKDOWN).
                 </div>
-                <div className="flex items-center gap-2 text-[#f5f5f7]">
+                <div className="flex items-center gap-2 text-text-primary">
                     <Shield size={18} />
                     <span className="text-sm font-semibold">Security Status</span>
                 </div>
                 <div className="flex items-center gap-4">
                     <button
                         onClick={refresh}
-                        className="text-xs text-[#86868b] hover:text-[#f5f5f7] transition-colors"
+                        className="text-xs text-text-secondary hover:text-text-primary transition-colors"
                     >
                         Refresh
                     </button>
@@ -103,8 +103,8 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
             {/* Circuit Breakers */}
             {trustDashboard.some(r => r.circuit_state !== 'closed' || r.failures > 0) && (
                 <div className="space-y-3">
-                    <div className="group/cb relative flex items-center gap-2 text-[#86868b] pl-1">
-                        <div className="invisible group-hover/cb:visible absolute -bottom-10 left-0 right-0 z-50 p-2 rounded-lg bg-[#2c2c2e] border border-[#3c3c3e] text-[10px] text-[#86868b] shadow-xl">
+                    <div className="group/cb relative flex items-center gap-2 text-text-secondary pl-1">
+                        <div className="invisible group-hover/cb:visible absolute -bottom-10 left-0 right-0 z-50 p-2 rounded-lg bg-surface-3 border border-border-primary text-[10px] text-text-secondary shadow-xl">
                             Circuit breakers protegen dimensiones con fallos repetidos; se abren temporalmente para evitar daño en cascada.
                         </div>
                         <Activity size={14} />
@@ -116,8 +116,8 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
 
             {/* Trust Dashboard */}
             <div className="space-y-3">
-                <div className="group/td relative flex items-center gap-2 text-[#86868b] pl-1">
-                    <div className="invisible group-hover/td:visible absolute -bottom-10 left-0 right-0 z-50 p-2 rounded-lg bg-[#2c2c2e] border border-[#3c3c3e] text-[10px] text-[#86868b] shadow-xl">
+                <div className="group/td relative flex items-center gap-2 text-text-secondary pl-1">
+                    <div className="invisible group-hover/td:visible absolute -bottom-10 left-0 right-0 z-50 p-2 rounded-lg bg-surface-3 border border-border-primary text-[10px] text-text-secondary shadow-xl">
                         Trust Dimensions miden fiabilidad por dominio (aprobaciones, rechazos, fallos) y aplican política automática.
                     </div>
                     <Lock size={14} />
@@ -128,7 +128,7 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
 
             {/* Agent Trust Settings */}
             <div className="space-y-3">
-                <div className="flex items-center gap-2 text-[#86868b] pl-1 mb-2">
+                <div className="flex items-center gap-2 text-text-secondary pl-1 mb-2">
                     <Settings size={14} />
                     <span className="text-[10px] font-bold uppercase tracking-widest">Agent Autonomy</span>
                 </div>
@@ -136,14 +136,14 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
                     {agents.map(agent => (
                         <div
                             key={agent.agentId}
-                            className="p-4 rounded-xl bg-[#141414] border border-[#1c1c1e] space-y-3"
+                            className="p-4 rounded-xl bg-surface-2 border border-border-primary space-y-3"
                         >
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <span className="text-sm font-medium text-[#f5f5f7]">{agent.label}</span>
+                                    <span className="text-sm font-medium text-text-primary">{agent.label}</span>
                                     <TrustBadge level={agent.trustLevel} showLabel />
                                 </div>
-                                <span className="text-[10px] font-mono text-[#86868b]">{agent.agentId}</span>
+                                <span className="text-[10px] font-mono text-text-secondary">{agent.agentId}</span>
                             </div>
 
                             <div className="flex gap-2">
@@ -156,10 +156,10 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
                                         className={`
                                             flex-1 py-1.5 px-3 rounded-lg text-[10px] font-semibold uppercase tracking-wider
                                             border transition-all duration-200
-                                                ${agent.trustLevel === level && level === 'autonomous' ? 'bg-[#32d74b]/10 border-[#32d74b]/30 text-[#32d74b]' : ''}
-                                            ${agent.trustLevel === level && level === 'supervised' ? 'bg-[#ff9f0a]/10 border-[#ff9f0a]/30 text-[#ff9f0a]' : ''}
-                                            ${agent.trustLevel === level && level === 'restricted' ? 'bg-[#ff453a]/10 border-[#ff453a]/30 text-[#ff453a]' : ''}
-                                            ${agent.trustLevel !== level ? 'bg-[#0a0a0a] border-[#2c2c2e] text-[#86868b] hover:bg-[#1c1c1e]' : ''}
+                                                ${agent.trustLevel === level && level === 'autonomous' ? 'bg-accent-trust/10 border-accent-trust/30 text-accent-trust' : ''}
+                                            ${agent.trustLevel === level && level === 'supervised' ? 'bg-accent-warning/10 border-accent-warning/30 text-accent-warning' : ''}
+                                            ${agent.trustLevel === level && level === 'restricted' ? 'bg-accent-alert/10 border-accent-alert/30 text-accent-alert' : ''}
+                                            ${agent.trustLevel !== level ? 'bg-surface-0 border-border-primary text-text-secondary hover:bg-surface-3' : ''}
                                             disabled:opacity-50 disabled:cursor-not-allowed
                                         `}
                                     >
@@ -172,10 +172,10 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
                 </div>
             </div>
 
-            <div className="p-3 rounded-lg bg-[#0a0a0a] border border-[#1c1c1e] mt-4">
-                <p className="text-[10px] text-[#86868b] leading-relaxed">
+            <div className="p-3 rounded-lg bg-surface-0 border border-border-subtle mt-4">
+                <p className="text-[10px] text-text-secondary leading-relaxed">
                     Trust levels and circuit breakers dynamically adjust based on system behavior.
-                    <strong className="text-[#f5f5f7]"> Autonomous</strong> agents execute without approval unless trust score drops.
+                    <strong className="text-text-primary"> Autonomous</strong> agents execute without approval unless trust score drops.
                 </p>
             </div>
         </div>

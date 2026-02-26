@@ -40,27 +40,27 @@ export const TurnItem: React.FC<TurnItemProps> = ({ turn }) => {
                     {isOrchestrator ? <Bot size={18} /> : <User size={18} />}
                 </div>
                 <div className="flex flex-col">
-                    <span className="text-[11px] font-bold text-[#f5f5f7]">{turn.agent_id}</span>
-                    <span className="text-[9px] text-[#86868b] uppercase">{new Date(turn.created_at).toLocaleTimeString()}</span>
+                    <span className="text-[11px] font-bold text-text-primary">{turn.agent_id}</span>
+                    <span className="text-[9px] text-text-secondary uppercase">{new Date(turn.created_at).toLocaleTimeString()}</span>
                 </div>
             </div>
 
             <div className={`max-w-[85%] space-y-3 ${isOrchestrator ? 'pl-10' : 'pr-10'}`}>
                 {turn.items.map((item) => (
-                    <div key={item.id} className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-2xl overflow-hidden shadow-xl">
-                        <div className="px-3 py-1.5 bg-[#2c2c2e]/50 border-b border-[#3c3c3e] flex items-center gap-2 justify-between">
+                    <div key={item.id} className="bg-surface-2 border border-border-primary rounded-2xl overflow-hidden shadow-xl">
+                        <div className="px-3 py-1.5 bg-surface-3/50 border-b border-border-subtle flex items-center gap-2 justify-between">
                             <div className="flex items-center gap-2">
                                 {renderItemIcon(item.type)}
-                                <span className="text-[10px] font-medium uppercase tracking-wider text-[#86868b]">{item.type}</span>
+                                <span className="text-[10px] font-medium uppercase tracking-wider text-text-secondary">{item.type}</span>
                             </div>
                             {item.status !== 'completed' && (
                                 <div className="flex items-center gap-2">
-                                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
-                                    <span className="text-[9px] text-blue-400 font-bold uppercase">{item.status}</span>
+                                    <div className="w-1.5 h-1.5 bg-accent-primary rounded-full animate-status-pulse" />
+                                    <span className="text-[9px] text-accent-primary font-bold uppercase">{item.status}</span>
                                 </div>
                             )}
                         </div>
-                        <div className="p-4 text-[13px] leading-relaxed text-[#f5f5f7] whitespace-pre-wrap font-mono">
+                        <div className="p-4 text-[13px] leading-relaxed text-text-primary whitespace-pre-wrap font-mono">
                             {item.content}
                         </div>
                     </div>

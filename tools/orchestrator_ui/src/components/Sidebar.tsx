@@ -29,10 +29,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
             title={label}
             className={`
                 w-full px-2 py-2 rounded-xl flex flex-col items-center justify-center gap-1
-                transition-all duration-200 group relative
+                transition-all duration-200 group relative active:scale-[0.97]
                 ${activeTab === id
-                    ? 'bg-[#0a84ff]/15 text-[#0a84ff]'
-                    : 'text-[#86868b] hover:text-[#f5f5f7] hover:bg-[#1c1c1e]'}
+                    ? 'bg-accent-primary/15 text-accent-primary shadow-[inset_2px_0_0_var(--accent-primary)]'
+                    : 'text-text-secondary hover:text-text-primary hover:bg-surface-3/50'}
             `}
         >
             <Icon size={16} />
@@ -41,12 +41,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
     );
 
     return (
-        <aside className="w-20 bg-[#000000] border-r border-[#2c2c2e] flex flex-col py-3 px-2 gap-2 shrink-0 overflow-y-auto">
+        <aside className="w-20 bg-surface-0 border-r border-border-subtle flex flex-col py-3 px-2 gap-2 shrink-0 overflow-y-auto">
             <div className="space-y-1.5">
                 {primaryTabs.map(renderTab)}
             </div>
 
-            <div className="h-px bg-[#1c1c1e] my-1" />
+            <div className="h-px bg-border-subtle my-1" />
 
             <div className="space-y-1.5">
                 {systemTabs.map(renderTab)}
