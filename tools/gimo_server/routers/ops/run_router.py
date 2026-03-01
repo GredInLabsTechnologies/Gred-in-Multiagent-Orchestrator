@@ -12,6 +12,7 @@ from tools.gimo_server.services.storage_service import StorageService
 from tools.gimo_server.services.graph_engine import GraphEngine
 from tools.gimo_server.services.confidence_service import ConfidenceService
 from tools.gimo_server.services.trust_engine import TrustEngine
+from tools.gimo_server.services.custom_plan_service import CustomPlanService
 from .common import _require_role, _actor_label, _WORKFLOW_ENGINES
 
 router = APIRouter()
@@ -37,14 +38,25 @@ async def approve_draft(
         raise HTTPException(status_code=404, detail=str(exc))
     audit_log("OPS", f"/ops/drafts/{draft_id}/approve", approved.id, operation="WRITE", actor=actor)
 
+    # Check if draft has a linked CustomPlan — execute via unified engine
+    draft = OpsService.get_draft(draft_id)
+    custom_plan_id = (draft.context or {}).get("custom_plan_id") if draft else None
+
     should_run = auto_run if auto_run is not None else OpsService.get_config().default_auto_run
     run = None
     if should_run:
-        try:
-            run = OpsService.create_run(approved.id)
-            audit_log("OPS", "/ops/runs", run.id, operation="WRITE_AUTO", actor=actor)
-        except (PermissionError, ValueError):
-            pass
+        if custom_plan_id:
+            # Execute via CustomPlanService (unified pipeline)
+            import asyncio
+            asyncio.create_task(CustomPlanService.execute_plan(custom_plan_id))
+            audit_log("OPS", f"/ops/custom-plans/{custom_plan_id}/execute", custom_plan_id, operation="WRITE_AUTO", actor=actor)
+        else:
+            # Legacy: execute via RunWorker
+            try:
+                run = OpsService.create_run(approved.id)
+                audit_log("OPS", "/ops/runs", run.id, operation="WRITE_AUTO", actor=actor)
+            except (PermissionError, ValueError):
+                pass
     return OpsApproveResponse(approved=approved, run=run)
 
 @router.get("/approved", response_model=List[OpsApproved])

@@ -32,7 +32,7 @@ export const OrchestratorNode = memo(({ data }: { data: any }) => {
         <div
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
-            className={`px-4 py-3 rounded-xl bg-surface-1 border-2 shadow-2xl transition-all min-w-[200px] cursor-default relative ${data.status === 'running' ? 'border-blue-500/50 shadow-blue-500/10' : 'border-white/5 hover:border-white/20'}`}
+            className={`px-4 py-3 rounded-xl bg-surface-1 border-2 shadow-2xl transition-all min-w-[200px] cursor-default relative ${data.status === 'running' ? 'node-running' : 'border-white/5 hover:border-white/20'}`}
         >
             <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-zinc-600 border-none" />
 

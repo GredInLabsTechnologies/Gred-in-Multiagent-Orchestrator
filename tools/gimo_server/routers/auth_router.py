@@ -114,26 +114,32 @@ async def firebase_login(body: FirebaseLoginRequest, response: Response, request
         logger.warning("Firebase verify request failed: %s", exc)
         raise HTTPException(status_code=502, detail="Unable to reach auth upstream") from exc
 
-    if verify_response.status_code in (401, 403):
-        raise HTTPException(status_code=401, detail="Invalid Firebase token")
     if verify_response.status_code >= 400:
+        upstream_error = ""
+        upstream_code = ""
         upstream_detail = ""
         try:
             parsed = verify_response.json()
             if isinstance(parsed, dict):
-                upstream_detail = str(parsed.get("error") or parsed.get("detail") or "")
+                upstream_error = str(parsed.get("error") or "")
+                upstream_code = str(parsed.get("code") or "")
+                upstream_detail = str(parsed.get("detail") or "")
         except Exception:
-            upstream_detail = (verify_response.text or "").strip()
+            upstream_error = (verify_response.text or "").strip()
 
         logger.warning(
-            "Auth upstream rejected request (status=%s, detail=%s)",
+            "Auth upstream rejected (status=%s, error=%s, code=%s, detail=%s)",
             verify_response.status_code,
-            upstream_detail or "<empty>",
+            upstream_error or "<empty>",
+            upstream_code or "<empty>",
+            upstream_detail[:200] if upstream_detail else "<empty>",
         )
-        detail = f"Auth upstream rejected request ({verify_response.status_code})"
+
+        status = 401 if verify_response.status_code in (401, 403) else 502
+        detail = f"[{upstream_code or 'UPSTREAM_' + str(verify_response.status_code)}] {upstream_error}"
         if upstream_detail:
-            detail = f"{detail}: {upstream_detail}"
-        raise HTTPException(status_code=502, detail=detail)
+            detail = f"{detail} — {upstream_detail[:300]}"
+        raise HTTPException(status_code=status, detail=detail)
 
     payload = verify_response.json()
     firebase_role = payload.get("role") if payload.get("role") in ("admin", "user") else "user"

@@ -94,6 +94,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
     return (
         <div className="h-full overflow-y-auto custom-scrollbar p-6 bg-surface-0">
             <div className="max-w-6xl mx-auto space-y-6">
+                <ProviderSettings />
+
                 <section className="rounded-2xl border border-border-primary bg-surface-2 p-5">
                     <div className="flex items-center gap-2 mb-4">
                         <SlidersHorizontal size={16} className="text-accent-primary" />
@@ -228,7 +230,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                     </div>
                 </section>
 
-                <ProviderSettings />
             </div>
         </div>
     );

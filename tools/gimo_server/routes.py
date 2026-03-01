@@ -237,6 +237,45 @@ def get_ui_graph_handler(
         engine = list(_WORKFLOW_ENGINES.values())[-1]
 
     if not engine:
+        # Priority 0: Active CustomPlans (running or draft) — unified plan system
+        try:
+            from tools.gimo_server.services.custom_plan_service import CustomPlanService
+            all_plans = CustomPlanService.list_plans()
+            active_cp = next((p for p in all_plans if p.status in ("running", "draft")), None)
+            if active_cp and active_cp.nodes:
+                cp_nodes = []
+                cp_edges = []
+                for node in active_cp.nodes:
+                    cp_nodes.append({
+                        "id": node.id,
+                        "type": "custom",
+                        "position": {"x": node.position.x, "y": node.position.y},
+                        "data": {
+                            "label": node.label,
+                            "status": node.status,
+                            "node_type": node.node_type,
+                            "role": node.role,
+                            "model": node.model,
+                            "provider": node.provider,
+                            "prompt": node.prompt,
+                            "role_definition": node.role_definition,
+                            "is_orchestrator": node.is_orchestrator,
+                            "output": node.output,
+                            "error": node.error,
+                            "plan": {"draft_id": active_cp.id},
+                            "custom_plan_id": active_cp.id,
+                        },
+                    })
+                for edge in active_cp.edges:
+                    cp_edges.append({
+                        "id": edge.id,
+                        "source": edge.source,
+                        "target": edge.target,
+                    })
+                return {"nodes": cp_nodes, "edges": cp_edges}
+        except Exception:
+            pass
+
         # Priority 1: Active runs (pending/running) — show live execution
         runs = []
         try:

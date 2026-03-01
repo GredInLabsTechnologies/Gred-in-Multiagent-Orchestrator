@@ -1,6 +1,5 @@
 import { useCallback, useEffect } from 'react';
-import {
-    ReactFlow,
+import ReactFlow, {
     Background,
     Controls,
     useNodesState,
@@ -13,19 +12,20 @@ import {
     BackgroundVariant,
     ReactFlowProvider,
     useReactFlow,
-    NodeTypes
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import { GenericNode, GenericNodeType } from './GenericNode';
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+import { GenericNode, GenericNodeData } from './GenericNode';
 
-const nodeTypes: NodeTypes = {
+const nodeTypes = {
     generic: GenericNode,
     agent_task: GenericNode,
     human_review: GenericNode,
     contract_check: GenericNode,
 };
 
-const getLayoutedElements = (nodes: GenericNodeType[], edges: Edge[]) => {
+type AppNode = Node<GenericNodeData>;
+
+const getLayoutedElements = (nodes: AppNode[], edges: Edge[]) => {
     const spacingX = 280;
     const spacingY = 140;
     const perRow = 4;
@@ -49,17 +49,17 @@ const getLayoutedElements = (nodes: GenericNodeType[], edges: Edge[]) => {
 
 interface WorkflowCanvasProps {
     data: {
-        nodes: GenericNodeType[];
+        nodes: AppNode[];
         edges: Edge[];
     };
     onNodeClick?: (event: React.MouseEvent, node: Node) => void;
 }
 
 interface LayoutHandlerProps {
-    nodes: GenericNodeType[];
+    nodes: AppNode[];
     edges: Edge[];
-    setNodes: ReturnType<typeof useNodesState<GenericNodeType>>[1];
-    setEdges: ReturnType<typeof useEdgesState>[1];
+    setNodes: (nodes: AppNode[]) => void;
+    setEdges: (edges: Edge[]) => void;
 }
 
 const LayoutHandler = ({ nodes, edges, setNodes, setEdges }: LayoutHandlerProps) => {
@@ -78,7 +78,7 @@ const LayoutHandler = ({ nodes, edges, setNodes, setEdges }: LayoutHandlerProps)
 };
 
 export const WorkflowCanvas = ({ data, onNodeClick }: WorkflowCanvasProps) => {
-    const [nodes, setNodes, onNodesChange] = useNodesState<GenericNodeType>(data.nodes);
+    const [nodes, setNodes, onNodesChange] = useNodesState(data.nodes);
     const [edges, setEdges, onEdgesChange] = useEdgesState(data.edges);
 
     useEffect(() => {
@@ -87,7 +87,7 @@ export const WorkflowCanvas = ({ data, onNodeClick }: WorkflowCanvasProps) => {
     }, [data, setNodes, setEdges]);
 
     const onConnect = useCallback(
-        (params: Connection) => setEdges((eds) => addEdge(params, eds)),
+        (params: Connection) => setEdges((eds: Edge[]) => addEdge(params, eds)),
         [setEdges],
     );
 
@@ -102,7 +102,6 @@ export const WorkflowCanvas = ({ data, onNodeClick }: WorkflowCanvasProps) => {
                 onNodeClick={onNodeClick}
                 nodeTypes={nodeTypes}
                 proOptions={{ hideAttribution: true }}
-                colorMode="dark"
                 defaultEdgeOptions={{
                     animated: true,
                     style: { stroke: 'var(--accent-primary)', strokeWidth: 2 },

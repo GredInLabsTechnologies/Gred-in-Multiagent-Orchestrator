@@ -7,6 +7,7 @@ from tools.gimo_server.ops_models import OpsDraft, OpsPlan, OpsCreateDraftReques
 from tools.gimo_server.services.cognitive import CognitiveService
 from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.custom_plan_service import CustomPlanService
 from .common import _require_role, _actor_label
 
 router = APIRouter()
@@ -144,21 +145,23 @@ async def generate_structured_plan(
         end = raw.rfind("}")
         if start >= 0 and end > start:
             raw = raw[start:end + 1]
-        plan = OpsPlan.model_validate(json.loads(raw))
+        plan_data = json.loads(raw)
 
-        # Generate mermaid graph
-        lines = ["graph TD"]
-        for task in plan.tasks:
-            nid = task.id.replace("-", "_")
-            lines.append(f'    {nid}["{task.title}<br/>[{task.status}]"]')
-            for dep in task.depends:
-                lines.append(f"    {dep.replace('-', '_')} --> {nid}")
-        mermaid = "\n".join(lines)
+        # Validate with OpsPlan for backwards compat
+        plan = OpsPlan.model_validate(plan_data)
+
+        # Create unified CustomPlan from LLM response
+        custom_plan = CustomPlanService.create_plan_from_llm(
+            plan_data, name=plan.title, description=plan.objective,
+        )
 
         draft = OpsService.create_draft(
             prompt,
             content=plan.model_dump_json(indent=2),
-            context={"structured": True, "mermaid": mermaid},
+            context={
+                "structured": True,
+                "custom_plan_id": custom_plan.id,
+            },
             provider=resp.get("provider", "local_ollama"),
             status="draft",
         )
@@ -212,9 +215,27 @@ async def generate_draft(
                 status="draft",
             )
         else:
+            import json as _json
             resp = await ProviderService.static_generate(prompt, context={})
             provider_name = resp["provider"]
             content = resp["content"]
+
+            # Try to parse as structured plan and create CustomPlan
+            custom_plan_id = None
+            try:
+                raw_content = content.strip()
+                if raw_content.startswith("{") or raw_content.startswith("["):
+                    parsed = _json.loads(raw_content)
+                    if isinstance(parsed, dict) and "tasks" in parsed:
+                        cp = CustomPlanService.create_plan_from_llm(parsed, name=prompt[:80])
+                        custom_plan_id = cp.id
+                        context_payload["structured"] = True
+            except Exception:
+                pass  # Not a structured plan — that's fine
+
+            if custom_plan_id:
+                context_payload["custom_plan_id"] = custom_plan_id
+
             draft = OpsService.create_draft(
                 prompt,
                 context=context_payload,

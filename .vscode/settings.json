@@ -1,9 +1,9 @@
 {
-    "java.jdt.ls.java.home": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.9.10-hotspot",
+    "java.jdt.ls.java.home": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.10.7-hotspot",
     "java.configuration.runtime": [
         {
             "name": "JavaSE-21",
-            "path": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.9.10-hotspot",
+            "path": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.10.7-hotspot",
             "default": true
         }
     ],

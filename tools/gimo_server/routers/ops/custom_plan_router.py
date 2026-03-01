@@ -47,7 +47,10 @@ async def create_plan(
     rl: None = Depends(check_rate_limit),
 ):
     _require_role(auth, "operator")
-    plan = CustomPlanService.create_plan(body)
+    try:
+        plan = CustomPlanService.create_plan(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     audit_log("PLANS", "/ops/custom-plans", plan.id, operation="CREATE", actor=_actor_label(auth))
     return plan
 
@@ -60,7 +63,10 @@ async def update_plan(
     rl: None = Depends(check_rate_limit),
 ):
     _require_role(auth, "operator")
-    plan = CustomPlanService.update_plan(plan_id, body)
+    try:
+        plan = CustomPlanService.update_plan(plan_id, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not plan:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
     audit_log("PLANS", f"/ops/custom-plans/{plan_id}", plan.id, operation="UPDATE", actor=_actor_label(auth))
@@ -90,6 +96,10 @@ async def execute_plan(
     plan = CustomPlanService.get_plan(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    try:
+        CustomPlanService.validate_plan(plan)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     
     # Run in background to avoid HTTP timeout
     asyncio.create_task(CustomPlanService.execute_plan(plan_id))

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Settings, Shield, Activity, Lock } from 'lucide-react';
-import { TrustLevel } from '../types';
+import { TrustLevel, API_BASE } from '../types';
 import { TrustBadge } from './TrustBadge';
 import { useSecurityService } from '../hooks/useSecurityService';
 import { ThreatLevelIndicator } from './security/ThreatLevelIndicator';
@@ -52,17 +52,31 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
 
     const updateTrust = useCallback(async (agentId: string, newLevel: TrustLevel) => {
         setSaving(agentId);
+        const prevAgents = [...agents];
         try {
             setAgents(prev =>
                 prev.map(a => a.agentId === agentId ? { ...a, trustLevel: newLevel } : a)
             );
-            addToast(`Trust level for ${agentId} set to ${newLevel}`, 'success');
-        } catch (err) {
-            addToast('Failed to update trust level', 'error');
+
+            // Persist to backend via policy config
+            const res = await fetch(`${API_BASE}/ops/policy`, {
+                method: 'PUT',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    agent_trust: { [agentId]: newLevel },
+                }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+            addToast(`Nivel de confianza de ${agentId} cambiado a ${newLevel}`, 'success');
+        } catch {
+            setAgents(prevAgents);
+            addToast('No se pudo actualizar el nivel de confianza', 'error');
         } finally {
             setSaving(null);
         }
-    }, [addToast]);
+    }, [addToast, agents]);
 
     const handleInspectBreaker = async (dimensionKey: string) => {
         const config = await getCircuitBreakerConfig(dimensionKey);

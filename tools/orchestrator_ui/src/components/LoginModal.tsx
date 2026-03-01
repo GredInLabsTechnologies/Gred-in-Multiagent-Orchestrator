@@ -90,7 +90,7 @@ export function LoginModal({ onAuthenticated }: Props) {
             setCardReady(true);
             return;
         }
-        const t = window.setTimeout(() => setLoginState('select'), 1500);
+        const t = window.setTimeout(() => setLoginState('select'), 300);
         return () => window.clearTimeout(t);
     }, [reducedMotion]);
 

@@ -6,6 +6,9 @@ interface WelcomeScreenProps {
     onConnectProvider: () => void;
     onOpenRepo: () => void;
     onOpenCommandPalette: () => void;
+    providerConnected?: boolean;
+    providerName?: string;
+    providerModel?: string;
 }
 
 const WelcomeButton = ({ icon, title, description, onClick }: { icon: React.ReactNode, title: string, description: string, onClick: () => void }) => (
@@ -28,6 +31,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     onConnectProvider,
     onOpenRepo,
     onOpenCommandPalette,
+    providerConnected,
+    providerName,
+    providerModel,
 }) => {
     return (
         <section className="h-full w-full bg-surface-0 flex items-center justify-center p-6">
@@ -44,9 +50,25 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                         Bienvenido al Sistema
                     </h1>
 
+                    {providerConnected ? (
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-medium mb-6">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                            Conectado a {providerName || 'Provider'} {providerModel ? `/ ${providerModel}` : ''}
+                        </div>
+                    ) : (
+                        <button
+                            onClick={onConnectProvider}
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 text-xs font-medium mb-6 hover:bg-red-500/20 transition-colors"
+                        >
+                            <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
+                            Sin provider configurado — click para configurar
+                        </button>
+                    )}
+
                     <p className="text-sm text-text-secondary max-w-xl leading-relaxed mb-10">
-                        El grafo de orquestación está inactivo. Inicia una nueva secuencia de planificación,
-                        conecta tus proveedores de IA o explora el repositorio local para comenzar.
+                        {providerConnected
+                            ? 'El sistema está listo. Crea un nuevo plan desde el chat o en modo edición, conecta dependencias entre nodos y ejecuta.'
+                            : 'Configura un provider de IA primero para poder generar y ejecutar planes de orquestación.'}
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

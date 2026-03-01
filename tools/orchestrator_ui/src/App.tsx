@@ -1,432 +1,161 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Sidebar, SidebarTab } from './components/Sidebar';
-import { GraphCanvas } from './components/GraphCanvas';
-import { InspectPanel } from './components/InspectPanel';
-import { TokenMastery } from './components/TokenMastery';
-import { MaintenanceIsland } from './islands/system/MaintenanceIsland';
-import { LoginModal } from './components/LoginModal';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
-import { UiStatusResponse, PlanCreateRequest, API_BASE } from './types';
-import { usePlanEngine } from './hooks/usePlanEngine';
-import { PlansPanel } from './components/PlansPanel';
-import { ReactFlowProvider } from 'reactflow';
-import { EvalDashboard } from './components/evals/EvalDashboard';
-import { ObservabilityPanel } from './components/observability/ObservabilityPanel';
-import { TrustSettings } from './components/TrustSettings';
-import { SettingsPanel } from './components/SettingsPanel';
+import { useEffect, useCallback, lazy, Suspense } from 'react';
+import { useAppStore, SidebarTab } from './stores/appStore';
+import { checkSession, logout } from './lib/auth';
+import { getCommandHandlers } from './lib/commands';
+import { Sidebar, SidebarTab as LegacySidebarTab } from './components/Sidebar';
 import { MenuBar } from './components/MenuBar';
-import { OrchestratorChat } from './components/OrchestratorChat';
-import { WelcomeScreen } from './components/WelcomeScreen';
+import { StatusBar } from './components/StatusBar';
+import { LoginModal } from './components/LoginModal';
 import { CommandPalette } from './components/Shell/CommandPalette';
-import { useToast } from './components/Toast';
 import { ProfilePanel } from './components/ProfilePanel';
+import { useToast } from './components/Toast';
 import { useProfile } from './hooks/useProfile';
-import { Panel as ResizePanel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
+import { useProviderHealth } from './hooks/useProviderHealth';
+import { UiStatusResponse, API_BASE } from './types';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { useState } from 'react';
 
-interface SessionUser {
-    email?: string;
-    displayName?: string;
-    plan?: string;
-    firebaseUser?: boolean;
-}
+/* ── Lazy-loaded views ─────────────────────────────────── */
+const GraphView = lazy(() => import('./views/GraphView'));
+const PlansView = lazy(() => import('./views/PlansView'));
+const EvalDashboard = lazy(() => import('./components/evals/EvalDashboard').then(m => ({ default: m.EvalDashboard })));
+const ObservabilityPanel = lazy(() => import('./components/observability/ObservabilityPanel').then(m => ({ default: m.ObservabilityPanel })));
+const TrustSettingsView = lazy(() => import('./views/TrustSettingsView'));
+const MaintenanceView = lazy(() => import('./views/MaintenanceView'));
+const SettingsPanel = lazy(() => import('./components/SettingsPanel').then(m => ({ default: m.SettingsPanel })));
+const TokenMasteryView = lazy(() => import('./views/TokenMasteryView'));
 
+/* ── Loading fallback ──────────────────────────────────── */
+const ViewLoader = () => (
+    <div className="h-full flex items-center justify-center">
+        <div className="w-5 h-5 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />
+    </div>
+);
+
+/* ── App ───────────────────────────────────────────────── */
 export default function App() {
-    const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-    const [bootState, setBootState] = useState<'checking' | 'ready' | 'offline'>('checking');
-    const [bootError, setBootError] = useState<string | null>(null);
-    const [status, setStatus] = useState<UiStatusResponse | null>(null);
-    const [activeTab, setActiveTab] = useState<SidebarTab>('graph');
-    const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-    const [graphNodeCount, setGraphNodeCount] = useState(-1);
-    const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-    const [isChatCollapsed, setIsChatCollapsed] = useState(false);
-    const [isProfileOpen, setIsProfileOpen] = useState(false);
-    const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
-    const { currentPlan, loading, createPlan, approvePlan, setCurrentPlan } = usePlanEngine();
+    const store = useAppStore();
     const { addToast } = useToast();
+    const [status, setStatus] = useState<UiStatusResponse | null>(null);
+
     const {
         profile,
         loading: profileLoading,
         error: profileError,
         unauthorized: profileUnauthorized,
         refetch: refetchProfile,
-    } = useProfile(Boolean(authenticated));
+    } = useProfile(Boolean(store.authenticated));
 
-    const handleMcpSync = useCallback(async () => {
-        try {
-            const listRes = await fetch(`${API_BASE}/ops/config/mcp`, { credentials: 'include' });
-            if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`);
-            const listData = await listRes.json() as { servers?: Array<{ name: string; enabled?: boolean }> };
-            const servers = Array.isArray(listData.servers) ? listData.servers : [];
-            const candidate = servers.find(s => s.enabled !== false) ?? servers[0];
-            if (!candidate?.name) {
-                addToast('No hay servidores MCP configurados para sincronizar.', 'info');
-                return;
-            }
+    const providerHealth = useProviderHealth(Boolean(store.authenticated));
 
-            const syncRes = await fetch(`${API_BASE}/ops/config/mcp/sync`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ server_name: candidate.name }),
-            });
-            if (!syncRes.ok) throw new Error(`HTTP ${syncRes.status}`);
+    /* ── Boot: check session on mount ── */
+    useEffect(() => { void checkSession(); }, []);
 
-            const payload = await syncRes.json() as { tools_discovered?: number; server?: string };
-            addToast(
-                `MCP Sync OK (${payload.server || candidate.name}): ${payload.tools_discovered ?? 0} tools`,
-                'success'
-            );
-            setActiveTab('operations');
-        } catch (error) {
-            addToast('Falló MCP Sync. Revisa configuración de server en Settings.', 'error');
-        }
-    }, [addToast]);
-
-    const checkSession = useCallback(async () => {
-        setBootState('checking');
-        setBootError(null);
-        try {
-            const response = await fetch(`${API_BASE}/auth/check`, { credentials: 'include' });
-            if (!response.ok && response.status !== 401) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-            const data = await response.json().catch(() => ({ authenticated: false }));
-            setAuthenticated(data.authenticated === true);
-            setSessionUser(
-                data.authenticated
-                    ? {
-                        email: data.email,
-                        displayName: data.displayName,
-                        plan: data.plan,
-                        firebaseUser: data.firebaseUser,
-                    }
-                    : null,
-            );
-            setBootState('ready');
-        } catch {
-            setBootError('No se pudo conectar con GIMO backend.');
-            setBootState('offline');
-        }
-    }, []);
-
-    // Check session on mount
+    /* ── Poll status when authenticated ── */
     useEffect(() => {
-        checkSession();
-    }, [checkSession]);
-
-    useEffect(() => {
-        if (!authenticated) return;
+        if (!store.authenticated) return;
         const fetchStatus = async () => {
             try {
-                const response = await fetch(`${API_BASE}/ui/status`, {
-                    credentials: 'include',
-                });
-                if (response.status === 401) { setAuthenticated(false); return; }
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                const data = await response.json();
+                const res = await fetch(`${API_BASE}/ui/status`, { credentials: 'include' });
+                if (res.status === 401) { store.setAuthenticated(false); return; }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
                 setStatus(data);
-                setBootState('ready');
-                setBootError(null);
-            } catch (error) {
+                store.setBootState('ready');
+                store.setBootError(null);
+            } catch {
                 addToast('No hay conexión con el backend.', 'error');
-                setBootState('offline');
-                setBootError('No hay conexión con el backend.');
+                store.setBootState('offline');
+                store.setBootError('No hay conexión con el backend.');
             }
         };
         fetchStatus();
         const interval = setInterval(fetchStatus, 5000);
         return () => clearInterval(interval);
-    }, [authenticated]);
+    }, [store.authenticated]);
 
-    const handleNodeSelect = (nodeId: string | null) => {
-        setSelectedNodeId(nodeId);
-        if (nodeId) setActiveTab('graph');
-    };
-
-    const handleCreatePlan = async (req: PlanCreateRequest) => {
-        await createPlan(req);
-    };
-
-    const handleApprovePlan = async () => {
-        if (currentPlan) {
-            await approvePlan(currentPlan.id);
-        }
-    };
-
-    const handleApprovePlanFromGraph = async (draftId: string) => {
-        try {
-            const res = await fetch(`${API_BASE}/ops/drafts/${draftId}/approve`, {
-                method: 'POST',
-                credentials: 'include',
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            addToast('Plan aprobado exitosamente', 'success');
-            setGraphNodeCount(-1); // Force refresh
-        } catch (err) {
-            addToast('Error al aprobar el plan', 'error');
-        }
-    };
-
-    const handleRejectPlan = async (draftId: string) => {
-        try {
-            const res = await fetch(`${API_BASE}/ops/drafts/${draftId}/reject`, {
-                method: 'POST',
-                credentials: 'include',
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            addToast('Plan rechazado', 'info');
-            setGraphNodeCount(0); // Clear graph
-        } catch (err) {
-            addToast('Error al rechazar el plan', 'error');
-        }
-    };
-
-    const openGlobalPlanBuilder = () => setActiveTab('plans');
-
-    const handleSelectView = (tab: SidebarTab) => {
-        setActiveTab(tab);
-        if (tab !== 'graph') setSelectedNodeId(null);
-    };
-
+    /* ── Keyboard: Ctrl+K command palette ── */
     useEffect(() => {
-        const onKeyDown = (event: KeyboardEvent) => {
-            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-                event.preventDefault();
-                setIsCommandPaletteOpen(true);
+        const onKeyDown = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                store.toggleCommandPalette(true);
             }
         };
         globalThis.addEventListener('keydown', onKeyDown);
         return () => globalThis.removeEventListener('keydown', onKeyDown);
     }, []);
 
+    /* ── Auto-refresh graph count when on graph tab with 0 nodes ── */
     useEffect(() => {
-        if (!authenticated || activeTab !== 'graph' || graphNodeCount !== 0) return;
-
-        const refreshGraphCount = async () => {
+        if (!store.authenticated || store.activeTab !== 'graph' || store.graphNodeCount !== 0) return;
+        const refresh = async () => {
             try {
-                const response = await fetch(`${API_BASE}/ui/graph`, { credentials: 'include' });
-                if (!response.ok) return;
-                const payload = await response.json();
+                const res = await fetch(`${API_BASE}/ui/graph`, { credentials: 'include' });
+                if (!res.ok) return;
+                const payload = await res.json();
                 const count = Array.isArray(payload?.nodes) ? payload.nodes.length : 0;
-                setGraphNodeCount(count);
-            } catch {
-                // Silent: welcome screen remains visible on errors
-            }
+                store.setGraphNodeCount(count);
+            } catch { /* welcome screen stays visible */ }
         };
+        const interval = setInterval(refresh, 5000);
+        return () => clearInterval(interval);
+    }, [store.authenticated, store.activeTab, store.graphNodeCount]);
 
-        const interval = globalThis.setInterval(refreshGraphCount, 5000);
-        return () => globalThis.clearInterval(interval);
-    }, [authenticated, activeTab, graphNodeCount]);
-
-    const handleLogout = useCallback(async () => {
-        try {
-            await fetch(`${API_BASE}/auth/logout`, {
-                method: 'POST',
-                credentials: 'include',
-            });
-        } catch {
-            // Ignore network errors on logout; local session state still resets.
-        } finally {
-            setIsProfileOpen(false);
-            setSessionUser(null);
-            setAuthenticated(false);
-        }
-    }, []);
-
+    /* ── Session expiry watch ── */
     useEffect(() => {
-        if (!authenticated || !profileUnauthorized) return;
+        if (!store.authenticated || !profileUnauthorized) return;
         addToast('Sesión expirada. Vuelve a iniciar sesión.', 'info');
-        void handleLogout();
-    }, [authenticated, profileUnauthorized, addToast, handleLogout]);
+        void logout();
+    }, [store.authenticated, profileUnauthorized]);
 
-    const handleCommandAction = (actionId: string) => {
-        switch (actionId) {
-            case 'new_plan':
-                setActiveTab('plans');
-                break;
-            case 'open_draft_modal':
-                setActiveTab('plans');
-                break;
-            case 'goto_graph':
-                setActiveTab('graph');
-                break;
-            case 'goto_plans':
-                setActiveTab('plans');
-                break;
-            case 'goto_evals':
-                setActiveTab('evals');
-                break;
-            case 'goto_metrics':
-                setActiveTab('metrics');
-                break;
-            case 'goto_security':
-                setActiveTab('security');
-                break;
-            case 'goto_operations':
-                setActiveTab('operations');
-                break;
-            case 'goto_settings':
-                setActiveTab('settings');
-                break;
-            case 'goto_mastery':
-                setActiveTab('mastery');
-                break;
-            case 'search_repo':
-                setActiveTab('operations');
-                break;
-            case 'mcp_sync':
-                void handleMcpSync();
-                break;
-            case 'view_runs':
-                setActiveTab('operations');
-                break;
-            case 'view_plan':
-                setActiveTab('plans');
-                break;
-            default:
-                break;
-        }
-    };
+    /* ── Command palette handler ── */
+    const commandHandlers = getCommandHandlers(addToast);
+    const handleCommandAction = useCallback(
+        (actionId: string) => {
+            const handler = commandHandlers[actionId];
+            if (handler) void handler();
+        },
+        [commandHandlers],
+    );
 
-    const renderMainContent = () => {
-        switch (activeTab) {
-            case 'graph':
-                return (
-                    <ReactFlowProvider>
-                        {graphNodeCount === 0 ? (
-                            <WelcomeScreen
-                                onNewPlan={openGlobalPlanBuilder}
-                                onConnectProvider={() => setActiveTab('settings')}
-                                onOpenRepo={() => setActiveTab('operations')}
-                                onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-                            />
-                        ) : (
-                            <div className="h-full flex flex-col min-h-0 relative">
-                                <PanelGroup orientation="vertical">
-                                    <ResizePanel
-                                        defaultSize={60}
-                                        minSize={20}
-                                        className="min-h-0 overflow-hidden relative"
-                                    >
-                                        <GraphCanvas
-                                            onNodeSelect={handleNodeSelect}
-                                            selectedNodeId={selectedNodeId}
-                                            onNodeCountChange={setGraphNodeCount}
-                                            onApprovePlan={handleApprovePlanFromGraph}
-                                            onRejectPlan={handleRejectPlan}
-                                            onEditPlan={openGlobalPlanBuilder}
-                                            planLoading={loading}
-                                        />
-                                    </ResizePanel>
+    /* ── Plan engine (kept for PlansPanel compat) ── */
+    // TODO: move to PlansView in Phase 1
+    const handleApprovePlanFromGraph = useCallback(async (draftId: string) => {
+        try {
+            const res = await fetch(`${API_BASE}/ops/drafts/${draftId}/approve`, {
+                method: 'POST', credentials: 'include',
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            addToast('Plan aprobado exitosamente', 'success');
+            store.setGraphNodeCount(-1);
+        } catch { addToast('Error al aprobar el plan', 'error'); }
+    }, [addToast]);
 
-                                    {!isChatCollapsed && (
-                                        <>
-                                            <PanelResizeHandle className="h-1 bg-surface-3 hover:bg-accent-primary/50 transition-colors cursor-row-resize flex items-center justify-center">
-                                                <div className="w-8 h-0.5 bg-border-primary rounded-full" />
-                                            </PanelResizeHandle>
-                                            <ResizePanel
-                                                defaultSize={40}
-                                                minSize={20}
-                                                className="relative overflow-hidden bg-surface-0 border-t border-border-primary"
-                                            >
-                                                <div
-                                                    className="absolute top-0 right-8 w-12 h-4 bg-surface-2 border border-border-primary border-t-0 rounded-b-md flex items-center justify-center cursor-pointer hover:bg-surface-3 z-50 group transition-colors"
-                                                    onClick={() => setIsChatCollapsed(true)}
-                                                    title="Colapsar chat"
-                                                >
-                                                    <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-text-secondary transition-transform" />
-                                                </div>
-                                                <OrchestratorChat isCollapsed={false} />
-                                            </ResizePanel>
-                                        </>
-                                    )}
-                                </PanelGroup>
+    const handleRejectPlan = useCallback(async (draftId: string) => {
+        try {
+            const res = await fetch(`${API_BASE}/ops/drafts/${draftId}/reject`, {
+                method: 'POST', credentials: 'include',
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            addToast('Plan rechazado', 'info');
+            store.setGraphNodeCount(0);
+        } catch { addToast('Error al rechazar el plan', 'error'); }
+    }, [addToast]);
 
-                                {isChatCollapsed && (
-                                    <div className="h-14 min-h-[56px] border-t border-border-primary relative overflow-hidden bg-surface-0 shrink-0">
-                                        <div
-                                            className="absolute top-0 right-8 w-12 h-4 bg-surface-2 border border-border-primary border-t-0 rounded-b-md flex items-center justify-center cursor-pointer hover:bg-surface-3 z-50 group transition-colors"
-                                            onClick={() => setIsChatCollapsed(false)}
-                                            title="Expandir chat"
-                                        >
-                                            <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-text-secondary transition-transform rotate-180" />
-                                        </div>
-                                        <OrchestratorChat isCollapsed={true} />
-                                    </div>
-                                )}
-
-                                <div className={`absolute right-0 top-0 bottom-0 z-40 transition-transform duration-300 ease-in-out ${selectedNodeId ? 'translate-x-0' : 'translate-x-full pointer-events-none'}`}>
-                                    <InspectPanel
-                                        selectedNodeId={selectedNodeId}
-                                        onClose={() => setSelectedNodeId(null)}
-                                    />
-                                </div>
-                            </div>
-                        )}
-                    </ReactFlowProvider>
-                );
-
-            case 'plans':
-                return (
-                    <PlansPanel
-                        currentPlan={currentPlan}
-                        loading={loading}
-                        onCreatePlan={handleCreatePlan}
-                        onApprovePlan={handleApprovePlan}
-                        onDiscardPlan={() => setCurrentPlan(null)}
-                    />
-                );
-
-            case 'evals':
-                return <EvalDashboard />;
-
-            case 'metrics':
-                return <ObservabilityPanel />;
-
-            case 'security':
-                return (
-                    <div className="h-full overflow-y-auto custom-scrollbar p-6 bg-surface-0">
-                        <div className="max-w-6xl mx-auto">
-                            <TrustSettings />
-                        </div>
-                    </div>
-                );
-
-            case 'operations':
-                return (
-                    <div className="h-full overflow-y-auto custom-scrollbar p-6 bg-surface-0">
-                        <MaintenanceIsland />
-                    </div>
-                );
-
-
-            case 'settings':
-                return (
-                    <SettingsPanel onOpenMastery={() => setActiveTab('mastery')} />
-                );
-
-            case 'mastery':
-                return (
-                    <div className="h-full overflow-y-auto custom-scrollbar bg-surface-0">
-                        <TokenMastery />
-                    </div>
-                );
-        }
-    };
-
-    // Loading state
-    if (bootState === 'checking' || authenticated === null) {
+    /* ── Render: boot states ── */
+    if (store.bootState === 'checking' || store.authenticated === null) {
         return (
-            <div className="min-h-screen bg-surface-3 flex items-center justify-center">
-                <div className="w-6 h-6 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />
+            <div className="min-h-screen bg-surface-0 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-8 h-8 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />
+                    <span className="text-xs text-text-secondary tracking-widest uppercase">Iniciando GIMO</span>
+                </div>
             </div>
         );
     }
 
-    if (bootState === 'offline') {
+    if (store.bootState === 'offline') {
         return (
             <div className="min-h-screen bg-surface-0 text-text-primary flex items-center justify-center p-6">
                 <div className="w-full max-w-lg rounded-2xl border border-border-primary bg-surface-2 p-8 space-y-5">
@@ -435,79 +164,114 @@ export default function App() {
                         <h1 className="text-lg font-semibold">Backend no disponible</h1>
                     </div>
                     <p className="text-sm text-text-secondary">
-                        {bootError || 'No se pudo conectar con los servicios de GIMO.'}
+                        {store.bootError || 'No se pudo conectar con los servicios de GIMO.'}
                     </p>
-                    <div className="flex gap-3">
-                        <button
-                            onClick={checkSession}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-accent-primary hover:bg-accent-primary/85 text-white text-sm font-medium"
-                        >
-                            <RefreshCw size={14} />
-                            Reintentar conexión
-                        </button>
-                    </div>
+                    <button
+                        onClick={() => void checkSession()}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-accent-primary hover:bg-accent-primary/85 text-white text-sm font-medium"
+                    >
+                        <RefreshCw size={14} />
+                        Reintentar conexión
+                    </button>
                 </div>
             </div>
         );
     }
 
-    // Not authenticated — show login
-    if (!authenticated) {
+    if (!store.authenticated) {
         return <LoginModal onAuthenticated={() => void checkSession()} />;
     }
 
-    const displayName = profile?.user?.displayName || sessionUser?.displayName || sessionUser?.email || 'Mi Perfil';
-    const email = profile?.user?.email || sessionUser?.email;
+    /* ── Render: main app ── */
+    const displayName = profile?.user?.displayName || store.sessionUser?.displayName || store.sessionUser?.email || 'Mi Perfil';
+    const email = profile?.user?.email || store.sessionUser?.email;
+
+    const renderView = () => {
+        switch (store.activeTab) {
+            case 'graph':
+                return (
+                    <GraphView
+                        providerHealth={providerHealth}
+                        graphNodeCount={store.graphNodeCount}
+                        onGraphNodeCountChange={store.setGraphNodeCount}
+                        onApprovePlan={handleApprovePlanFromGraph}
+                        onRejectPlan={handleRejectPlan}
+                        onNewPlan={() => store.setActiveTab('plans')}
+                        activePlanIdFromChat={store.activePlanIdFromChat}
+                    />
+                );
+            case 'plans':
+                return <PlansView />;
+            case 'evals':
+                return <EvalDashboard />;
+            case 'metrics':
+                return <ObservabilityPanel />;
+            case 'security':
+                return <TrustSettingsView />;
+            case 'operations':
+                return <MaintenanceView />;
+            case 'settings':
+                return <SettingsPanel onOpenMastery={() => store.setActiveTab('mastery')} />;
+            case 'mastery':
+                return <TokenMasteryView />;
+            default:
+                return null;
+        }
+    };
 
     return (
         <div className="min-h-screen bg-surface-0 text-text-primary font-sans selection:bg-accent-primary selection:text-white flex flex-col">
             <MenuBar
                 status={status}
-                onNewPlan={openGlobalPlanBuilder}
-                onSelectView={handleSelectView}
-                onSelectSettingsView={handleSelectView}
-                onRefreshSession={checkSession}
-                onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-                onMcpSync={() => void handleMcpSync()}
+                onNewPlan={() => store.setActiveTab('plans')}
+                onSelectView={(tab: SidebarTab) => store.setActiveTab(tab)}
+                onSelectSettingsView={(tab: SidebarTab) => store.setActiveTab(tab)}
+                onRefreshSession={() => void checkSession()}
+                onOpenCommandPalette={() => store.toggleCommandPalette(true)}
+                onMcpSync={() => {
+                    const handlers = getCommandHandlers(addToast);
+                    void handlers.mcp_sync();
+                }}
                 userDisplayName={displayName}
                 userEmail={email}
                 userPhotoUrl={profile?.user?.photoURL}
-                onOpenProfile={() => setIsProfileOpen(true)}
+                onOpenProfile={() => store.toggleProfile(true)}
             />
 
             <div className="flex flex-1 overflow-hidden">
-                <Sidebar activeTab={activeTab} onTabChange={handleSelectView} />
-
+                <Sidebar
+                    activeTab={store.activeTab as LegacySidebarTab}
+                    onTabChange={(tab) => store.setActiveTab(tab)}
+                />
                 <main role="main" className="flex-1 relative overflow-hidden">
-                    {renderMainContent()}
+                    <Suspense fallback={<ViewLoader />}>
+                        {renderView()}
+                    </Suspense>
                 </main>
             </div>
 
-            <footer role="contentinfo" className="h-8 border-t border-border-primary bg-surface-1 flex items-center justify-between px-4 text-[10px] text-text-tertiary uppercase tracking-widest shrink-0">
-                <div className="flex items-center gap-4">
-                    <span>Gred In Labs</span>
-                    <span className="text-border-subtle">|</span>
-                    <span>v{status?.version || '1.0.0'}</span>
-                </div>
-                <div className="font-mono lowercase italic opacity-60 text-text-secondary">
-                    {status?.service_status || 'connecting...'}
-                </div>
-            </footer>
+            <StatusBar
+                providerHealth={providerHealth}
+                version={status?.version}
+                serviceStatus={status?.service_status}
+                onNavigateToSettings={() => store.setActiveTab('settings')}
+                onNavigateToMastery={() => store.setActiveTab('mastery')}
+            />
 
             <CommandPalette
-                isOpen={isCommandPaletteOpen}
-                onClose={() => setIsCommandPaletteOpen(false)}
+                isOpen={store.isCommandPaletteOpen}
+                onClose={() => store.toggleCommandPalette(false)}
                 onAction={handleCommandAction}
             />
 
             <ProfilePanel
-                isOpen={isProfileOpen}
-                onClose={() => setIsProfileOpen(false)}
+                isOpen={store.isProfileOpen}
+                onClose={() => store.toggleProfile(false)}
                 profile={profile}
                 loading={profileLoading}
                 error={profileError}
                 onRefresh={() => void refetchProfile()}
-                onLogout={() => void handleLogout()}
+                onLogout={() => void logout()}
             />
         </div>
     );

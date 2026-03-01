@@ -62,7 +62,19 @@ const buildDraftSteps = (
     ];
 };
 
-export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed = false }) => {
+interface OrchestratorChatProps {
+    isCollapsed?: boolean;
+    providerConnected?: boolean;
+    onPlanGenerated?: (planId: string) => void;
+    onNavigateToSettings?: () => void;
+}
+
+export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
+    isCollapsed = false,
+    providerConnected = true,
+    onPlanGenerated,
+    onNavigateToSettings,
+}) => {
     const [messages, setMessages] = useState<ChatMessage[]>([
         {
             id: 'm-welcome',
@@ -223,6 +235,21 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
         const prompt = input.trim();
         if (!prompt || isSending) return;
 
+        // Provider awareness: block LLM calls if no provider configured
+        if (mode === 'generate' && !providerConnected) {
+            appendMessage({
+                id: `m-noprovider-${Date.now()}`,
+                role: 'system',
+                text: 'No hay provider configurado. Configura un provider de IA para generar planes.',
+                ts: new Date().toISOString(),
+                errorActionable: 'Abre Ajustes → Proveedores para configurar tu conexión.',
+            });
+            if (onNavigateToSettings) {
+                addToast('Configura un provider primero', 'info');
+            }
+            return;
+        }
+
         appendMessage({
             id: `m-user-${Date.now()}`,
             role: 'user',
@@ -244,6 +271,7 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                 const intent = generated.context?.detected_intent;
                 const decisionPath = generated.context?.decision_path;
                 const actionable = generated.context?.error_actionable || generated.error || undefined;
+                const customPlanId = generated.context?.custom_plan_id as string | undefined;
                 appendMessage({
                     id: `m-gen-${generated.id}`,
                     role: generated.status === 'error' ? 'system' : 'assistant',
@@ -256,6 +284,11 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                     executionSteps: buildDraftSteps(generated),
                 });
                 addToast('Draft generado con IA', 'success');
+
+                // Notify parent that a plan was generated so the graph can load it
+                if (customPlanId && onPlanGenerated) {
+                    onPlanGenerated(customPlanId);
+                }
             } else {
                 const response = await fetch(`${API_BASE}/ops/drafts`, {
                     method: 'POST',
@@ -276,12 +309,28 @@ export const OrchestratorChat: React.FC<{ isCollapsed?: boolean }> = ({ isCollap
                 });
                 addToast('Draft manual creado', 'success');
             }
-        } catch {
+        } catch (err: any) {
+            const errMsg = err?.message || '';
+            let actionable: string | undefined;
+            let text = 'No se pudo procesar la solicitud del chat.';
+
+            if (errMsg.includes('401') || errMsg.includes('403')) {
+                text = 'Sesión expirada o sin permisos.';
+                actionable = 'Revalida la sesión desde Archivo → Revalidar sesión.';
+            } else if (errMsg.includes('Connection refused') || errMsg.includes('fetch')) {
+                text = 'No se pudo conectar al servidor backend.';
+                actionable = 'Verifica que el servidor GIMO está corriendo en el puerto 9325.';
+            } else if (errMsg.includes('Provider') || errMsg.includes('provider')) {
+                text = 'Error del provider de IA.';
+                actionable = 'Verifica la configuración del provider en Ajustes → Proveedores.';
+            }
+
             appendMessage({
                 id: `m-error-${Date.now()}`,
                 role: 'system',
-                text: 'No se pudo procesar la solicitud del chat.',
+                text,
                 ts: new Date().toISOString(),
+                errorActionable: actionable,
             });
             addToast('Error en la operación de chat', 'error');
         } finally {

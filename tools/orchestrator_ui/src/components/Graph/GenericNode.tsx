@@ -1,5 +1,6 @@
 import { memo } from 'react';
-import { Handle, Position, NodeProps, Node } from '@xyflow/react';
+import { Handle, Position, NodeProps } from 'reactflow';
+import type { Node } from 'reactflow';
 import { CheckCircle2, Clock, FileCode, AlertCircle, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -12,7 +13,7 @@ export type GenericNodeData = {
     [key: string]: unknown; // Index signature for Record<string, unknown> constraint
 };
 
-export type GenericNodeType = Node<GenericNodeData>;
+export type GenericNodeType = Node<GenericNodeData, string>;
 
 const statusColors: Record<string, string> = {
     pending: 'border-zinc-700 text-zinc-500 bg-zinc-900/50',
@@ -32,7 +33,7 @@ const StatusIcon = ({ status }: { status?: string }) => {
     }
 };
 
-export const GenericNode = memo(({ data, selected }: NodeProps<GenericNodeType>) => {
+export const GenericNode = memo(({ data, selected }: NodeProps<GenericNodeData>) => {
     const status = (data.status as string) || 'pending';
     const style = statusColors[status] || statusColors.pending;
 

@@ -46,7 +46,14 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
             const draft = await resp.json();
 
             // 2. Update the specific task's system prompt in the content
-            const plan = JSON.parse(draft.content);
+            let plan: any;
+            try {
+                plan = typeof draft.content === 'string' ? JSON.parse(draft.content) : draft.content;
+            } catch {
+                addToast('El contenido del draft no es JSON válido', 'error');
+                return;
+            }
+            if (!plan?.tasks) return;
             const task = plan.tasks.find((t: any) => t.id === selectedNodeId);
             if (task?.agent_assignee) {
                 task.agent_assignee.system_prompt = newPrompt;
@@ -80,7 +87,14 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                 credentials: 'include'
             });
             const draft = await resp.json();
-            const plan = JSON.parse(draft.content);
+            let plan: any;
+            try {
+                plan = typeof draft.content === 'string' ? JSON.parse(draft.content) : draft.content;
+            } catch {
+                addToast('El contenido del draft no es JSON válido', 'error');
+                return;
+            }
+            if (!plan?.tasks) return;
             const task = plan.tasks.find((t: any) => t.id === selectedNodeId);
             if (task?.agent_assignee) {
                 task.agent_assignee.model = newModel;
