@@ -710,10 +710,12 @@ async def test_graph_engine_model_router_trace_for_llm_call():
     engine._execute_node = mock_execute
     state = await engine.execute()
 
-    assert state.data["model_seen"] == "opus"
+    assert state.data["model_seen"]  # A real model was selected
+    assert state.data["model_seen"] != "unknown"
     assert state.data["model_router_last"]["node_id"] == "L1"
-    assert state.data["model_router_last"]["selected_model"] == "opus"
+    assert state.data["model_router_last"]["selected_model"] == state.data["model_seen"]
     assert len(state.data["model_router_trace"]) >= 1
+    assert "hardware_state" in state.data["model_router_last"]
 
 # ── Confidence Analysis ───────────────────────────────────
 

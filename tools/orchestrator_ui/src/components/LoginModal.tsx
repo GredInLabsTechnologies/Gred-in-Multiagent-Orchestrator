@@ -182,9 +182,12 @@ export function LoginModal({ onAuthenticated }: Props) {
             addToast('Sesión iniciada con Google', 'success');
             setLoginState('success');
             window.setTimeout(() => onAuthenticated(), 450);
-        } catch {
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            const errCode = (err as { code?: string })?.code ?? '';
+            console.error('[GoogleLogin]', errCode, errMsg);
             setLoginState('google');
-            setError('No se pudo iniciar sesión con Google');
+            setError(errCode ? `[${errCode}] ${errMsg}` : errMsg || 'No se pudo iniciar sesión con Google');
         } finally {
             setGoogleLoading(false);
         }

@@ -324,6 +324,9 @@ class GraphEngine:
                 "node_id": node.id,
                 "selected_model": routing.model,
                 "reason": routing.reason,
+                "provider_id": getattr(routing, "provider_id", ""),
+                "hardware_state": getattr(routing, "hardware_state", "safe"),
+                "tier": getattr(routing, "tier", 3),
             }
             self.state.data.setdefault("model_router_trace", []).append(self.state.data["model_router_last"])
 

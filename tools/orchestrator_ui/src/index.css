@@ -416,6 +416,40 @@ button:active, [role="button"]:active {
     color: var(--status-warning);
 }
 
+/* ── Input field utility for graph editor ── */
+.input-field {
+    width: 100%;
+    background: var(--surface-3);
+    border: 1px solid var(--border-primary);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text-primary);
+    transition: border-color 0.15s ease;
+}
+
+.input-field:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.15);
+}
+
+/* ── Edge flow animation for SVG ── */
+@keyframes edge-flow {
+    from { stroke-dashoffset: 12; }
+    to { stroke-dashoffset: 0; }
+}
+
+/* ── Node shimmer overlay ── */
+@keyframes node-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.animate-shimmer {
+    animation: node-shimmer 2s ease-in-out infinite;
+}
+
 /* ── Reduced motion: cancel ALL complex animations ── */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {

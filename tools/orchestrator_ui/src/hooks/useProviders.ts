@@ -243,7 +243,7 @@ export const useProviders = () => {
         const nextProviders = { ...(current.providers || {}) };
         delete nextProviders[id];
         const nextKeys = Object.keys(nextProviders);
-        if (nextKeys.length === 0) throw new Error("At least one provider is required");
+        if (nextKeys.length === 0) throw new Error("Se requiere al menos un provider");
 
         const next = {
             ...current,
@@ -260,22 +260,21 @@ export const useProviders = () => {
         await loadProviders();
     };
 
-    const testProvider = async (id: string) => {
+    const testProvider = async (id: string): Promise<{ healthy: boolean; message: string }> => {
+        const provider = providers.find((p) => p.id === id);
+        if (!provider) {
+            return { healthy: false, message: `Provider no encontrado: ${id}` };
+        }
+
+        const payload: ProviderValidatePayload = {
+            base_url: provider.config?.base_url || undefined,
+        };
+
+        if (provider.auth_mode === 'account' && provider.auth_ref) {
+            payload.account = provider.auth_ref;
+        }
+
         try {
-            const provider = providers.find((p) => p.id === id);
-            if (!provider) {
-                alert(`Provider not found: ${id}`);
-                return;
-            }
-
-            const payload: ProviderValidatePayload = {
-                base_url: provider.config?.base_url || undefined,
-            };
-
-            if (provider.auth_mode === 'account' && provider.auth_ref) {
-                payload.account = provider.auth_ref;
-            }
-
             const res = await fetch(`${API_BASE}/ops/connectors/${encodeURIComponent(provider.type)}/validate`, {
                 method: 'POST',
                 ...getRequestInit(true),
@@ -284,10 +283,15 @@ export const useProviders = () => {
 
             const data = res.ok ? await res.json() : null;
             const healthy = Boolean(data?.valid);
-            alert(`Test Result [${id}]: ${healthy ? 'ok' : 'error'}\nMessage: ${healthy ? 'Provider reachable' : (data?.error_actionable || 'Provider unreachable')}`);
             await loadProviders();
-        } catch (e) {
-            alert("Test failed check console");
+            return {
+                healthy,
+                message: healthy
+                    ? `Provider ${id} accesible`
+                    : (data?.error_actionable || 'Provider no accesible'),
+            };
+        } catch {
+            return { healthy: false, message: 'Error de conexion al probar el provider' };
         }
     };
 

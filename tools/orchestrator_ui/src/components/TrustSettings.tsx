@@ -19,9 +19,9 @@ interface TrustSettingsProps {
 }
 
 const TRUST_LEVELS: { level: TrustLevel; label: string; description: string }[] = [
-    { level: 'autonomous', label: 'Autonomous', description: 'Full control, no approval needed' },
-    { level: 'supervised', label: 'Supervised', description: 'Actions require approval before execution' },
-    { level: 'restricted', label: 'Restricted', description: 'Read-only, cannot perform actions' },
+    { level: 'autonomous', label: 'Autónomo', description: 'Control total, sin aprobación requerida' },
+    { level: 'supervised', label: 'Supervisado', description: 'Las acciones requieren aprobación antes de ejecutarse' },
+    { level: 'restricted', label: 'Restringido', description: 'Solo lectura, no puede realizar acciones' },
 ];
 
 const DEFAULT_AGENTS: AgentTrustEntry[] = [
@@ -97,18 +97,18 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
                 className="group/threat relative flex items-center justify-between bg-surface-2 p-5 rounded-xl border border-border-primary"
             >
                 <div className="invisible group-hover/threat:visible absolute -bottom-12 left-4 right-4 z-50 p-2 rounded-lg bg-surface-3 border border-border-primary text-[10px] text-text-secondary shadow-xl transition-opacity">
-                    Threat Level indica el riesgo global actual del sistema (NOMINAL → ALERT → GUARDED → LOCKDOWN).
+                    Nivel de amenaza indica el riesgo global actual del sistema (NOMINAL → ALERT → GUARDED → LOCKDOWN).
                 </div>
                 <div className="flex items-center gap-2 text-text-primary">
                     <Shield size={18} />
-                    <span className="text-sm font-semibold">Security Status</span>
+                    <span className="text-sm font-semibold">Estado de Seguridad</span>
                 </div>
                 <div className="flex items-center gap-4">
                     <button
                         onClick={refresh}
                         className="text-xs text-text-secondary hover:text-text-primary transition-colors"
                     >
-                        Refresh
+                        Actualizar
                     </button>
                     <ThreatLevelIndicator level={threatLevel} label={threatLevelLabel} lockdown={lockdown} />
                 </div>
@@ -119,10 +119,10 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
                 <div className="space-y-3">
                     <div className="group/cb relative flex items-center gap-2 text-text-secondary pl-1">
                         <div className="invisible group-hover/cb:visible absolute -bottom-10 left-0 right-0 z-50 p-2 rounded-lg bg-surface-3 border border-border-primary text-[10px] text-text-secondary shadow-xl">
-                            Circuit breakers protegen dimensiones con fallos repetidos; se abren temporalmente para evitar daño en cascada.
+                            Los circuit breakers protegen dimensiones con fallos repetidos; se abren temporalmente para evitar daño en cascada.
                         </div>
                         <Activity size={14} />
-                        <span className="text-[10px] font-bold uppercase tracking-widest">Active Circuit Breakers</span>
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Circuit Breakers Activos</span>
                     </div>
                     <CircuitBreakerPanel records={trustDashboard} onInspect={handleInspectBreaker} />
                 </div>
@@ -132,10 +132,10 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
             <div className="space-y-3">
                 <div className="group/td relative flex items-center gap-2 text-text-secondary pl-1">
                     <div className="invisible group-hover/td:visible absolute -bottom-10 left-0 right-0 z-50 p-2 rounded-lg bg-surface-3 border border-border-primary text-[10px] text-text-secondary shadow-xl">
-                        Trust Dimensions miden fiabilidad por dominio (aprobaciones, rechazos, fallos) y aplican política automática.
+                        Las dimensiones de confianza miden fiabilidad por dominio (aprobaciones, rechazos, fallos) y aplican política automática.
                     </div>
                     <Lock size={14} />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">Trust Dimensions</span>
+                    <span className="text-[10px] font-bold uppercase tracking-widest">Dimensiones de Confianza</span>
                 </div>
                 <TrustDashboard records={trustDashboard} />
             </div>
@@ -144,7 +144,7 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
             <div className="space-y-3">
                 <div className="flex items-center gap-2 text-text-secondary pl-1 mb-2">
                     <Settings size={14} />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">Agent Autonomy</span>
+                    <span className="text-[10px] font-bold uppercase tracking-widest">Autonomía de Agentes</span>
                 </div>
                 <div className="space-y-3">
                     {agents.map(agent => (
@@ -188,8 +188,8 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
 
             <div className="p-3 rounded-lg bg-surface-0 border border-border-subtle mt-4">
                 <p className="text-[10px] text-text-secondary leading-relaxed">
-                    Trust levels and circuit breakers dynamically adjust based on system behavior.
-                    <strong className="text-text-primary"> Autonomous</strong> agents execute without approval unless trust score drops.
+                    Los niveles de confianza y circuit breakers se ajustan dinámicamente según el comportamiento del sistema.
+                    Los agentes <strong className="text-text-primary">autónomos</strong> se ejecutan sin aprobación a menos que su puntuación de confianza baje.
                 </p>
             </div>
         </div>

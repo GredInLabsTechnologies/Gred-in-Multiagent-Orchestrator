@@ -3,20 +3,23 @@ import { create } from 'zustand';
 /* ── Types ─────────────────────────────────────────────── */
 
 /**
- * Current tabs (legacy 8-tab layout, will be reduced to 5 in Phase 1).
- * Keeping full set for backward-compat during migration.
+ * Primary sidebar tabs — only the essentials.
+ * Everything else opens as an overlay drawer.
  */
-export type SidebarTab =
-    | 'graph'
-    | 'plans'
+export type SidebarTab = 'graph' | 'plans';
+
+/**
+ * Overlay drawers that slide over the main view.
+ * These never replace the graph — they float on top.
+ */
+export type OverlayId =
+    | 'settings'
     | 'evals'
     | 'metrics'
+    | 'mastery'
     | 'security'
     | 'operations'
-    | 'settings'
-    | 'mastery'
-    // Phase 1 additions (will replace metrics+mastery and security+operations)
-    | 'analytics';
+    | null;
 
 export interface SessionUser {
     email?: string;
@@ -37,6 +40,7 @@ interface AppState {
     /* Navigation */
     activeTab: SidebarTab;
     selectedNodeId: string | null;
+    activeOverlay: OverlayId;
 
     /* UI panels */
     isCommandPaletteOpen: boolean;
@@ -61,6 +65,14 @@ interface AppActions {
     /* Navigation */
     setActiveTab: (tab: SidebarTab) => void;
     selectNode: (id: string | null) => void;
+    openOverlay: (id: NonNullable<OverlayId>) => void;
+    closeOverlay: () => void;
+
+    /**
+     * Legacy compat: accepts old 8-tab IDs and routes them
+     * to either a sidebar tab or an overlay.
+     */
+    navigate: (target: string) => void;
 
     /* UI panels */
     toggleCommandPalette: (open?: boolean) => void;
@@ -71,6 +83,11 @@ interface AppActions {
     setGraphNodeCount: (n: number) => void;
     setActivePlanIdFromChat: (id: string | null) => void;
 }
+
+/* ── Helpers ───────────────────────────────────────────── */
+
+const SIDEBAR_TABS = new Set<string>(['graph', 'plans']);
+const OVERLAY_IDS = new Set<string>(['settings', 'evals', 'metrics', 'mastery', 'security', 'operations']);
 
 /* ── Store ──────────────────────────────────────────────── */
 
@@ -83,6 +100,7 @@ export const useAppStore = create<AppState & AppActions>()((set) => ({
 
     activeTab: 'graph',
     selectedNodeId: null,
+    activeOverlay: null,
 
     isCommandPaletteOpen: false,
     isChatCollapsed: false,
@@ -110,6 +128,7 @@ export const useAppStore = create<AppState & AppActions>()((set) => ({
             sessionUser: null,
             isProfileOpen: false,
             selectedNodeId: null,
+            activeOverlay: null,
         }),
 
     /* ---- navigation ---- */
@@ -117,12 +136,32 @@ export const useAppStore = create<AppState & AppActions>()((set) => ({
         set((s) => ({
             activeTab: tab,
             selectedNodeId: tab !== 'graph' ? null : s.selectedNodeId,
+            activeOverlay: null, // close overlay when switching tabs
         })),
 
     selectNode: (id) =>
         set({
             selectedNodeId: id,
             ...(id ? { activeTab: 'graph' as const } : {}),
+        }),
+
+    openOverlay: (id) => set({ activeOverlay: id }),
+    closeOverlay: () => set({ activeOverlay: null }),
+
+    navigate: (target) =>
+        set((s) => {
+            if (SIDEBAR_TABS.has(target)) {
+                return {
+                    activeTab: target as SidebarTab,
+                    activeOverlay: null,
+                    selectedNodeId: target !== 'graph' ? null : s.selectedNodeId,
+                };
+            }
+            if (OVERLAY_IDS.has(target)) {
+                return { activeOverlay: target as NonNullable<OverlayId> };
+            }
+            // Unknown target — ignore
+            return {};
         }),
 
     /* ---- UI panels ---- */

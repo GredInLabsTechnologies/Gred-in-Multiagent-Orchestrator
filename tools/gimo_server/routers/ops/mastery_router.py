@@ -47,57 +47,74 @@ async def get_model_recommendations(
     router_service = ModelRouterService()
     return router_service.promote_eco_mode(node, state)
 
+@router.get("/hardware", response_model=Dict[str, Any])
+async def get_hardware_status(auth: Annotated[AuthContext, Depends(verify_token)]):
+    """Returns current hardware state and available model count."""
+    from ...services.hardware_monitor_service import HardwareMonitorService
+    from ...services.model_inventory_service import ModelInventoryService
+    hw = HardwareMonitorService.get_instance()
+    state = hw.get_current_state()
+    models = ModelInventoryService.get_available_models()
+    state["available_models"] = len(models)
+    state["local_models"] = len([m for m in models if m.is_local])
+    state["remote_models"] = len([m for m in models if not m.is_local])
+    state["local_safe"] = hw.is_local_safe()
+    return state
+
+
 @router.get("/status", response_model=MasteryStatus)
 async def get_mastery_status(auth: Annotated[AuthContext, Depends(verify_token)]):
     """Returns general token mastery metrics with real data."""
     from ...services.ops_service import OpsService
     from ...services.storage_service import StorageService
-    
+    from ...services.hardware_monitor_service import HardwareMonitorService
+
     config = OpsService.get_config()
     storage = StorageService()
-    
-    # Use new economy config for eco_mode status (check if not 'off')
+    hw = HardwareMonitorService.get_instance()
+
     eco_mode_active = config.economy.eco_mode.mode != "off"
-    
-    # Real savings calculation
     savings = storage.cost.get_total_savings(days=30)
     spend = storage.cost.get_total_spend(days=30)
-    
-    # Efficiency calculation: savings / (spend + savings)
+
     efficiency = 0.0
     if (spend + savings) > 0:
         efficiency = round(savings / (spend + savings), 2)
     elif eco_mode_active:
-        efficiency = 1.0 # Everything was free/cached
-    
-    # Budget Alerts
+        efficiency = 1.0
+
     alerts = []
     if config.economy.global_budget_usd:
         alerts = storage.cost.check_budget_alerts(
-            config.economy.global_budget_usd, 
+            config.economy.global_budget_usd,
             config.economy.alert_thresholds
         )
-    
-    # Dynamic tips based on actual data
+
     tips = []
     for alert in alerts:
         tips.append(f"ALERTA: Has alcanzado el {alert['percentage']}% de tu presupuesto global.")
-        
+
     if spend > 50:
          tips.append("Tu gasto global este mes es elevado (> $50). Revisa tus limites de provider.")
-    
+
+    hw_state = hw.get_load_level()
+    if hw_state == "critical":
+        tips.insert(0, "CARGA CRITICA: El sistema esta bajo mucha carga. Solo se usaran modelos remotos.")
+    elif hw_state == "caution":
+        tips.insert(0, "Carga elevada: GIMO esta limitando el uso de modelos locales grandes.")
+
     if eco_mode_active:
         tips.extend([
-            "Eco-Mode está activo: GIMO está priorizando modelos económicos.",
-            "Tus workflows actuales están optimizados para el ahorro.",
-            "Recuerda que los modelos locales no consumen créditos de nube."
+            "Eco-Mode esta activo: GIMO esta priorizando modelos economicos.",
+            "Tus workflows actuales estan optimizados para el ahorro.",
+            "Recuerda que los modelos locales no consumen creditos de nube."
         ])
     else:
         tips.extend([
             "Considera activar Eco-Mode para reducir costes hasta un 80% en tareas simples.",
-            "GIMO sugiere modelos Haiku para tareas de clasificación para mayor eficiencia."
+            "GIMO sugiere modelos economicos para tareas de clasificacion."
         ])
-        
+
     if not config.economy.allow_roi_routing:
         tips.append("Activa 'allow_roi_routing' para permitir que GIMO elija modelos por rendimiento real.")
 
@@ -105,6 +122,7 @@ async def get_mastery_status(auth: Annotated[AuthContext, Depends(verify_token)]
         "eco_mode_enabled": eco_mode_active,
         "total_savings_usd": savings,
         "efficiency_score": efficiency,
+        "hardware_state": hw_state,
         "tips": tips[:5]
     }
 

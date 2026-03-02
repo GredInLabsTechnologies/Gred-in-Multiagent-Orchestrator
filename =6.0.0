@@ -1,0 +1,9 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting psutil
+  Downloading psutil-7.2.2-cp37-abi3-win_amd64.whl.metadata (22 kB)
+Downloading psutil-7.2.2-cp37-abi3-win_amd64.whl (137 kB)
+Installing collected packages: psutil
+Successfully installed psutil-7.2.2
+
+[notice] A new release of pip is available: 25.3 -> 26.0.1
+[notice] To update, run: C:\Users\shilo\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pip install --upgrade pip

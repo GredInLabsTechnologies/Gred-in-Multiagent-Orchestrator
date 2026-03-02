@@ -293,6 +293,8 @@ class UserEconomyConfig(BaseModel):
     cache_ttl_hours: int = 24
     show_cost_predictions: bool = False
     provider_model_map: Dict[str, Dict[str, str]] = Field(default_factory=dict)
+    hardware_thresholds: Optional[Dict[str, Dict[str, int]]] = None
+    allow_local_override: bool = False
 
     @field_validator("global_budget_usd")
     @classmethod

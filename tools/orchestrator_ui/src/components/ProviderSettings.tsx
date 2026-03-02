@@ -1,10 +1,20 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { useProviders } from '../hooks/useProviders';
 import { useToast } from './Toast';
 import { Server, Cloud, Cpu, Trash2, Activity, Download, CheckCircle2, AlertTriangle } from 'lucide-react';
+
+/* ── Friendly provider type labels ── */
+const PROVIDER_LABELS: Record<string, string> = {
+    openai: 'OpenAI',
+    codex: 'Codex CLI',
+    ollama_local: 'Ollama (Local)',
+    groq: 'Groq',
+    openrouter: 'OpenRouter',
+    custom_openai_compatible: 'OpenAI Compatible',
+};
 
 export const ProviderSettings: React.FC = () => {
     const {
@@ -91,19 +101,20 @@ export const ProviderSettings: React.FC = () => {
 
     const selectedModelInstalados = modelGroups.installed.some((m) => m.id === modelId);
 
-    const handleInstallAndUse = async () => {
-        if (!modelId) {
+    const handleInstallAndUse = useCallback(async (explicitModelId?: string) => {
+        const targetModel = explicitModelId || modelId;
+        if (!targetModel) {
             addToast('Selecciona un modelo para instalar', 'error');
             return;
         }
         try {
-            const res = await installModel(providerType, modelId);
+            const res = await installModel(providerType, targetModel);
             setInstallState(res);
             addToast(res?.message || 'Instalación lanzada', 'info');
         } catch {
             addToast('Error instalando el modelo', 'error');
         }
-    };
+    }, [modelId, providerType, installModel, addToast]);
 
     useEffect(() => {
         if (!installState?.job_id) return;
@@ -176,32 +187,35 @@ export const ProviderSettings: React.FC = () => {
         }
     };
 
-    const handleSaveAsActive = async () => {
-        if (!providerId.trim() || !modelId.trim()) {
+    const handleSaveAsActive = useCallback(async (overrides?: { providerId?: string; modelId?: string; authMode?: string }) => {
+        const effectiveProviderId = overrides?.providerId || providerId;
+        const effectiveModelId = overrides?.modelId || modelId;
+        const effectiveAuthMode = overrides?.authMode || authMode;
+        if (!effectiveProviderId.trim() || !effectiveModelId.trim()) {
             addToast('Provider ID y modelo son obligatorios', 'error');
             return;
         }
         try {
             await saveActiveProvider({
-                providerId: providerId.trim(),
+                providerId: effectiveProviderId.trim(),
                 providerType: providerType,
-                modelId: modelId.trim(),
-                authMode,
-                apiKey: authMode === 'api_key' ? apiKey : undefined,
-                account: authMode === 'account' ? account : undefined,
+                modelId: effectiveModelId.trim(),
+                authMode: effectiveAuthMode,
+                apiKey: effectiveAuthMode === 'api_key' ? apiKey : undefined,
+                account: effectiveAuthMode === 'account' ? account : undefined,
                 baseUrl: baseUrl || undefined,
                 org: org || undefined,
             });
             addToast('Provider activo guardado', 'success');
 
             // Clean up UI states after successful save, specially for Device Login flows
-            if (authMode === 'account' && providerType === 'codex') {
+            if (effectiveAuthMode === 'account' && providerType === 'codex') {
                 setDeviceLoginState(null);
             }
         } catch {
             addToast('No se pudo guardar provider activo', 'error');
         }
-    };
+    }, [providerId, modelId, authMode, providerType, apiKey, account, baseUrl, org, saveActiveProvider, addToast]);
 
     return (
         <div className="space-y-6 text-text-primary p-4">
@@ -217,8 +231,8 @@ export const ProviderSettings: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                     <div><span className="text-text-secondary">Provider activo:</span> <span className="font-semibold">{effectiveState?.active || 'n/a'}</span></div>
                     <div><span className="text-text-secondary">Modelo efectivo:</span> <span className="font-semibold">{effectiveState?.model_id || 'n/a'}</span></div>
-                    <div><span className="text-text-secondary">Role:</span> <span className="font-semibold">{roleLabel}</span></div>
-                    <div><span className="text-text-secondary">Health:</span> <span className="font-semibold">{effectiveHealth}</span></div>
+                    <div><span className="text-text-secondary">Rol:</span> <span className="font-semibold">{roleLabel}</span></div>
+                    <div><span className="text-text-secondary">Salud:</span> <span className="font-semibold">{effectiveHealth}</span></div>
                     <div className="md:col-span-2"><span className="text-text-secondary">Error accionable:</span> <span className="font-semibold text-accent-warning">{effectiveActionableError}</span></div>
                 </div>
             </Card>
@@ -227,7 +241,7 @@ export const ProviderSettings: React.FC = () => {
                 <h3 className="text-sm font-semibold mb-3 text-text-secondary uppercase tracking-wider">Configurar provider</h3>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                     <div>
-                        <label className="block text-xs text-text-secondary mb-1">Provider Type</label>
+                        <label className="block text-xs text-text-secondary mb-1">Tipo de Provider</label>
                         <select
                             value={providerType}
                             onChange={(e) => {
@@ -239,7 +253,7 @@ export const ProviderSettings: React.FC = () => {
                             className="w-full bg-surface-0 border border-border-primary rounded p-2 text-sm text-text-primary"
                         >
                             {(providerTypes.length > 0 ? providerTypes : ['openai', 'codex', 'ollama_local', 'groq', 'openrouter', 'custom_openai_compatible']).map((canonical) => (
-                                <option key={canonical} value={canonical}>{canonical}</option>
+                                <option key={canonical} value={canonical}>{PROVIDER_LABELS[canonical] || canonical}</option>
                             ))}
                         </select>
                     </div>
@@ -277,8 +291,7 @@ export const ProviderSettings: React.FC = () => {
                                                                 setProviderId('ollama-main');
                                                                 setModelId(m.id);
                                                                 setAuthMode('none');
-                                                                // Esperar un tick para que react actualice el estado antes de guardar
-                                                                setTimeout(() => handleSaveAsActive(), 50);
+                                                                void handleSaveAsActive({ providerId: 'ollama-main', modelId: m.id, authMode: 'none' });
                                                             }}
                                                         >
                                                             Asignar Orchestrator
@@ -324,15 +337,11 @@ export const ProviderSettings: React.FC = () => {
                                                         className="bg-surface-3 hover:bg-accent-primary hover:text-white transition-colors text-xs"
                                                         onClick={() => {
                                                             setModelId(m.id);
-                                                            // Esperar que React refresque el estado de modelId antes de saltar la instalación
-                                                            setTimeout(() => {
-                                                                const installBtn = document.getElementById('hidden-install-btn');
-                                                                if (installBtn) installBtn.click();
-                                                            }, 100);
+                                                            void handleInstallAndUse(m.id);
                                                         }}
                                                     >
                                                         <Download className="w-3.5 h-3.5 mr-1" />
-                                                        Pull
+                                                        Descargar
                                                     </Button>
                                                 </div>
                                             ))}
@@ -347,12 +356,11 @@ export const ProviderSettings: React.FC = () => {
                                                         onChange={(e) => setModelId(e.target.value)}
                                                     />
                                                     <Button
-                                                        id="hidden-install-btn"
                                                         size="sm"
-                                                        title="Pull desde Ollama"
-                                                        className="bg-surface-3 hover:bg-accent-primary hover:text-white transition-colors text-xs shrink-0 h-8 w-8 p-0 flex items-center justify-center hidden-button-visible"
+                                                        title="Descargar desde Ollama"
+                                                        className="bg-surface-3 hover:bg-accent-primary hover:text-white transition-colors text-xs shrink-0 h-8 w-8 p-0 flex items-center justify-center"
                                                         onClick={() => {
-                                                            if (modelId) handleInstallAndUse();
+                                                            if (modelId) void handleInstallAndUse();
                                                             else addToast('Escribe el tag del modelo', 'info');
                                                         }}
                                                     >
@@ -475,7 +483,7 @@ export const ProviderSettings: React.FC = () => {
                             <Button onClick={handleTestConnection} className="bg-surface-3 hover:bg-surface-3 text-white">
                                 Probar conexión
                             </Button>
-                            <Button onClick={handleSaveAsActive} className="bg-indigo-600 hover:bg-indigo-500 text-white">
+                            <Button onClick={() => void handleSaveAsActive()} className="bg-indigo-600 hover:bg-indigo-500 text-white">
                                 Guardar como provider activo
                             </Button>
                         </>
@@ -495,7 +503,7 @@ export const ProviderSettings: React.FC = () => {
                 {!selectedModelInstalados && supportsInstall && modelId ? (
                     <div className="mt-4 p-3 rounded border border-border-primary bg-surface-0 flex items-center justify-between gap-3">
                         <div className="text-xs text-text-primary">Modelo no instalado. ¿Quieres descargarlo ahora?</div>
-                        <Button onClick={handleInstallAndUse} className="bg-accent-primary hover:bg-accent-primary/80 text-white text-xs px-3 py-2">
+                        <Button onClick={() => void handleInstallAndUse()} className="bg-accent-primary hover:bg-accent-primary/80 text-white text-xs px-3 py-2">
                             <Download className="w-3.5 h-3.5 mr-1" />
                             Descargar y usar
                         </Button>
@@ -542,8 +550,8 @@ export const ProviderSettings: React.FC = () => {
                             />
                         </div>
                         <div className="flex justify-between mt-1 text-xs text-text-secondary">
-                            <span>Load: {node.current_load} / {node.max_concurrency} agents</span>
-                            <span>{node.current_load >= node.max_concurrency ? 'FULL' : 'AVAILABLE'}</span>
+                            <span>Carga: {node.current_load} / {node.max_concurrency} agentes</span>
+                            <span>{node.current_load >= node.max_concurrency ? 'LLENO' : 'DISPONIBLE'}</span>
                         </div>
                     </Card>
                 ))}
@@ -563,8 +571,8 @@ export const ProviderSettings: React.FC = () => {
                                 {p.is_local ? <Cpu className="w-5 h-5" /> : <Cloud className="w-5 h-5" />}
                             </div>
                             <div>
-                                <div className="font-medium text-text-primary">{p.id}</div>
-                                <div className="text-xs text-text-secondary uppercase">{p.type} • {p.is_local ? 'Local' : 'Cloud'}</div>
+                                <div className="font-medium text-text-primary">{p.config?.display_name || PROVIDER_LABELS[p.type] || p.id}</div>
+                                <div className="text-xs text-text-secondary uppercase">{PROVIDER_LABELS[p.type] || p.type} • {p.is_local ? 'Local' : 'Cloud'}</div>
                                 {p.capabilities && (
                                     <div className="text-[10px] text-text-secondary mt-1">
                                         auth: {(p.capabilities.auth_modes_supported || []).join(', ') || 'n/a'}
@@ -578,16 +586,26 @@ export const ProviderSettings: React.FC = () => {
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => testProvider(p.id)}
+                                onClick={async () => {
+                                    const result = await testProvider(p.id);
+                                    addToast(result.message, result.healthy ? 'success' : 'error');
+                                }}
                                 className="text-text-secondary hover:text-text-primary"
                             >
                                 <Activity className="w-4 h-4 mr-1" />
-                                Test
+                                Probar
                             </Button>
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => removeProvider(p.id)}
+                                onClick={async () => {
+                                    try {
+                                        await removeProvider(p.id);
+                                        addToast(`Provider ${p.config?.display_name || p.id} eliminado`, 'info');
+                                    } catch (err: any) {
+                                        addToast(err?.message || 'No se pudo eliminar el provider', 'error');
+                                    }
+                                }}
                                 className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
                             >
                                 <Trash2 className="w-4 h-4" />

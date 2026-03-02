@@ -29,7 +29,7 @@ export default function GraphView({
     const selectNode = useAppStore((s) => s.selectNode);
     const isChatCollapsed = useAppStore((s) => s.isChatCollapsed);
     const toggleChat = useAppStore((s) => s.toggleChat);
-    const setActiveTab = useAppStore((s) => s.setActiveTab);
+    const navigate = useAppStore((s) => s.navigate);
     const setActivePlanIdFromChat = useAppStore((s) => s.setActivePlanIdFromChat);
 
     return (
@@ -37,8 +37,8 @@ export default function GraphView({
             {graphNodeCount === 0 ? (
                 <WelcomeScreen
                     onNewPlan={onNewPlan}
-                    onConnectProvider={() => setActiveTab('settings')}
-                    onOpenRepo={() => setActiveTab('operations')}
+                    onConnectProvider={() => navigate('settings')}
+                    onOpenRepo={() => navigate('operations')}
                     onOpenCommandPalette={() => useAppStore.getState().toggleCommandPalette(true)}
                     providerConnected={providerHealth.connected}
                     providerName={providerHealth.providerName}
@@ -77,7 +77,7 @@ export default function GraphView({
                                         isCollapsed={false}
                                         providerConnected={providerHealth.connected}
                                         onPlanGenerated={(planId) => setActivePlanIdFromChat(planId)}
-                                        onNavigateToSettings={() => setActiveTab('settings')}
+                                        onNavigateToSettings={() => navigate('settings')}
                                     />
                                 </ResizePanel>
                             </>
@@ -97,7 +97,7 @@ export default function GraphView({
                                 isCollapsed={true}
                                 providerConnected={providerHealth.connected}
                                 onPlanGenerated={(planId) => setActivePlanIdFromChat(planId)}
-                                onNavigateToSettings={() => setActiveTab('settings')}
+                                onNavigateToSettings={() => navigate('settings')}
                             />
                         </div>
                     )}

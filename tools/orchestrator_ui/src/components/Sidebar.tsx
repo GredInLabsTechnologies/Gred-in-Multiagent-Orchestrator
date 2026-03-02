@@ -1,60 +1,31 @@
+import React from 'react';
 import { motion } from 'framer-motion';
-import {
-    Network,
-    ClipboardList,
-    BarChart2,
-    Activity,
-    Settings,
-} from 'lucide-react';
-
-export type SidebarTab =
-    | 'graph'
-    | 'plans'
-    | 'evals'
-    | 'metrics'
-    | 'security'
-    | 'operations'
-    | 'settings'
-    | 'mastery';
-
-interface SidebarProps {
-    activeTab: SidebarTab;
-    onTabChange: (tab: SidebarTab) => void;
-}
-
-/* ── Tab definitions ─────────────────────────────────────── */
+import { Network, ClipboardList, Settings } from 'lucide-react';
+import { useAppStore, SidebarTab } from '../stores/appStore';
 
 interface TabDef {
     id: SidebarTab;
     icon: typeof Network;
     label: string;
-    shortcut?: string;
 }
 
-const workflowTabs: TabDef[] = [
-    { id: 'graph', icon: Network, label: 'Grafo', shortcut: '1' },
-    { id: 'plans', icon: ClipboardList, label: 'Planes', shortcut: '2' },
-    { id: 'evals', icon: BarChart2, label: 'Evals', shortcut: '3' },
+const tabs: TabDef[] = [
+    { id: 'graph', icon: Network, label: 'Grafo' },
+    { id: 'plans', icon: ClipboardList, label: 'Planes' },
 ];
 
-const analyticsTabs: TabDef[] = [
-    { id: 'metrics', icon: Activity, label: 'Métricas', shortcut: '4' },
-];
+export const Sidebar: React.FC = () => {
+    const activeTab = useAppStore((s) => s.activeTab);
+    const setActiveTab = useAppStore((s) => s.setActiveTab);
+    const openOverlay = useAppStore((s) => s.openOverlay);
 
-const systemTabs: TabDef[] = [
-    { id: 'settings', icon: Settings, label: 'Ajustes', shortcut: '5' },
-];
-
-/* ── Component ───────────────────────────────────────────── */
-
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
     const renderTab = ({ id, icon: Icon, label }: TabDef) => {
         const isActive = activeTab === id;
 
         return (
             <button
                 key={id}
-                onClick={() => onTabChange(id)}
+                onClick={() => setActiveTab(id)}
                 aria-label={label}
                 aria-current={isActive ? 'page' : undefined}
                 className={`
@@ -65,7 +36,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
                         : 'text-text-secondary hover:text-text-primary'}
                 `}
             >
-                {/* Active indicator — glow bar */}
+                {/* Active indicator — animated background */}
                 {isActive && (
                     <motion.div
                         layoutId="sidebar-active"
@@ -102,28 +73,32 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
         <aside
             role="navigation"
             aria-label="Navegación principal"
-            className="w-[72px] bg-surface-0/80 backdrop-blur-xl border-r border-white/[0.04] flex flex-col py-3 px-1.5 shrink-0 overflow-y-auto"
+            className="w-[72px] bg-surface-0/80 backdrop-blur-xl border-r border-white/[0.04] flex flex-col py-3 px-1.5 shrink-0"
         >
-            {/* Workflow group */}
+            {/* Primary tabs */}
             <div className="space-y-1">
-                {workflowTabs.map(renderTab)}
-            </div>
-
-            {/* Divider */}
-            <div className="h-px bg-white/[0.04] mx-3 my-2.5" />
-
-            {/* Analytics group */}
-            <div className="space-y-1">
-                {analyticsTabs.map(renderTab)}
+                {tabs.map(renderTab)}
             </div>
 
             {/* Spacer */}
             <div className="flex-1" />
 
-            {/* System group — pinned to bottom */}
-            <div className="space-y-1">
-                {systemTabs.map(renderTab)}
-            </div>
+            {/* Settings gear — opens overlay */}
+            <button
+                onClick={() => openOverlay('settings')}
+                aria-label="Ajustes"
+                className="w-full px-2 py-2.5 rounded-xl flex flex-col items-center justify-center gap-1.5 text-text-secondary hover:text-text-primary transition-all duration-200 group active:scale-[0.96] relative"
+            >
+                <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 bg-surface-3/30 backdrop-blur-sm border border-white/[0.03] transition-opacity duration-200" />
+                <Settings size={20} className="relative z-10" />
+                <span className="relative z-10 text-[9px] font-semibold uppercase tracking-wider leading-none">Ajustes</span>
+            </button>
         </aside>
     );
 };
+
+/**
+ * Re-export SidebarTab from store for backward compatibility
+ * with components that import from Sidebar.
+ */
+export type { SidebarTab } from '../stores/appStore';

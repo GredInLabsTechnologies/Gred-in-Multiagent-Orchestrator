@@ -1,5 +1,18 @@
 # GIMO UI Masterplan: Transformacion Apple-Level
 
+> **Principio central**: El grafo ES la app. Todo lo demas son overlays contextuales.
+> Settings, Evals, Analytics, Security → overlays/drawers sobre el grafo, nunca tabs que reemplazan la vista.
+> Lo que no es TOTALMENTE necesario se abstrae y muestra de forma ambiental (StatusBar) o bajo demanda (Ctrl+K, overlays).
+
+## Estado de implementacion
+- [x] Fase 0 — Cimientos (zustand, framer-motion, design tokens, App.tsx migrado)
+- [x] Fase 1 — Sidebar, MenuBar, StatusBar rediseñados
+- [ ] Fase 1.5 — Reduccion de navegacion: overlays para Settings/Evals/Analytics
+- [ ] Fase 2 — Graph Canvas rewrite
+- [ ] Fase 3 — Chat & Comunicacion
+- [ ] Fase 4 — Overlays secundarios (Settings, Analytics, Evals)
+- [ ] Fase 5 — Polish & Micro-interacciones
+
 ## Contexto
 
 La UI de GIMO es funcional pero **generica**. Parece un dashboard oscuro mas, no un producto premium. Los problemas raiz:

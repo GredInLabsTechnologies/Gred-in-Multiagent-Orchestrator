@@ -1,5 +1,6 @@
 import React from 'react';
-import { FolderOpen, Keyboard, PlugZap, Sparkles } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { FolderOpen, Keyboard, Sparkles, CheckCircle2, ArrowRight } from 'lucide-react';
 
 interface WelcomeScreenProps {
     onNewPlan: () => void;
@@ -11,19 +12,90 @@ interface WelcomeScreenProps {
     providerModel?: string;
 }
 
-const WelcomeButton = ({ icon, title, description, onClick }: { icon: React.ReactNode, title: string, description: string, onClick: () => void }) => (
-    <button
-        onClick={onClick}
-        className="group relative h-28 rounded-2xl border border-border-primary bg-surface-2/50 p-4 text-left transition-all hover:border-accent-primary/50 hover:bg-accent-primary/5 shadow-sm hover:shadow-[0_0_12px_var(--glow-primary)]"
+/* ── Stepper step ── */
+interface StepProps {
+    number: number;
+    title: string;
+    description: string;
+    done: boolean;
+    active: boolean;
+    action?: { label: string; onClick: () => void };
+    delay: number;
+}
+
+const Step: React.FC<StepProps> = ({ number, title, description, done, active, action, delay }) => (
+    <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 25, delay }}
+        className={`flex items-start gap-4 p-4 rounded-xl border transition-all ${
+            done
+                ? 'border-emerald-500/20 bg-emerald-500/5'
+                : active
+                    ? 'border-accent-primary/30 bg-accent-primary/5 shadow-lg shadow-accent-primary/5'
+                    : 'border-white/[0.04] bg-surface-2/30 opacity-50'
+        }`}
     >
-        <div className="mb-3 transition-transform group-hover:scale-110 group-hover:-rotate-3">
+        <div
+            className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-sm font-bold ${
+                done
+                    ? 'bg-emerald-500/20 text-emerald-400'
+                    : active
+                        ? 'bg-accent-primary/20 text-accent-primary'
+                        : 'bg-surface-3 text-text-tertiary'
+            }`}
+        >
+            {done ? <CheckCircle2 size={16} /> : number}
+        </div>
+        <div className="flex-1 min-w-0">
+            <div className={`text-sm font-semibold ${done ? 'text-emerald-400' : 'text-text-primary'}`}>
+                {title}
+            </div>
+            <div className="text-[11px] text-text-secondary mt-0.5 leading-relaxed">
+                {description}
+            </div>
+            {action && active && !done && (
+                <button
+                    onClick={action.onClick}
+                    className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-primary text-white text-[11px] font-bold hover:bg-accent-primary/85 active:scale-[0.97] transition-all"
+                >
+                    {action.label}
+                    <ArrowRight size={12} />
+                </button>
+            )}
+        </div>
+    </motion.div>
+);
+
+/* ── Quick action card ── */
+const QuickAction = ({
+    icon,
+    title,
+    description,
+    onClick,
+    delay,
+}: {
+    icon: React.ReactNode;
+    title: string;
+    description: string;
+    onClick: () => void;
+    delay: number;
+}) => (
+    <motion.button
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 25, delay }}
+        onClick={onClick}
+        className="group relative rounded-xl border border-white/[0.04] bg-surface-2/40 backdrop-blur-lg p-4 text-left transition-all hover:border-accent-primary/30 hover:bg-accent-primary/5 hover:shadow-lg hover:shadow-accent-primary/5 hover:-translate-y-0.5"
+    >
+        <div className="mb-2.5 transition-transform group-hover:scale-110">
             {icon}
         </div>
-        <div className="text-sm font-bold text-text-primary tracking-tight">{title}</div>
-        <div className="mt-1 text-[11px] leading-tight text-text-secondary group-hover:text-text-primary/70 transition-colors">
+        <div className="text-[13px] font-semibold text-text-primary">{title}</div>
+        <div className="mt-0.5 text-[10px] text-text-secondary leading-relaxed group-hover:text-text-primary/70 transition-colors">
             {description}
         </div>
-    </button>
+    </motion.button>
 );
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
@@ -36,75 +108,99 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     providerModel,
 }) => {
     return (
-        <section className="h-full w-full bg-surface-0 flex items-center justify-center p-6">
-            <div className="w-full max-w-3xl rounded-3xl border border-border-primary bg-surface-1 p-10 md:p-12 shadow-2xl relative overflow-hidden">
-                {/* Decorative background element */}
-                <div className="absolute top-0 right-0 w-64 h-64 bg-accent-primary/10 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2" />
+        <section className="h-full w-full bg-surface-0 flex items-center justify-center p-6 relative overflow-hidden">
+            {/* Background glow */}
+            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-accent-primary/8 blur-[120px] rounded-full pointer-events-none" />
 
-                <div className="relative">
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-border-primary bg-surface-3 text-accent-primary text-[10px] uppercase font-black tracking-widest mb-6 animate-in fade-in slide-in-from-bottom-2 duration-1000">
-                        <Sparkles size={12} className="animate-pulse" /> GIMO Orquestador
+            <div className="w-full max-w-2xl relative z-10">
+                {/* Header */}
+                <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                    className="text-center mb-10"
+                >
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/[0.06] bg-surface-2/60 backdrop-blur text-accent-primary text-[10px] uppercase font-black tracking-widest mb-4">
+                        <Sparkles size={11} className="animate-pulse" />
+                        GIMO Orchestrator
                     </div>
-
-                    <h1 className="text-3xl md:text-4xl font-black text-text-primary tracking-tighter mb-4">
-                        Bienvenido al Sistema
+                    <h1 className="text-3xl font-black text-text-primary tracking-tight">
+                        Bienvenido
                     </h1>
-
-                    {providerConnected ? (
-                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-medium mb-6">
-                            <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                            Conectado a {providerName || 'Provider'} {providerModel ? `/ ${providerModel}` : ''}
-                        </div>
-                    ) : (
-                        <button
-                            onClick={onConnectProvider}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 text-xs font-medium mb-6 hover:bg-red-500/20 transition-colors"
-                        >
-                            <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
-                            Sin provider configurado — click para configurar
-                        </button>
-                    )}
-
-                    <p className="text-sm text-text-secondary max-w-xl leading-relaxed mb-10">
+                    <p className="text-sm text-text-secondary mt-2 max-w-md mx-auto">
                         {providerConnected
-                            ? 'El sistema está listo. Crea un nuevo plan desde el chat o en modo edición, conecta dependencias entre nodos y ejecuta.'
-                            : 'Configura un provider de IA primero para poder generar y ejecutar planes de orquestación.'}
+                            ? 'El sistema esta listo. Sigue los pasos para crear tu primer plan.'
+                            : 'Configura un provider de IA para empezar a orquestar.'}
                     </p>
+                </motion.div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <WelcomeButton
-                            icon={<Sparkles className="w-5 h-5 text-accent-primary" />}
-                            title="Nuevo Plan"
-                            description="Inicia un flujo de trabajo guiado para crear una secuencia de tareas."
-                            onClick={onNewPlan}
-                        />
-                        <WelcomeButton
-                            icon={<PlugZap className="w-5 h-5 text-accent-warning" />}
-                            title="Proveedores"
-                            description="Configura tus modelos LLM y claves de API para la inferencia."
-                            onClick={onConnectProvider}
-                        />
-                        <WelcomeButton
-                            icon={<FolderOpen className="w-5 h-5 text-accent-trust" />}
-                            title="Repositorio"
-                            description="Selecciona y audita el directorio de trabajo actual del sistema."
-                            onClick={onOpenRepo}
-                        />
-                        <WelcomeButton
-                            icon={<Keyboard className="w-5 h-5 text-text-secondary" />}
-                            title="Comandos"
-                            description="Abre la paleta de comandos para acceso rápido a utilidades."
-                            onClick={onOpenCommandPalette}
-                        />
-                    </div>
-
-                    <button
-                        onClick={onOpenCommandPalette}
-                        className="mt-10 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-accent-primary/70 hover:text-accent-primary transition-colors"
-                    >
-                        <Keyboard size={14} /> Presiona <span className="bg-surface-3 px-1.5 py-0.5 rounded border border-border-primary mx-1 text-text-primary">Ctrl+K</span> para buscar
-                    </button>
+                {/* Stepper */}
+                <div className="space-y-3 mb-10">
+                    <Step
+                        number={1}
+                        title="Conectar Provider"
+                        description={
+                            providerConnected
+                                ? `Conectado a ${providerName || 'Provider'}${providerModel ? ` / ${providerModel}` : ''}`
+                                : 'Configura tu modelo LLM y clave de API para la inferencia.'
+                        }
+                        done={!!providerConnected}
+                        active={!providerConnected}
+                        action={{ label: 'Configurar', onClick: onConnectProvider }}
+                        delay={0.1}
+                    />
+                    <Step
+                        number={2}
+                        title="Crear tu primer plan"
+                        description="Describe un workflow en el chat o crea nodos manualmente en modo edicion."
+                        done={false}
+                        active={!!providerConnected}
+                        action={{ label: 'Nuevo Plan', onClick: onNewPlan }}
+                        delay={0.2}
+                    />
+                    <Step
+                        number={3}
+                        title="Explorar el sistema"
+                        description="Usa Ctrl+K para acceso rapido, configura repositorios y revisa herramientas."
+                        done={false}
+                        active={!!providerConnected}
+                        delay={0.3}
+                    />
                 </div>
+
+                {/* Quick actions */}
+                <div className="grid grid-cols-2 gap-3">
+                    <QuickAction
+                        icon={<FolderOpen size={18} className="text-accent-trust" />}
+                        title="Repositorio"
+                        description="Selecciona el directorio de trabajo."
+                        onClick={onOpenRepo}
+                        delay={0.35}
+                    />
+                    <QuickAction
+                        icon={<Keyboard size={18} className="text-text-secondary" />}
+                        title="Comandos"
+                        description="Paleta de acceso rapido."
+                        onClick={onOpenCommandPalette}
+                        delay={0.4}
+                    />
+                </div>
+
+                {/* Keyboard hint */}
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.5 }}
+                    className="text-center mt-8"
+                >
+                    <span className="text-[10px] text-text-tertiary">
+                        Presiona{' '}
+                        <kbd className="bg-surface-3/60 px-1.5 py-0.5 rounded border border-white/[0.06] text-text-secondary mx-0.5 font-mono">
+                            Ctrl+K
+                        </kbd>{' '}
+                        para buscar
+                    </span>
+                </motion.div>
             </div>
         </section>
     );

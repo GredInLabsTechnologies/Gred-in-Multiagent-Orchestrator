@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown } from 'lucide-react';
-import type { SidebarTab } from './Sidebar';
 import { useAppStore } from '../stores/appStore';
 
 type MenuId = 'file' | 'edit' | 'tools' | 'help';
@@ -9,8 +8,8 @@ type MenuId = 'file' | 'edit' | 'tools' | 'help';
 interface MenuBarProps {
     status?: any;
     onNewPlan: () => void;
-    onSelectView: (tab: SidebarTab) => void;
-    onSelectSettingsView: (tab: SidebarTab) => void;
+    onSelectView: (target: string) => void;
+    onSelectSettingsView: (target: string) => void;
     onRefreshSession: () => void;
     onOpenCommandPalette: () => void;
     onMcpSync: () => void;

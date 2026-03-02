@@ -233,10 +233,23 @@ async def lifespan(app: FastAPI):
     run_worker = RunWorker()
     await run_worker.start()
 
+    # Start Hardware Monitor
+    from tools.gimo_server.services.hardware_monitor_service import HardwareMonitorService
+    hw_monitor = HardwareMonitorService.get_instance()
+    try:
+        from tools.gimo_server.services.ops_service import OpsService
+        cfg = OpsService.get_config()
+        if cfg.economy.hardware_thresholds:
+            hw_monitor.update_thresholds(cfg.economy.hardware_thresholds)
+    except Exception:
+        pass
+    await hw_monitor.start_monitoring()
+
     yield
 
     # Shutdown: Clean up resources
     logger.info("Shutting down Repo Orchestrator...")
+    await hw_monitor.stop_monitoring()
     if hasattr(app.state, "gics"):
         app.state.gics.stop_daemon()
     await run_worker.stop()

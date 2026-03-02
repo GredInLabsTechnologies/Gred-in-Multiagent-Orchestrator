@@ -1,7 +1,19 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Zap } from 'lucide-react';
+import { Zap, Cpu } from 'lucide-react';
+import { API_BASE } from '../types';
 import type { ProviderHealth } from '../hooks/useProviderHealth';
+
+interface HardwareState {
+    cpu_percent: number;
+    ram_percent: number;
+    ram_available_gb: number;
+    load_level: 'safe' | 'caution' | 'critical';
+    available_models: number;
+    local_models: number;
+    remote_models: number;
+    local_safe: boolean;
+}
 
 interface StatusBarProps {
     providerHealth: ProviderHealth;
@@ -18,8 +30,28 @@ export const StatusBar: React.FC<StatusBarProps> = ({
     onNavigateToSettings,
     onNavigateToMastery,
 }) => {
+    const [hw, setHw] = useState<HardwareState | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        const poll = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/ops/mastery/hardware`, { credentials: 'include' });
+                if (res.ok && active) setHw(await res.json());
+            } catch { /* ignore */ }
+        };
+        poll();
+        const id = setInterval(poll, 15_000);
+        return () => { active = false; clearInterval(id); };
+    }, []);
+
     const isConnected = providerHealth.connected;
     const isDegraded = providerHealth.health === 'degraded';
+
+    const hwColor = !hw ? 'text-text-tertiary'
+        : hw.load_level === 'critical' ? 'text-red-400'
+        : hw.load_level === 'caution' ? 'text-amber-400'
+        : 'text-emerald-400';
 
     const dotColor = isConnected
         ? 'bg-emerald-400'
@@ -28,7 +60,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             : 'bg-red-400';
 
     const providerLabel = isConnected
-        ? `${providerHealth.providerName || 'Provider'} · ${providerHealth.model || ''}`.trim()
+        ? [providerHealth.providerName || 'Provider', providerHealth.model].filter(Boolean).join(' · ')
         : 'Sin provider';
 
     return (
@@ -68,10 +100,23 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
             </button>
 
-            {/* Center: service status */}
-            <div className="flex items-center gap-1.5 font-mono text-text-tertiary">
-                <Zap size={9} className={serviceStatus === 'running' ? 'text-accent-primary' : ''} />
-                <span>{serviceStatus || 'idle'}</span>
+            {/* Center: hardware + service status */}
+            <div className="flex items-center gap-3 font-mono text-text-tertiary">
+                {hw && (
+                    <span
+                        className={`flex items-center gap-1 ${hwColor}`}
+                        title={`CPU: ${hw.cpu_percent.toFixed(0)}% | RAM: ${hw.ram_percent.toFixed(0)}% (${hw.ram_available_gb} GB libres)\nModelos: ${hw.available_models} (${hw.local_models} local, ${hw.remote_models} remoto)\nLocal seguro: ${hw.local_safe ? 'Si' : 'No'}`}
+                    >
+                        <Cpu size={10} />
+                        <span>{hw.cpu_percent.toFixed(0)}%</span>
+                        <span className="text-text-tertiary/50">|</span>
+                        <span>{hw.ram_percent.toFixed(0)}%</span>
+                    </span>
+                )}
+                <span className="flex items-center gap-1">
+                    <Zap size={9} className={serviceStatus === 'running' ? 'text-accent-primary' : ''} />
+                    <span>{serviceStatus || 'idle'}</span>
+                </span>
             </div>
 
             {/* Right: version + mastery link */}
