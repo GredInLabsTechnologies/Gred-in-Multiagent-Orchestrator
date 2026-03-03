@@ -10,6 +10,7 @@ from tools.gimo_server.ops_models import (
 from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.storage_service import StorageService
 from tools.gimo_server.services.graph_engine import GraphEngine
+from tools.gimo_server.services.observability_service import ObservabilityService
 from tools.gimo_server.services.confidence_service import ConfidenceService
 from tools.gimo_server.services.trust_engine import TrustEngine
 from tools.gimo_server.services.custom_plan_service import CustomPlanService
@@ -32,6 +33,16 @@ async def approve_draft(
     _require_role(auth, "operator")
     actor = _actor_label(auth)
     OpsService.set_gics(getattr(request.app.state, "gics", None))
+
+    draft = OpsService.get_draft(draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    context = dict(draft.context or {})
+    execution_decision = str(context.get("execution_decision") or "")
+
+    if execution_decision == "RISK_SCORE_TOO_HIGH":
+        raise HTTPException(status_code=409, detail="RISK_SCORE_TOO_HIGH")
+
     try:
         approved = OpsService.approve_draft(draft_id, approved_by=actor)
     except ValueError as exc:
@@ -39,10 +50,12 @@ async def approve_draft(
     audit_log("OPS", f"/ops/drafts/{draft_id}/approve", approved.id, operation="WRITE", actor=actor)
 
     # Check if draft has a linked CustomPlan — execute via unified engine
-    draft = OpsService.get_draft(draft_id)
-    custom_plan_id = (draft.context or {}).get("custom_plan_id") if draft else None
+    custom_plan_id = context.get("custom_plan_id")
 
     should_run = auto_run if auto_run is not None else OpsService.get_config().default_auto_run
+    if should_run and execution_decision != "AUTO_RUN_ELIGIBLE":
+        should_run = False
+
     run = None
     if should_run:
         if custom_plan_id:
@@ -136,6 +149,46 @@ async def get_run(
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+
+@router.get("/runs/{run_id}/preview")
+async def get_run_preview(
+    request: Request,
+    run_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    OpsService.set_gics(getattr(request.app.state, "gics", None))
+    request_id = str(
+        getattr(request.state, "request_id", "")
+        or request.headers.get("X-Request-ID", "")
+        or request.headers.get("X-Correlation-ID", "")
+    )
+    trace_id = str(
+        request.headers.get("X-Trace-ID", "")
+        or request.query_params.get("trace_id", "")
+    )
+    preview = OpsService.get_run_preview(run_id, request_id=request_id, trace_id=trace_id)
+    if not preview:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    ObservabilityService.record_structured_event(
+        event_type="run_preview_read",
+        status=str(preview.get("final_status") or preview.get("status") or ""),
+        trace_id=str(preview.get("trace_id") or trace_id),
+        request_id=str(preview.get("request_id") or request_id),
+        run_id=str(preview.get("run_id") or run_id),
+        actor=_actor_label(auth),
+        intent_class=str(preview.get("intent_effective") or ""),
+        repo_id="",
+        baseline_version=str(preview.get("baseline_version") or ""),
+        model_attempted=str(preview.get("model_attempted") or ""),
+        final_model_used=str(preview.get("final_model_used") or ""),
+        stage="preview",
+        latency_ms=0.0,
+        error_category="",
+    )
+    return preview
 
 @router.post(
     "/runs/{run_id}/cancel", 

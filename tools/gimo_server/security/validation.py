@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import HTTPException
 
 from tools.gimo_server.config import ALLOWLIST_PATH, ALLOWLIST_TTL_SECONDS, REPO_REGISTRY_PATH
+from tools.gimo_server.services.repo_override_service import RepoOverrideService
 
 from .common import load_json_db
 
@@ -23,6 +24,14 @@ def save_repo_registry(data: dict):
 
 
 def get_active_repo_dir() -> Path:
+    override = RepoOverrideService.get_active_override()
+    if override:
+        repo_id = override.get("repo_id")
+        if isinstance(repo_id, str) and repo_id:
+            path = Path(repo_id).resolve()
+            if path.exists():
+                return path
+
     registry = load_repo_registry()
     active = registry.get("active_repo")
     if active:

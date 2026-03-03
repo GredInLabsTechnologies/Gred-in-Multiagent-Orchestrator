@@ -45,3 +45,15 @@ async def observability_trace_detail(
     
     audit_log("OPS", f"/ops/observability/traces/{trace_id}", "read", operation="READ", actor=_actor_label(auth))
     return trace
+
+
+@router.get("/observability/alerts")
+async def observability_alerts(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    alerts = ObservabilityService.get_alerts()
+    audit_log("OPS", "/ops/observability/alerts", str(len(alerts)), operation="READ", actor=_actor_label(auth))
+    return {"items": alerts, "count": len(alerts)}

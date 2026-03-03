@@ -149,6 +149,23 @@ def test_get_active_repo(client):
         assert response.json()["active_repo"] == "/mock/active"
 
 
+def test_get_active_repo_with_override(client):
+    with patch(
+        "tools.gimo_server.routes.RepoOverrideService.get_active_override",
+        return_value={
+            "repo_id": "/mock/override",
+            "etag": '"abc"',
+            "expires_at": "2099-01-01T00:00:00Z",
+            "set_by_user": "operator",
+        },
+    ):
+        response = client.get("/ui/repos/active")
+        assert response.status_code == 200
+        assert response.json()["active_repo"] == "/mock/override"
+        assert response.json()["override_active"] is True
+        assert response.headers.get("etag") == '"abc"'
+
+
 def test_open_repo_success(client, tmp_path):
     with patch("tools.gimo_server.routes.REPO_ROOT_DIR", tmp_path):
         repo = tmp_path / "myrepo"
@@ -175,10 +192,61 @@ def test_select_repo_success(client, tmp_path):
         repo.mkdir()
         with patch("tools.gimo_server.routes.load_repo_registry", return_value={"repos": []}):
             with patch("tools.gimo_server.routes.save_repo_registry") as mock_save:
+                with patch(
+                    "tools.gimo_server.routes.RepoOverrideService.set_human_override",
+                    return_value={"etag": '"etag1"', "expires_at": "2099-01-01T00:00:00Z"},
+                ):
+                    response = client.post(f"/ui/repos/select?path={repo}")
+                    assert response.status_code == 200
+                    mock_save.assert_called_once()
+                    assert response.json()["active_repo"] == str(repo.resolve())
+
+
+def test_select_repo_actions_blocked_when_override_active(tmp_path):
+    def override_actions():
+        return AuthContext(token="actions-token", role="actions")
+
+    app.dependency_overrides[verify_token] = override_actions
+    with TestClient(app) as client:
+        with patch("tools.gimo_server.routes.REPO_ROOT_DIR", tmp_path):
+            repo = tmp_path / "myrepo"
+            repo.mkdir()
+            with patch(
+                "tools.gimo_server.routes.RepoOverrideService.get_active_override",
+                return_value={"repo_id": str(repo), "etag": '"etag1"', "expires_at": "2099-01-01T00:00:00Z"},
+            ):
                 response = client.post(f"/ui/repos/select?path={repo}")
-                assert response.status_code == 200
-                mock_save.assert_called_once()
-                assert response.json()["active_repo"] == str(repo.resolve())
+                assert response.status_code == 403
+                assert response.json()["detail"] == "REPO_OVERRIDE_ACTIVE"
+    app.dependency_overrides.clear()
+
+
+def test_select_repo_etag_mismatch_returns_409(client, tmp_path):
+    with patch("tools.gimo_server.routes.REPO_ROOT_DIR", tmp_path):
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        with patch("tools.gimo_server.routes.load_repo_registry", return_value={"repos": []}):
+            with patch("tools.gimo_server.routes.RepoOverrideService.set_human_override", side_effect=ValueError("OVERRIDE_ETAG_MISMATCH")):
+                response = client.post(
+                    f"/ui/repos/select?path={repo}",
+                    headers={"If-Match": '"bad"'},
+                )
+                assert response.status_code == 409
+                assert response.json()["detail"] == "OVERRIDE_ETAG_MISMATCH"
+
+
+def test_revoke_repo_override_success(client):
+    with patch("tools.gimo_server.routes.RepoOverrideService.revoke_human_override", return_value=True):
+        response = client.post("/ui/repos/revoke", headers={"If-Match": '"etag1"'})
+        assert response.status_code == 200
+        assert response.json()["revoked"] is True
+
+
+def test_revoke_repo_override_etag_mismatch(client):
+    with patch("tools.gimo_server.routes.RepoOverrideService.revoke_human_override", side_effect=ValueError("OVERRIDE_ETAG_MISMATCH")):
+        response = client.post("/ui/repos/revoke", headers={"If-Match": '"bad"'})
+        assert response.status_code == 409
+        assert response.json()["detail"] == "OVERRIDE_ETAG_MISMATCH"
 
 
 def test_select_repo_fail_outside(client, tmp_path):

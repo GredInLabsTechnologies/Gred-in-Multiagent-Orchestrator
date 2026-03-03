@@ -101,13 +101,15 @@ async def correlation_id_middleware(
     request: Request, call_next: Callable[[Request], Coroutine[None, None, Response]]
 ) -> Response:
     """Add correlation ID to request and response, and log the request."""
-    correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+    correlation_id = request.headers.get("X-Correlation-ID") or request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request.state.correlation_id = correlation_id
+    request.state.request_id = correlation_id
 
     start_time = time.perf_counter()
     response = await call_next(request)
     duration_ms = (time.perf_counter() - start_time) * 1000
     response.headers["X-Correlation-ID"] = correlation_id
+    response.headers["X-Request-ID"] = correlation_id
 
     logger.info(
         "Request handled",

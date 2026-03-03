@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+from collections import Counter
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Deque, Dict, List, Optional
@@ -73,9 +74,11 @@ class ObservabilityService:
 
     _lock = threading.RLock()
     _initialized = False
+    OBS_LOG_SCHEMA_VERSION = "1.0"
     
     # Internal buffer for UI compatibility
     _ui_spans: Deque[Dict[str, Any]] = deque(maxlen=5000)
+    _structured_events: Deque[Dict[str, Any]] = deque(maxlen=5000)
     _ui_metrics: Dict[str, Any] = {
         "workflows_total": 0,
         "nodes_total": 0,
@@ -83,6 +86,9 @@ class ObservabilityService:
         "tokens_total": 0,
         "cost_total_usd": 0.0,
     }
+    _stage_latency: Dict[str, List[float]] = {}
+    _run_outcome_counters: Counter[str] = Counter()
+    _error_category_counters: Counter[str] = Counter()
     
     # OTel components
     _tracer: trace.Tracer = None
@@ -246,9 +252,172 @@ class ObservabilityService:
             )
 
     @classmethod
+    def record_structured_event(
+        cls,
+        *,
+        event_type: str,
+        status: str,
+        trace_id: str,
+        request_id: str,
+        run_id: str,
+        actor: str = "",
+        intent_class: str = "",
+        repo_id: str = "",
+        baseline_version: str = "",
+        model_attempted: str = "",
+        final_model_used: str = "",
+        stage: str = "",
+        latency_ms: Optional[float] = None,
+        error_category: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Record Phase-8 structured observability event (versioned schema)."""
+        if not cls._initialized:
+            cls._initialize_sdk()
+
+        event = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "schema_version": cls.OBS_LOG_SCHEMA_VERSION,
+            "event_type": event_type,
+            "status": status,
+            "trace_id": trace_id,
+            "request_id": request_id,
+            "run_id": run_id,
+            "actor": actor,
+            "intent_class": intent_class,
+            "repo_id": repo_id,
+            "baseline_version": baseline_version,
+            "model_attempted": model_attempted,
+            "final_model_used": final_model_used,
+            "stage": stage,
+            "latency_ms": float(latency_ms or 0.0),
+            "error_category": error_category,
+            "metadata": metadata or {},
+        }
+
+        with cls._lock:
+            cls._structured_events.append(event)
+
+            if stage:
+                cls._stage_latency.setdefault(stage, []).append(float(latency_ms or 0.0))
+
+            if status == "FALLBACK_MODEL_USED":
+                cls._run_outcome_counters["fallback"] += 1
+            if status == "HUMAN_APPROVAL_REQUIRED":
+                cls._run_outcome_counters["human_approval_required"] += 1
+            if status in {"DRAFT_REJECTED_FORBIDDEN_SCOPE", "BASELINE_TAMPER_DETECTED"}:
+                cls._run_outcome_counters["policy_block"] += 1
+            if status:
+                cls._run_outcome_counters["total"] += 1
+            if error_category:
+                cls._error_category_counters[error_category] += 1
+
+        return event
+
+    @classmethod
+    def list_structured_events(cls, *, limit: int = 200) -> List[Dict[str, Any]]:
+        with cls._lock:
+            if limit <= 0:
+                return []
+            return list(cls._structured_events)[-limit:]
+
+    @classmethod
+    def get_alerts(cls) -> List[Dict[str, Any]]:
+        """Return Sev-0/Sev-1 alerts required by Phase 8 observability."""
+        metrics = cls.get_metrics()
+        alerts: List[Dict[str, Any]] = []
+
+        error_rate = float(metrics.get("error_rate", 0.0) or 0.0)
+        fallback_rate = float(metrics.get("fallback_rate", 0.0) or 0.0)
+        policy_block_rate = float(metrics.get("policy_block_rate", 0.0) or 0.0)
+        human_approval_rate = float(metrics.get("human_approval_required_rate", 0.0) or 0.0)
+        errors_by_category = dict(metrics.get("errors_by_category") or {})
+
+        if errors_by_category.get("baseline", 0) > 0:
+            alerts.append(
+                {
+                    "severity": "SEV-0",
+                    "code": "BASELINE_TAMPER_DETECTED",
+                    "message": "Baseline tamper events detected",
+                }
+            )
+
+        if error_rate >= 0.10:
+            alerts.append(
+                {
+                    "severity": "SEV-1",
+                    "code": "HIGH_ERROR_RATE",
+                    "message": f"Error rate is high ({error_rate:.2%})",
+                }
+            )
+        if fallback_rate >= 0.40:
+            alerts.append(
+                {
+                    "severity": "SEV-1",
+                    "code": "HIGH_FALLBACK_RATE",
+                    "message": f"Fallback rate is high ({fallback_rate:.2%})",
+                }
+            )
+        if policy_block_rate >= 0.30:
+            alerts.append(
+                {
+                    "severity": "SEV-1",
+                    "code": "HIGH_POLICY_BLOCK_RATE",
+                    "message": f"Policy block rate is high ({policy_block_rate:.2%})",
+                }
+            )
+        if human_approval_rate >= 0.70:
+            alerts.append(
+                {
+                    "severity": "SEV-1",
+                    "code": "HIGH_HUMAN_APPROVAL_RATE",
+                    "message": f"Human approval required rate is high ({human_approval_rate:.2%})",
+                }
+            )
+
+        return alerts
+
+    @classmethod
     def get_metrics(cls) -> Dict[str, Any]:
         with cls._lock:
-            return dict(cls._ui_metrics)
+            metrics = dict(cls._ui_metrics)
+
+            total_outcomes = max(1, int(cls._run_outcome_counters.get("total", 0)))
+            fallback_rate = float(cls._run_outcome_counters.get("fallback", 0)) / total_outcomes
+            human_approval_rate = float(cls._run_outcome_counters.get("human_approval_required", 0)) / total_outcomes
+            policy_block_rate = float(cls._run_outcome_counters.get("policy_block", 0)) / total_outcomes
+
+            latency_by_stage = {
+                stage: (sum(values) / len(values) if values else 0.0)
+                for stage, values in cls._stage_latency.items()
+            }
+            avg_latency = sum(latency_by_stage.values()) / len(latency_by_stage) if latency_by_stage else 0.0
+            error_rate = float(metrics.get("nodes_failed", 0)) / max(1, int(metrics.get("nodes_total", 0)))
+
+            # Fase 8 canonical metrics
+            metrics.update(
+                {
+                    "schema_version": cls.OBS_LOG_SCHEMA_VERSION,
+                    "latency_ms_by_stage": latency_by_stage,
+                    "fallback_rate": fallback_rate,
+                    "human_approval_required_rate": human_approval_rate,
+                    "policy_block_rate": policy_block_rate,
+                    "errors_by_category": dict(cls._error_category_counters),
+                }
+            )
+
+            # UI backward/forward compatibility aliases
+            metrics.update(
+                {
+                    "total_workflows": int(metrics.get("workflows_total", 0)),
+                    "active_workflows": int(cls._run_outcome_counters.get("total", 0)),
+                    "total_tokens": int(metrics.get("tokens_total", 0)),
+                    "estimated_cost": float(metrics.get("cost_total_usd", 0.0)),
+                    "error_rate": error_rate,
+                    "avg_latency_ms": avg_latency,
+                }
+            )
+            return metrics
 
     @classmethod
     def list_traces(cls, *, limit: int = 20) -> List[Dict[str, Any]]:
@@ -347,7 +516,11 @@ class ObservabilityService:
     def reset(cls) -> None:
         with cls._lock:
             cls._ui_spans.clear()
+            cls._structured_events.clear()
             cls._active_spans.clear()
+            cls._stage_latency = {}
+            cls._run_outcome_counters = Counter()
+            cls._error_category_counters = Counter()
             # Reset UI internal metrics
             for k in cls._ui_metrics:
                 cls._ui_metrics[k] = 0.0 if isinstance(cls._ui_metrics[k], float) else 0

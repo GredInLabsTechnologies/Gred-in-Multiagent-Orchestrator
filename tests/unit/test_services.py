@@ -4,6 +4,7 @@ import os
 from unittest.mock import MagicMock, AsyncMock, patch
 from tools.gimo_server.ops_models import WorkflowNode, TrustEvent, EvalDataset, EvalGateConfig, EvalGoldenCase, EvalJudgeConfig, WorkflowGraph
 from tools.gimo_server.services.model_router_service import ModelRouterService, RoutingDecision
+from tools.gimo_server.services.provider_service import ProviderService
 from tools.gimo_server.services.quality_service import QualityService
 from tools.gimo_server.services.llm_cache import NormalizedLLMCache
 from tools.gimo_server.services.storage_service import StorageService
@@ -42,6 +43,139 @@ class TestModelRouter:
         state = {"budget": {"max_cost_usd": 10.0}, "budget_counters": {"cost_usd": 9.5}}
         decision = await router.choose_model(node, state=state)
         assert decision.model != "unknown"
+
+    async def test_phase6_forced_local_for_security_change(self):
+        decision = ModelRouterService.resolve_phase6_strategy(
+            intent_effective="SECURITY_CHANGE",
+            path_scope=["tools/gimo_server/security/auth.py"],
+            primary_failure_reason="",
+        )
+        assert decision.final_model_used == ModelRouterService.PHASE6_FALLBACK_MODEL
+        assert decision.fallback_used is False
+        assert decision.strategy_reason == "forced_local_only"
+
+    async def test_phase6_400_never_fallback(self):
+        decision = ModelRouterService.resolve_phase6_strategy(
+            intent_effective="SAFE_REFACTOR",
+            path_scope=["tools/gimo_server/services/ops_service.py"],
+            primary_failure_reason="400",
+        )
+        assert decision.fallback_used is False
+        assert decision.final_model_used == ModelRouterService.PHASE6_PRIMARY_MODEL
+
+    async def test_phase6_429_uses_fallback(self):
+        decision = ModelRouterService.resolve_phase6_strategy(
+            intent_effective="SAFE_REFACTOR",
+            path_scope=["tools/gimo_server/services/ops_service.py"],
+            primary_failure_reason="429",
+        )
+        assert decision.fallback_used is True
+        assert decision.final_model_used == ModelRouterService.PHASE6_FALLBACK_MODEL
+        assert decision.final_status == "FALLBACK_MODEL_USED"
+
+    async def test_phase6_deterministic_decision(self):
+        kwargs = {
+            "intent_effective": "SAFE_REFACTOR",
+            "path_scope": ["tools/gimo_server/services/provider_service.py"],
+            "primary_failure_reason": "timeout",
+        }
+        a = ModelRouterService.resolve_phase6_strategy(**kwargs)
+        b = ModelRouterService.resolve_phase6_strategy(**kwargs)
+        assert a.strategy_decision_id == b.strategy_decision_id
+        assert a.final_model_used == b.final_model_used
+
+
+@pytest.mark.asyncio
+async def test_phase6_provider_strategy_no_fallback_on_policy_error():
+    with patch.object(ProviderService, "static_generate", new_callable=AsyncMock) as mock_generate:
+        mock_generate.side_effect = RuntimeError("policy check failed")
+        with pytest.raises(RuntimeError) as exc:
+            await ProviderService.static_generate_phase6_strategy(
+                prompt="hola",
+                context={},
+                intent_effective="SAFE_REFACTOR",
+                path_scope=["tools/gimo_server/services/ops_service.py"],
+            )
+        assert "PHASE6_NO_FALLBACK" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_phase6_provider_strategy_no_fallback_on_schema_error():
+    with patch.object(ProviderService, "static_generate", new_callable=AsyncMock) as mock_generate:
+        mock_generate.side_effect = RuntimeError("schema validation failed")
+        with pytest.raises(RuntimeError) as exc:
+            await ProviderService.static_generate_phase6_strategy(
+                prompt="hola",
+                context={},
+                intent_effective="SAFE_REFACTOR",
+                path_scope=["tools/gimo_server/services/ops_service.py"],
+            )
+        assert "PHASE6_NO_FALLBACK" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_phase6_provider_strategy_no_fallback_on_merge_gate_error():
+    with patch.object(ProviderService, "static_generate", new_callable=AsyncMock) as mock_generate:
+        mock_generate.side_effect = RuntimeError("merge gate failed")
+        with pytest.raises(RuntimeError) as exc:
+            await ProviderService.static_generate_phase6_strategy(
+                prompt="hola",
+                context={},
+                intent_effective="SAFE_REFACTOR",
+                path_scope=["tools/gimo_server/services/ops_service.py"],
+            )
+        assert "PHASE6_NO_FALLBACK" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_phase6_provider_strategy_fallback_on_429():
+    with patch.object(ProviderService, "static_generate", new_callable=AsyncMock) as mock_generate:
+        import httpx
+
+        req = httpx.Request("POST", "http://localhost/v1/chat/completions")
+        resp = httpx.Response(429, request=req)
+        mock_generate.side_effect = [
+            httpx.HTTPStatusError("too many requests", request=req, response=resp),
+            httpx.HTTPStatusError("too many requests", request=req, response=resp),
+            {"provider": "local_ollama", "model": "qwen3:8b", "content": "ok", "tokens_used": 1, "cost_usd": 0.0},
+        ]
+
+        result = await ProviderService.static_generate_phase6_strategy(
+            prompt="hola",
+            context={},
+            intent_effective="SAFE_REFACTOR",
+            path_scope=["tools/gimo_server/services/ops_service.py"],
+        )
+
+        assert result["fallback_used"] is True
+        assert result["failure_reason"] == "429"
+        assert result["execution_decision"] == "FALLBACK_MODEL_USED"
+        assert isinstance(result["fallback_count_window"], int)
+
+
+@pytest.mark.asyncio
+async def test_phase6_provider_strategy_fallback_on_5xx():
+    with patch.object(ProviderService, "static_generate", new_callable=AsyncMock) as mock_generate:
+        import httpx
+
+        req = httpx.Request("POST", "http://localhost/v1/chat/completions")
+        resp = httpx.Response(503, request=req)
+        mock_generate.side_effect = [
+            httpx.HTTPStatusError("service unavailable", request=req, response=resp),
+            httpx.HTTPStatusError("service unavailable", request=req, response=resp),
+            {"provider": "local_ollama", "model": "qwen3:8b", "content": "ok", "tokens_used": 1, "cost_usd": 0.0},
+        ]
+
+        result = await ProviderService.static_generate_phase6_strategy(
+            prompt="hola",
+            context={},
+            intent_effective="SAFE_REFACTOR",
+            path_scope=["tools/gimo_server/services/ops_service.py"],
+        )
+
+        assert result["fallback_used"] is True
+        assert result["failure_reason"] == "5xx"
+        assert result["execution_decision"] == "FALLBACK_MODEL_USED"
 
 # ── Quality Service ───────────────────────────────────────
 

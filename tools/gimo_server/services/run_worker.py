@@ -17,6 +17,7 @@ from typing import Optional
 
 from .ops_service import OpsService
 from .provider_service import ProviderService
+from .merge_gate_service import MergeGateService
 
 logger = logging.getLogger("orchestrator.run_worker")
 
@@ -116,6 +117,8 @@ class RunWorker:
         model: str,
         instructions: list,  # noqa: ARG002
         base_path: Optional[Path] = None,
+        intent_effective: str = "",
+        path_scope: Optional[list[str]] = None,
     ) -> bool:
         """
         Execute a file-write task via LLM. Returns True if handled.
@@ -164,9 +167,11 @@ class RunWorker:
                 f"just the exact content that should be written to the file."
             )
             llm_resp = await asyncio.wait_for(
-                ProviderService.static_generate(
+                ProviderService.static_generate_phase6_strategy(
                     prompt=generation_prompt,
-                    context={"mode": "worker_file_gen", "model": model}
+                    context={"mode": "worker_file_gen", "model": model},
+                    intent_effective=intent_effective,
+                    path_scope=list(path_scope or []),
                 ),
                 timeout=DEFAULT_RUN_TIMEOUT,
             )
@@ -207,6 +212,11 @@ class RunWorker:
         try:
             OpsService.update_run_status(run_id, "running", msg="Execution started")
 
+            # Fase 7 industrial merge gate is authoritative for run execution.
+            merged = await MergeGateService.execute_run(run_id)
+            if merged:
+                return
+
             run = OpsService.get_run(run_id)
             if not run:
                 return
@@ -222,6 +232,10 @@ class RunWorker:
                 f"--- CONTENT ---\n{approved.content}\n\n"
                 f"Provide the execution result."
             )
+
+            context_payload = dict((draft.context if (draft := OpsService.get_draft(approved.draft_id)) else {}) or {})
+            intent_effective = str(context_payload.get("intent_effective") or "")
+            path_scope = list((context_payload.get("repo_context") or {}).get("path_scope") or [])
 
             try:
                 # 1. Check if content is a structured JSON plan
@@ -266,7 +280,9 @@ class RunWorker:
 
                             file_result = await self._execute_file_task(
                                 run_id, tid, title, desc, agent_prompt, agent_model, agent_instructions,
-                                base_path=base_path
+                                base_path=base_path,
+                                intent_effective=intent_effective,
+                                path_scope=path_scope,
                             )
                             if file_result:
                                 continue
@@ -276,9 +292,11 @@ class RunWorker:
                             try:
                                 OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Sending to LLM ({agent_model})...")
                                 llm_resp = await asyncio.wait_for(
-                                    ProviderService.static_generate(
+                                    ProviderService.static_generate_phase6_strategy(
                                         prompt=agent_prompt,
-                                        context={"mode": "worker_execute", "model": agent_model}
+                                        context={"mode": "worker_execute", "model": agent_model},
+                                        intent_effective=intent_effective,
+                                        path_scope=path_scope,
                                     ),
                                     timeout=DEFAULT_RUN_TIMEOUT,
                                 )
@@ -295,11 +313,27 @@ class RunWorker:
 
                 # 2. Legacy/Simple execution (via LLM generation)
                 resp = await asyncio.wait_for(
-                    ProviderService.static_generate(prompt, context={"mode": "execute"}),
+                    ProviderService.static_generate_phase6_strategy(
+                        prompt=prompt,
+                        context={"mode": "execute"},
+                        intent_effective=intent_effective,
+                        path_scope=path_scope,
+                    ),
                     timeout=DEFAULT_RUN_TIMEOUT,
                 )
                 provider_name = resp["provider"]
                 result = resp["content"]
+                OpsService.append_log(
+                    run_id,
+                    level="INFO",
+                    msg=(
+                        "Model strategy: "
+                        f"attempted={resp.get('model_attempted','')} "
+                        f"failure_reason={resp.get('failure_reason','')} "
+                        f"final_model={resp.get('final_model_used', resp.get('model',''))} "
+                        f"fallback_used={bool(resp.get('fallback_used', False))}"
+                    ),
+                )
                 OpsService.append_log(run_id, level="INFO", msg=f"Provider: {provider_name}")
                 OpsService.append_log(run_id, level="INFO", msg=f"Result:\n{result[:2000]}")
                 OpsService.update_run_status(run_id, "done", msg="Execution completed")

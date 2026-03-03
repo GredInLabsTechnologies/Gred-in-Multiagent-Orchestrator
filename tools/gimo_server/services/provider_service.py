@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import json
+import time
 from typing import Any, Dict, Optional
 
 from ..config import OPS_DATA_DIR
@@ -12,6 +15,7 @@ from .provider_connector_service import ProviderConnectorService
 from .provider_auth_service import ProviderAuthService
 from .provider_state_service import ProviderStateService
 from .llm_cache import NormalizedLLMCache
+from .model_router_service import ModelRouterService
 
 logger = logging.getLogger("orchestrator.ops.provider")
 
@@ -299,6 +303,26 @@ class ProviderService:
         return await self.__class__.static_generate(prompt, context)
 
     _cache_instance: Optional[NormalizedLLMCache] = None
+    _FALLBACK_METRICS_FILE = OPS_DATA_DIR / "fallback_metrics.json"
+    _FALLBACK_WINDOW_SECONDS = 3600
+
+    @classmethod
+    def _record_fallback_and_get_window_count(cls) -> int:
+        """Track fallback events in a rolling time window (phase-6 metric)."""
+        now = int(time.time())
+        cutoff = now - cls._FALLBACK_WINDOW_SECONDS
+        OPS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        events: list[int] = []
+        try:
+            if cls._FALLBACK_METRICS_FILE.exists():
+                raw = json.loads(cls._FALLBACK_METRICS_FILE.read_text(encoding="utf-8") or "{}")
+                events = [int(x) for x in (raw.get("events") or []) if int(x) >= cutoff]
+        except Exception:
+            events = []
+        events.append(now)
+        payload = {"window_seconds": cls._FALLBACK_WINDOW_SECONDS, "events": events}
+        cls._FALLBACK_METRICS_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return len(events)
 
     @classmethod
     def _get_cache(cls, ttl_hours: int = 24) -> NormalizedLLMCache:
@@ -392,6 +416,119 @@ class ProviderService:
             })
 
         return result
+
+    @classmethod
+    async def static_generate_phase6_strategy(
+        cls,
+        *,
+        prompt: str,
+        context: Dict[str, Any],
+        intent_effective: str,
+        path_scope: list[str],
+    ) -> Dict[str, Any]:
+        """Phase-6 deterministic cloud/local strategy resolver execution.
+
+        Rules:
+        - Primary: qwen3-coder:480b-cloud
+        - Fallback: qwen3:8b (local)
+        - Fallback only on: 429, session/weekly limits, timeout, network error, 5xx
+        - No fallback on: 400, policy/schema/merge-gate errors
+        - SECURITY_CHANGE / CORE_RUNTIME_CHANGE / sensitive scope => local-only
+        """
+
+        safe_context = dict(context or {})
+        decision = ModelRouterService.resolve_phase6_strategy(
+            intent_effective=str(intent_effective or ""),
+            path_scope=list(path_scope or []),
+            primary_failure_reason="",
+        )
+
+        if decision.strategy_reason == "forced_local_only":
+            local_result = await cls.static_generate(
+                prompt,
+                {**safe_context, "model": decision.final_model_used},
+            )
+            local_result.update(
+                {
+                    "strategy_decision_id": decision.strategy_decision_id,
+                    "strategy_reason": decision.strategy_reason,
+                    "model_attempted": decision.model_attempted,
+                    "failure_reason": "",
+                    "final_model_used": decision.final_model_used,
+                    "fallback_used": False,
+                    "execution_decision": "PRIMARY_MODEL_SUCCESS",
+                    "fallback_count_window": 0,
+                }
+            )
+            return local_result
+
+        primary_model = ModelRouterService.PHASE6_PRIMARY_MODEL
+        fallback_model = ModelRouterService.PHASE6_FALLBACK_MODEL
+        max_primary_attempts = 2
+        backoff_seconds = 0.25
+        last_error: Optional[Exception] = None
+        last_reason = "unknown"
+
+        for attempt in range(1, max_primary_attempts + 1):
+            try:
+                primary_result = await cls.static_generate(
+                    prompt,
+                    {**safe_context, "model": primary_model},
+                )
+                primary_result.update(
+                    {
+                        "strategy_decision_id": decision.strategy_decision_id,
+                        "strategy_reason": "cloud_primary_selected",
+                        "model_attempted": primary_model,
+                        "failure_reason": "",
+                        "final_model_used": primary_model,
+                        "fallback_used": False,
+                        "execution_decision": "PRIMARY_MODEL_SUCCESS",
+                        "fallback_count_window": 0,
+                    }
+                )
+                return primary_result
+            except Exception as exc:
+                last_error = exc
+                last_reason = ModelRouterService.classify_phase6_failure_reason(exc)
+                if (
+                    last_reason in ModelRouterService._PHASE6_FALLBACK_ALLOWED
+                    and attempt < max_primary_attempts
+                ):
+                    await asyncio.sleep(backoff_seconds * (2 ** (attempt - 1)))
+                    continue
+                break
+
+        resolved = ModelRouterService.resolve_phase6_strategy(
+            intent_effective=str(intent_effective or ""),
+            path_scope=list(path_scope or []),
+            primary_failure_reason=last_reason,
+        )
+
+        if not resolved.fallback_used:
+            raise RuntimeError(f"PHASE6_NO_FALLBACK:{last_reason}") from last_error
+
+        try:
+            fallback_result = await cls.static_generate(
+                prompt,
+                {**safe_context, "model": fallback_model},
+            )
+        except Exception as fallback_exc:
+            raise RuntimeError(f"PHASE6_FALLBACK_FAILED:{last_reason}") from fallback_exc
+
+        fallback_result.update(
+            {
+                "strategy_decision_id": resolved.strategy_decision_id,
+                "strategy_reason": resolved.strategy_reason,
+                "model_attempted": resolved.model_attempted,
+                "failure_reason": resolved.failure_reason,
+                "final_model_used": resolved.final_model_used,
+                "fallback_used": True,
+                "execution_decision": "FALLBACK_MODEL_USED",
+                "fallback_count_window": cls._record_fallback_and_get_window_count(),
+            }
+        )
+        return fallback_result
 
     @classmethod
     async def health_check(cls) -> bool:

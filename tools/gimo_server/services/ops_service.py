@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import time
@@ -37,6 +38,7 @@ class OpsService:
     DRAFTS_DIR = OPS_DIR / "drafts"
     APPROVED_DIR = OPS_DIR / "approved"
     RUNS_DIR = OPS_DIR / "runs"
+    LOCKS_DIR = OPS_DIR / "locks"
 
     CONFIG_FILE = OPS_DIR / "config.json"
     LOCK_FILE = OPS_DIR / ".ops.lock"
@@ -53,6 +55,7 @@ class OpsService:
         cls.DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
         cls.APPROVED_DIR.mkdir(parents=True, exist_ok=True)
         cls.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        cls.LOCKS_DIR.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def _lock(cls) -> FileLock:
@@ -70,6 +73,17 @@ class OpsService:
     @classmethod
     def _run_path(cls, run_id: str) -> Path:
         return cls.RUNS_DIR / f"{run_id}.json"
+
+    @classmethod
+    def _merge_lock_path(cls, repo_id: str) -> Path:
+        safe = str(repo_id or "default").replace("/", "_").replace("\\", "_")
+        return cls.LOCKS_DIR / f"merge_{safe}.json"
+
+    @classmethod
+    def _deterministic_run_id(cls, draft_id: str, commit_base: str) -> str:
+        key = f"{draft_id}:{commit_base}"
+        digest = hashlib.sha256(key.encode("utf-8", errors="ignore")).hexdigest()[:24]
+        return f"r_{digest}"
 
     # -----------------
     # Plan
@@ -308,11 +322,28 @@ class OpsService:
             approved = cls.get_approved(approved_id)
             if not approved:
                 raise ValueError(f"Approved entry {approved_id} not found")
-            run_id = f"r_{int(time.time() * 1000)}_{os.urandom(3).hex()}"
+
+            draft = cls.get_draft(approved.draft_id)
+            context = dict((draft.context if draft else {}) or {})
+            repo_context = dict(context.get("repo_context") or {})
+            repo_id = str(repo_context.get("repo_id") or repo_context.get("target_branch") or "default")
+            commit_base = str(context.get("commit_base") or "HEAD")
+            run_id = cls._deterministic_run_id(approved.draft_id, commit_base)
+
+            existing = cls.get_run(run_id)
+            if existing:
+                return existing
+
             run = OpsRun(
                 id=run_id,
                 approved_id=approved_id,
                 status="pending",  # type: ignore[arg-type]
+                repo_id=repo_id,
+                draft_id=approved.draft_id,
+                commit_base=commit_base,
+                run_key=run_id,
+                risk_score=float(context.get("risk_score") or 0.0),
+                policy_decision_id=str(context.get("policy_decision_id") or ""),
                 log=[{"ts": _utcnow().isoformat(), "level": "INFO", "msg": "Run created"}],
                 started_at=None,
                 created_at=_utcnow(),
@@ -343,6 +374,230 @@ class OpsService:
                 run.log.append({"ts": _utcnow().isoformat(), "level": "INFO", "msg": msg})
             cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
             return run
+
+    @classmethod
+    def set_run_stage(cls, run_id: str, stage: str, *, msg: str | None = None) -> OpsRun:
+        with cls._lock():
+            run = cls.get_run(run_id)
+            if not run:
+                raise ValueError(f"Run {run_id} not found")
+            run.stage = stage
+            if msg:
+                run.log.append({"ts": _utcnow().isoformat(), "level": "INFO", "msg": msg})
+            cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
+            return run
+
+    @classmethod
+    def update_run_merge_metadata(
+        cls,
+        run_id: str,
+        *,
+        commit_before: Optional[str] = None,
+        commit_after: Optional[str] = None,
+        lock_id: Optional[str] = None,
+        lock_expires_at: Optional[datetime] = None,
+        heartbeat_at: Optional[datetime] = None,
+    ) -> OpsRun:
+        with cls._lock():
+            run = cls.get_run(run_id)
+            if not run:
+                raise ValueError(f"Run {run_id} not found")
+            if commit_before is not None:
+                run.commit_before = commit_before
+            if commit_after is not None:
+                run.commit_after = commit_after
+            if lock_id is not None:
+                run.lock_id = lock_id
+            if lock_expires_at is not None:
+                run.lock_expires_at = lock_expires_at
+            if heartbeat_at is not None:
+                run.heartbeat_at = heartbeat_at
+            cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
+            return run
+
+    @classmethod
+    def acquire_merge_lock(cls, repo_id: str, run_id: str, *, ttl_seconds: int = 120) -> Dict[str, Any]:
+        now = _utcnow()
+        expires_at = now + timedelta(seconds=max(1, int(ttl_seconds)))
+        lock_id = f"ml_{int(time.time() * 1000)}_{os.urandom(2).hex()}"
+        lock_payload = {
+            "lock_id": lock_id,
+            "repo_id": repo_id,
+            "run_id": run_id,
+            "acquired_at": now.isoformat(),
+            "heartbeat_at": now.isoformat(),
+            "expires_at": expires_at.isoformat(),
+            "ttl_seconds": max(1, int(ttl_seconds)),
+        }
+        with cls._lock():
+            lock_file = cls._merge_lock_path(repo_id)
+            if lock_file.exists():
+                try:
+                    current = json.loads(lock_file.read_text(encoding="utf-8"))
+                except Exception:
+                    current = {}
+                current_expiry = str(current.get("expires_at") or "")
+                stale = True
+                if current_expiry:
+                    try:
+                        stale = datetime.fromisoformat(current_expiry) <= now
+                    except Exception:
+                        stale = True
+                if not stale and str(current.get("run_id") or "") != run_id:
+                    raise RuntimeError("MERGE_LOCKED")
+            lock_file.write_text(_json_dump(lock_payload), encoding="utf-8")
+            run = cls.get_run(run_id)
+            if run:
+                run.lock_id = lock_id
+                run.lock_expires_at = expires_at
+                run.heartbeat_at = now
+                cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
+            return lock_payload
+
+    @classmethod
+    def heartbeat_merge_lock(cls, repo_id: str, run_id: str, *, ttl_seconds: int = 120) -> Dict[str, Any]:
+        now = _utcnow()
+        expires_at = now + timedelta(seconds=max(1, int(ttl_seconds)))
+        with cls._lock():
+            lock_file = cls._merge_lock_path(repo_id)
+            if not lock_file.exists():
+                raise RuntimeError("MERGE_LOCKED")
+            payload = json.loads(lock_file.read_text(encoding="utf-8"))
+            if str(payload.get("run_id") or "") != run_id:
+                raise RuntimeError("MERGE_LOCKED")
+            payload["heartbeat_at"] = now.isoformat()
+            payload["expires_at"] = expires_at.isoformat()
+            payload["ttl_seconds"] = max(1, int(ttl_seconds))
+            lock_file.write_text(_json_dump(payload), encoding="utf-8")
+            run = cls.get_run(run_id)
+            if run:
+                run.lock_expires_at = expires_at
+                run.heartbeat_at = now
+                cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
+            return payload
+
+    @classmethod
+    def release_merge_lock(cls, repo_id: str, run_id: str) -> bool:
+        with cls._lock():
+            lock_file = cls._merge_lock_path(repo_id)
+            if not lock_file.exists():
+                return False
+            try:
+                payload = json.loads(lock_file.read_text(encoding="utf-8"))
+            except Exception:
+                payload = {}
+            if str(payload.get("run_id") or "") != run_id:
+                return False
+            lock_file.unlink(missing_ok=True)
+            return True
+
+    @classmethod
+    def recover_stale_lock(cls, repo_id: str) -> bool:
+        now = _utcnow()
+        with cls._lock():
+            lock_file = cls._merge_lock_path(repo_id)
+            if not lock_file.exists():
+                return False
+            try:
+                payload = json.loads(lock_file.read_text(encoding="utf-8"))
+                expires_at = datetime.fromisoformat(str(payload.get("expires_at") or ""))
+            except Exception:
+                lock_file.unlink(missing_ok=True)
+                return True
+            if expires_at <= now:
+                lock_file.unlink(missing_ok=True)
+                return True
+            return False
+
+    @classmethod
+    def get_run_preview(
+        cls,
+        run_id: str,
+        *,
+        request_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return a stable preview payload for audit/UI contracts."""
+        run = cls.get_run(run_id)
+        if not run:
+            return None
+
+        approved = cls.get_approved(run.approved_id)
+        if not approved:
+            return None
+
+        draft = cls.get_draft(approved.draft_id)
+        context = dict((draft.context if draft else {}) or {})
+
+        content = approved.content or ""
+        diff_summary = context.get("diff_summary") or f"content_chars={len(content)}"
+        risk_score = float(context.get("risk_score", 0.0) or 0.0)
+        model_used = str(context.get("model_used") or approved.provider or "unknown")
+
+        expected = str(context.get("policy_hash_expected") or "")
+        runtime = str(context.get("policy_hash_runtime") or "")
+        if not expected:
+            expected = hashlib.sha256((approved.prompt or "").encode("utf-8", errors="ignore")).hexdigest()
+        if not runtime:
+            runtime = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
+
+        strategy_line = ""
+        for entry in reversed(run.log or []):
+            msg = str((entry or {}).get("msg") or "")
+            if msg.startswith("Model strategy:"):
+                strategy_line = msg
+                break
+
+        strategy_fields: Dict[str, str] = {}
+        if strategy_line:
+            payload = strategy_line.replace("Model strategy:", "").strip()
+            for part in payload.split(" "):
+                if "=" not in part:
+                    continue
+                k, v = part.split("=", 1)
+                strategy_fields[k.strip()] = v.strip()
+
+        model_attempted = str(context.get("model_attempted") or strategy_fields.get("attempted") or "")
+        failure_reason = str(context.get("failure_reason") or strategy_fields.get("failure_reason") or "")
+        final_model_used = str(
+            context.get("final_model_used")
+            or strategy_fields.get("final_model")
+            or model_used
+            or "unknown"
+        )
+        fallback_used_raw = context.get("fallback_used", strategy_fields.get("fallback_used", False))
+        fallback_used = bool(str(fallback_used_raw).lower() in {"1", "true", "yes"})
+
+        preview = {
+            "run_id": run.id,
+            "draft_id": approved.draft_id,
+            "status": run.status,
+            "final_status": run.status,
+            "diff_summary": diff_summary,
+            "risk_score": risk_score,
+            "intent_declared": str(context.get("intent_declared") or context.get("intent_class") or ""),
+            "intent_effective": str(context.get("intent_effective") or context.get("intent_class") or ""),
+            "decision_reason": str(context.get("decision_reason") or ""),
+            "execution_decision": str(context.get("execution_decision") or ""),
+            "model_used": model_used,
+            "model_attempted": model_attempted,
+            "failure_reason": failure_reason,
+            "final_model_used": final_model_used,
+            "fallback_used": fallback_used,
+            "policy_decision_id": str(context.get("policy_decision_id") or ""),
+            "policy_decision": str(context.get("policy_decision") or ""),
+            "policy_status_code": str(context.get("policy_status_code") or ""),
+            "policy_triggered_rules": list(context.get("policy_triggered_rules") or []),
+            "policy_hash_expected": expected,
+            "policy_hash_runtime": runtime,
+            "baseline_version": str(context.get("baseline_version") or "v1"),
+            "commit_before": str(context.get("commit_before") or run.commit_before or "unknown"),
+            "commit_after": str(context.get("commit_after") or run.commit_after or "unknown"),
+            "trace_id": str(trace_id or context.get("trace_id") or ""),
+            "request_id": str(request_id or context.get("request_id") or ""),
+            "updated_at": _utcnow().isoformat(),
+        }
+        return preview
 
     @classmethod
     def get_runs_by_status(cls, status: str) -> List[OpsRun]:

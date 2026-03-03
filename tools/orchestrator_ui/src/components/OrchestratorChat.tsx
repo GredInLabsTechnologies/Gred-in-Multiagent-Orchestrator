@@ -16,6 +16,9 @@ interface ChatMessage {
     runId?: string;
     detectedIntent?: string;
     decisionPath?: string;
+    executionDecision?: string;
+    decisionReason?: string;
+    riskScore?: number;
     errorActionable?: string;
     executionSteps?: ChatExecutionStep[];
     failed?: boolean;
@@ -150,6 +153,9 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                 runId: data.run?.id,
                 detectedIntent: currentDraft?.context?.detected_intent,
                 decisionPath: currentDraft?.context?.decision_path,
+                executionDecision: currentDraft?.context?.execution_decision,
+                decisionReason: currentDraft?.context?.decision_reason,
+                riskScore: typeof currentDraft?.context?.risk_score === 'number' ? currentDraft.context.risk_score : undefined,
                 executionSteps: buildDraftSteps(
                     { ...(currentDraft || { id: draftId, prompt: '', status: 'approved', created_at: new Date().toISOString() }), status: 'approved' },
                     { approvedId: data.approved.id, runId: data.run?.id },
@@ -242,6 +248,9 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                     draftId: generated.id,
                     detectedIntent: generated.context?.detected_intent,
                     decisionPath: generated.context?.decision_path,
+                    executionDecision: generated.context?.execution_decision,
+                    decisionReason: generated.context?.decision_reason,
+                    riskScore: typeof generated.context?.risk_score === 'number' ? generated.context.risk_score : undefined,
                     errorActionable: generated.context?.error_actionable || generated.error || undefined,
                     executionSteps: buildDraftSteps(generated),
                 });
@@ -345,23 +354,21 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                     initial="hidden"
                                     animate="visible"
                                     transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                                    className={`rounded-2xl px-3.5 py-2.5 border transition-colors ${
-                                        message.role === 'user'
-                                            ? 'bg-accent-primary/8 border-accent-primary/15 ml-12 rounded-br-lg'
-                                            : message.role === 'assistant'
-                                                ? 'bg-surface-2/70 border-white/[0.04] mr-12 rounded-bl-lg'
-                                                : message.failed
-                                                    ? 'bg-red-500/8 border-red-500/20'
-                                                    : 'bg-surface-2/40 border-white/[0.03]'
-                                    }`}
+                                    className={`rounded-2xl px-3.5 py-2.5 border transition-colors ${message.role === 'user'
+                                        ? 'bg-accent-primary/8 border-accent-primary/15 ml-12 rounded-br-lg'
+                                        : message.role === 'assistant'
+                                            ? 'bg-surface-2/70 border-white/[0.04] mr-12 rounded-bl-lg'
+                                            : message.failed
+                                                ? 'bg-red-500/8 border-red-500/20'
+                                                : 'bg-surface-2/40 border-white/[0.03]'
+                                        }`}
                                 >
                                     {/* Role label + timestamp */}
                                     <div className="flex items-center justify-between mb-1">
-                                        <span className={`text-[9px] uppercase tracking-wider font-bold ${
-                                            message.role === 'user' ? 'text-accent-primary/60' :
+                                        <span className={`text-[9px] uppercase tracking-wider font-bold ${message.role === 'user' ? 'text-accent-primary/60' :
                                             message.role === 'assistant' ? 'text-text-tertiary' :
-                                            message.failed ? 'text-red-400/60' : 'text-text-tertiary'
-                                        }`}>
+                                                message.failed ? 'text-red-400/60' : 'text-text-tertiary'
+                                            }`}>
                                             {message.role === 'user' ? 'Tu' : message.role === 'assistant' ? 'GIMO' : 'Sistema'}
                                         </span>
                                         <span className="text-[9px] text-text-tertiary">{formatTime(message.ts)}</span>
@@ -373,7 +380,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                     </p>
 
                                     {/* Intent / Decision badges */}
-                                    {(message.detectedIntent || message.decisionPath) && (
+                                    {(message.detectedIntent || message.decisionPath || message.executionDecision || typeof message.riskScore === 'number') && (
                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                             {message.detectedIntent && (
                                                 <span className="text-[9px] px-2 py-0.5 rounded-full border border-accent-primary/30 bg-accent-primary/8 text-accent-primary">
@@ -385,6 +392,21 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                                     Ruta: {message.decisionPath}
                                                 </span>
                                             )}
+                                            {message.executionDecision && (
+                                                <span className="text-[9px] px-2 py-0.5 rounded-full border border-amber-400/30 bg-amber-500/10 text-amber-300">
+                                                    Decision: {message.executionDecision}
+                                                </span>
+                                            )}
+                                            {typeof message.riskScore === 'number' && (
+                                                <span className="text-[9px] px-2 py-0.5 rounded-full border border-white/[0.06] bg-surface-3/50 text-text-secondary">
+                                                    Risk: {message.riskScore}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                    {message.decisionReason && (
+                                        <div className="mt-1 text-[10px] text-text-tertiary">
+                                            Razon: {message.decisionReason}
                                         </div>
                                     )}
 
@@ -413,13 +435,12 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                                         {message.executionSteps.map((step) => (
                                                             <div
                                                                 key={`${message.id}-${step.key}`}
-                                                                className={`text-[10px] rounded-lg px-2 py-1 border ${
-                                                                    step.status === 'done'
-                                                                        ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400'
-                                                                        : step.status === 'error'
-                                                                            ? 'border-red-500/20 bg-red-500/5 text-red-400'
-                                                                            : 'border-white/[0.04] bg-surface-3/30 text-text-secondary'
-                                                                }`}
+                                                                className={`text-[10px] rounded-lg px-2 py-1 border ${step.status === 'done'
+                                                                    ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400'
+                                                                    : step.status === 'error'
+                                                                        ? 'border-red-500/20 bg-red-500/5 text-red-400'
+                                                                        : 'border-white/[0.04] bg-surface-3/30 text-text-secondary'
+                                                                    }`}
                                                             >
                                                                 {step.label}: {step.detail || (step.status === 'pending' ? 'pendiente' : step.status)}
                                                             </div>

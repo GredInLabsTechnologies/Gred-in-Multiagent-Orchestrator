@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Tuple
 
@@ -51,6 +52,17 @@ class RoutingDecision:
     hardware_state: str = "safe"
 
 
+@dataclass
+class Phase6StrategyDecision:
+    strategy_decision_id: str
+    strategy_reason: str
+    model_attempted: str
+    failure_reason: str
+    final_model_used: str
+    fallback_used: bool
+    final_status: str
+
+
 class ModelRouterService:
     """Agnostic model router that uses only the user's configured providers."""
 
@@ -63,6 +75,25 @@ class ModelRouterService:
         "security_review": "opus",
         "formatting": "local",
         "default": "sonnet",
+    }
+
+    PHASE6_PRIMARY_MODEL = "qwen3-coder:480b-cloud"
+    PHASE6_FALLBACK_MODEL = "qwen3:8b"
+    _PHASE6_FALLBACK_ALLOWED = {
+        "429",
+        "session_limit",
+        "weekly_limit",
+        "timeout",
+        "network_error",
+        "5xx",
+        "provider_auth_expired",
+        "provider_auth_refresh_failed",
+    }
+    _PHASE6_FALLBACK_FORBIDDEN = {
+        "400",
+        "policy_error",
+        "schema_error",
+        "merge_gate_error",
     }
 
     def __init__(self, storage: Optional["StorageService"] = None,
@@ -272,6 +303,122 @@ class ModelRouterService:
         period_days = {"daily": 1, "weekly": 7, "total": 3650}.get(budget_cfg.period, 30)
         spent = self.storage.cost.get_provider_spend(provider, days=period_days)
         return spent >= budget_cfg.max_cost_usd
+
+    @classmethod
+    def classify_phase6_failure_reason(cls, exc: Exception) -> str:
+        import httpx
+
+        if isinstance(exc, httpx.TimeoutException):
+            return "timeout"
+        if isinstance(exc, httpx.NetworkError):
+            return "network_error"
+        if isinstance(exc, httpx.HTTPStatusError):
+            code = int(exc.response.status_code)
+            if code == 429:
+                return "429"
+            if code == 400:
+                return "400"
+            if 500 <= code <= 599:
+                return "5xx"
+
+        msg = str(exc or "").lower()
+        if "session" in msg and "limit" in msg:
+            return "session_limit"
+        if "weekly" in msg and "limit" in msg:
+            return "weekly_limit"
+        if "provider_auth_expired" in msg or "token expired" in msg or "auth expired" in msg:
+            return "provider_auth_expired"
+        if "provider_auth_refresh_failed" in msg or ("refresh" in msg and "failed" in msg):
+            return "provider_auth_refresh_failed"
+        if "merge_gate" in msg or "merge gate" in msg:
+            return "merge_gate_error"
+        if "schema" in msg:
+            return "schema_error"
+        if "policy" in msg:
+            return "policy_error"
+        return "unknown"
+
+    @classmethod
+    def resolve_phase6_strategy(
+        cls,
+        *,
+        intent_effective: str,
+        path_scope: List[str],
+        primary_failure_reason: str = "",
+    ) -> Phase6StrategyDecision:
+        normalized_scope = [str(p or "").replace("\\", "/").lower() for p in (path_scope or [])]
+        sensitive_scope = any(
+            (
+                "security" in p
+                or "runtime_policy" in p
+                or "baseline_manifest" in p
+                or "policy.json" in p
+                or "tools/gimo_server/mcp_bridge" in p
+            )
+            for p in normalized_scope
+        )
+
+        forced_local = intent_effective in {"SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"} or sensitive_scope
+        reason = str(primary_failure_reason or "")
+
+        if forced_local:
+            seed = f"forced_local|{intent_effective}|{','.join(normalized_scope)}"
+            return Phase6StrategyDecision(
+                strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
+                strategy_reason="forced_local_only",
+                model_attempted=cls.PHASE6_FALLBACK_MODEL,
+                failure_reason="",
+                final_model_used=cls.PHASE6_FALLBACK_MODEL,
+                fallback_used=False,
+                final_status="PRIMARY_MODEL_SUCCESS",
+            )
+
+        if not reason:
+            seed = f"primary_success|{intent_effective}|{','.join(normalized_scope)}"
+            return Phase6StrategyDecision(
+                strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
+                strategy_reason="cloud_primary_selected",
+                model_attempted=cls.PHASE6_PRIMARY_MODEL,
+                failure_reason="",
+                final_model_used=cls.PHASE6_PRIMARY_MODEL,
+                fallback_used=False,
+                final_status="PRIMARY_MODEL_SUCCESS",
+            )
+
+        if reason in cls._PHASE6_FALLBACK_FORBIDDEN:
+            seed = f"no_fallback|{reason}|{intent_effective}|{','.join(normalized_scope)}"
+            return Phase6StrategyDecision(
+                strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
+                strategy_reason="fallback_forbidden",
+                model_attempted=cls.PHASE6_PRIMARY_MODEL,
+                failure_reason=reason,
+                final_model_used=cls.PHASE6_PRIMARY_MODEL,
+                fallback_used=False,
+                final_status="PRIMARY_MODEL_SUCCESS",
+            )
+
+        if reason in cls._PHASE6_FALLBACK_ALLOWED:
+            seed = f"fallback_allowed|{reason}|{intent_effective}|{','.join(normalized_scope)}"
+            return Phase6StrategyDecision(
+                strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
+                strategy_reason="cloud_to_local_fallback",
+                model_attempted=cls.PHASE6_PRIMARY_MODEL,
+                failure_reason=reason,
+                final_model_used=cls.PHASE6_FALLBACK_MODEL,
+                fallback_used=True,
+                final_status="FALLBACK_MODEL_USED",
+            )
+
+        seed = f"unknown_no_fallback|{reason}|{intent_effective}|{','.join(normalized_scope)}"
+        return Phase6StrategyDecision(
+            strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
+            strategy_reason="fallback_not_allowed_unknown_reason",
+            model_attempted=cls.PHASE6_PRIMARY_MODEL,
+            failure_reason=reason,
+            final_model_used=cls.PHASE6_PRIMARY_MODEL,
+            fallback_used=False,
+            final_status="PRIMARY_MODEL_SUCCESS",
+        )
 
     # === Backwards-compatible methods ===
 

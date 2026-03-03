@@ -106,12 +106,44 @@ class OpsApproved(BaseModel):
     approved_by: Optional[str] = None
 
 
+OpsRunStatus = Literal[
+    "pending",
+    "running",
+    "done",
+    "error",
+    "cancelled",
+    "MERGE_LOCKED",
+    "MERGE_CONFLICT",
+    "VALIDATION_FAILED_TESTS",
+    "VALIDATION_FAILED_LINT",
+    "RISK_SCORE_TOO_HIGH",
+    "BASELINE_TAMPER_DETECTED",
+    "PIPELINE_TIMEOUT",
+    "WORKTREE_CORRUPTED",
+    "ROLLBACK_EXECUTED",
+    "WORKER_CRASHED_RECOVERABLE",
+    "HUMAN_APPROVAL_REQUIRED",
+]
+
+
 class OpsRun(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str
     approved_id: str
-    status: Literal["pending", "running", "done", "error", "cancelled"] = "pending"
+    status: OpsRunStatus = "pending"
+    repo_id: Optional[str] = None
+    draft_id: Optional[str] = None
+    commit_base: Optional[str] = None
+    commit_before: Optional[str] = None
+    commit_after: Optional[str] = None
+    stage: Optional[str] = None
+    run_key: Optional[str] = None
+    risk_score: Optional[float] = None
+    policy_decision_id: Optional[str] = None
+    lock_id: Optional[str] = None
+    lock_expires_at: Optional[datetime] = None
+    heartbeat_at: Optional[datetime] = None
     log: List[Dict[str, Any]] = Field(default_factory=list)
     started_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -216,14 +248,214 @@ class ProviderConfig(BaseModel):
 
 
 class OpsCreateDraftRequest(BaseModel):
-    prompt: str
+    # Legacy shape (kept for backward compatibility)
+    prompt: Optional[str] = None
     context: Dict[str, Any] = Field(default_factory=dict)
+
+    # Phase-1 contract shape (GPT Actions integration)
+    objective: Optional[str] = None
+    constraints: List[str] = Field(default_factory=list)
+    acceptance_criteria: List[str] = Field(default_factory=list)
+    repo_context: Dict[str, Any] = Field(default_factory=dict)
+    execution: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_phase1_contract(self) -> "OpsCreateDraftRequest":
+        # Legacy mode: prompt-only request
+        if self.prompt and str(self.prompt).strip():
+            intent = str((self.context or {}).get("intent_class") or "").strip()
+            if intent not in PHASE4_INTENT_CLASSES:
+                raise ValueError("context.intent_class is missing or invalid")
+            return self
+
+        # Contract mode: strict required fields
+        if not self.objective or not str(self.objective).strip():
+            raise ValueError("objective is required when prompt is not provided")
+
+        if not isinstance(self.constraints, list):
+            raise ValueError("constraints must be a list")
+        if not isinstance(self.acceptance_criteria, list) or not self.acceptance_criteria:
+            raise ValueError("acceptance_criteria must be a non-empty list")
+
+        rc = self.repo_context or {}
+        if not isinstance(rc, dict):
+            raise ValueError("repo_context must be an object")
+        if not rc.get("target_branch"):
+            raise ValueError("repo_context.target_branch is required")
+        if not isinstance(rc.get("path_scope"), list) or not rc.get("path_scope"):
+            raise ValueError("repo_context.path_scope must be a non-empty list")
+
+        ex = self.execution or {}
+        if not isinstance(ex, dict):
+            raise ValueError("execution must be an object")
+        intent = str(ex.get("intent_class") or "").strip()
+        if intent not in PHASE4_INTENT_CLASSES:
+            raise ValueError("execution.intent_class is missing or invalid")
+
+        return self
 
 
 class OpsUpdateDraftRequest(BaseModel):
     prompt: Optional[str] = None
     content: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
+
+
+PHASE4_INTENT_CLASSES = {
+    "DOC_UPDATE",
+    "TEST_ADD",
+    "SAFE_REFACTOR",
+    "FEATURE_ADD_LOW_RISK",
+    "ARCH_CHANGE",
+    "SECURITY_CHANGE",
+    "CORE_RUNTIME_CHANGE",
+}
+
+ExecutionDecisionCode = Literal[
+    "AUTO_RUN_ELIGIBLE",
+    "HUMAN_APPROVAL_REQUIRED",
+    "RISK_SCORE_TOO_HIGH",
+    "DRAFT_REJECTED_FORBIDDEN_SCOPE",
+    "PRIMARY_MODEL_SUCCESS",
+    "FALLBACK_MODEL_USED",
+]
+
+
+class IntentDecisionAudit(BaseModel):
+    """Phase-4 auditable decision payload persisted in draft context."""
+
+    intent_declared: str
+    intent_effective: str
+    risk_score: float = 0.0
+    decision_reason: str
+    execution_decision: ExecutionDecisionCode
+
+
+StrategyFinalStatus = Literal[
+    "PRIMARY_MODEL_SUCCESS",
+    "FALLBACK_MODEL_USED",
+]
+
+
+class ModelStrategyAudit(BaseModel):
+    """Phase-6 auditable model strategy decision payload."""
+
+    strategy_decision_id: str
+    strategy_reason: str
+    model_attempted: str
+    failure_reason: str
+    final_model_used: str
+    fallback_used: bool
+    final_status: StrategyFinalStatus
+
+
+# --- Jules-Style GraphState MVP Models ---
+
+from enum import Enum
+
+class IntentClass(str, Enum):
+    feature = "feature"
+    bugfix = "bugfix"
+    refactor = "refactor"
+    chore = "chore"
+
+class DelegationStatus(str, Enum):
+    pending = "pending"
+    running = "running"
+    done = "done"
+    failed = "failed"
+
+class QaVerdict(str, Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+
+class RepoSnapshot(BaseModel):
+    provider: str
+    repo: str
+    base_ref: str
+    worktree_id: Optional[str] = None
+
+class RepoContext(BaseModel):
+    stack: List[str] = Field(default_factory=list)
+    commands: List[str] = Field(default_factory=list)
+    paths_of_interest: List[str] = Field(default_factory=list)
+    env_notes: Optional[str] = None
+
+class ContractExecution(BaseModel):
+    intent_class: IntentClass
+
+class StrictContract(BaseModel):
+    objective: str = Field(min_length=10)
+    constraints: List[str] = Field(default_factory=list)
+    acceptance_criteria: List[str] = Field(min_length=1)
+    execution: ContractExecution
+    out_of_scope: List[str] = Field(default_factory=list)
+
+    @field_validator("acceptance_criteria")
+    @classmethod
+    def validate_actionable_criteria(cls, v: List[str]) -> List[str]:
+        # Minimum validation: must not be just empty strings
+        for c in v:
+            if not c.strip():
+                raise ValueError("Acceptance criteria cannot be empty strings.")
+        return v
+
+class Delegation(BaseModel):
+    role: str
+    prompt: str
+    inputs: Dict[str, Any] = Field(default_factory=dict)
+    expected_outputs: Dict[str, Any] = Field(default_factory=dict)
+    status: DelegationStatus = DelegationStatus.pending
+    artifacts: List[str] = Field(default_factory=list)
+
+class CommandRun(BaseModel):
+    cmd: str
+    cwd: str
+    exit_code: int
+    stdout_tail: str
+    stderr_tail: str
+    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class TestRun(BaseModel):
+    name: str
+    status: Literal["passed", "failed", "skipped"]
+    duration_ms: int
+
+class DiffRef(BaseModel):
+    path: str
+    sha: Optional[str] = None
+    summary: str
+
+class Evidence(BaseModel):
+    commands_run: List[CommandRun] = Field(default_factory=list)
+    test_results: List[TestRun] = Field(default_factory=list)
+    diffs: List[DiffRef] = Field(default_factory=list)
+
+class Failure(BaseModel):
+    criterion: str
+    reason: str
+    evidence_ref: Optional[str] = None
+    suggested_fix: Optional[str] = None
+
+class QaState(BaseModel):
+    verdict: Optional[QaVerdict] = None
+    failures: List[Failure] = Field(default_factory=list)
+
+class GraphState(BaseModel):
+    """
+    Central artifact for Jules-style multi-agent orchestration.
+    """
+    state_version: Literal["0.1"] = "0.1"
+    
+    user_request_raw: str
+    repo_snapshot: Optional[RepoSnapshot] = None
+    repo_context: RepoContext = Field(default_factory=RepoContext)
+    
+    contract: Optional[StrictContract] = None
+    delegations: Dict[str, Delegation] = Field(default_factory=dict)
+    
+    evidence: Evidence = Field(default_factory=Evidence)
+    qa: QaState = Field(default_factory=QaState)
 
 
 class ProviderBudget(BaseModel):
@@ -546,6 +778,39 @@ class PolicyRule(BaseModel):
 
 class PolicyConfig(BaseModel):
     rules: List[PolicyRule] = Field(default_factory=list)
+
+
+class RuntimePolicyConfig(BaseModel):
+    """Phase-3 runtime policy contract (baseline enforcement)."""
+
+    policy_schema_version: str = "1.0"
+    allowed_paths: List[str] = Field(default_factory=list)
+    forbidden_paths: List[str] = Field(default_factory=list)
+    forbidden_globs: List[str] = Field(default_factory=list)
+    forbidden_filetypes: List[str] = Field(default_factory=list)
+    max_files_changed: int = Field(default=200, ge=1)
+    max_loc_changed: int = Field(default=5000, ge=1)
+    require_human_review_if: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    policy_signature_alg: Optional[str] = None
+    policy_hash_previous: Optional[str] = None
+    execution_mode_defaults: Dict[str, Any] = Field(default_factory=dict)
+
+
+class BaselineManifest(BaseModel):
+    baseline_version: str = "v1"
+    policy_schema_version: str = "1.0"
+    policy_hash_expected: str
+
+
+class PolicyDecision(BaseModel):
+    policy_decision_id: str
+    decision: Literal["allow", "review", "deny"]
+    status_code: str
+    policy_hash_expected: str
+    policy_hash_runtime: str
+    triggered_rules: List[str] = Field(default_factory=list)
 
 
 class EvalGoldenCase(BaseModel):

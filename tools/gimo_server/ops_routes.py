@@ -7,7 +7,6 @@ from tools.gimo_server.security.auth import AuthContext
 from .routers.ops import (
     plan_router, run_router, eval_router, trust_router, config_router, observability_router, mastery_router, skills_router, custom_plan_router, conversation_router
 )
-from .routers.ops.common import _ROLE_LEVEL, _ACTIONS_SAFE_PATHS, _ACTIONS_SAFE_PATH_PREFIXES
 
 router = APIRouter(prefix="/ops", tags=["ops"])
 
@@ -22,6 +21,17 @@ router.include_router(mastery_router.router)
 router.include_router(skills_router.router)
 router.include_router(custom_plan_router.router)
 router.include_router(conversation_router.router)
+
+# Phase 9 — Actions-Safe public contract (strict allowlist)
+_ACTIONS_SAFE_PUBLIC_ENDPOINTS: tuple[tuple[str, str], ...] = (
+    ("post", "/ops/drafts"),
+    ("post", "/ops/drafts/{draft_id}/approve"),
+    ("get", "/ops/runs/{run_id}"),
+    ("get", "/ops/runs/{run_id}/preview"),
+    ("get", "/ui/repos"),
+    ("get", "/ui/repos/active"),
+    ("post", "/ui/repos/select"),
+)
 
 @router.get("/openapi.json")
 async def get_filtered_openapi(
@@ -43,24 +53,18 @@ async def get_filtered_openapi(
     full_spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
     filtered = copy.deepcopy(full_spec)
 
-    new_paths = {}
-    for path, methods in filtered.get("paths", {}).items():
-        is_safe = path in _ACTIONS_SAFE_PATHS or any(
-            path.startswith(p) for p in _ACTIONS_SAFE_PATH_PREFIXES
-        )
-        if is_safe:
-            # Keep only GET methods for actions-safe paths
-            safe_methods = {m: v for m, v in methods.items() if m == "get"}
-            if safe_methods:
-                new_paths[path] = safe_methods
+    source_paths = filtered.get("paths", {}) or {}
+    new_paths: dict[str, dict] = {}
 
-    # Also include the approve and runs POST for operator-level spec
-    if _ROLE_LEVEL.get(auth.role, 0) >= _ROLE_LEVEL["operator"]:
-        for path in ("/ops/drafts/{draft_id}/approve", "/ops/runs"):
-            if path in filtered.get("paths", {}):
-                entry = new_paths.setdefault(path, {})
-                if "post" in filtered["paths"][path]:
-                    entry["post"] = filtered["paths"][path]["post"]
+    # Keep the public contract deterministic and fail-fast if the source spec drifts.
+    for method, path in _ACTIONS_SAFE_PUBLIC_ENDPOINTS:
+        if path not in source_paths:
+            raise HTTPException(status_code=404, detail=f"Public spec path missing: {path}")
+        source_methods = source_paths.get(path) or {}
+        if method not in source_methods:
+            raise HTTPException(status_code=404, detail=f"Public spec method missing: {method.upper()} {path}")
+        entry = new_paths.setdefault(path, {})
+        entry[method] = source_methods[method]
 
     filtered["paths"] = new_paths
     filtered["info"]["title"] = "Repo Orchestrator API (Actions)"

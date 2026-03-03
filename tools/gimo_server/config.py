@@ -53,6 +53,7 @@ class Settings:
     rate_limit_per_min: int
     rate_limit_window_seconds: int
     rate_limit_cleanup_seconds: int
+    actions_max_payload_bytes: int
     subprocess_timeout: int
     search_exclude_dirs: Set[str]
     audit_log_path: Path
@@ -176,6 +177,7 @@ def _build_settings() -> Settings:
     rate_limit_per_min = 100
     rate_limit_window_seconds = int(os.environ.get("ORCH_RATE_LIMIT_WINDOW_SECONDS", "60"))
     rate_limit_cleanup_seconds = int(os.environ.get("ORCH_RATE_LIMIT_CLEANUP_SECONDS", "120"))
+    actions_max_payload_bytes = int(os.environ.get("ORCH_ACTIONS_MAX_PAYLOAD_BYTES", str(64 * 1024)))
     subprocess_timeout = int(os.environ.get("ORCH_SUBPROCESS_TIMEOUT", "10"))
     search_exclude_dirs = {"tools", "scripts"}
     audit_log_path = base_dir / "logs" / "orchestrator_audit.log"
@@ -210,6 +212,7 @@ def _build_settings() -> Settings:
         rate_limit_per_min=rate_limit_per_min,
         rate_limit_window_seconds=rate_limit_window_seconds,
         rate_limit_cleanup_seconds=rate_limit_cleanup_seconds,
+        actions_max_payload_bytes=actions_max_payload_bytes,
         subprocess_timeout=subprocess_timeout,
         search_exclude_dirs=search_exclude_dirs,
         audit_log_path=audit_log_path,
@@ -284,6 +287,7 @@ ORCH_OPERATOR_TOKEN = _SETTINGS.operator_token
 RATE_LIMIT_PER_MIN = _SETTINGS.rate_limit_per_min
 RATE_LIMIT_WINDOW_SECONDS = _SETTINGS.rate_limit_window_seconds
 RATE_LIMIT_CLEANUP_SECONDS = _SETTINGS.rate_limit_cleanup_seconds
+ACTIONS_MAX_PAYLOAD_BYTES = _SETTINGS.actions_max_payload_bytes
 SUBPROCESS_TIMEOUT = _SETTINGS.subprocess_timeout
 SEARCH_EXCLUDE_DIRS = _SETTINGS.search_exclude_dirs
 AUDIT_LOG_PATH = _SETTINGS.audit_log_path

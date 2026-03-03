@@ -7,6 +7,8 @@ from tools.gimo_server.ops_models import OpsDraft, OpsPlan, OpsCreateDraftReques
 from tools.gimo_server.services.cognitive import CognitiveService
 from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.runtime_policy_service import RuntimePolicyService
+from tools.gimo_server.services.intent_classification_service import IntentClassificationService
 from tools.gimo_server.services.custom_plan_service import CustomPlanService
 from .common import _require_role, _actor_label
 
@@ -53,9 +55,76 @@ async def create_draft(
     auth: AuthContext = Depends(verify_token),
     rl: None = Depends(check_rate_limit),
 ):
-    _require_role(auth, "admin")
+    if auth.role not in ("actions", "operator", "admin"):
+        raise HTTPException(status_code=403, detail="actions/operator/admin role required")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
-    draft = OpsService.create_draft(body.prompt, context=body.context)
+    if body.prompt and str(body.prompt).strip():
+        prompt = str(body.prompt).strip()
+        context = dict(body.context or {})
+        path_scope = list((context.get("repo_context") or {}).get("path_scope") or [])
+    else:
+        prompt = str(body.objective or "").strip()
+        context = dict(body.context or {})
+        path_scope = list((body.repo_context or {}).get("path_scope") or [])
+        context.update(
+            {
+                "constraints": list(body.constraints or []),
+                "acceptance_criteria": list(body.acceptance_criteria or []),
+                "repo_context": dict(body.repo_context or {}),
+                "execution": dict(body.execution or {}),
+                "intent_class": str((body.execution or {}).get("intent_class") or ""),
+                "contract_mode": "phase1",
+            }
+        )
+
+    policy_decision = RuntimePolicyService.evaluate_draft_policy(
+        path_scope=path_scope,
+        estimated_files_changed=context.get("estimated_files_changed"),
+        estimated_loc_changed=context.get("estimated_loc_changed"),
+    )
+
+    declared_intent = str(context.get("intent_class") or "")
+    raw_risk = context.get("risk_score")
+    if raw_risk is None:
+        raw_risk = (body.execution or {}).get("risk_score")
+    try:
+        risk_score = float(raw_risk or 0.0)
+    except (TypeError, ValueError):
+        risk_score = 0.0
+
+    intent_decision = IntentClassificationService.evaluate(
+        intent_declared=declared_intent,
+        path_scope=path_scope,
+        risk_score=risk_score,
+        policy_decision=policy_decision.decision,
+        policy_status_code=policy_decision.status_code,
+    )
+
+    context.update(
+        {
+            "policy_decision_id": policy_decision.policy_decision_id,
+            "policy_decision": policy_decision.decision,
+            "policy_status_code": policy_decision.status_code,
+            "policy_hash_expected": policy_decision.policy_hash_expected,
+            "policy_hash_runtime": policy_decision.policy_hash_runtime,
+            "policy_triggered_rules": policy_decision.triggered_rules,
+            "intent_declared": intent_decision.intent_declared,
+            "intent_effective": intent_decision.intent_effective,
+            "risk_score": intent_decision.risk_score,
+            "decision_reason": intent_decision.decision_reason,
+            "execution_decision": intent_decision.execution_decision,
+        }
+    )
+
+    if intent_decision.execution_decision in {"DRAFT_REJECTED_FORBIDDEN_SCOPE", "RISK_SCORE_TOO_HIGH"}:
+        draft = OpsService.create_draft(
+            prompt,
+            context=context,
+            status="rejected",
+            error=intent_decision.execution_decision,
+        )
+    else:
+        draft = OpsService.create_draft(prompt, context=context)
     audit_log("OPS", "/ops/drafts", draft.id, operation="WRITE", actor=_actor_label(auth))
     return draft
 

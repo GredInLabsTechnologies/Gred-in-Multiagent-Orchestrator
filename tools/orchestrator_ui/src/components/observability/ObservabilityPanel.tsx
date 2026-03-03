@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useObservabilityService } from '../../hooks/useObservabilityService';
 import { ObservabilityMetrics } from '../../types';
-import { Activity, BarChart2, Coins, AlertOctagon } from 'lucide-react';
+import { Activity, BarChart2, Coins, AlertOctagon, Shuffle } from 'lucide-react';
 import { TraceViewer } from './TraceViewer';
 
 export const ObservabilityPanel: React.FC = () => {
@@ -29,7 +29,7 @@ export const ObservabilityPanel: React.FC = () => {
             </div>
 
             {/* Metrics Grid */}
-            <div className="grid grid-cols-5 gap-4">
+            <div className="grid grid-cols-6 gap-4">
                 <MetricCard
                     label="Total Workflows"
                     value={metrics?.total_workflows ?? 0}
@@ -58,6 +58,12 @@ export const ObservabilityPanel: React.FC = () => {
                     value={`${Math.round(metrics?.avg_latency_ms ?? 0)} ms`}
                     icon={Activity}
                     color="text-accent-primary"
+                />
+                <MetricCard
+                    label="Fallback Rate"
+                    value={`${((metrics?.fallback_rate ?? 0) * 100).toFixed(1)}%`}
+                    icon={Shuffle}
+                    color="text-violet-400"
                 />
             </div>
 

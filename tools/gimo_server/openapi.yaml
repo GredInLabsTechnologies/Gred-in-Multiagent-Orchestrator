@@ -635,6 +635,26 @@ paths:
               schema: { $ref: '#/components/schemas/OpsRun' }
         '404': { description: Not found }
 
+  /ops/runs/{run_id}/preview:
+    get:
+      summary: Get run preview payload
+      operationId: getOpsRunPreview
+      tags: [ops]
+      description: "Roles: actions, operator, admin"
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Run preview detail
+          content:
+            application/json:
+              schema:
+                type: object
+        '404': { description: Not found }
+
   /ops/runs/{run_id}/cancel:
     post:
       summary: Cancel a running or pending run

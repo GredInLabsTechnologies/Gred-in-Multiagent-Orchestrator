@@ -48,6 +48,7 @@ class HardwareMonitorService:
         self._interval = interval
         self._history: deque[HardwareSnapshot] = deque(maxlen=60)
         self._task: Optional[asyncio.Task] = None
+        self._task_loop: Optional[asyncio.AbstractEventLoop] = None
         self._last_level: LoadLevel = "safe"
         self._running = False
 
@@ -103,6 +104,7 @@ class HardwareMonitorService:
         if self._running:
             return
         self._running = True
+        self._task_loop = asyncio.get_running_loop()
         self._task = asyncio.create_task(self._loop())
         logger.info("Hardware monitoring started (interval=%ss)", self._interval)
 
@@ -111,10 +113,18 @@ class HardwareMonitorService:
         if self._task:
             self._task.cancel()
             try:
-                await self._task
+                current_loop = asyncio.get_running_loop()
+                if self._task_loop is current_loop:
+                    await self._task
             except asyncio.CancelledError:
                 pass
+            except RuntimeError as exc:
+                # Puede ocurrir en tests cuando el singleton se inicia en un loop
+                # y se intenta cerrar en otro loop distinto.
+                if "different loop" not in str(exc).lower():
+                    raise
             self._task = None
+            self._task_loop = None
 
     async def _loop(self) -> None:
         while self._running:

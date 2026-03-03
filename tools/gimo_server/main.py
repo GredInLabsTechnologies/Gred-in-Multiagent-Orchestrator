@@ -3,10 +3,12 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from tools.gimo_server.config import BASE_DIR, DEBUG, LOG_LEVEL, get_settings
+from tools.gimo_server.config import ACTIONS_MAX_PAYLOAD_BYTES, BASE_DIR, DEBUG, LOG_LEVEL, get_settings
 from tools.gimo_server.middlewares import register_middlewares
 from tools.gimo_server.routes import register_routes
 from tools.gimo_server.version import __version__
@@ -14,7 +16,7 @@ from tools.gimo_server.services.snapshot_service import SnapshotService
 from tools.gimo_server.services.gics_service import GicsService
 from tools.gimo_server.static_app import mount_static
 from tools.gimo_server.tasks import snapshot_cleanup_loop
-from tools.gimo_server.ops_routes import router as ops_router
+from tools.gimo_server.ops_routes import _ACTIONS_SAFE_PUBLIC_ENDPOINTS, router as ops_router
 from tools.gimo_server.routers.auth_router import router as auth_router
 
 # Configure logging with dynamic level from env
@@ -275,6 +277,23 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="Repo Orchestrator", version=__version__, lifespan=lifespan)
 
+    actions_safe_targets = {(method.upper(), path) for method, path in _ACTIONS_SAFE_PUBLIC_ENDPOINTS}
+
+    def _is_actions_safe_request(request: Request) -> bool:
+        return (request.method.upper(), request.url.path) in actions_safe_targets
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+        if _is_actions_safe_request(request):
+            return JSONResponse(status_code=422, content={"detail": "Invalid request payload."})
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        if _is_actions_safe_request(request) and int(exc.status_code) >= 500:
+            return JSONResponse(status_code=exc.status_code, content={"detail": "Internal error."})
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
     @app.get("/")
     async def root_route():
         """Serve the SPA index when available, otherwise return a basic health payload."""
@@ -303,6 +322,21 @@ def create_app() -> FastAPI:
             NotificationService.unsubscribe(queue)
 
     register_middlewares(app)
+
+    @app.middleware("http")
+    async def actions_safe_payload_limit_guard(request: Request, call_next):
+        if _is_actions_safe_request(request) and request.method.upper() in {"POST", "PUT", "PATCH"}:
+            content_length = request.headers.get("content-length")
+            if content_length:
+                try:
+                    if int(content_length) > ACTIONS_MAX_PAYLOAD_BYTES:
+                        return JSONResponse(status_code=413, content={"detail": "Payload too large."})
+                except ValueError:
+                    pass
+            body = await request.body()
+            if len(body) > ACTIONS_MAX_PAYLOAD_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "Payload too large."})
+        return await call_next(request)
 
     @app.middleware("http")
     async def limited_mode_guard(request, call_next):

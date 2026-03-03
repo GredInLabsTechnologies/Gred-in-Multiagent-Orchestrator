@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from tools.gimo_server.config import ALLOWLIST_REQUIRE, MAX_LINES, REPO_ROOT_DIR
 from tools.gimo_server.models import StatusResponse, UiStatusResponse, VitaminizeResponse
@@ -26,6 +26,7 @@ from tools.gimo_server.security import (
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.file_service import FileService
 from tools.gimo_server.services.repo_service import RepoService
+from tools.gimo_server.services.repo_override_service import RepoOverrideService
 from tools.gimo_server.services.system_service import SystemService
 from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.plan_graph_builder import build_graph_from_ops_plan
@@ -39,6 +40,9 @@ READ_ONLY_ACTIONS_PATHS = {
     "/search",
     "/diff",
     "/ui/status",
+    "/ui/repos",
+    "/ui/repos/active",
+    "/ui/repos/select",
     # OPS v2 read endpoints (prefix-matched via helper)
     "/ops/plan",
     "/ops/drafts",
@@ -58,6 +62,7 @@ OPERATOR_EXTRA_PREFIXES = (
 OPERATOR_EMERGENCY_PATHS = {
     "/ui/security/events",
     "/ui/security/resolve",
+    "/ui/repos/revoke",
 }
 
 
@@ -435,8 +440,25 @@ def list_repos_handler(
 def get_active_repo_handler(
     auth: AuthContext = Depends(require_read_only_access), rl: None = Depends(check_rate_limit)
 ):
+    override = RepoOverrideService.get_active_override()
+    if override:
+        payload = {
+            "active_repo": override.get("repo_id"),
+            "override_active": True,
+            "etag": override.get("etag"),
+            "expires_at": override.get("expires_at"),
+            "set_by_user": override.get("set_by_user"),
+        }
+        return JSONResponse(payload, headers={"ETag": str(override.get("etag", ""))})
+
     registry = load_repo_registry()
-    return {"active_repo": registry.get("active_repo")}
+    return {
+        "active_repo": registry.get("active_repo"),
+        "override_active": False,
+        "etag": None,
+        "expires_at": None,
+        "set_by_user": None,
+    }
 
 
 def _is_path_within_base(path: Path, base: Path) -> bool:
@@ -465,6 +487,7 @@ def open_repo_handler(
 
 def select_repo_handler(
     path: str = Query(...),
+    request: Request = None,
     auth: AuthContext = Depends(require_read_only_access),
     rl: None = Depends(check_rate_limit),
 ):
@@ -474,12 +497,65 @@ def select_repo_handler(
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail=ERR_REPO_NOT_FOUND)
 
+    override = RepoOverrideService.get_active_override()
+    if auth.role == "actions" and override:
+        audit_log(
+            "REPO_OVERRIDE",
+            "BLOCK_ACTIONS",
+            str(repo_path),
+            operation="repo_override_blocked_actions",
+            actor=auth.token,
+        )
+        raise HTTPException(status_code=403, detail="REPO_OVERRIDE_ACTIVE")
+
+    if_match_etag = request.headers.get("if-match") if request else None
+    try:
+        new_override = RepoOverrideService.set_human_override(
+            repo_id=str(repo_path),
+            set_by_user=auth.token,
+            source="api",
+            reason="manual_select",
+            if_match_etag=if_match_etag,
+        )
+    except ValueError as exc:
+        if str(exc) == "OVERRIDE_ETAG_MISMATCH":
+            raise HTTPException(status_code=409, detail="OVERRIDE_ETAG_MISMATCH")
+        raise
+
     registry = load_repo_registry()
     registry["active_repo"] = str(repo_path)
     save_repo_registry(registry)
 
     audit_log("REPO", "SELECT", str(repo_path), actor=auth.token)
-    return {"status": "success", "active_repo": str(repo_path)}
+    return {
+        "status": "success",
+        "active_repo": str(repo_path),
+        "override_active": True,
+        "etag": new_override.get("etag"),
+        "expires_at": new_override.get("expires_at"),
+    }
+
+
+def revoke_repo_override_handler(
+    request: Request,
+    auth: AuthContext = Depends(require_read_only_access),
+    rl: None = Depends(check_rate_limit),
+):
+    if auth.role not in ("operator", "admin"):
+        raise HTTPException(status_code=403, detail="operator or admin role required")
+
+    if_match_etag = request.headers.get("if-match")
+    try:
+        revoked = RepoOverrideService.revoke_human_override(
+            actor=auth.token,
+            if_match_etag=if_match_etag,
+        )
+    except ValueError as exc:
+        if str(exc) == "OVERRIDE_ETAG_MISMATCH":
+            raise HTTPException(status_code=409, detail="OVERRIDE_ETAG_MISMATCH")
+        raise
+
+    return {"status": "success" if revoked else "noop", "revoked": revoked}
 
 
 def resolve_security_handler(
@@ -665,6 +741,7 @@ def register_routes(app: FastAPI):
     app.get("/ui/repos/active")(get_active_repo_handler)
     app.post("/ui/repos/open")(open_repo_handler)
     app.post("/ui/repos/select")(select_repo_handler)
+    app.post("/ui/repos/revoke")(revoke_repo_override_handler)
     app.get("/ui/graph")(get_ui_graph_handler)
 
     @app.post("/ui/plan/create")

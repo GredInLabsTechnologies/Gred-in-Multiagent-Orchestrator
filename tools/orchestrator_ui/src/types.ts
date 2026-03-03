@@ -356,6 +356,16 @@ export interface OpsDraft {
     context?: {
         detected_intent?: string;
         decision_path?: 'security_block' | 'direct_response' | 'llm_generate' | string;
+        intent_declared?: string;
+        intent_effective?: string;
+        risk_score?: number;
+        decision_reason?: string;
+        execution_decision?:
+        | 'AUTO_RUN_ELIGIBLE'
+        | 'HUMAN_APPROVAL_REQUIRED'
+        | 'RISK_SCORE_TOO_HIGH'
+        | 'DRAFT_REJECTED_FORBIDDEN_SCOPE'
+        | string;
         can_bypass_llm?: boolean;
         error_actionable?: string;
         [key: string]: unknown;
@@ -529,6 +539,11 @@ export interface ObservabilityMetrics {
     estimated_cost: number;
     error_rate: number;
     avg_latency_ms: number;
+    fallback_rate?: number;
+    human_approval_required_rate?: number;
+    policy_block_rate?: number;
+    latency_ms_by_stage?: Record<string, number>;
+    errors_by_category?: Record<string, number>;
 }
 
 // --- Phase 10: Token Mastery ---
