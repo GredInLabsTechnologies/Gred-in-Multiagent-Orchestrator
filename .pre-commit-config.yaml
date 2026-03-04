@@ -63,6 +63,13 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: gimo-sonar-local
+        name: "Run Tests & SonarQube Analysis"
+        entry: cmd /c run_sonar_locally.cmd
+        language: system
+        pass_filenames: false
+        always_run: true
+
 # Configuration for pre-commit CI
 ci:
   autofix_commit_msg: 'style: auto fixes from pre-commit hooks'
