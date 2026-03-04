@@ -67,22 +67,30 @@ class OpsService:
         return FileLock(str(cls.LOCK_FILE))
 
     @classmethod
+    def _safe_path(cls, base_dir: Path, filename: str) -> Path:
+        safe_name = os.path.basename(str(filename))
+        path = (base_dir / safe_name).resolve()
+        if not str(path).startswith(str(base_dir.resolve())):
+            raise ValueError(f"Path traversal detected: {filename}")
+        return path
+
+    @classmethod
     def _draft_path(cls, draft_id: str) -> Path:
-        return cls.DRAFTS_DIR / f"{draft_id}.json"
+        return cls._safe_path(cls.DRAFTS_DIR, f"{draft_id}.json")
 
     @classmethod
     def _approved_path(cls, approved_id: str) -> Path:
-        return cls.APPROVED_DIR / f"{approved_id}.json"
+        return cls._safe_path(cls.APPROVED_DIR, f"{approved_id}.json")
 
     @classmethod
     def _run_path(cls, run_id: str) -> Path:
-        return cls.RUNS_DIR / f"{run_id}.json"
+        return cls._safe_path(cls.RUNS_DIR, f"{run_id}.json")
 
     @classmethod
     def _merge_lock_path(cls, repo_id: str) -> Path:
         safe_repo_id = str(repo_id or "default")
         digest = hashlib.sha256(safe_repo_id.encode("utf-8", errors="ignore")).hexdigest()[:24]
-        return cls.LOCKS_DIR / f"merge_{digest}.json"
+        return cls._safe_path(cls.LOCKS_DIR, f"merge_{digest}.json")
 
     @classmethod
     def _deterministic_run_id(cls, draft_id: str, commit_base: str) -> str:
