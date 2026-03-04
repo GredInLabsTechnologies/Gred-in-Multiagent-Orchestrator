@@ -26,6 +26,105 @@ if DEBUG:
     logger.info("DEBUG mode enabled (LOG_LEVEL=%s)", LOG_LEVEL)
 
 
+
+async def _integrity_recheck_loop(settings):
+    """Periodic integrity verification (defense-in-depth)."""
+    import sys as _sys
+    import asyncio
+    from tools.gimo_server.security.integrity import IntegrityVerifier
+    import logging
+    logger = logging.getLogger("orchestrator")
+    while True:
+        try:
+            await asyncio.sleep(6 * 3600)
+            ok, reason = IntegrityVerifier(settings).verify_manifest()
+            if not ok:
+                logger.critical("INTEGRITY RECHECK FAILED: %s", reason)
+                _sys.exit(1)
+            logger.debug("INTEGRITY RECHECK: %s", reason)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Integrity recheck loop error: %s", exc)
+
+async def _threat_decay_loop():
+    """Periodically check for threat level decay."""
+    import asyncio
+    from tools.gimo_server.security import save_security_db, threat_engine
+    import logging
+    logger = logging.getLogger("orchestrator")
+    while True:
+        try:
+            await asyncio.sleep(30)
+            if threat_engine.tick_decay():
+                save_security_db()
+            threat_engine.cleanup_stale_sources()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Threat decay loop error: %s", exc)
+
+async def _ops_runs_cleanup_loop():
+    import asyncio
+    from tools.gimo_server.services.ops_service import OpsService
+    import logging
+    logger = logging.getLogger("orchestrator")
+    while True:
+        try:
+            await asyncio.sleep(300)
+            cleaned = OpsService.cleanup_old_runs()
+            if cleaned:
+                logger.info("OPS run cleanup: removed %s old runs", cleaned)
+            draft_cleaned = OpsService.cleanup_old_drafts()
+            if draft_cleaned:
+                logger.info("OPS draft cleanup: removed %s old drafts", draft_cleaned)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("OPS run cleanup loop error: %s", exc)
+
+async def _notify_sessions_for_run(run, sessions, logger, ops_service):
+    ops_service.update_run_status(run.id, "notifying_handover")
+    for session in sessions:
+        try:
+            msg = f"⚠ GIMO Orchestrator requires Intervention for Run {run.id}.\nObjective: {run.objective}\nPlease use gimo_resolve_handover to resolve this."
+            await session.create_message(
+                messages=[{"role": "user", "content": {"type": "text", "text": msg}}],
+                maxTokens=500,
+            )
+            logger.info(f"Pushed Handover Sampling request for {run.id} to client via MCP")
+        except Exception as e:
+            logger.error(f"Failed to push Sampling to MCP client: {e}")
+            ops_service.update_run_status(run.id, "blocked_handover")
+
+async def _mcp_sampling_loop():
+    """
+    Periodically checks for Runs that are blocked waiting for human/agent review (status: blocked_handover)
+    and attempts to push them to connected MCP clients via Sampling.
+    """
+    import asyncio
+    from tools.gimo_server.mcp_server import mcp
+    from tools.gimo_server.services.ops_service import OpsService
+    import logging
+    logger = logging.getLogger("orchestrator")
+    while True:
+        try:
+            await asyncio.sleep(5)
+            # Ensure the MCP server has at least one active connection
+            sessions = list(mcp._sessions) if hasattr(mcp, "_sessions") else []
+            if not sessions:
+                continue  # No clients to notify
+            
+            # Fetch pending runs needing handover
+            pending_runs = OpsService.get_runs_by_status("blocked_handover")
+            for run in pending_runs:
+                await _notify_sessions_for_run(run, sessions, logger, OpsService)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("MCP sampling loop error: %s", exc)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Perform infrastructure checks and initialization without side-effects on import
@@ -67,21 +166,6 @@ async def lifespan(app: FastAPI):
         logger.critical("INTEGRITY CHECK FAILED: %s", _integrity_reason)
         _sys.exit(1)
     logger.info("INTEGRITY: %s", _integrity_reason)
-
-    async def integrity_recheck_loop():
-        """Periodic integrity verification (defense-in-depth)."""
-        while True:
-            try:
-                await asyncio.sleep(6 * 3600)
-                ok, reason = IntegrityVerifier(settings).verify_manifest()
-                if not ok:
-                    logger.critical("INTEGRITY RECHECK FAILED: %s", reason)
-                    _sys.exit(1)
-                logger.debug("INTEGRITY RECHECK: %s", reason)
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.warning("Integrity recheck loop error: %s", exc)
 
     # ── LICENSE GATE ──────────────────────────────────────────────────
     # Must pass before ANY other service starts.
@@ -138,96 +222,12 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(snapshot_cleanup_loop())
     from tools.gimo_server.services.ops_service import OpsService
 
-    async def threat_decay_loop():
-        """Periodically check for threat level decay."""
-        while True:
-            try:
-                await asyncio.sleep(30)
-                if threat_engine.tick_decay():
-                    save_security_db()
-                threat_engine.cleanup_stale_sources()
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.warning("Threat decay loop error: %s", exc)
+    threat_cleanup_task = asyncio.create_task(_threat_decay_loop())
 
-    threat_cleanup_task = asyncio.create_task(threat_decay_loop())
+    ops_cleanup_task = asyncio.create_task(_ops_runs_cleanup_loop())
+    integrity_task = asyncio.create_task(_integrity_recheck_loop(settings))
 
-    async def ops_runs_cleanup_loop():
-        while True:
-            try:
-                await asyncio.sleep(300)
-                cleaned = OpsService.cleanup_old_runs()
-                if cleaned:
-                    logger.info("OPS run cleanup: removed %s old runs", cleaned)
-                draft_cleaned = OpsService.cleanup_old_drafts()
-                if draft_cleaned:
-                    logger.info("OPS draft cleanup: removed %s old drafts", draft_cleaned)
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.warning("OPS run cleanup loop error: %s", exc)
-
-    ops_cleanup_task = asyncio.create_task(ops_runs_cleanup_loop())
-    integrity_task = asyncio.create_task(integrity_recheck_loop())
-
-    async def mcp_sampling_loop():
-        """
-        Periodically checks for Runs that are blocked waiting for human/agent review (status: blocked_handover)
-        and attempts to push them to connected MCP clients via Sampling.
-        """
-        while True:
-            try:
-                await asyncio.sleep(5)
-                # Ensure the MCP server has at least one active connection
-                from tools.gimo_server.mcp_server import mcp
-                
-                # Check for handovers if clients are connected
-                from tools.gimo_server.services.ops_service import OpsService
-                from mcp.types import CreateMessageRequestParams
-                # Getting recently blocked runs 
-                # (For simplicity in this POC we query 'blocked_handover' directly from ops dir)
-                # FastMCP provides access to sessions
-                sessions = list(mcp._sessions) if hasattr(mcp, "_sessions") else []
-                
-                if not sessions:
-                    continue  # No clients to notify
-                
-                # Fetch pending runs needing handover
-                pending_runs = OpsService.get_runs_by_status("blocked_handover")
-                
-                for run in pending_runs:
-                    # Mark as 'notifying_handover' temporarily so we don't spam
-                    OpsService.update_run_status(run.id, "notifying_handover")
-                    
-                    for session in sessions:
-                        try:
-                            # Send Sampling Push Notification to Client
-                            msg = f"⚠ GIMO Orchestrator requires Intervention for Run {run.id}.\nObjective: {run.objective}\nPlease use gimo_resolve_handover to resolve this."
-                            
-                            await session.create_message(
-                                messages=[
-                                    {
-                                        "role": "user", 
-                                        "content": {
-                                            "type": "text", 
-                                            "text": msg
-                                        }
-                                    }
-                                ],
-                                maxTokens=500,
-                            )
-                            logger.info(f"Pushed Handover Sampling request for {run.id} to client via MCP")
-                        except Exception as e:
-                            logger.error(f"Failed to push Sampling to MCP client: {e}")
-                            OpsService.update_run_status(run.id, "blocked_handover") # rollback
-
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.warning("MCP sampling loop error: %s", exc)
-                
-    mcp_sampling_task = asyncio.create_task(mcp_sampling_loop())
+    mcp_sampling_task = asyncio.create_task(_mcp_sampling_loop())
     
     # Start the Run Worker (processes pending runs in background)
     from tools.gimo_server.services.run_worker import RunWorker
@@ -269,31 +269,29 @@ async def lifespan(app: FastAPI):
         await integrity_task
     except asyncio.CancelledError:
         logger.debug("Cleanup tasks cancelled successfully.")
+        raise
     except Exception as exc:
         logger.error(f"Cleanup task failed during shutdown: {exc}")
 
 
-def create_app() -> FastAPI:
-    settings = get_settings()
-    app = FastAPI(title="Repo Orchestrator", version=__version__, lifespan=lifespan)
 
-    actions_safe_targets = {(method.upper(), path) for method, path in _ACTIONS_SAFE_PUBLIC_ENDPOINTS}
+def _is_actions_safe_request(request: Request, actions_safe_targets: set) -> bool:
+    return (request.method.upper(), request.url.path) in actions_safe_targets
 
-    def _is_actions_safe_request(request: Request) -> bool:
-        return (request.method.upper(), request.url.path) in actions_safe_targets
-
+def _register_core_exception_handlers(app: FastAPI, actions_safe_targets: set):
     @app.exception_handler(RequestValidationError)
     async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
-        if _is_actions_safe_request(request):
+        if _is_actions_safe_request(request, actions_safe_targets):
             return JSONResponse(status_code=422, content={"detail": "Invalid request payload."})
         return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-        if _is_actions_safe_request(request) and int(exc.status_code) >= 500:
+        if _is_actions_safe_request(request, actions_safe_targets) and int(exc.status_code) >= 500:
             return JSONResponse(status_code=exc.status_code, content={"detail": "Internal error."})
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
+def _register_core_routes(app: FastAPI, settings):
     @app.get("/")
     async def root_route():
         """Serve the SPA index when available, otherwise return a basic health payload."""
@@ -307,6 +305,7 @@ def create_app() -> FastAPI:
     async def websocket_endpoint(ws: WebSocket):
         """Real-time event stream via WebSocket (mirrors /ops/stream SSE)."""
         from tools.gimo_server.services.notification_service import NotificationService
+        import asyncio
         await ws.accept()
         queue = await NotificationService.subscribe()
         try:
@@ -316,43 +315,60 @@ def create_app() -> FastAPI:
                     await ws.send_text(message)
                 except asyncio.TimeoutError:
                     await ws.send_text('{"type":"ping"}')
-        except (WebSocketDisconnect, Exception):
+        except Exception:
             pass
         finally:
             NotificationService.unsubscribe(queue)
 
-    register_middlewares(app)
-
-    @app.middleware("http")
-    async def actions_safe_payload_limit_guard(request: Request, call_next):
-        if _is_actions_safe_request(request) and request.method.upper() in {"POST", "PUT", "PATCH"}:
-            content_length = request.headers.get("content-length")
-            if content_length:
-                try:
-                    if int(content_length) > ACTIONS_MAX_PAYLOAD_BYTES:
-                        return JSONResponse(status_code=413, content={"detail": "Payload too large."})
-                except ValueError:
-                    pass
-            body = await request.body()
-            if len(body) > ACTIONS_MAX_PAYLOAD_BYTES:
+async def _check_payload_size(request: Request):
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > ACTIONS_MAX_PAYLOAD_BYTES:
                 return JSONResponse(status_code=413, content={"detail": "Payload too large."})
-        return await call_next(request)
+        except ValueError:
+            pass
+    body = await request.body()
+    if len(body) > ACTIONS_MAX_PAYLOAD_BYTES:
+        return JSONResponse(status_code=413, content={"detail": "Payload too large."})
+    return None
 
-    @app.middleware("http")
-    async def limited_mode_guard(request, call_next):
-        if getattr(app.state, "limited_mode", False):
-            if request.url.path.startswith("/auth/cold-room/"):
-                return await call_next(request)
-            return JSONResponse(
-                {
-                    "detail": "Cold Room renewal required",
-                    "reason": getattr(app.state, "limited_reason", "cold_room_renewal_required"),
-                    "limited_mode": True,
-                    "allowed": ["/auth/cold-room/status", "/auth/cold-room/info", "/auth/cold-room/activate", "/auth/cold-room/renew"],
-                },
-                status_code=503,
-            )
+def _create_actions_safe_guard(actions_safe_targets: set):
+    async def guard(request: Request, call_next):
+        if _is_actions_safe_request(request, actions_safe_targets) and request.method.upper() in {"POST", "PUT", "PATCH"}:
+            resp = await _check_payload_size(request)
+            if resp: return resp
         return await call_next(request)
+    return guard
+
+async def _limited_mode_guard(request: Request, call_next):
+    if getattr(request.app.state, "limited_mode", False):
+        if request.url.path.startswith("/auth/cold-room/"):
+            return await call_next(request)
+        return JSONResponse(
+            {
+                "detail": "Cold Room renewal required",
+                "reason": getattr(request.app.state, "limited_reason", "cold_room_renewal_required"),
+                "limited_mode": True,
+                "allowed": ["/auth/cold-room/status", "/auth/cold-room/info", "/auth/cold-room/activate", "/auth/cold-room/renew"],
+            },
+            status_code=503,
+        )
+    return await call_next(request)
+
+def _register_core_middlewares(app: FastAPI, actions_safe_targets: set):
+    app.middleware("http")(_limited_mode_guard)
+    app.middleware("http")(_create_actions_safe_guard(actions_safe_targets))
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+    app = FastAPI(title="Repo Orchestrator", version=__version__, lifespan=lifespan)
+    actions_safe_targets = {(method.upper(), path) for method, path in _ACTIONS_SAFE_PUBLIC_ENDPOINTS}
+    
+    _register_core_exception_handlers(app, actions_safe_targets)
+    _register_core_routes(app, settings)
+    register_middlewares(app)
+    _register_core_middlewares(app, actions_safe_targets)
 
     # Mount FastMCP SSE Server
     try:
@@ -371,7 +387,6 @@ def create_app() -> FastAPI:
 
     return app
 
-
 app = create_app()
 
 if __name__ == "__main__":
@@ -383,7 +398,7 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "tools.gimo_server.main:app",
-        host="0.0.0.0",  # nosec B104 - CLI entrypoint for local/dev use
+        host="127.0.0.1",  # nosec B104 - CLI entrypoint for local/dev use
         port=port,
         reload=DEBUG,
         log_level=LOG_LEVEL.lower(),

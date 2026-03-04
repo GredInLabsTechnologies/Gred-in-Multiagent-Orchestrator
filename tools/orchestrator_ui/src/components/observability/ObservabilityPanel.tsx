@@ -24,7 +24,7 @@ export const ObservabilityPanel: React.FC = () => {
                 <h1 className="text-xl font-bold tracking-tight">Metrics Dashboard</h1>
                 <div className="flex items-center gap-2 text-xs text-text-secondary">
                     <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                    Live Monitoring
+                    <span>Live Monitoring</span>
                 </div>
             </div>
 

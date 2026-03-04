@@ -147,7 +147,7 @@ class ProviderService:
             redacted_mcp_servers[name] = McpServerConfig(
                 command=srv.command,
                 args=srv.args,
-                env={k: "***" for k in srv.env.keys()},
+                env=dict.fromkeys(srv.env.keys(), "***"),
                 enabled=srv.enabled,
             )
         return ProviderConfig(
@@ -177,39 +177,53 @@ class ProviderService:
         return normalized_cfg
 
     @classmethod
+    def _get_changed_provider_types(cls, before: Optional[ProviderConfig], cur_cfg: ProviderConfig) -> set[str]:
+        changed_types: set[str] = set()
+        if not before:
+            for entry in cur_cfg.providers.values():
+                changed_types.add(cls.normalize_provider_type(entry.provider_type or entry.type))
+            return changed_types
+
+        all_ids = set(before.providers.keys()) | set(cur_cfg.providers.keys())
+        for pid in all_ids:
+            prev = before.providers.get(pid)
+            cur = cur_cfg.providers.get(pid)
+            cls._compare_provider(prev, cur, changed_types)
+        
+        return changed_types
+
+    @classmethod
+    def _compare_provider(cls, prev, cur, changed_types: set[str]):
+        prev_type = cls.normalize_provider_type(prev.provider_type or prev.type) if prev else None
+        cur_type = cls.normalize_provider_type(cur.provider_type or cur.type) if cur else None
+        
+        if prev_type:
+            changed_types.add(prev_type)
+        if cur_type:
+            changed_types.add(cur_type)
+        
+        if prev and cur and (prev.auth_ref != cur.auth_ref or prev.auth_mode != cur.auth_mode):
+            if cur_type:
+                from .provider_catalog_service import ProviderCatalogService
+                ProviderCatalogService.invalidate_cache(provider_type=cur_type, reason="credentials_changed")
+
+    @classmethod
+    def _invalidate_caches_on_config_change(cls, before: Optional[ProviderConfig], cur_cfg: ProviderConfig) -> None:
+        try:
+            from .provider_catalog_service import ProviderCatalogService
+            changed_types = cls._get_changed_provider_types(before, cur_cfg)
+            for ctype in changed_types:
+                ProviderCatalogService.invalidate_cache(provider_type=ctype, reason="provider_config_updated")
+        except Exception:
+            pass
+
+    @classmethod
     def set_config(cls, cfg: ProviderConfig) -> ProviderConfig:
         OPS_DATA_DIR.mkdir(parents=True, exist_ok=True)
         before = cls.get_config()
         normalized_cfg = cls._normalize_config(cfg)
         cls.CONFIG_FILE.write_text(normalized_cfg.model_dump_json(indent=2), encoding="utf-8")
-        try:
-            from .provider_catalog_service import ProviderCatalogService
-
-            changed_types: set[str] = set()
-            if before:
-                all_ids = set(before.providers.keys()) | set(normalized_cfg.providers.keys())
-                for pid in all_ids:
-                    prev = before.providers.get(pid)
-                    cur = normalized_cfg.providers.get(pid)
-                    prev_type = cls.normalize_provider_type((prev.provider_type if prev else None) or (prev.type if prev else None)) if prev else None
-                    cur_type = cls.normalize_provider_type((cur.provider_type if cur else None) or (cur.type if cur else None)) if cur else None
-                    if prev_type:
-                        changed_types.add(prev_type)
-                    if cur_type:
-                        changed_types.add(cur_type)
-                    if prev and cur and (prev.auth_ref != cur.auth_ref or prev.auth_mode != cur.auth_mode):
-                        if cur_type:
-                            ProviderCatalogService.invalidate_cache(provider_type=cur_type, reason="credentials_changed")
-            else:
-                for entry in normalized_cfg.providers.values():
-                    changed_types.add(cls.normalize_provider_type(entry.provider_type or entry.type))
-
-            # conservative safety net for first persist / broad changes
-            for ctype in changed_types:
-                ProviderCatalogService.invalidate_cache(provider_type=ctype, reason="provider_config_updated")
-        except Exception:
-            # cache invalidation should never block config persistence
-            pass
+        cls._invalidate_caches_on_config_change(before, normalized_cfg)
         return normalized_cfg
 
     @classmethod

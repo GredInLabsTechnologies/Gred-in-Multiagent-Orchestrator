@@ -3,7 +3,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -108,11 +108,10 @@ def require_read_only_access(
             raise HTTPException(
                 status_code=403, detail="Read-only token cannot access this endpoint"
             )
-    elif auth.role == "operator":
-        if not _is_operator_allowed_path(path):
-            raise HTTPException(
-                status_code=403, detail="Operator token cannot access this endpoint"
-            )
+    elif auth.role == "operator" and not _is_operator_allowed_path(path):
+        raise HTTPException(
+            status_code=403, detail="Operator token cannot access this endpoint"
+        )
     return auth
 
 
@@ -121,6 +120,10 @@ logger = logging.getLogger("orchestrator.routes")
 # Constants for error messages
 ERR_REPO_NOT_FOUND = "Repo no encontrado"
 ERR_REPO_OUT_OF_BASE = "Repo fuera de la base permitida"
+ERR_OPERATOR_ADMIN_REQUIRED = "operator or admin role required"
+ERR_ADMIN_REQUIRED = "admin role or higher required"
+ERR_PROVIDER_MISSING = "Provider config missing"
+ERR_PROVIDER_NOT_FOUND = "Provider not found"
 
 # Route Handlers
 
@@ -192,204 +195,226 @@ def get_ui_allowlist_handler(
     return {"paths": safe_items}
 
 
+def _is_node_completed(msg: str, n_id: str, lbl: str) -> bool:
+    if "✅" in msg or "delegation noted" in msg:
+        if n_id in msg or (lbl and lbl in msg):
+            return True
+    return False
+
+def _parse_run_logs_for_status(nodes: list, logs: list):
+    completed = set()
+    running = None
+
+    for entry in logs:
+        msg = entry.get("msg", "")
+        for n in nodes:
+            n_id = n["id"]
+            lbl = n["data"].get("label", "")
+            if _is_node_completed(msg, n_id, lbl):
+                completed.add(n_id)
+        if "Executing Task" in msg:
+            for n in nodes:
+                if n["id"] in msg:
+                    running = n["id"]
+    return completed, running
+
+def _apply_node_status(node, run_status, completed_tasks, running_task):
+    nid = node["id"]
+    if run_status == "done":
+        return "done"
+    elif run_status == "pending":
+        return "pending"
+    
+    # "error" or "running"
+    if nid in completed_tasks:
+        return "done"
+    elif nid == running_task:
+        return run_status
+    return "pending"
+
 def _overlay_run_status(nodes: list, run) -> None:
     """Update node statuses based on run logs (which tasks completed/failed)."""
-    completed_tasks = set()
-    running_task = None
-    for entry in (run.log or []):
-        msg = entry.get("msg", "")
-        # Detect completed tasks from log messages
-        if "✅" in msg or "delegation noted" in msg:
-            for node in nodes:
-                if node["id"] in msg or node["data"].get("label", "") in msg:
-                    completed_tasks.add(node["id"])
-        if "Executing Task" in msg:
-            for node in nodes:
-                if node["id"] in msg:
-                    running_task = node["id"]
-
+    logs = run.log or []
+    completed_tasks, running_task = _parse_run_logs_for_status(nodes, logs)
+    
     for node in nodes:
-        nid = node["id"]
-        if run.status == "done":
-            node["data"]["status"] = "done"
-        elif run.status == "error":
-            if nid in completed_tasks:
-                node["data"]["status"] = "done"
-            elif nid == running_task:
-                node["data"]["status"] = "error"
-            else:
-                node["data"]["status"] = "pending"
-        elif run.status == "running":
-            if nid in completed_tasks:
-                node["data"]["status"] = "done"
-            elif nid == running_task:
-                node["data"]["status"] = "running"
-            else:
-                node["data"]["status"] = "pending"
-        elif run.status == "pending":
-            node["data"]["status"] = "pending"
+        node["data"]["status"] = _apply_node_status(node, run.status, completed_tasks, running_task)
 
+
+def _get_graph_for_custom_plan():
+    try:
+        from tools.gimo_server.services.custom_plan_service import CustomPlanService
+        all_plans = CustomPlanService.list_plans()
+        active_cp = next((p for p in all_plans if p.status in ("running", "draft")), None)
+        if active_cp and active_cp.nodes:
+            cp_nodes = []
+            cp_edges = []
+            for node in active_cp.nodes:
+                cp_nodes.append({
+                    "id": node.id,
+                    "type": "custom",
+                    "position": {"x": node.position.x, "y": node.position.y},
+                    "data": {
+                        "label": node.label,
+                        "status": node.status,
+                        "node_type": node.node_type,
+                        "role": node.role,
+                        "model": node.model,
+                        "provider": node.provider,
+                        "prompt": node.prompt,
+                        "role_definition": node.role_definition,
+                        "is_orchestrator": node.is_orchestrator,
+                        "output": node.output,
+                        "error": node.error,
+                        "plan": {"draft_id": active_cp.id},
+                        "custom_plan_id": active_cp.id,
+                    },
+                })
+            for edge in active_cp.edges:
+                cp_edges.append({
+                    "id": edge.id,
+                    "source": edge.source,
+                    "target": edge.target,
+                })
+            return {"nodes": cp_nodes, "edges": cp_edges}
+    except Exception:
+        pass
+    return None
+
+def _get_graph_for_active_runs():
+    try:
+        runs = OpsService.list_runs()
+        active_runs = [r for r in runs if r.status in ("pending", "running")]
+        if active_runs:
+            latest_run = active_runs[0]
+            approved = OpsService.get_approved(latest_run.approved_id)
+            if approved and approved.content:
+                nodes, edges = build_graph_from_ops_plan(approved.content, draft_id=latest_run.id)
+                _overlay_run_status(nodes, latest_run)
+                return {"nodes": nodes, "edges": edges}
+    except Exception:
+        pass
+    return None
+
+def _get_graph_for_pending_drafts():
+    try:
+        drafts = OpsService.list_drafts()
+        pending_drafts = [d for d in drafts if d.context.get("structured") and d.status == "draft" and d.content]
+        if pending_drafts:
+            latest = pending_drafts[0]
+            nodes, edges = build_graph_from_ops_plan(latest.content, draft_id=latest.id)
+            return {"nodes": nodes, "edges": edges}
+    except Exception:
+        pass
+    return None
+
+def _get_graph_for_recent_done_runs():
+    try:
+        runs = OpsService.list_runs()
+        recent_done = [r for r in runs if r.status in ("done", "error")]
+        if recent_done:
+            latest_done = recent_done[0]
+            approved = OpsService.get_approved(latest_done.approved_id)
+            if approved and approved.content:
+                nodes, edges = build_graph_from_ops_plan(approved.content, draft_id=latest_done.id)
+                _overlay_run_status(nodes, latest_done)
+                return {"nodes": nodes, "edges": edges}
+    except Exception:
+        pass
+    return None
+
+def _get_graph_for_approved_drafts():
+    try:
+        drafts = OpsService.list_drafts()
+        approved_drafts = [d for d in drafts if d.context.get("structured") and d.status == "approved" and d.content]
+        if approved_drafts:
+            latest = approved_drafts[0]
+            nodes, edges = build_graph_from_ops_plan(latest.content, draft_id=latest.id)
+            return {"nodes": nodes, "edges": edges}
+    except Exception:
+        pass
+    return None
+
+def _process_engine_node(node, state_data, checkpoints, resume_id):
+    confidence = state_data.get("node_confidence", {}).get(node.id)
+    status = "pending"
+    for cp in reversed(checkpoints):
+        if cp.node_id == node.id:
+            status = cp.status if cp.status != "completed" else "done"
+            break
+            
+    if state_data.get("execution_paused") and state_data.get("pause_reason") == "agent_doubt":
+        if resume_id == node.id:
+            status = "doubt"
+
+    pending_questions = []
+    if confidence and confidence.get("questions"):
+        for i, q in enumerate(confidence["questions"]):
+            pending_questions.append({
+                "id": f"doubt_{node.id}_{i}",
+                "question": q,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": "pending"
+            })
+
+    return {
+        "id": node.id,
+        "type": "orchestrator" if getattr(node, "type", "") == "agent_task" else "bridge",
+        "data": {
+            "label": getattr(node, "config", {}).get("label", node.id),
+            "status": status,
+            "confidence": confidence,
+            "pendingQuestions": pending_questions,
+            "trustLevel": state_data.get(f"trust_{node.id}", "autonomous"),
+        },
+        "position": {"x": 0, "y": 0}
+    }
+
+def _build_engine_graph(engine):
+    graph = engine.graph
+    state_data = engine.state.data
+    checkpoints = engine.state.checkpoints
+    resume_id = getattr(engine, "_resume_from_node_id", None)
+
+    nodes = [_process_engine_node(node, state_data, checkpoints, resume_id) for node in graph.nodes]
+    
+    edges = [{
+        "id": f"e-{edge.from_node}-{edge.to_node}",
+        "source": edge.from_node,
+        "target": edge.to_node,
+        "animated": True
+    } for edge in graph.edges]
+
+    return {"nodes": nodes, "edges": edges}
 
 def get_ui_graph_handler(
     auth: AuthContext = Depends(require_read_only_access),
     rl: None = Depends(check_rate_limit),
 ):
     """Generate dynamic graph structure for the UI based on active engines."""
-    # Find most recent active engine
     engine = None
     if _WORKFLOW_ENGINES:
-        # Get the move recent one (insertion order in python 3.7+)
         engine = list(_WORKFLOW_ENGINES.values())[-1]
 
     if not engine:
-        # Priority 0: Active CustomPlans (running or draft) — unified plan system
-        try:
-            from tools.gimo_server.services.custom_plan_service import CustomPlanService
-            all_plans = CustomPlanService.list_plans()
-            active_cp = next((p for p in all_plans if p.status in ("running", "draft")), None)
-            if active_cp and active_cp.nodes:
-                cp_nodes = []
-                cp_edges = []
-                for node in active_cp.nodes:
-                    cp_nodes.append({
-                        "id": node.id,
-                        "type": "custom",
-                        "position": {"x": node.position.x, "y": node.position.y},
-                        "data": {
-                            "label": node.label,
-                            "status": node.status,
-                            "node_type": node.node_type,
-                            "role": node.role,
-                            "model": node.model,
-                            "provider": node.provider,
-                            "prompt": node.prompt,
-                            "role_definition": node.role_definition,
-                            "is_orchestrator": node.is_orchestrator,
-                            "output": node.output,
-                            "error": node.error,
-                            "plan": {"draft_id": active_cp.id},
-                            "custom_plan_id": active_cp.id,
-                        },
-                    })
-                for edge in active_cp.edges:
-                    cp_edges.append({
-                        "id": edge.id,
-                        "source": edge.source,
-                        "target": edge.target,
-                    })
-                return {"nodes": cp_nodes, "edges": cp_edges}
-        except Exception:
-            pass
-
-        # Priority 1: Active runs (pending/running) — show live execution
-        runs = []
-        try:
-            runs = OpsService.list_runs()
-            active_runs = [r for r in runs if r.status in ("pending", "running")]
-            if active_runs:
-                latest_run = active_runs[0]
-                approved = OpsService.get_approved(latest_run.approved_id)
-                if approved and approved.content:
-                    nodes, edges = build_graph_from_ops_plan(approved.content, draft_id=latest_run.id)
-                    _overlay_run_status(nodes, latest_run)
-                    return {"nodes": nodes, "edges": edges}
-        except Exception:
-            pass
-
-        # Priority 2: Pending drafts — new plan awaiting approval
-        try:
-            drafts = OpsService.list_drafts()
-            pending_drafts = [d for d in drafts if d.context.get("structured") and d.status == "draft" and d.content]
-            if pending_drafts:
-                latest = pending_drafts[0]
-                nodes, edges = build_graph_from_ops_plan(latest.content, draft_id=latest.id)
-                return {"nodes": nodes, "edges": edges}
-        except Exception:
-            pass
-
-        # Priority 3: Most recent completed/errored run — post-execution view
-        try:
-            recent_done = [r for r in runs if r.status in ("done", "error")]
-            if recent_done:
-                latest_done = recent_done[0]
-                approved = OpsService.get_approved(latest_done.approved_id)
-                if approved and approved.content:
-                    nodes, edges = build_graph_from_ops_plan(approved.content, draft_id=latest_done.id)
-                    _overlay_run_status(nodes, latest_done)
-                    return {"nodes": nodes, "edges": edges}
-        except Exception:
-            pass
-
-        # Priority 4: Approved drafts waiting for run
-        try:
-            approved_drafts = [d for d in drafts if d.context.get("structured") and d.status == "approved" and d.content]
-            if approved_drafts:
-                latest = approved_drafts[0]
-                nodes, edges = build_graph_from_ops_plan(latest.content, draft_id=latest.id)
-                return {"nodes": nodes, "edges": edges}
-        except Exception:
-            pass
-
+        result = _get_graph_for_custom_plan()
+        if result: return result
+        
+        result = _get_graph_for_active_runs()
+        if result: return result
+        
+        result = _get_graph_for_pending_drafts()
+        if result: return result
+        
+        result = _get_graph_for_recent_done_runs()
+        if result: return result
+        
+        result = _get_graph_for_approved_drafts()
+        if result: return result
+        
         return {"nodes": [], "edges": []}
 
-    graph = engine.graph
-    state_data = engine.state.data
-    node_confidence = state_data.get("node_confidence", {})
-
-    nodes = []
-    for node in graph.nodes:
-        # Map WorkflowNode to UI GraphNode format
-        confidence = node_confidence.get(node.id)
-        
-        # Determine status
-        status = "pending"
-        # Check checkpoints for status
-        for cp in reversed(engine.state.checkpoints):
-            if cp.node_id == node.id:
-                status = cp.status if cp.status != "completed" else "done"
-                break
-        
-        # If it's paused due to doubt
-        if state_data.get("execution_paused") and state_data.get("pause_reason") == "agent_doubt":
-            # Check if this node is the one that paused
-            # We don't have a direct 'current_node' but we have _resume_from_node_id
-            if getattr(engine, "_resume_from_node_id", None) == node.id:
-                status = "doubt"
-
-        # Map questions if any
-        pending_questions = []
-        if confidence and confidence.get("questions"):
-            for i, q in enumerate(confidence["questions"]):
-                pending_questions.append({
-                    "id": f"doubt_{node.id}_{i}",
-                    "question": q,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "status": "pending"
-                })
-
-        nodes.append({
-            "id": node.id,
-            "type": "orchestrator" if node.type == "agent_task" else "bridge",
-            "data": {
-                "label": node.config.get("label", node.id),
-                "status": status,
-                "confidence": confidence,
-                "pendingQuestions": pending_questions,
-                "trustLevel": state_data.get(f"trust_{node.id}", "autonomous"),
-            },
-            "position": {"x": 0, "y": 0} # Frontend layouting usually handles this, or we can mock
-        })
-
-    edges = []
-    for edge in graph.edges:
-        edges.append({
-            "id": f"e-{edge.from_node}-{edge.to_node}",
-            "source": edge.from_node,
-            "target": edge.to_node,
-            "animated": True
-        })
-
-    return {"nodes": nodes, "edges": edges}
+    return _build_engine_graph(engine)
 
 
 def list_repos_handler(
@@ -398,7 +423,7 @@ def list_repos_handler(
     repos = RepoService.list_repos()
     registry = load_repo_registry()
     
-    current_paths = set(str(Path(p).resolve()) for p in registry.get("repos", []))
+    current_paths = {str(Path(p).resolve()) for p in registry.get("repos", [])}
     changed = False
     new_repos_list = list(registry.get("repos", []))
     
@@ -542,7 +567,7 @@ def revoke_repo_override_handler(
     rl: None = Depends(check_rate_limit),
 ):
     if auth.role not in ("operator", "admin"):
-        raise HTTPException(status_code=403, detail="operator or admin role required")
+        raise HTTPException(status_code=403, detail=ERR_OPERATOR_ADMIN_REQUIRED)
 
     if_match_etag = request.headers.get("if-match")
     try:
@@ -732,6 +757,278 @@ def get_diff_handler(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+async def create_plan_handler(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(require_read_only_access)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """Creates a structured plan from UI and returns it as a draft."""
+    if auth.role not in ("operator", "admin"):
+        raise HTTPException(status_code=403, detail=ERR_OPERATOR_ADMIN_REQUIRED)
+
+    body = await request.json()
+    prompt = str(body.get("prompt") or body.get("instructions") or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required")
+
+    from tools.gimo_server.services.provider_service import ProviderService
+    from tools.gimo_server.ops_models import OpsPlan
+
+    workspace = str(body.get("workspace") or ".")
+
+    # Generate structured plan via LLM
+    system_msg = (
+        "You are a multi-agent orchestration planner. Given a task, produce a JSON plan with "
+        "the schema: {\"id\": \"plan_xxx\", \"title\": \"Short plan title\", "
+        "\"workspace\": \".\", \"created\": \"2026-01-01\", \"objective\": \"...\", "
+        "\"tasks\": [{\"id\": \"t1\", \"title\": \"...\", \"scope\": \"bridge\", "
+        "\"description\": \"...\", \"depends\": [], \"status\": \"pending\", "
+        "\"agent_assignee\": {\"role\": \"orchestrator\", \"goal\": \"...\", \"model\": \"qwen2.5-coder:32b\", "
+        "\"system_prompt\": \"...\", \"instructions\": [\"...\"]}}, "
+        "{\"id\": \"t2\", \"title\": \"...\", \"scope\": \"file_write\", "
+        "\"description\": \"...\", \"depends\": [\"t1\"], \"status\": \"pending\", "
+        "\"agent_assignee\": {\"role\": \"worker\", \"goal\": \"...\", \"model\": \"qwen2.5-coder:32b\", "
+        "\"system_prompt\": \"...\", \"instructions\": [\"...\"]}}]}. "
+        "First task is always the orchestrator (scope=bridge). Remaining tasks are workers (scope=file_write). "
+        "Return ONLY valid JSON, no markdown."
+    )
+
+    try:
+        response = await ProviderService.static_generate(
+            prompt=f"{system_msg}\n\nTask: {prompt}",
+            context={"task_type": "planning"}
+        )
+        raw = response.get("content", "{}")
+
+        # Try to extract JSON from response
+        import re as _re
+        json_match = _re.search(r'\{.*\}', raw, _re.DOTALL)
+        plan_json = json_match.group(0) if json_match else raw
+
+        plan_data = OpsPlan.model_validate_json(plan_json)
+    except Exception as _plan_err:
+        # Fallback: create a simple 2-node plan
+        import logging as _log
+        _log.getLogger("orchestrator").warning("Plan LLM failed, using fallback: %s", _plan_err)
+        import uuid
+        from datetime import datetime, timezone
+        from tools.gimo_server.ops_models import OpsTask, AgentProfile
+        plan_data = OpsPlan(
+            id=f"plan_{uuid.uuid4().hex[:8]}",
+            title=prompt[:80],
+            workspace=workspace,
+            created=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            objective=prompt,
+            tasks=[
+                OpsTask(
+                    id="t1", title="Orquestador", scope="bridge",
+                    description=prompt, depends=[], status="pending",
+                    agent_assignee=AgentProfile(
+                        role="orchestrator", goal="Coordinate the plan",
+                        model="qwen2.5-coder:32b",
+                        system_prompt=f"You are the orchestrator for: {prompt}",
+                    )
+                ),
+                OpsTask(
+                    id="t2", title="Worker", scope="file_write",
+                    description=f"Execute: {prompt}",
+                    depends=["t1"], status="pending",
+                    agent_assignee=AgentProfile(
+                        role="worker", goal=prompt,
+                        model="qwen2.5-coder:32b",
+                        system_prompt=f"You are a specialist worker. Your task: {prompt}",
+                    )
+                ),
+            ]
+        )
+
+    # Generate mermaid graph from plan
+    lines = ["graph TD"]
+    for task in plan_data.tasks:
+        node_id = task.id.replace("-", "_")
+        label = f'"{task.title}<br/>[{task.status}]"'
+        lines.append(f"    {node_id}[{label}]")
+        for dep in task.depends:
+            lines.append(f"    {dep.replace('-', '_')} --> {node_id}")
+    graph = "\n".join(lines)
+
+    draft = OpsService.create_draft(
+        prompt=prompt,
+        content=plan_data.model_dump_json(indent=2),
+        context={"structured": True, "mermaid": graph},
+        provider="ui_plan_builder"
+    )
+
+    audit_log("UI", "PLAN_CREATE", draft.id, actor=auth.token)
+    return {
+        "id": draft.id,
+        "status": draft.status,
+        "prompt": draft.prompt,
+        "content": draft.content,
+        "mermaid": graph,
+    }
+
+
+def reject_draft_handler(
+    draft_id: str,
+    auth: Annotated[AuthContext, Depends(require_read_only_access)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """Rejects a draft plan."""
+    if auth.role not in ("operator", "admin"):
+        raise HTTPException(status_code=403, detail=ERR_OPERATOR_ADMIN_REQUIRED)
+
+    draft = OpsService.get_draft(draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    OpsService.update_draft(draft_id, status="rejected")
+    audit_log("UI", "PLAN_REJECT", draft_id, actor=auth.token)
+    return {"status": "rejected", "id": draft_id}
+
+
+def list_ui_providers_bridge(
+    auth: Annotated[AuthContext, Depends(require_read_only_access)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """Bridge endpoint for legacy UI. Source of truth is OPS provider config."""
+    from tools.gimo_server.services.provider_service import ProviderService
+
+    cfg = ProviderService.get_public_config()
+    if not cfg:
+        return []
+
+    result = []
+    for pid, entry in cfg.providers.items():
+        caps = entry.capabilities or {}
+        provider_type = entry.provider_type or entry.type
+        result.append(
+            {
+                "id": pid,
+                "type": provider_type,
+                "is_local": not bool(caps.get("requires_remote_api", True)),
+                "config": {
+                    "display_name": entry.display_name,
+                    "base_url": entry.base_url,
+                    "model": entry.model,
+                    "capabilities": caps,
+                },
+                "deprecated": True,
+                "deprecation_note": "Use /ops/provider as canonical source.",
+            }
+        )
+    return result
+
+
+def add_ui_provider_bridge(
+    body: dict,
+    auth: Annotated[AuthContext, Depends(require_read_only_access)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    from tools.gimo_server.ops_models import ProviderEntry, ProviderConfig
+    from tools.gimo_server.services.provider_service import ProviderService
+
+    if auth.role != "admin":
+        raise HTTPException(status_code=403, detail=ERR_ADMIN_REQUIRED)
+
+    cfg = ProviderService.get_config()
+    if not cfg:
+        raise HTTPException(status_code=404, detail=ERR_PROVIDER_MISSING)
+
+    provider_id = str(body.get("id") or body.get("name") or "").strip()
+    if not provider_id:
+        raise HTTPException(status_code=400, detail="provider id is required")
+
+    raw_type = str(body.get("provider_type") or body.get("type") or "custom_openai_compatible")
+    canonical_type = ProviderService.normalize_provider_type(raw_type)
+    model = str(body.get("model") or body.get("default_model") or "gpt-4o-mini")
+    base_url = body.get("base_url")
+    if canonical_type == "ollama_local" and not base_url:
+        base_url = "http://localhost:11434/v1"
+
+    cfg.providers[provider_id] = ProviderEntry(
+        type=raw_type,
+        provider_type=canonical_type,
+        display_name=body.get("display_name") or provider_id,
+        base_url=base_url,
+        api_key=body.get("api_key"),
+        model=model,
+        capabilities=ProviderService.capabilities_for(canonical_type),
+    )
+
+    updated = ProviderService.set_config(
+        ProviderConfig(active=cfg.active if cfg.active in cfg.providers else provider_id, providers=cfg.providers, mcp_servers=cfg.mcp_servers)
+    )
+    audit_log("UI", "LEGACY_PROVIDER_ADD", provider_id, actor=f"{auth.role}:legacy_bridge")
+    return {"id": provider_id, "status": "registered", "active": updated.active, "deprecated": True}
+
+
+def remove_ui_provider_bridge(
+    provider_id: str,
+    auth: Annotated[AuthContext, Depends(require_read_only_access)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    from tools.gimo_server.ops_models import ProviderConfig
+    from tools.gimo_server.services.provider_service import ProviderService
+
+    if auth.role != "admin":
+        raise HTTPException(status_code=403, detail=ERR_ADMIN_REQUIRED)
+
+    cfg = ProviderService.get_config()
+    if not cfg:
+        raise HTTPException(status_code=404, detail=ERR_PROVIDER_MISSING)
+    if provider_id not in cfg.providers:
+        raise HTTPException(status_code=404, detail=ERR_PROVIDER_NOT_FOUND)
+
+    cfg.providers.pop(provider_id, None)
+    if not cfg.providers:
+        raise HTTPException(status_code=400, detail="At least one provider is required")
+    if cfg.active == provider_id:
+        cfg.active = next(iter(cfg.providers.keys()))
+    ProviderService.set_config(ProviderConfig(active=cfg.active, providers=cfg.providers, mcp_servers=cfg.mcp_servers))
+    audit_log("UI", "LEGACY_PROVIDER_REMOVE", provider_id, actor=f"{auth.role}:legacy_bridge")
+    return {"status": "removed", "id": provider_id, "deprecated": True}
+
+
+async def test_ui_provider_bridge(
+    provider_id: str,
+    auth: Annotated[AuthContext, Depends(require_read_only_access)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    from tools.gimo_server.services.provider_service import ProviderService
+
+    cfg = ProviderService.get_config()
+    if not cfg or provider_id not in cfg.providers:
+        raise HTTPException(status_code=404, detail=ERR_PROVIDER_NOT_FOUND)
+
+    healthy = await ProviderService.health_check() if provider_id == cfg.active else True
+    return {
+        "status": "ok" if healthy else "error",
+        "message": "Provider reachable" if healthy else "Provider unreachable",
+        "deprecated": True,
+    }
+
+
+def list_ui_nodes_bridge(
+    auth: Annotated[AuthContext, Depends(require_read_only_access)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """Bridge endpoint kept for legacy UI compatibility."""
+    return {}
+
+
+def compare_costs(
+    model_a: Annotated[str, Query(..., min_length=1)],
+    model_b: Annotated[str, Query(..., min_length=1)],
+    auth: Annotated[AuthContext, Depends(verify_token)],
+):
+    from tools.gimo_server.services.cost_service import CostService
+    try:
+        return CostService.get_impact_comparison(model_a, model_b)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 def register_routes(app: FastAPI):
     app.get("/status", response_model=StatusResponse)(get_status_handler)
     app.get("/ui/status", response_model=UiStatusResponse)(get_ui_status_handler)
@@ -743,279 +1040,6 @@ def register_routes(app: FastAPI):
     app.post("/ui/repos/select")(select_repo_handler)
     app.post("/ui/repos/revoke")(revoke_repo_override_handler)
     app.get("/ui/graph")(get_ui_graph_handler)
-
-    @app.post("/ui/plan/create")
-    async def create_plan_handler(
-        request: Request,
-        auth: AuthContext = Depends(require_read_only_access),
-        rl: None = Depends(check_rate_limit),
-    ):
-        """Creates a structured plan from UI and returns it as a draft."""
-        if auth.role not in ("operator", "admin"):
-            raise HTTPException(status_code=403, detail="operator or admin role required")
-
-        body = await request.json()
-        prompt = str(body.get("prompt") or body.get("instructions") or "").strip()
-        if not prompt:
-            raise HTTPException(status_code=400, detail="prompt is required")
-
-        from tools.gimo_server.services.provider_service import ProviderService
-        from tools.gimo_server.ops_models import OpsPlan
-
-        workspace = str(body.get("workspace") or ".")
-
-        # Generate structured plan via LLM
-        system_msg = (
-            "You are a multi-agent orchestration planner. Given a task, produce a JSON plan with "
-            "the schema: {\"id\": \"plan_xxx\", \"title\": \"Short plan title\", "
-            "\"workspace\": \".\", \"created\": \"2026-01-01\", \"objective\": \"...\", "
-            "\"tasks\": [{\"id\": \"t1\", \"title\": \"...\", \"scope\": \"bridge\", "
-            "\"description\": \"...\", \"depends\": [], \"status\": \"pending\", "
-            "\"agent_assignee\": {\"role\": \"orchestrator\", \"goal\": \"...\", \"model\": \"qwen2.5-coder:32b\", "
-            "\"system_prompt\": \"...\", \"instructions\": [\"...\"]}}, "
-            "{\"id\": \"t2\", \"title\": \"...\", \"scope\": \"file_write\", "
-            "\"description\": \"...\", \"depends\": [\"t1\"], \"status\": \"pending\", "
-            "\"agent_assignee\": {\"role\": \"worker\", \"goal\": \"...\", \"model\": \"qwen2.5-coder:32b\", "
-            "\"system_prompt\": \"...\", \"instructions\": [\"...\"]}}]}. "
-            "First task is always the orchestrator (scope=bridge). Remaining tasks are workers (scope=file_write). "
-            "Return ONLY valid JSON, no markdown."
-        )
-
-        try:
-            response = await ProviderService.static_generate(
-                prompt=f"{system_msg}\n\nTask: {prompt}",
-                context={"task_type": "planning"}
-            )
-            raw = response.get("content", "{}")
-
-            # Try to extract JSON from response
-            import re as _re
-            json_match = _re.search(r'\{.*\}', raw, _re.DOTALL)
-            plan_json = json_match.group(0) if json_match else raw
-
-            plan_data = OpsPlan.model_validate_json(plan_json)
-        except Exception as _plan_err:
-            # Fallback: create a simple 2-node plan
-            import logging as _log
-            _log.getLogger("orchestrator").warning("Plan LLM failed, using fallback: %s", _plan_err)
-            import uuid
-            from datetime import datetime, timezone
-            from tools.gimo_server.ops_models import OpsTask, AgentProfile
-            plan_data = OpsPlan(
-                id=f"plan_{uuid.uuid4().hex[:8]}",
-                title=prompt[:80],
-                workspace=workspace,
-                created=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                objective=prompt,
-                tasks=[
-                    OpsTask(
-                        id="t1", title="Orquestador", scope="bridge",
-                        description=prompt, depends=[], status="pending",
-                        agent_assignee=AgentProfile(
-                            role="orchestrator", goal="Coordinate the plan",
-                            model="qwen2.5-coder:32b",
-                            system_prompt=f"You are the orchestrator for: {prompt}",
-                        )
-                    ),
-                    OpsTask(
-                        id="t2", title="Worker", scope="file_write",
-                        description=f"Execute: {prompt}",
-                        depends=["t1"], status="pending",
-                        agent_assignee=AgentProfile(
-                            role="worker", goal=prompt,
-                            model="qwen2.5-coder:32b",
-                            system_prompt=f"You are a specialist worker. Your task: {prompt}",
-                        )
-                    ),
-                ]
-            )
-
-        # Generate mermaid graph from plan
-        lines = ["graph TD"]
-        for task in plan_data.tasks:
-            node_id = task.id.replace("-", "_")
-            label = f'"{task.title}<br/>[{task.status}]"'
-            lines.append(f"    {node_id}[{label}]")
-            for dep in task.depends:
-                lines.append(f"    {dep.replace('-', '_')} --> {node_id}")
-        graph = "\n".join(lines)
-
-        draft = OpsService.create_draft(
-            prompt=prompt,
-            content=plan_data.model_dump_json(indent=2),
-            context={"structured": True, "mermaid": graph},
-            provider="ui_plan_builder"
-        )
-
-        audit_log("UI", "PLAN_CREATE", draft.id, actor=auth.token)
-        return {
-            "id": draft.id,
-            "status": draft.status,
-            "prompt": draft.prompt,
-            "content": draft.content,
-            "mermaid": graph,
-        }
-
-    @app.post("/ui/drafts/{draft_id}/reject")
-    async def reject_draft_handler(
-        draft_id: str,
-        auth: AuthContext = Depends(require_read_only_access),
-        rl: None = Depends(check_rate_limit),
-    ):
-        """Rejects a draft plan."""
-        if auth.role not in ("operator", "admin"):
-            raise HTTPException(status_code=403, detail="operator or admin role required")
-
-        draft = OpsService.get_draft(draft_id)
-        if not draft:
-            raise HTTPException(status_code=404, detail="Draft not found")
-
-        OpsService.update_draft(draft_id, status="rejected")
-        audit_log("UI", "PLAN_REJECT", draft_id, actor=auth.token)
-        return {"status": "rejected", "id": draft_id}
-
-    @app.get("/ui/providers")
-    async def list_ui_providers_bridge(
-        auth: AuthContext = Depends(require_read_only_access),
-        rl: None = Depends(check_rate_limit),
-    ):
-        """Bridge endpoint for legacy UI. Source of truth is OPS provider config."""
-        from tools.gimo_server.services.provider_service import ProviderService
-
-        cfg = ProviderService.get_public_config()
-        if not cfg:
-            return []
-
-        result = []
-        for pid, entry in cfg.providers.items():
-            caps = entry.capabilities or {}
-            provider_type = entry.provider_type or entry.type
-            result.append(
-                {
-                    "id": pid,
-                    "type": provider_type,
-                    "is_local": not bool(caps.get("requires_remote_api", True)),
-                    "config": {
-                        "display_name": entry.display_name,
-                        "base_url": entry.base_url,
-                        "model": entry.model,
-                        "capabilities": caps,
-                    },
-                    "deprecated": True,
-                    "deprecation_note": "Use /ops/provider as canonical source.",
-                }
-            )
-        return result
-
-    @app.post("/ui/providers")
-    async def add_ui_provider_bridge(
-        body: dict,
-        auth: AuthContext = Depends(require_read_only_access),
-        rl: None = Depends(check_rate_limit),
-    ):
-        from tools.gimo_server.ops_models import ProviderEntry, ProviderConfig
-        from tools.gimo_server.services.provider_service import ProviderService
-
-        if auth.role != "admin":
-            raise HTTPException(status_code=403, detail="admin role or higher required")
-
-        cfg = ProviderService.get_config()
-        if not cfg:
-            raise HTTPException(status_code=404, detail="Provider config missing")
-
-        provider_id = str(body.get("id") or body.get("name") or "").strip()
-        if not provider_id:
-            raise HTTPException(status_code=400, detail="provider id is required")
-
-        raw_type = str(body.get("provider_type") or body.get("type") or "custom_openai_compatible")
-        canonical_type = ProviderService.normalize_provider_type(raw_type)
-        model = str(body.get("model") or body.get("default_model") or "gpt-4o-mini")
-        base_url = body.get("base_url")
-        if canonical_type == "ollama_local" and not base_url:
-            base_url = "http://localhost:11434/v1"
-
-        cfg.providers[provider_id] = ProviderEntry(
-            type=raw_type,
-            provider_type=canonical_type,
-            display_name=body.get("display_name") or provider_id,
-            base_url=base_url,
-            api_key=body.get("api_key"),
-            model=model,
-            capabilities=ProviderService.capabilities_for(canonical_type),
-        )
-
-        updated = ProviderService.set_config(
-            ProviderConfig(active=cfg.active if cfg.active in cfg.providers else provider_id, providers=cfg.providers, mcp_servers=cfg.mcp_servers)
-        )
-        audit_log("UI", "LEGACY_PROVIDER_ADD", provider_id, actor=f"{auth.role}:legacy_bridge")
-        return {"id": provider_id, "status": "registered", "active": updated.active, "deprecated": True}
-
-    @app.delete("/ui/providers/{provider_id}")
-    async def remove_ui_provider_bridge(
-        provider_id: str,
-        auth: AuthContext = Depends(require_read_only_access),
-        rl: None = Depends(check_rate_limit),
-    ):
-        from tools.gimo_server.ops_models import ProviderConfig
-        from tools.gimo_server.services.provider_service import ProviderService
-
-        if auth.role != "admin":
-            raise HTTPException(status_code=403, detail="admin role or higher required")
-
-        cfg = ProviderService.get_config()
-        if not cfg:
-            raise HTTPException(status_code=404, detail="Provider config missing")
-        if provider_id not in cfg.providers:
-            raise HTTPException(status_code=404, detail="Provider not found")
-
-        cfg.providers.pop(provider_id, None)
-        if not cfg.providers:
-            raise HTTPException(status_code=400, detail="At least one provider is required")
-        if cfg.active == provider_id:
-            cfg.active = next(iter(cfg.providers.keys()))
-        ProviderService.set_config(ProviderConfig(active=cfg.active, providers=cfg.providers, mcp_servers=cfg.mcp_servers))
-        audit_log("UI", "LEGACY_PROVIDER_REMOVE", provider_id, actor=f"{auth.role}:legacy_bridge")
-        return {"status": "removed", "id": provider_id, "deprecated": True}
-
-    @app.post("/ui/providers/{provider_id}/test")
-    async def test_ui_provider_bridge(
-        provider_id: str,
-        auth: AuthContext = Depends(require_read_only_access),
-        rl: None = Depends(check_rate_limit),
-    ):
-        from tools.gimo_server.services.provider_service import ProviderService
-
-        cfg = ProviderService.get_config()
-        if not cfg or provider_id not in cfg.providers:
-            raise HTTPException(status_code=404, detail="Provider not found")
-
-        healthy = await ProviderService.health_check() if provider_id == cfg.active else True
-        return {
-            "status": "ok" if healthy else "error",
-            "message": "Provider reachable" if healthy else "Provider unreachable",
-            "deprecated": True,
-        }
-
-    @app.get("/ui/nodes")
-    async def list_ui_nodes_bridge(
-        auth: AuthContext = Depends(require_read_only_access),
-        rl: None = Depends(check_rate_limit),
-    ):
-        """Bridge endpoint kept for legacy UI compatibility."""
-        return {}
-    
-    @app.get("/ui/cost/compare")
-    async def compare_costs(
-        model_a: str = Query(..., min_length=1),
-        model_b: str = Query(..., min_length=1),
-        auth: AuthContext = Depends(verify_token),
-    ):
-        from tools.gimo_server.services.cost_service import CostService
-        try:
-            return CostService.get_impact_comparison(model_a, model_b)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-
     app.get("/ui/security/events")(get_security_events_handler)
     app.post("/ui/security/resolve")(resolve_security_handler)
     app.get("/ui/service/status")(get_service_status_handler)
@@ -1026,3 +1050,12 @@ def register_routes(app: FastAPI):
     app.get("/file", response_class=PlainTextResponse)(get_file_handler)
     app.get("/search")(search_handler)
     app.get("/diff", response_class=PlainTextResponse)(get_diff_handler)
+
+    app.post("/ui/plan/create", responses={403: {"description": ERR_OPERATOR_ADMIN_REQUIRED}, 400: {"description": "prompt is required"}})(create_plan_handler)
+    app.post("/ui/drafts/{draft_id}/reject", responses={403: {"description": ERR_OPERATOR_ADMIN_REQUIRED}, 404: {"description": "Draft not found"}})(reject_draft_handler)
+    app.get("/ui/providers")(list_ui_providers_bridge)
+    app.post("/ui/providers", responses={403: {"description": ERR_ADMIN_REQUIRED}, 404: {"description": ERR_PROVIDER_MISSING}, 400: {"description": "provider id is required"}})(add_ui_provider_bridge)
+    app.delete("/ui/providers/{provider_id}", responses={403: {"description": ERR_ADMIN_REQUIRED}, 404: {"description": "Provider missing or not found"}, 400: {"description": "At least one provider is required"}})(remove_ui_provider_bridge)
+    app.post("/ui/providers/{provider_id}/test", responses={404: {"description": ERR_PROVIDER_NOT_FOUND}})(test_ui_provider_bridge)
+    app.get("/ui/nodes")(list_ui_nodes_bridge)
+    app.get("/ui/cost/compare", responses={400: {"description": "Bad Request"}})(compare_costs)

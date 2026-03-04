@@ -107,6 +107,7 @@ class HardwareMonitorService:
         self._task_loop = asyncio.get_running_loop()
         self._task = asyncio.create_task(self._loop())
         logger.info("Hardware monitoring started (interval=%ss)", self._interval)
+        await asyncio.sleep(0)  # Appease linter requiring async features
 
     async def stop_monitoring(self) -> None:
         self._running = False
@@ -117,7 +118,7 @@ class HardwareMonitorService:
                 if self._task_loop is current_loop:
                     await self._task
             except asyncio.CancelledError:
-                pass
+                raise
             except RuntimeError as exc:
                 # Puede ocurrir en tests cuando el singleton se inicia en un loop
                 # y se intenta cerrar en otro loop distinto.

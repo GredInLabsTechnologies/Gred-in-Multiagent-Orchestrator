@@ -101,63 +101,38 @@ class ModelRouterService:
         self.storage = storage
         self.confidence_service = confidence_service
 
-    async def choose_model(self, node: WorkflowNode, state: Dict[str, Any]) -> RoutingDecision:
-        from .ops_service import OpsService
-        config = OpsService.get_config()
-
-        # Refresh inventory if stale
-        import time as _time
-        if not ModelInventoryService._cache or (_time.time() - ModelInventoryService._cache_ts) > 300:
-            try:
-                await ModelInventoryService.refresh_inventory()
-            except Exception:
-                pass  # Fall back to minimal sync inventory
-
-        cfg = node.config if isinstance(node.config, dict) else {}
-        task_type = str(cfg.get("task_type") or "").strip()
-        reason_parts: list[str] = []
-
-        hw = HardwareMonitorService.get_instance()
-        hw_state = hw.get_load_level()
-
-        # 1. Explicit model preference from node
-        explicit = cfg.get("model") or cfg.get("preferred_model")
-        if explicit:
-            entry = ModelInventoryService.find_model(str(explicit))
-            if entry:
-                if entry.is_local and hw_state == "critical":
-                    allow_override = getattr(config.economy, "allow_local_override", False) if hasattr(config, "economy") else False
-                    if not allow_override:
-                        reason_parts.append(f"explicit:{explicit}->hw_critical_blocked")
-                    else:
-                        return RoutingDecision(
-                            model=entry.model_id, provider_id=entry.provider_id,
-                            reason=f"explicit:{explicit}|hw_override",
-                            tier=entry.quality_tier, hardware_state=hw_state,
-                        )
+    def _handle_explicit_model(self, explicit: str, hw_state: str, config: Any, reason_parts: list[str]) -> Optional[RoutingDecision]:
+        entry = ModelInventoryService.find_model(str(explicit))
+        if entry:
+            if entry.is_local and hw_state == "critical":
+                allow_override = getattr(config.economy, "allow_local_override", False) if hasattr(config, "economy") else False
+                if not allow_override:
+                    reason_parts.append(f"explicit:{explicit}->hw_critical_blocked")
                 else:
                     return RoutingDecision(
                         model=entry.model_id, provider_id=entry.provider_id,
-                        reason=f"explicit:{explicit}",
+                        reason=f"explicit:{explicit}|hw_override",
                         tier=entry.quality_tier, hardware_state=hw_state,
                     )
+            else:
+                return RoutingDecision(
+                    model=entry.model_id, provider_id=entry.provider_id,
+                    reason=f"explicit:{explicit}",
+                    tier=entry.quality_tier, hardware_state=hw_state,
+                )
+        return None
 
-        # 2. Determine requirements from task_type
-        cap_needed, tier_min = TASK_REQUIREMENTS.get(task_type, TASK_REQUIREMENTS["default"])
-        reason_parts.append(f"task:{task_type or 'default'}(cap={cap_needed},tier>={tier_min})")
-
-        # 3. Eco-mode may lower tier_min
+    def _adjust_tier_min_for_eco_mode(self, config: Any, tier_min: int, reason_parts: list[str]) -> int:
         if hasattr(config, "economy") and config.economy.eco_mode.mode != "off":
             eco = config.economy.eco_mode
             autonomy = config.economy.autonomy_level
-            if autonomy in ("guided", "autonomous"):
-                if eco.mode == "binary":
-                    floor_tier = _legacy_to_numeric(eco.floor_tier) or 1
-                    tier_min = min(tier_min, floor_tier)
-                    reason_parts.append(f"eco:binary->tier_min={tier_min}")
+            if autonomy in ("guided", "autonomous") and eco.mode == "binary":
+                floor_tier = _legacy_to_numeric(eco.floor_tier) or 1
+                tier_min = min(tier_min, floor_tier)
+                reason_parts.append(f"eco:binary->tier_min={tier_min}")
+        return tier_min
 
-        # 4. User bounds (floor/ceiling)
-        tier_max = 5
+    def _adjust_tier_bounds(self, config: Any, tier_min: int, tier_max: int) -> Tuple[int, int]:
         if hasattr(config, "economy"):
             floor_val = _legacy_to_numeric(config.economy.model_floor)
             ceil_val = _legacy_to_numeric(config.economy.model_ceiling)
@@ -165,26 +140,30 @@ class ModelRouterService:
                 tier_min = max(tier_min, floor_val)
             if ceil_val:
                 tier_max = min(tier_max, ceil_val)
+        return tier_min, tier_max
 
-        # 5. Get all available models
-        all_models = ModelInventoryService.get_available_models()
-        if not all_models:
-            # Fallback: return whatever the active provider has
-            return self._fallback_decision(state, reason_parts, hw_state)
-
-        # 6. Filter by capability and tier bounds
+    def _filter_capabilities(self, all_models: list[ModelEntry], cap_needed: str, tier_min: int, tier_max: int, reason_parts: list[str]) -> list[ModelEntry]:
         candidates = [m for m in all_models
                       if cap_needed in m.capabilities
                       and tier_min <= m.quality_tier <= tier_max]
 
-        # If no capability match, relax to just "chat"
         if not candidates and cap_needed != "chat":
             candidates = [m for m in all_models
                           if "chat" in m.capabilities
                           and tier_min <= m.quality_tier <= tier_max]
             reason_parts.append(f"cap_relaxed:{cap_needed}->chat")
+        return candidates
 
-        # 7. Hardware filter for local models
+    def _is_caution_safe(self, m: ModelEntry) -> bool:
+        if not m.is_local: 
+            return True
+        if m.size_gb is not None and m.size_gb <= 4.0: 
+            return True
+        if m.quality_tier <= 2: 
+            return True
+        return False
+
+    def _filter_hardware(self, candidates: list[ModelEntry], hw_state: str, config: Any, reason_parts: list[str]) -> list[ModelEntry]:
         if hw_state == "critical":
             allow_override = getattr(config.economy, "allow_local_override", False) if hasattr(config, "economy") else False
             if not allow_override:
@@ -193,33 +172,13 @@ class ModelRouterService:
                     candidates = remote_only
                     reason_parts.append("hw_critical:remote_only")
         elif hw_state == "caution":
-            filtered = [m for m in candidates
-                        if not m.is_local or (m.size_gb is not None and m.size_gb <= 4.0)
-                        or m.quality_tier <= 2]
+            filtered = [m for m in candidates if self._is_caution_safe(m)]
             if filtered:
                 candidates = filtered
                 reason_parts.append("hw_caution:small_local_only")
+        return candidates
 
-        if not candidates:
-            # Try all models ignoring capability
-            candidates = [m for m in all_models if tier_min <= m.quality_tier <= tier_max]
-            reason_parts.append("no_match:tier_only")
-
-        if not candidates:
-            return self._fallback_decision(state, reason_parts, hw_state)
-
-        # 8. Budget filter
-        candidates = self._filter_budget_exhausted(candidates, config)
-        if not candidates:
-            return self._fallback_decision(state, reason_parts + ["all_budgets_exhausted"], hw_state)
-
-        # 9. ROI routing (prefer historically best model for this task_type)
-        roi_pick = self._apply_roi_preference(candidates, task_type, config)
-        if roi_pick:
-            candidates = [roi_pick] + [m for m in candidates if m.model_id != roi_pick.model_id]
-            reason_parts.append(f"roi:{roi_pick.model_id}")
-
-        # 10. Eco-mode: prefer cheapest
+    def _apply_eco_mode_selection(self, candidates: list[ModelEntry], config: Any, reason_parts: list[str], hw_state: str) -> Optional[RoutingDecision]:
         if hasattr(config, "economy") and config.economy.eco_mode.mode != "off":
             autonomy = config.economy.autonomy_level
             if autonomy in ("guided", "autonomous"):
@@ -231,8 +190,69 @@ class ModelRouterService:
                     reason="|".join(reason_parts), tier=selected.quality_tier,
                     alternatives=alts, hardware_state=hw_state,
                 )
+        return None
 
-        # 11. Default: pick best quality tier
+    async def _ensure_inventory_loaded(self) -> None:
+        import time as _time
+        if not ModelInventoryService._cache or (_time.time() - ModelInventoryService._cache_ts) > 300:
+            try:
+                await ModelInventoryService.refresh_inventory()
+            except Exception:
+                pass  # Fall back to minimal sync inventory
+
+    async def choose_model(self, node: WorkflowNode, _state: Dict[str, Any]) -> RoutingDecision:
+        from .ops_service import OpsService
+        config = OpsService.get_config()
+
+        await self._ensure_inventory_loaded()
+
+        cfg = node.config if isinstance(node.config, dict) else {}
+        task_type = str(cfg.get("task_type") or "").strip()
+        reason_parts: list[str] = []
+
+        hw = HardwareMonitorService.get_instance()
+        hw_state = hw.get_load_level()
+
+        explicit = cfg.get("model") or cfg.get("preferred_model")
+        if explicit:
+            decision = self._handle_explicit_model(str(explicit), hw_state, config, reason_parts)
+            if decision:
+                return decision
+
+        cap_needed, tier_min = TASK_REQUIREMENTS.get(task_type, TASK_REQUIREMENTS["default"])
+        reason_parts.append(f"task:{task_type or 'default'}(cap={cap_needed},tier>={tier_min})")
+
+        tier_min = self._adjust_tier_min_for_eco_mode(config, tier_min, reason_parts)
+        tier_max = 5
+        tier_min, tier_max = self._adjust_tier_bounds(config, tier_min, tier_max)
+
+        all_models = ModelInventoryService.get_available_models()
+        if not all_models:
+            return self._fallback_decision(reason_parts, hw_state)
+
+        candidates = self._filter_capabilities(all_models, cap_needed, tier_min, tier_max, reason_parts)
+        candidates = self._filter_hardware(candidates, hw_state, config, reason_parts)
+
+        if not candidates:
+            candidates = [m for m in all_models if tier_min <= m.quality_tier <= tier_max]
+            reason_parts.append("no_match:tier_only")
+
+        if not candidates:
+            return self._fallback_decision(reason_parts, hw_state)
+
+        candidates = self._filter_budget_exhausted(candidates, config)
+        if not candidates:
+            return self._fallback_decision(reason_parts + ["all_budgets_exhausted"], hw_state)
+
+        roi_pick = self._apply_roi_preference(candidates, task_type, config)
+        if roi_pick:
+            candidates = [roi_pick] + [m for m in candidates if m.model_id != roi_pick.model_id]
+            reason_parts.append(f"roi:{roi_pick.model_id}")
+
+        decision = self._apply_eco_mode_selection(candidates, config, reason_parts, hw_state)
+        if decision:
+            return decision
+
         selected = max(candidates, key=lambda m: m.quality_tier)
         alts = [m.model_id for m in candidates if m.model_id != selected.model_id][:3]
         reason_parts.append(f"selected:{selected.model_id}")
@@ -243,7 +263,7 @@ class ModelRouterService:
             alternatives=alts, hardware_state=hw_state,
         )
 
-    def _fallback_decision(self, state: Dict[str, Any], reason_parts: list, hw_state: str) -> RoutingDecision:
+    def _fallback_decision(self, reason_parts: list, hw_state: str) -> RoutingDecision:
         """Fallback when no inventory models found — use active provider's model."""
         from .provider_service import ProviderService
         cfg = ProviderService.get_config()
@@ -305,37 +325,46 @@ class ModelRouterService:
         return spent >= budget_cfg.max_cost_usd
 
     @classmethod
-    def classify_phase6_failure_reason(cls, exc: Exception) -> str:
+    def _classify_httpx_error(cls, exc: Exception) -> Optional[str]:
         import httpx
-
         if isinstance(exc, httpx.TimeoutException):
             return "timeout"
         if isinstance(exc, httpx.NetworkError):
             return "network_error"
-        if isinstance(exc, httpx.HTTPStatusError):
-            code = int(exc.response.status_code)
-            if code == 429:
-                return "429"
-            if code == 400:
-                return "400"
-            if 500 <= code <= 599:
-                return "5xx"
+        if getattr(exc, "response", None) is not None:
+            try:
+                code = int(exc.response.status_code)
+                if code in (429, 400):
+                    return str(code)
+                if 500 <= code <= 599:
+                    return "5xx"
+            except Exception:
+                pass
+        return None
+
+    @classmethod
+    def classify_phase6_failure_reason(cls, exc: Exception) -> str:
+        httpx_err = cls._classify_httpx_error(exc)
+        if httpx_err:
+            return httpx_err
 
         msg = str(exc or "").lower()
-        if "session" in msg and "limit" in msg:
-            return "session_limit"
-        if "weekly" in msg and "limit" in msg:
-            return "weekly_limit"
-        if "provider_auth_expired" in msg or "token expired" in msg or "auth expired" in msg:
+        if "limit" in msg:
+            if "session" in msg: return "session_limit"
+            if "weekly" in msg: return "weekly_limit"
+            
+        if any(k in msg for k in ("token expired", "auth expired", "provider_auth_expired")):
             return "provider_auth_expired"
-        if "provider_auth_refresh_failed" in msg or ("refresh" in msg and "failed" in msg):
+            
+        if "refresh" in msg and "failed" in msg:
             return "provider_auth_refresh_failed"
-        if "merge_gate" in msg or "merge gate" in msg:
+            
+        if "merge gate" in msg or "merge_gate" in msg:
             return "merge_gate_error"
-        if "schema" in msg:
-            return "schema_error"
-        if "policy" in msg:
-            return "policy_error"
+            
+        if "schema" in msg: return "schema_error"
+        if "policy" in msg: return "policy_error"
+        
         return "unknown"
 
     @classmethod
@@ -422,11 +451,8 @@ class ModelRouterService:
 
     # === Backwards-compatible methods ===
 
-    def promote_eco_mode(self, node: WorkflowNode, state: Dict[str, Any]) -> Dict[str, Any]:
+    def promote_eco_mode(self, node: WorkflowNode) -> Dict[str, Any]:
         """Best vs Eco recommendations for UI."""
-        from .ops_service import OpsService
-        config = OpsService.get_config()
-
         cfg = node.config if isinstance(node.config, dict) else {}
         task_type = str(cfg.get("task_type") or "").strip()
         cap_needed, tier_min = TASK_REQUIREMENTS.get(task_type, TASK_REQUIREMENTS["default"])
@@ -457,9 +483,9 @@ class ModelRouterService:
             "saving_prospect": impact["saving_pct"] if impact["status"] == "better" else 0,
         }
 
-    async def check_provider_budget(self, node: WorkflowNode, state: Dict[str, Any]) -> Optional[str]:
+    async def check_provider_budget(self, node: WorkflowNode, _state: Dict[str, Any]) -> Optional[str]:
         try:
-            await self.choose_model(node, state)
+            await self.choose_model(node, _state)
             return None
         except ValueError as e:
             msg = str(e)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import pytest
 
 from tools.gimo_server.main import app
@@ -67,6 +68,7 @@ async def test_phase10_integration_cloud_fallback_and_double_failure(monkeypatch
     calls = {"n": 0}
 
     async def _primary_fails_then_local_ok(_prompt, _ctx):
+        await asyncio.sleep(0)
         calls["n"] += 1
         if calls["n"] <= 2:
             raise httpx.HTTPStatusError("too many requests", request=req, response=resp)
@@ -99,6 +101,7 @@ async def test_phase10_integration_account_mode_token_expired(monkeypatch):
     calls = {"n": 0}
 
     async def _auth_expired_then_local_ok(_prompt, _ctx):
+        await asyncio.sleep(0)
         calls["n"] += 1
         if calls["n"] <= 2:
             raise RuntimeError("PROVIDER_AUTH_EXPIRED")

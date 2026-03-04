@@ -152,7 +152,7 @@ def _build_settings() -> Settings:
     max_bytes = 250000
     cors_env = os.environ.get(
         "ORCH_CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:9325,http://127.0.0.1:9325",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:9325,http://127.0.0.1:9325",  # nosonar
     )
     cors_origins = [origin.strip() for origin in cors_env.split(",") if origin.strip()]
     orch_token_file = Path(

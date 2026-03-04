@@ -112,7 +112,11 @@ def test_phase10_improper_auto_run_forced_human_approval(monkeypatch):
     approved = OpsApproved(id="a10_human", draft_id=draft.id, prompt="p", content="c")
     monkeypatch.setattr(run_router.OpsService, "get_draft", lambda _id: draft)
     monkeypatch.setattr(run_router.OpsService, "approve_draft", lambda *_a, **_k: approved)
-    monkeypatch.setattr(run_router.OpsService, "create_run", lambda _approved_id: (_ for _ in ()).throw(AssertionError("must not auto-run")))
+
+    def _raise_assertion(*args, **kwargs):
+        raise AssertionError("must not auto-run")
+
+    monkeypatch.setattr(run_router.OpsService, "create_run", _raise_assertion)
     try:
         with __import__("fastapi.testclient").testclient.TestClient(app) as client:
             res = client.post(f"/ops/drafts/{draft.id}/approve?auto_run=true")
@@ -160,6 +164,7 @@ async def test_phase10_both_models_fail_returns_clean_error(monkeypatch):
     calls = {"n": 0}
 
     async def _all_fail(_prompt, _ctx):
+        await asyncio.sleep(0)
         calls["n"] += 1
         if calls["n"] <= 2:
             raise httpx.HTTPStatusError("too many requests", request=req, response=resp)
@@ -184,6 +189,7 @@ async def test_phase10_account_mode_token_expired_during_critical_execution(monk
     calls = {"n": 0}
 
     async def _auth_expired_then_local_ok(_prompt, _ctx):
+        await asyncio.sleep(0)
         calls["n"] += 1
         if calls["n"] <= 2:
             raise RuntimeError("PROVIDER_AUTH_EXPIRED")
@@ -281,7 +287,11 @@ def test_phase10_worker_crash_during_merge_or_rollback_is_recoverable(tmp_path, 
     monkeypatch.setattr(mgs.GitService, "run_lint_typecheck", lambda _base: (True, "ok"))
     monkeypatch.setattr(mgs.GitService, "dry_run_merge", lambda _b, _s, _t: (True, "ok"))
     monkeypatch.setattr(mgs.GitService, "get_head_commit", lambda _base: "head_before")
-    monkeypatch.setattr(mgs.GitService, "perform_merge", lambda _b, _s, _t: (_ for _ in ()).throw(RuntimeError("merge crashed")))
+
+    def _raise_runtime(*args, **kwargs):
+        raise RuntimeError("merge crashed")
+
+    monkeypatch.setattr(mgs.GitService, "perform_merge", _raise_runtime)
 
     assert asyncio.run(MergeGateService.execute_run(run.id)) is True
     updated = OpsService.get_run(run.id)

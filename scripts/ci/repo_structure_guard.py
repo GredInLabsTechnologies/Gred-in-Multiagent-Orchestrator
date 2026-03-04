@@ -98,6 +98,8 @@ def check_root_cleanliness():
         ".env", ".env.example", "conftest.py",
         # MCP / Claude config
         ".mcp.json",
+        # Root operational launch/security helpers
+        "GIMO_DEV_LAUNCHER.cmd", "setup_security.py",
     }
     stray_extensions = {".py", ".cmd", ".bat", ".ps1", ".log", ".txt"}
 

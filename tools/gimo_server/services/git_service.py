@@ -171,54 +171,55 @@ class GitService:
         return process.returncode == 0, out.strip()
 
     @staticmethod
-    def run_lint_typecheck(base_dir: Path) -> tuple[bool, str]:
-        outputs: list[str] = []
-
-        # Lint gate: prefer ruff when installed.
+    def _run_ruff(base_dir: Path, outputs: list[str]) -> bool:
         if importlib.util.find_spec("ruff") is not None:
             p_lint = subprocess.Popen(
                 ["python", "-m", "ruff", "check", "."],
-                cwd=base_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+                cwd=base_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
             lint_out, lint_err = p_lint.communicate(timeout=max(SUBPROCESS_TIMEOUT, 120))
             outputs.append((lint_out or "") + ("\n" + lint_err if lint_err else ""))
-            if p_lint.returncode != 0:
-                return False, "\n".join(outputs).strip()
-        else:
-            outputs.append("ruff not installed; lint gate skipped")
+            return p_lint.returncode == 0
+        outputs.append("ruff not installed; lint gate skipped")
+        return True
 
-        # Typecheck gate: prefer mypy when installed.
+    @staticmethod
+    def _run_mypy(base_dir: Path, outputs: list[str]) -> bool:
         if importlib.util.find_spec("mypy") is not None:
             p_type = subprocess.Popen(
                 ["python", "-m", "mypy", "tools/gimo_server"],
-                cwd=base_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+                cwd=base_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
             type_out, type_err = p_type.communicate(timeout=max(SUBPROCESS_TIMEOUT, 120))
             outputs.append((type_out or "") + ("\n" + type_err if type_err else ""))
-            if p_type.returncode != 0:
-                return False, "\n".join(outputs).strip()
-        else:
-            outputs.append("mypy not installed; typecheck gate skipped")
+            return p_type.returncode == 0
+        outputs.append("mypy not installed; typecheck gate skipped")
+        return True
 
-        # Fallback deterministic syntax check when no tool is installed.
+    @staticmethod
+    def _run_compileall(base_dir: Path, outputs: list[str]) -> bool:
         if all("not installed" in o for o in outputs):
             p_syntax = subprocess.Popen(
                 ["python", "-m", "compileall", "-q", "tools/gimo_server"],
-                cwd=base_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+                cwd=base_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
             syn_out, syn_err = p_syntax.communicate(timeout=max(SUBPROCESS_TIMEOUT, 120))
             outputs.append((syn_out or "") + ("\n" + syn_err if syn_err else ""))
-            if p_syntax.returncode != 0:
-                return False, "\n".join(outputs).strip()
+            return p_syntax.returncode == 0
+        return True
+
+    @staticmethod
+    def run_lint_typecheck(base_dir: Path) -> tuple[bool, str]:
+        outputs: list[str] = []
+
+        if not GitService._run_ruff(base_dir, outputs):
+            return False, "\n".join(outputs).strip()
+
+        if not GitService._run_mypy(base_dir, outputs):
+            return False, "\n".join(outputs).strip()
+
+        if not GitService._run_compileall(base_dir, outputs):
+            return False, "\n".join(outputs).strip()
 
         return True, "\n".join(outputs).strip()
 

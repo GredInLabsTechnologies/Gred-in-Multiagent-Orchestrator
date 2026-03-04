@@ -40,12 +40,11 @@ async def update_economy_config(
 @router.post("/recommend", response_model=Dict[str, Any])
 async def get_model_recommendations(
     node: WorkflowNode,
-    state: Dict[str, Any],
     auth: Annotated[AuthContext, Depends(verify_token)]
 ):
     """Returns Best vs Eco model recommendations for a node."""
     router_service = ModelRouterService()
-    return router_service.promote_eco_mode(node, state)
+    return router_service.promote_eco_mode(node)
 
 @router.get("/hardware", response_model=Dict[str, Any])
 async def get_hardware_status(auth: Annotated[AuthContext, Depends(verify_token)]):
@@ -161,7 +160,7 @@ async def get_mastery_recommendations(
     }
 
 
-@router.post("/predict", response_model=Dict[str, Any])
+@router.post("/predict", response_model=Dict[str, Any], responses={400: {"description": "Bad Request"}, 403: {"description": "Forbidden"}})
 async def predict_workflow_cost(
     request: Dict[str, Any],
     auth: Annotated[AuthContext, Depends(verify_token)]
@@ -192,7 +191,7 @@ async def predict_workflow_cost(
 @router.get("/analytics", response_model=CostAnalytics)
 async def get_mastery_analytics(
     auth: Annotated[AuthContext, Depends(verify_token)],
-    days: int = Query(30, ge=1, le=365)
+    days: Annotated[int, Query(ge=1, le=365)] = 30
 ):
     """Returns detailed analytics for the dashboard."""
     from ...services.storage_service import StorageService

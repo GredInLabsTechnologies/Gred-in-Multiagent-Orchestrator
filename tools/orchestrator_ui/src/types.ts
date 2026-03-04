@@ -100,8 +100,8 @@ export interface UiStatusResponse {
 }
 
 export interface LicenseInfo {
-    plan: 'standard' | 'admin' | 'none' | string;
-    status: 'active' | 'expired' | 'suspended' | 'none' | string;
+    plan: 'standard' | 'admin' | 'none';
+    status: 'active' | 'expired' | 'suspended' | 'none';
     isLifetime: boolean;
     keyPreview: string;
     installationsUsed: number;
@@ -110,7 +110,7 @@ export interface LicenseInfo {
 }
 
 export interface SubscriptionInfo {
-    status: 'active' | 'canceled' | 'past_due' | 'none' | string;
+    status: 'active' | 'canceled' | 'past_due' | 'none';
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
 }
@@ -139,7 +139,7 @@ export interface UserProfile {
     license: LicenseInfo;
     subscription: SubscriptionInfo;
     session: SessionInfo;
-    profileSource?: 'upstream' | 'session_cache' | string;
+    profileSource?: 'upstream' | 'session_cache';
 }
 
 export type PlanStatus = 'draft' | 'review' | 'approved' | 'executing' | 'completed' | 'failed';
@@ -355,7 +355,7 @@ export interface OpsDraft {
     prompt: string;
     context?: {
         detected_intent?: string;
-        decision_path?: 'security_block' | 'direct_response' | 'llm_generate' | string;
+        decision_path?: 'security_block' | 'direct_response' | 'llm_generate';
         intent_declared?: string;
         intent_effective?: string;
         risk_score?: number;
@@ -364,8 +364,7 @@ export interface OpsDraft {
         | 'AUTO_RUN_ELIGIBLE'
         | 'HUMAN_APPROVAL_REQUIRED'
         | 'RISK_SCORE_TOO_HIGH'
-        | 'DRAFT_REJECTED_FORBIDDEN_SCOPE'
-        | string;
+        | 'DRAFT_REJECTED_FORBIDDEN_SCOPE';
         can_bypass_llm?: boolean;
         error_actionable?: string;
         [key: string]: unknown;

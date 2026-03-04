@@ -24,7 +24,7 @@ async def observability_traces(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
     rl: Annotated[None, Depends(check_rate_limit)],
-    limit: int = Query(20, ge=1, le=500),
+    limit: Annotated[int, Query(ge=1, le=500)] = 20,
 ):
     _require_role(auth, "operator")
     items = ObservabilityService.list_traces(limit=limit)

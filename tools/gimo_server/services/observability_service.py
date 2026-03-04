@@ -260,20 +260,15 @@ class ObservabilityService:
         trace_id: str,
         request_id: str,
         run_id: str,
-        actor: str = "",
-        intent_class: str = "",
-        repo_id: str = "",
-        baseline_version: str = "",
-        model_attempted: str = "",
-        final_model_used: str = "",
-        stage: str = "",
-        latency_ms: Optional[float] = None,
-        error_category: str = "",
-        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """Record Phase-8 structured observability event (versioned schema)."""
         if not cls._initialized:
             cls._initialize_sdk()
+
+        stage = kwargs.get("stage", "")
+        latency_ms = float(kwargs.get("latency_ms") or 0.0)
+        error_category = kwargs.get("error_category", "")
 
         event = {
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -283,23 +278,23 @@ class ObservabilityService:
             "trace_id": trace_id,
             "request_id": request_id,
             "run_id": run_id,
-            "actor": actor,
-            "intent_class": intent_class,
-            "repo_id": repo_id,
-            "baseline_version": baseline_version,
-            "model_attempted": model_attempted,
-            "final_model_used": final_model_used,
+            "actor": kwargs.get("actor", ""),
+            "intent_class": kwargs.get("intent_class", ""),
+            "repo_id": kwargs.get("repo_id", ""),
+            "baseline_version": kwargs.get("baseline_version", ""),
+            "model_attempted": kwargs.get("model_attempted", ""),
+            "final_model_used": kwargs.get("final_model_used", ""),
             "stage": stage,
-            "latency_ms": float(latency_ms or 0.0),
+            "latency_ms": latency_ms,
             "error_category": error_category,
-            "metadata": metadata or {},
+            "metadata": kwargs.get("metadata") or {},
         }
 
         with cls._lock:
             cls._structured_events.append(event)
 
             if stage:
-                cls._stage_latency.setdefault(stage, []).append(float(latency_ms or 0.0))
+                cls._stage_latency.setdefault(stage, []).append(latency_ms)
 
             if status == "FALLBACK_MODEL_USED":
                 cls._run_outcome_counters["fallback"] += 1
@@ -420,63 +415,55 @@ class ObservabilityService:
             return metrics
 
     @classmethod
-    def list_traces(cls, *, limit: int = 20) -> List[Dict[str, Any]]:
-        """Returns a list of aggregated traces (latest first)."""
-        with cls._lock:
-            raw_spans = list(cls._ui_spans)
-        
-        # Group by trace_id
+    def _group_spans(cls, raw_spans: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         traces: Dict[str, Dict[str, Any]] = {}
-        
         for span in raw_spans:
             t_id = span["trace_id"]
             if t_id not in traces:
                 traces[t_id] = {
-                    "trace_id": t_id,
-                    "root_span": None,
-                    "spans": [],
-                    "start_time": span["timestamp"],
-                    "end_time": span["timestamp"],
-                    "status": "pending",
-                    "duration_ms": 0
+                    "trace_id": t_id, "root_span": None, "spans": [],
+                    "start_time": span["timestamp"], "end_time": span["timestamp"],
+                    "status": "pending", "duration_ms": 0
                 }
             
             trace_obj = traces[t_id]
             trace_obj["spans"].append(span)
             
-            # Determine root span (workflow kind)
             if span["kind"] == "workflow" and span.get("event") != "end":
                 trace_obj["root_span"] = span
                 trace_obj["start_time"] = span["timestamp"]
                 trace_obj["workflow_id"] = span.get("workflow_id")
             
-            # Update end time
             if span["timestamp"] > trace_obj["end_time"]:
                 trace_obj["end_time"] = span["timestamp"]
             
-            # Update status if we see a completion event
             if span["kind"] == "workflow" and span.get("event") == "end":
                  trace_obj["status"] = span.get("status", "completed")
+        return traces
 
-        # Post-process traces
+    @classmethod
+    def _finalize_traces(cls, traces: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
         result = []
         for t in traces.values():
-            if not t["root_span"]:
-                # If we missed the start event (deque rotation), try to infer or skip
-                if t["spans"]:
-                     t["root_span"] = t["spans"][0] # Fallback
-            
-            # Calculate duration
+            if not t["root_span"] and t["spans"]:
+                t["root_span"] = t["spans"][0]
             try:
                 start = datetime.fromisoformat(t["start_time"].replace('Z', '+00:00'))
                 end = datetime.fromisoformat(t["end_time"].replace('Z', '+00:00'))
                 t["duration_ms"] = int((end - start).total_seconds() * 1000)
             except Exception:
                 t["duration_ms"] = 0
-            
             result.append(t)
-            
-        # Sort by start_time descending
+        return result
+
+    @classmethod
+    def list_traces(cls, *, limit: int = 20) -> List[Dict[str, Any]]:
+        """Returns a list of aggregated traces (latest first)."""
+        with cls._lock:
+            raw_spans = list(cls._ui_spans)
+        
+        traces = cls._group_spans(raw_spans)
+        result = cls._finalize_traces(traces)
         result.sort(key=lambda x: x["start_time"], reverse=True)
         return result[:limit]
 

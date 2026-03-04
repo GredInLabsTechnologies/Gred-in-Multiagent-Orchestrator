@@ -261,14 +261,21 @@ class OpsCreateDraftRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_phase1_contract(self) -> "OpsCreateDraftRequest":
-        # Legacy mode: prompt-only request
-        if self.prompt and str(self.prompt).strip():
-            intent = str((self.context or {}).get("intent_class") or "").strip()
-            if intent not in PHASE4_INTENT_CLASSES:
-                raise ValueError("context.intent_class is missing or invalid")
-            return self
+        if self._is_legacy_mode():
+            self._validate_legacy_mode()
+        else:
+            self._validate_contract_mode()
+        return self
 
-        # Contract mode: strict required fields
+    def _is_legacy_mode(self) -> bool:
+        return bool(self.prompt and str(self.prompt).strip())
+
+    def _validate_legacy_mode(self) -> None:
+        intent = str((self.context or {}).get("intent_class") or "").strip()
+        if intent not in PHASE4_INTENT_CLASSES:
+            raise ValueError("context.intent_class is missing or invalid")
+
+    def _validate_contract_mode(self) -> None:
         if not self.objective or not str(self.objective).strip():
             raise ValueError("objective is required when prompt is not provided")
 

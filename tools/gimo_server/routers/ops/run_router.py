@@ -18,10 +18,12 @@ from .common import _require_role, _actor_label, _WORKFLOW_ENGINES
 
 router = APIRouter()
 
+RUN_NOT_FOUND = "Run not found"
+
 @router.post(
     "/drafts/{draft_id}/approve", 
     response_model=OpsApproveResponse,
-    responses={404: {"description": "Draft not found"}}
+    responses={404: {"description": "Draft not found"}, 409: {"description": "Risk score too high"}}
 )
 async def approve_draft(
     request: Request,
@@ -136,7 +138,7 @@ async def list_runs(
 @router.get(
     "/runs/{run_id}", 
     response_model=OpsRun,
-    responses={404: {"description": "Run not found"}}
+    responses={404: {"description": RUN_NOT_FOUND}}
 )
 async def get_run(
     request: Request,
@@ -147,11 +149,11 @@ async def get_run(
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     run = OpsService.get_run(run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
     return run
 
 
-@router.get("/runs/{run_id}/preview")
+@router.get("/runs/{run_id}/preview", responses={404: {"description": RUN_NOT_FOUND}})
 async def get_run_preview(
     request: Request,
     run_id: str,
@@ -170,7 +172,7 @@ async def get_run_preview(
     )
     preview = OpsService.get_run_preview(run_id, request_id=request_id, trace_id=trace_id)
     if not preview:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
 
     ObservabilityService.record_structured_event(
         event_type="run_preview_read",
@@ -194,7 +196,7 @@ async def get_run_preview(
     "/runs/{run_id}/cancel", 
     response_model=OpsRun,
     responses={
-        404: {"description": "Run not found"},
+        404: {"description": RUN_NOT_FOUND},
         409: {"description": "Run already in terminal state"}
     }
 )
@@ -208,7 +210,7 @@ async def cancel_run(
     actor = _actor_label(auth)
     run = OpsService.get_run(run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
     if run.status in ("done", "error", "cancelled"):
         raise HTTPException(status_code=409, detail=f"Run already in terminal state: {run.status}")
     try:
@@ -264,7 +266,8 @@ async def list_workflow_checkpoints(
     responses={
         404: {"description": "Workflow not found"},
         409: {"description": "No checkpoints available"},
-        400: {"description": "Resume failed"}
+        400: {"description": "Resume failed"},
+        500: {"description": "Invalid persisted workflow"}
     }
 )
 async def resume_workflow(

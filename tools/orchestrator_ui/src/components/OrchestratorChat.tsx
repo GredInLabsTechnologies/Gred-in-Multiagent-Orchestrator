@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Loader2, Send, Sparkles, X, RefreshCw, AlertTriangle, ChevronDown } from 'lucide-react';
-import { API_BASE, ChatExecutionStep, OpsApproveResponse, OpsDraft } from '../types';
+import { API_BASE, ChatExecutionStep, ChatExecutionStepStatus, OpsApproveResponse, OpsDraft } from '../types';
 import { useToast } from './Toast';
 
 type ComposerMode = 'generate' | 'draft';
@@ -25,6 +25,31 @@ interface ChatMessage {
     failedPrompt?: string;
 }
 
+const getMessageStyle = (role: string, failed?: boolean) => {
+    if (role === 'user') return 'bg-accent-primary/8 border-accent-primary/15 ml-12 rounded-br-lg';
+    if (role === 'assistant') return 'bg-surface-2/70 border-white/[0.04] mr-12 rounded-bl-lg';
+    if (failed) return 'bg-red-500/8 border-red-500/20';
+    return 'bg-surface-2/40 border-white/[0.03]';
+};
+
+const getRoleTextStyle = (role: string, failed?: boolean) => {
+    if (role === 'user') return 'text-accent-primary/60';
+    if (failed) return 'text-red-400/60';
+    return 'text-text-tertiary';
+};
+
+const getRoleLabel = (role: string) => {
+    if (role === 'user') return 'Tu';
+    if (role === 'assistant') return 'GIMO';
+    return 'Sistema';
+};
+
+const getStepStyle = (status: string) => {
+    if (status === 'done') return 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400';
+    if (status === 'error') return 'border-red-500/20 bg-red-500/5 text-red-400';
+    return 'border-white/[0.04] bg-surface-3/30 text-text-secondary';
+};
+
 const buildDraftSteps = (
     draft: OpsDraft,
     extras?: Partial<Pick<ChatMessage, 'approvedId' | 'runId'>>,
@@ -33,12 +58,22 @@ const buildDraftSteps = (
     const hasError = draft.status === 'error';
     const hasApproval = Boolean(extras?.approvedId);
     const hasRun = Boolean(extras?.runId);
+    let runStatusKey: ChatExecutionStepStatus = 'pending';
+    let runDetail = undefined;
+    if (hasError) {
+        runStatusKey = 'error';
+        runDetail = draft.error || draft.context?.error_actionable;
+    } else if (hasRun) {
+        runStatusKey = 'done';
+        runDetail = 'pending';
+    }
+
     return [
         { key: 'intent_detected', label: 'Intencion detectada', status: intentDetected ? 'done' : 'pending', detail: draft.context?.detected_intent },
         { key: 'draft_created', label: 'Draft creado', status: hasError ? 'error' : 'done', detail: hasError ? (draft.error || 'No se pudo crear el draft') : draft.id },
         { key: 'approved', label: 'Draft aprobado', status: hasApproval ? 'done' : 'pending', detail: extras?.approvedId },
         { key: 'run_created', label: 'Run creado', status: hasRun ? 'done' : 'pending', detail: extras?.runId },
-        { key: 'run_status', label: 'Estado de run', status: hasError ? 'error' : (hasRun ? 'done' : 'pending'), detail: hasError ? (draft.error || draft.context?.error_actionable) : (hasRun ? 'pending' : undefined) },
+        { key: 'run_status', label: 'Estado de run', status: runStatusKey, detail: runDetail },
     ];
 };
 
@@ -143,6 +178,11 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data: OpsApproveResponse = await response.json();
             setDrafts((prev) => prev.map((d) => (d.id === draftId ? { ...d, status: 'approved' } : d)));
+            const draftState = currentDraft || { id: draftId, prompt: '', status: 'approved', created_at: new Date().toISOString() };
+            const draftSteps = buildDraftSteps(
+                { ...draftState, status: 'approved' } as OpsDraft,
+                { approvedId: data.approved.id, runId: data.run?.id },
+            );
             appendMessage({
                 id: `m-approve-${Date.now()}`,
                 role: 'system',
@@ -156,10 +196,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                 executionDecision: currentDraft?.context?.execution_decision,
                 decisionReason: currentDraft?.context?.decision_reason,
                 riskScore: typeof currentDraft?.context?.risk_score === 'number' ? currentDraft.context.risk_score : undefined,
-                executionSteps: buildDraftSteps(
-                    { ...(currentDraft || { id: draftId, prompt: '', status: 'approved', created_at: new Date().toISOString() }), status: 'approved' },
-                    { approvedId: data.approved.id, runId: data.run?.id },
-                ),
+                executionSteps: draftSteps,
             });
             addToast('Draft aprobado', 'success');
         } catch {
@@ -210,6 +247,77 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
         }
     };
 
+    const handleSendError = (err: any, prompt: string) => {
+        const errMsg = err?.message || '';
+        let actionable: string | undefined;
+        let text = 'No se pudo procesar la solicitud del chat.';
+        if (errMsg.includes('401') || errMsg.includes('403')) {
+            text = 'Sesion expirada o sin permisos.';
+            actionable = 'Revalida la sesion desde Archivo > Revalidar sesion.';
+        } else if (errMsg.includes('Connection refused') || errMsg.includes('fetch')) {
+            text = 'No se pudo conectar al servidor backend.';
+            actionable = 'Verifica que el servidor GIMO esta corriendo en el puerto 9325.';
+        } else if (errMsg.includes('Provider') || errMsg.includes('provider')) {
+            text = 'Error del provider de IA.';
+            actionable = 'Verifica la configuracion del provider en Ajustes.';
+        }
+        appendMessage({
+            id: `m-error-${Date.now()}`,
+            role: 'system',
+            text,
+            ts: new Date().toISOString(),
+            errorActionable: actionable,
+            failed: true,
+            failedPrompt: prompt,
+        });
+        addToast('Error en la operacion de chat', 'error');
+    };
+
+    const handleGenerateDraft = async (prompt: string) => {
+        const response = await fetch(`${API_BASE}/ops/generate?prompt=${encodeURIComponent(prompt)}`, { method: 'POST', credentials: 'include' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const generated: OpsDraft = await response.json();
+        upsertDraft(generated);
+        const customPlanId = generated.context?.custom_plan_id as string | undefined;
+        appendMessage({
+            id: `m-gen-${generated.id}`,
+            role: generated.status === 'error' ? 'system' : 'assistant',
+            text: generated.content || generated.error || 'Draft generado sin contenido.',
+            ts: generated.created_at,
+            draftId: generated.id,
+            detectedIntent: generated.context?.detected_intent,
+            decisionPath: generated.context?.decision_path,
+            executionDecision: generated.context?.execution_decision,
+            decisionReason: generated.context?.decision_reason,
+            riskScore: typeof generated.context?.risk_score === 'number' ? generated.context.risk_score : undefined,
+            errorActionable: generated.context?.error_actionable || generated.error || undefined,
+            executionSteps: buildDraftSteps(generated),
+        });
+        addToast('Draft generado con IA', 'success');
+        if (customPlanId && onPlanGenerated) onPlanGenerated(customPlanId);
+    };
+
+    const handleManualDraft = async (prompt: string) => {
+        const response = await fetch(`${API_BASE}/ops/drafts`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, context: { source: 'orchestrator-chat' } }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const created: OpsDraft = await response.json();
+        upsertDraft(created);
+        appendMessage({
+            id: `m-draft-${created.id}`,
+            role: 'assistant',
+            text: `Draft manual ${created.id} creado y pendiente de aprobacion.`,
+            ts: created.created_at,
+            draftId: created.id,
+            executionSteps: buildDraftSteps(created),
+        });
+        addToast('Draft manual creado', 'success');
+    };
+
     /* ── Send logic ── */
     const handleSend = async (retryPrompt?: string) => {
         const prompt = retryPrompt || input.trim();
@@ -235,71 +343,12 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
 
         try {
             if (mode === 'generate') {
-                const response = await fetch(`${API_BASE}/ops/generate?prompt=${encodeURIComponent(prompt)}`, { method: 'POST', credentials: 'include' });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const generated: OpsDraft = await response.json();
-                upsertDraft(generated);
-                const customPlanId = generated.context?.custom_plan_id as string | undefined;
-                appendMessage({
-                    id: `m-gen-${generated.id}`,
-                    role: generated.status === 'error' ? 'system' : 'assistant',
-                    text: generated.content || generated.error || 'Draft generado sin contenido.',
-                    ts: generated.created_at,
-                    draftId: generated.id,
-                    detectedIntent: generated.context?.detected_intent,
-                    decisionPath: generated.context?.decision_path,
-                    executionDecision: generated.context?.execution_decision,
-                    decisionReason: generated.context?.decision_reason,
-                    riskScore: typeof generated.context?.risk_score === 'number' ? generated.context.risk_score : undefined,
-                    errorActionable: generated.context?.error_actionable || generated.error || undefined,
-                    executionSteps: buildDraftSteps(generated),
-                });
-                addToast('Draft generado con IA', 'success');
-                if (customPlanId && onPlanGenerated) onPlanGenerated(customPlanId);
+                await handleGenerateDraft(prompt);
             } else {
-                const response = await fetch(`${API_BASE}/ops/drafts`, {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt, context: { source: 'orchestrator-chat' } }),
-                });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const created: OpsDraft = await response.json();
-                upsertDraft(created);
-                appendMessage({
-                    id: `m-draft-${created.id}`,
-                    role: 'assistant',
-                    text: `Draft manual ${created.id} creado y pendiente de aprobacion.`,
-                    ts: created.created_at,
-                    draftId: created.id,
-                    executionSteps: buildDraftSteps(created),
-                });
-                addToast('Draft manual creado', 'success');
+                await handleManualDraft(prompt);
             }
         } catch (err: any) {
-            const errMsg = err?.message || '';
-            let actionable: string | undefined;
-            let text = 'No se pudo procesar la solicitud del chat.';
-            if (errMsg.includes('401') || errMsg.includes('403')) {
-                text = 'Sesion expirada o sin permisos.';
-                actionable = 'Revalida la sesion desde Archivo > Revalidar sesion.';
-            } else if (errMsg.includes('Connection refused') || errMsg.includes('fetch')) {
-                text = 'No se pudo conectar al servidor backend.';
-                actionable = 'Verifica que el servidor GIMO esta corriendo en el puerto 9325.';
-            } else if (errMsg.includes('Provider') || errMsg.includes('provider')) {
-                text = 'Error del provider de IA.';
-                actionable = 'Verifica la configuracion del provider en Ajustes.';
-            }
-            appendMessage({
-                id: `m-error-${Date.now()}`,
-                role: 'system',
-                text,
-                ts: new Date().toISOString(),
-                errorActionable: actionable,
-                failed: true,
-                failedPrompt: prompt,
-            });
-            addToast('Error en la operacion de chat', 'error');
+            handleSendError(err, prompt);
         } finally {
             setIsSending(false);
         }
@@ -354,22 +403,12 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                     initial="hidden"
                                     animate="visible"
                                     transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                                    className={`rounded-2xl px-3.5 py-2.5 border transition-colors ${message.role === 'user'
-                                        ? 'bg-accent-primary/8 border-accent-primary/15 ml-12 rounded-br-lg'
-                                        : message.role === 'assistant'
-                                            ? 'bg-surface-2/70 border-white/[0.04] mr-12 rounded-bl-lg'
-                                            : message.failed
-                                                ? 'bg-red-500/8 border-red-500/20'
-                                                : 'bg-surface-2/40 border-white/[0.03]'
-                                        }`}
+                                    className={`rounded-2xl px-3.5 py-2.5 border transition-colors ${getMessageStyle(message.role, message.failed)}`}
                                 >
                                     {/* Role label + timestamp */}
                                     <div className="flex items-center justify-between mb-1">
-                                        <span className={`text-[9px] uppercase tracking-wider font-bold ${message.role === 'user' ? 'text-accent-primary/60' :
-                                            message.role === 'assistant' ? 'text-text-tertiary' :
-                                                message.failed ? 'text-red-400/60' : 'text-text-tertiary'
-                                            }`}>
-                                            {message.role === 'user' ? 'Tu' : message.role === 'assistant' ? 'GIMO' : 'Sistema'}
+                                        <span className={`text-[9px] uppercase tracking-wider font-bold ${getRoleTextStyle(message.role, message.failed)}`}>
+                                            {getRoleLabel(message.role)}
                                         </span>
                                         <span className="text-[9px] text-text-tertiary">{formatTime(message.ts)}</span>
                                     </div>
@@ -435,12 +474,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                                         {message.executionSteps.map((step) => (
                                                             <div
                                                                 key={`${message.id}-${step.key}`}
-                                                                className={`text-[10px] rounded-lg px-2 py-1 border ${step.status === 'done'
-                                                                    ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400'
-                                                                    : step.status === 'error'
-                                                                        ? 'border-red-500/20 bg-red-500/5 text-red-400'
-                                                                        : 'border-white/[0.04] bg-surface-3/30 text-text-secondary'
-                                                                    }`}
+                                                                className={`text-[10px] rounded-lg px-2 py-1 border ${getStepStyle(step.status)}`}
                                                             >
                                                                 {step.label}: {step.detail || (step.status === 'pending' ? 'pendiente' : step.status)}
                                                             </div>

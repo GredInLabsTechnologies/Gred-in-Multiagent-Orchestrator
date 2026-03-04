@@ -36,6 +36,7 @@ class RunWorker:
         self._running_ids: set[str] = set()
 
     async def start(self) -> None:
+        await asyncio.sleep(0)
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._loop())
             logger.info("RunWorker started")
@@ -43,10 +44,7 @@ class RunWorker:
     async def stop(self) -> None:
         if self._task and not self._task.done():
             self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+            await asyncio.gather(self._task, return_exceptions=True)
             logger.info("RunWorker stopped")
 
     async def _loop(self) -> None:
@@ -60,6 +58,7 @@ class RunWorker:
             await asyncio.sleep(POLL_INTERVAL)
 
     async def _tick(self) -> None:
+        await asyncio.sleep(0)
         config = OpsService.get_config()
         max_concurrent = config.max_concurrent_runs
 
@@ -115,7 +114,6 @@ class RunWorker:
         description: str,
         system_prompt: str,
         model: str,
-        instructions: list,  # noqa: ARG002
         base_path: Optional[Path] = None,
         intent_effective: str = "",
         path_scope: Optional[list[str]] = None,
@@ -179,7 +177,7 @@ class RunWorker:
             llm_model_used = llm_resp.get("model", model)
             # Clean markdown code fences if the LLM wrapped it
             if content.startswith("```"):
-                content = re.sub(r"```\w*\n?|```", "", content).strip()
+                content = re.sub(r"```\w*\n?", "", content).strip()
 
             OpsService.append_log(
                 run_id, level="INFO",
@@ -207,6 +205,97 @@ class RunWorker:
                 msg=f"Task {task_id}: ❌ File write failed: {write_err}"
             )
             return False
+
+    async def _process_task(self, run_id: str, task: dict, intent_effective: str, path_scope: list[str]) -> None:
+        tid = task.get("id", "??")
+        title = task.get("title", "")
+        desc = task.get("description", "")
+        combined = f"{title} {desc}".lower()
+        agent = task.get("agent_assignee", {})
+        agent_model = agent.get("model", "qwen2.5-coder:3b")
+        agent_prompt = agent.get("system_prompt", "")
+
+        OpsService.append_log(run_id, level="INFO", msg=f"Executing Task {tid}: {title}")
+
+        if any(kw in combined for kw in ["orchestr", "coordinat", "lead", "monitor"]):
+            OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Orchestrator role — delegation noted.")
+            return
+
+        if any(kw in combined for kw in ["escribir", "write", "crear", "create", "generar", "generate", ".bat", ".txt", ".py", ".sh"]):
+            base_path = None
+            if agent.get("id"):
+                from .sub_agent_manager import SubAgentManager
+                sa = SubAgentManager.get_sub_agent(agent.get("id"))
+                if sa and sa.worktreePath:
+                    base_path = Path(sa.worktreePath)
+                    OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Using isolated worktree at {base_path}")
+
+            file_result = await self._execute_file_task(
+                run_id, tid, title, desc, agent_prompt, agent_model,
+                base_path=base_path,
+                intent_effective=intent_effective,
+                path_scope=path_scope,
+            )
+            if file_result:
+                return
+
+        if agent_prompt:
+            try:
+                OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Sending to LLM ({agent_model})...")
+                llm_resp = await asyncio.wait_for(
+                    ProviderService.static_generate_phase6_strategy(
+                        prompt=agent_prompt,
+                        context={"mode": "worker_execute", "model": agent_model},
+                        intent_effective=intent_effective,
+                        path_scope=path_scope,
+                    ),
+                    timeout=DEFAULT_RUN_TIMEOUT,
+                )
+                result_content = llm_resp.get("content", "")[:500]
+                OpsService.append_log(run_id, level="INFO", msg=f"Task {tid} LLM result: {result_content}")
+            except Exception as llm_err:
+                OpsService.append_log(run_id, level="WARN", msg=f"Task {tid} LLM call failed: {llm_err}")
+        else:
+            OpsService.append_log(run_id, level="INFO", msg=f"Task {tid} (Simulation): Success.")
+
+    async def _execute_structured_plan(self, run_id: str, plan_data: dict, intent_effective: str, path_scope: list[str]) -> None:
+        OpsService.append_log(run_id, level="INFO", msg="Detected structured plan. Executing steps...")
+        for task in plan_data.get("tasks", []):
+            await self._process_task(run_id, task, intent_effective, path_scope)
+
+        OpsService.update_run_status(run_id, "done", msg="Structured plan execution completed")
+
+    async def _handle_legacy_execution(self, run_id: str, prompt: str, intent_effective: str, path_scope: list[str]) -> None:
+        try:
+            resp = await asyncio.wait_for(
+                ProviderService.static_generate_phase6_strategy(
+                    prompt=prompt,
+                    context={"mode": "execute"},
+                    intent_effective=intent_effective,
+                    path_scope=path_scope,
+                ),
+                timeout=DEFAULT_RUN_TIMEOUT,
+            )
+            provider_name = resp.get("provider", "unknown")
+            result = resp.get("content", "")
+            OpsService.append_log(
+                run_id,
+                level="INFO",
+                msg=(
+                    "Model strategy: "
+                    f"attempted={resp.get('model_attempted','')} "
+                    f"failure_reason={resp.get('failure_reason','')} "
+                    f"final_model={resp.get('final_model_used', resp.get('model',''))} "
+                    f"fallback_used={bool(resp.get('fallback_used', False))}"
+                ),
+            )
+            OpsService.append_log(run_id, level="INFO", msg=f"Provider: {provider_name}")
+            OpsService.append_log(run_id, level="INFO", msg=f"Result:\n{result[:2000]}")
+            OpsService.update_run_status(run_id, "done", msg="Execution completed")
+        except asyncio.TimeoutError:
+            OpsService.update_run_status(run_id, "error", msg="Execution timed out")
+        except Exception as exc:
+            OpsService.update_run_status(run_id, "error", msg=f"Provider error: {str(exc)[:200]}")
 
     async def _execute_run(self, run_id: str) -> None:
         try:
@@ -237,112 +326,16 @@ class RunWorker:
             intent_effective = str(context_payload.get("intent_effective") or "")
             path_scope = list((context_payload.get("repo_context") or {}).get("path_scope") or [])
 
+            import json
             try:
-                # 1. Check if content is a structured JSON plan
-                is_structured = False
-                import json
-                try:
-                    plan_data = json.loads(approved.content)
-                    if isinstance(plan_data, dict) and "tasks" in plan_data:
-                        is_structured = True
-                except:
-                    pass
-
-                if is_structured:
-                    OpsService.append_log(run_id, level="INFO", msg="Detected structured plan. Executing steps...")
-                    for task in plan_data["tasks"]:
-                        tid = task.get("id", "??")
-                        title = task.get("title", "")
-                        desc = task.get("description", "")
-                        combined = f"{title} {desc}".lower()
-                        agent = task.get("agent_assignee", {})
-                        agent_model = agent.get("model", "qwen2.5-coder:3b")
-                        agent_prompt = agent.get("system_prompt", "")
-                        agent_instructions = agent.get("instructions", [])
-
-                        OpsService.append_log(run_id, level="INFO", msg=f"Executing Task {tid}: {title}")
-
-                        # Skip orchestrator-type tasks (they coordinate, not execute)
-                        if any(kw in combined for kw in ["orchestr", "coordinat", "lead", "monitor"]):
-                            OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Orchestrator role — delegation noted.")
-                            continue
-
-                        # Detect file write/create tasks
-                        if any(kw in combined for kw in ["escribir", "write", "crear", "create", "generar", "generate", ".bat", ".txt", ".py", ".sh"]):
-                            # Attempt to find if this assignee has an isolated worktree
-                            base_path = None
-                            if agent.get("id"):
-                                from .sub_agent_manager import SubAgentManager
-                                sa = SubAgentManager.get_sub_agent(agent.get("id"))
-                                if sa and sa.worktreePath:
-                                    base_path = Path(sa.worktreePath)
-                                    OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Using isolated worktree at {base_path}")
-
-                            file_result = await self._execute_file_task(
-                                run_id, tid, title, desc, agent_prompt, agent_model, agent_instructions,
-                                base_path=base_path,
-                                intent_effective=intent_effective,
-                                path_scope=path_scope,
-                            )
-                            if file_result:
-                                continue
-
-                        # For other tasks, attempt LLM execution or simulate
-                        if agent_prompt:
-                            try:
-                                OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Sending to LLM ({agent_model})...")
-                                llm_resp = await asyncio.wait_for(
-                                    ProviderService.static_generate_phase6_strategy(
-                                        prompt=agent_prompt,
-                                        context={"mode": "worker_execute", "model": agent_model},
-                                        intent_effective=intent_effective,
-                                        path_scope=path_scope,
-                                    ),
-                                    timeout=DEFAULT_RUN_TIMEOUT,
-                                )
-                                result_content = llm_resp.get("content", "")[:500]
-                                OpsService.append_log(run_id, level="INFO", msg=f"Task {tid} LLM result: {result_content}")
-                            except Exception as llm_err:
-                                OpsService.append_log(run_id, level="WARN", msg=f"Task {tid} LLM call failed: {llm_err}")
-                        else:
-                            OpsService.append_log(run_id, level="INFO", msg=f"Task {tid} (Simulation): Success.")
-
-                    OpsService.update_run_status(run_id, "done", msg="Structured plan execution completed")
+                plan_data = json.loads(approved.content)
+                if isinstance(plan_data, dict) and "tasks" in plan_data:
+                    await self._execute_structured_plan(run_id, plan_data, intent_effective, path_scope)
                     return
+            except Exception:
+                pass
 
-
-                # 2. Legacy/Simple execution (via LLM generation)
-                resp = await asyncio.wait_for(
-                    ProviderService.static_generate_phase6_strategy(
-                        prompt=prompt,
-                        context={"mode": "execute"},
-                        intent_effective=intent_effective,
-                        path_scope=path_scope,
-                    ),
-                    timeout=DEFAULT_RUN_TIMEOUT,
-                )
-                provider_name = resp["provider"]
-                result = resp["content"]
-                OpsService.append_log(
-                    run_id,
-                    level="INFO",
-                    msg=(
-                        "Model strategy: "
-                        f"attempted={resp.get('model_attempted','')} "
-                        f"failure_reason={resp.get('failure_reason','')} "
-                        f"final_model={resp.get('final_model_used', resp.get('model',''))} "
-                        f"fallback_used={bool(resp.get('fallback_used', False))}"
-                    ),
-                )
-                OpsService.append_log(run_id, level="INFO", msg=f"Provider: {provider_name}")
-                OpsService.append_log(run_id, level="INFO", msg=f"Result:\n{result[:2000]}")
-                OpsService.update_run_status(run_id, "done", msg="Execution completed")
-            except asyncio.TimeoutError:
-                OpsService.update_run_status(run_id, "error", msg="Execution timed out")
-            except Exception as exc:
-                OpsService.update_run_status(
-                    run_id, "error", msg=f"Provider error: {str(exc)[:200]}"
-                )
+            await self._handle_legacy_execution(run_id, prompt, intent_effective, path_scope)
         except Exception:
             logger.exception("Failed to execute run %s", run_id)
             try:

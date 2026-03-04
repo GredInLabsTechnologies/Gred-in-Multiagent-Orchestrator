@@ -1,5 +1,6 @@
+
 from __future__ import annotations
-from typing import List
+from typing import List, Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
@@ -14,11 +15,11 @@ from .common import _require_role, _actor_label
 
 router = APIRouter()
 
-@router.get("/plan", response_model=OpsPlan)
+@router.get("/plan", response_model=OpsPlan, responses={404: {"description": "Plan not set"}})
 async def get_plan(
     request: Request,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     plan = OpsService.get_plan()
@@ -30,8 +31,8 @@ async def get_plan(
 async def set_plan(
     request: Request,
     plan: OpsPlan,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
@@ -42,47 +43,38 @@ async def set_plan(
 @router.get("/drafts", response_model=List[OpsDraft])
 async def list_drafts(
     request: Request,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     return OpsService.list_drafts()
 
-@router.post("/drafts", response_model=OpsDraft, status_code=201)
-async def create_draft(
-    request: Request,
-    body: OpsCreateDraftRequest,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
-):
-    if auth.role not in ("actions", "operator", "admin"):
-        raise HTTPException(status_code=403, detail="actions/operator/admin role required")
-    OpsService.set_gics(getattr(request.app.state, "gics", None))
+def _build_draft_context_and_scope(body: OpsCreateDraftRequest):
+    context = dict(body.context or {})
     if body.prompt and str(body.prompt).strip():
         prompt = str(body.prompt).strip()
-        context = dict(body.context or {})
-        path_scope = list((context.get("repo_context") or {}).get("path_scope") or [])
+        path_scope = list(context.get("repo_context", {}).get("path_scope", []))
     else:
         prompt = str(body.objective or "").strip()
-        context = dict(body.context or {})
-        path_scope = list((body.repo_context or {}).get("path_scope") or [])
-        context.update(
-            {
-                "constraints": list(body.constraints or []),
-                "acceptance_criteria": list(body.acceptance_criteria or []),
-                "repo_context": dict(body.repo_context or {}),
-                "execution": dict(body.execution or {}),
-                "intent_class": str((body.execution or {}).get("intent_class") or ""),
-                "contract_mode": "phase1",
-            }
-        )
+        rc = dict(body.repo_context or {})
+        ex = dict(body.execution or {})
+        path_scope = list(rc.get("path_scope") or [])
+        context.update({
+            "constraints": list(body.constraints or []),
+            "acceptance_criteria": list(body.acceptance_criteria or []),
+            "repo_context": rc,
+            "execution": ex,
+            "intent_class": str(ex.get("intent_class") or ""),
+            "contract_mode": "phase1",
+        })
+    return prompt, context, path_scope
 
+def _evaluate_draft_intent(context: dict, path_scope: list, body: OpsCreateDraftRequest):
     policy_decision = RuntimePolicyService.evaluate_draft_policy(
         path_scope=path_scope,
         estimated_files_changed=context.get("estimated_files_changed"),
         estimated_loc_changed=context.get("estimated_loc_changed"),
     )
-
     declared_intent = str(context.get("intent_class") or "")
     raw_risk = context.get("risk_score")
     if raw_risk is None:
@@ -99,41 +91,49 @@ async def create_draft(
         policy_decision=policy_decision.decision,
         policy_status_code=policy_decision.status_code,
     )
+    return policy_decision, intent_decision
 
-    context.update(
-        {
-            "policy_decision_id": policy_decision.policy_decision_id,
-            "policy_decision": policy_decision.decision,
-            "policy_status_code": policy_decision.status_code,
-            "policy_hash_expected": policy_decision.policy_hash_expected,
-            "policy_hash_runtime": policy_decision.policy_hash_runtime,
-            "policy_triggered_rules": policy_decision.triggered_rules,
-            "intent_declared": intent_decision.intent_declared,
-            "intent_effective": intent_decision.intent_effective,
-            "risk_score": intent_decision.risk_score,
-            "decision_reason": intent_decision.decision_reason,
-            "execution_decision": intent_decision.execution_decision,
-        }
-    )
+@router.post("/drafts", response_model=OpsDraft, status_code=201, responses={403: {"description": "Role required"}})
+async def create_draft(
+    request: Request,
+    body: OpsCreateDraftRequest,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    if auth.role not in ("actions", "operator", "admin"):
+        raise HTTPException(status_code=403, detail="actions/operator/admin role required")
+    OpsService.set_gics(getattr(request.app.state, "gics", None))
+    
+    prompt, context, path_scope = _build_draft_context_and_scope(body)
+    policy_decision, intent_decision = _evaluate_draft_intent(context, path_scope, body)
+
+    context.update({
+        "policy_decision_id": policy_decision.policy_decision_id,
+        "policy_decision": policy_decision.decision,
+        "policy_status_code": policy_decision.status_code,
+        "policy_hash_expected": policy_decision.policy_hash_expected,
+        "policy_hash_runtime": policy_decision.policy_hash_runtime,
+        "policy_triggered_rules": policy_decision.triggered_rules,
+        "intent_declared": intent_decision.intent_declared,
+        "intent_effective": intent_decision.intent_effective,
+        "risk_score": intent_decision.risk_score,
+        "decision_reason": intent_decision.decision_reason,
+        "execution_decision": intent_decision.execution_decision,
+    })
 
     if intent_decision.execution_decision in {"DRAFT_REJECTED_FORBIDDEN_SCOPE", "RISK_SCORE_TOO_HIGH"}:
-        draft = OpsService.create_draft(
-            prompt,
-            context=context,
-            status="rejected",
-            error=intent_decision.execution_decision,
-        )
+        draft = OpsService.create_draft(prompt, context=context, status="rejected", error=intent_decision.execution_decision)
     else:
         draft = OpsService.create_draft(prompt, context=context)
     audit_log("OPS", "/ops/drafts", draft.id, operation="WRITE", actor=_actor_label(auth))
     return draft
 
-@router.get("/drafts/{draft_id}", response_model=OpsDraft)
+@router.get("/drafts/{draft_id}", response_model=OpsDraft, responses={404: {"description": "Draft not found"}})
 async def get_draft(
     request: Request,
     draft_id: str,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     draft = OpsService.get_draft(draft_id)
@@ -141,13 +141,13 @@ async def get_draft(
         raise HTTPException(status_code=404, detail="Draft not found")
     return draft
 
-@router.put("/drafts/{draft_id}", response_model=OpsDraft)
+@router.put("/drafts/{draft_id}", response_model=OpsDraft, responses={404: {"description": "Value error"}})
 async def update_draft(
     request: Request,
     draft_id: str,
     body: OpsUpdateDraftRequest,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
@@ -160,12 +160,12 @@ async def update_draft(
     audit_log("OPS", f"/ops/drafts/{draft_id}", updated.id, operation="WRITE", actor=_actor_label(auth))
     return updated
 
-@router.post("/drafts/{draft_id}/reject", response_model=OpsDraft)
+@router.post("/drafts/{draft_id}/reject", response_model=OpsDraft, responses={404: {"description": "Value error"}})
 async def reject_draft(
     request: Request,
     draft_id: str,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
@@ -176,12 +176,35 @@ async def reject_draft(
     audit_log("OPS", f"/ops/drafts/{draft_id}/reject", updated.id, operation="WRITE", actor=_actor_label(auth))
     return updated
 
+@router.post("/slice0-pipeline", response_model=OpsDraft, status_code=201)
+async def run_slice0_pipeline(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+    prompt: Annotated[str, Query(..., min_length=1, max_length=8000)],
+    repo_path: Annotated[str, Query(..., min_length=1)],
+):
+    """Ejecuta el Pipeline estilo LangGraph E2E (Slice 0/Anexo A)."""
+    _require_role(auth, "operator")
+    OpsService.set_gics(getattr(request.app.state, "gics", None))
+    from tools.gimo_server.services.slice0_orchestrator import Slice0Orchestrator
+    try:
+        draft = await Slice0Orchestrator.run_pipeline(prompt, repo_path)
+    except Exception as exc:
+        # Fallback draft creation indicating error
+        draft = OpsService.create_draft(
+            prompt, provider=None, content=None, status="error", 
+            error=f"Slice 0 Pipeline failed: {str(exc)[:200]}"
+        )
+    audit_log("OPS", "/ops/slice0-pipeline", draft.id, operation="WRITE", actor=_actor_label(auth))
+    return draft
+
 @router.post("/generate-plan", response_model=OpsDraft, status_code=201)
 async def generate_structured_plan(
     request: Request,
-    prompt: str = Query(..., min_length=1, max_length=8000),
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+    prompt: Annotated[str, Query(..., min_length=1, max_length=8000)],
 ):
     """Generate a structured multi-task plan with Mermaid graph via LLM."""
     import json, re
@@ -243,18 +266,65 @@ async def generate_structured_plan(
     return draft
 
 
+async def _process_cognitive_generation(prompt: str, decision: Any, context_payload: dict):
+    if decision.decision_path == "security_block":
+        return OpsService.create_draft(
+            prompt,
+            context=context_payload,
+            provider=None,
+            content=None,
+            status="error",
+            error=(decision.error_actionable or "Solicitud bloqueada por seguridad")[:200],
+        )
+    if decision.can_bypass_llm and decision.direct_content:
+        return OpsService.create_draft(
+            prompt,
+            context=context_payload,
+            provider="cognitive_direct_response",
+            content=decision.direct_content,
+            status="draft",
+        )
+    
+    resp = await ProviderService.static_generate(prompt, context={})
+    provider_name = resp["provider"]
+    content = resp["content"]
+    
+    _try_parse_custom_plan(content, prompt, context_payload)
+
+    return OpsService.create_draft(
+        prompt,
+        context=context_payload,
+        provider=provider_name,
+        content=content,
+        status="draft",
+    )
+
+def _try_parse_custom_plan(content: str, prompt: str, context_payload: dict) -> None:
+    import json as _json
+    try:
+        raw_content = content.strip()
+        if raw_content.startswith("{") or raw_content.startswith("["):
+            parsed = _json.loads(raw_content)
+            if isinstance(parsed, dict) and "tasks" in parsed:
+                cp = CustomPlanService.create_plan_from_llm(parsed, name=prompt[:80])
+                context_payload["structured"] = True
+                context_payload["custom_plan_id"] = cp.id
+    except Exception:
+        pass
+
 @router.post("/generate", response_model=OpsDraft, status_code=201)
 async def generate_draft(
     request: Request,
-    prompt: str = Query(..., min_length=1, max_length=8000),
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+    prompt: Annotated[str, Query(..., min_length=1, max_length=8000)],
 ):
     config = OpsService.get_config()
     if config.operator_can_generate:
         _require_role(auth, "operator")
     else:
         _require_role(auth, "admin")
+    
     cognitive = CognitiveService()
     try:
         OpsService.set_gics(getattr(request.app.state, "gics", None))
@@ -266,52 +336,7 @@ async def generate_draft(
         if decision.error_actionable:
             context_payload.setdefault("error_actionable", decision.error_actionable)
 
-        if decision.decision_path == "security_block":
-            draft = OpsService.create_draft(
-                prompt,
-                context=context_payload,
-                provider=None,
-                content=None,
-                status="error",
-                error=(decision.error_actionable or "Solicitud bloqueada por seguridad")[:200],
-            )
-        elif decision.can_bypass_llm and decision.direct_content:
-            draft = OpsService.create_draft(
-                prompt,
-                context=context_payload,
-                provider="cognitive_direct_response",
-                content=decision.direct_content,
-                status="draft",
-            )
-        else:
-            import json as _json
-            resp = await ProviderService.static_generate(prompt, context={})
-            provider_name = resp["provider"]
-            content = resp["content"]
-
-            # Try to parse as structured plan and create CustomPlan
-            custom_plan_id = None
-            try:
-                raw_content = content.strip()
-                if raw_content.startswith("{") or raw_content.startswith("["):
-                    parsed = _json.loads(raw_content)
-                    if isinstance(parsed, dict) and "tasks" in parsed:
-                        cp = CustomPlanService.create_plan_from_llm(parsed, name=prompt[:80])
-                        custom_plan_id = cp.id
-                        context_payload["structured"] = True
-            except Exception:
-                pass  # Not a structured plan — that's fine
-
-            if custom_plan_id:
-                context_payload["custom_plan_id"] = custom_plan_id
-
-            draft = OpsService.create_draft(
-                prompt,
-                context=context_payload,
-                provider=provider_name,
-                content=content,
-                status="draft",
-            )
+        draft = await _process_cognitive_generation(prompt, decision, context_payload)
     except Exception as exc:
         draft = OpsService.create_draft(
             prompt,

@@ -24,7 +24,7 @@ from .common import _require_role, _actor_label
 
 router = APIRouter()
 
-@router.get("/provider", response_model=ProviderConfig)
+@router.get("/provider", response_model=ProviderConfig, responses={404: {"description": "Not Found"}})
 async def get_provider(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
@@ -70,7 +70,7 @@ async def list_connectors(
     audit_log("OPS", "/ops/connectors", str(data.get("count", 0)), operation="READ", actor=_actor_label(auth))
     return data
 
-@router.get("/connectors/{connector_id}/health")
+@router.get("/connectors/{connector_id}/health", responses={404: {"description": "Not Found"}})
 async def connector_health(
     request: Request,
     connector_id: str,
@@ -241,7 +241,7 @@ async def list_mcp_servers(
     audit_log("OPS", "/ops/config/mcp", str(len(servers)), operation="READ", actor=_actor_label(auth))
     return {"servers": servers}
 
-@router.post("/config/mcp/sync")
+@router.post("/config/mcp/sync", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}, 500: {"description": "Internal Server Error"}})
 async def sync_mcp_tools(
     request: Request,
     body: dict,
@@ -283,7 +283,7 @@ async def list_tool_registry(
     audit_log("OPS", "/ops/tool-registry", str(len(items)), operation="READ", actor=_actor_label(auth))
     return {"items": [item.model_dump() for item in items], "count": len(items)}
 
-@router.get("/tool-registry/{tool_name}")
+@router.get("/tool-registry/{tool_name}", responses={404: {"description": "Not Found"}})
 async def get_tool_registry_entry(
     request: Request,
     tool_name: str,
@@ -311,7 +311,7 @@ async def upsert_tool_registry_entry(
     audit_log("OPS", f"/ops/tool-registry/{tool_name}", tool_name, operation="WRITE", actor=_actor_label(auth))
     return item.model_dump()
 
-@router.delete("/tool-registry/{tool_name}")
+@router.delete("/tool-registry/{tool_name}", responses={404: {"description": "Not Found"}})
 async def delete_tool_registry_entry(
     request: Request,
     tool_name: str,
@@ -348,7 +348,7 @@ async def set_policy_config(
     audit_log("OPS", "/ops/policy", "updated", operation="WRITE", actor=_actor_label(auth))
     return cfg
 
-@router.post("/policy/decide")
+@router.post("/policy/decide", responses={400: {"description": "Bad Request"}})
 async def policy_decide(
     request: Request,
     body: dict,
@@ -380,14 +380,13 @@ async def model_recommend(
     node_id = body.get("node_id", "unknown")
     node_type = body.get("node_type", "agent_task")
     config = body.get("config", {})
-    state = body.get("state", {})
     
     from tools.gimo_server.ops_models import WorkflowNode
     from tools.gimo_server.services.model_router_service import ModelRouterService
     
     node = WorkflowNode(id=node_id, type=node_type, config=config)
     router_service = ModelRouterService()
-    recommendation = router_service.promote_eco_mode(node, state)
+    recommendation = router_service.promote_eco_mode(node)
     
     audit_log("OPS", "/ops/model/recommend", f"{node_id}", operation="READ", actor=_actor_label(auth))
     return recommendation

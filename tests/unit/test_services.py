@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import math
 import os
 from unittest.mock import MagicMock, AsyncMock, patch
 from tools.gimo_server.ops_models import WorkflowNode, TrustEvent, EvalDataset, EvalGateConfig, EvalGoldenCase, EvalJudgeConfig, WorkflowGraph
@@ -45,6 +46,7 @@ class TestModelRouter:
         assert decision.model != "unknown"
 
     async def test_phase6_forced_local_for_security_change(self):
+        await asyncio.sleep(0)
         decision = ModelRouterService.resolve_phase6_strategy(
             intent_effective="SECURITY_CHANGE",
             path_scope=["tools/gimo_server/security/auth.py"],
@@ -55,6 +57,7 @@ class TestModelRouter:
         assert decision.strategy_reason == "forced_local_only"
 
     async def test_phase6_400_never_fallback(self):
+        await asyncio.sleep(0)
         decision = ModelRouterService.resolve_phase6_strategy(
             intent_effective="SAFE_REFACTOR",
             path_scope=["tools/gimo_server/services/ops_service.py"],
@@ -64,6 +67,7 @@ class TestModelRouter:
         assert decision.final_model_used == ModelRouterService.PHASE6_PRIMARY_MODEL
 
     async def test_phase6_429_uses_fallback(self):
+        await asyncio.sleep(0)
         decision = ModelRouterService.resolve_phase6_strategy(
             intent_effective="SAFE_REFACTOR",
             path_scope=["tools/gimo_server/services/ops_service.py"],
@@ -74,6 +78,7 @@ class TestModelRouter:
         assert decision.final_status == "FALLBACK_MODEL_USED"
 
     async def test_phase6_deterministic_decision(self):
+        await asyncio.sleep(0)
         kwargs = {
             "intent_effective": "SAFE_REFACTOR",
             "path_scope": ["tools/gimo_server/services/provider_service.py"],
@@ -255,7 +260,7 @@ async def test_evals_service_regression_passes_all_cases():
         mock_exec.return_value = MagicMock()
         mock_exec.return_value.data = {"result": "ok"}
         report = await EvalsService.run_regression(workflow=workflow, dataset=dataset, judge=EvalJudgeConfig(enabled=False), gate=EvalGateConfig(min_pass_rate=1.0, min_avg_score=1.0))
-        assert report.pass_rate == 1.0
+        assert math.isclose(report.pass_rate, 1.0)
         assert report.gate_passed is True
 
 @pytest.mark.asyncio

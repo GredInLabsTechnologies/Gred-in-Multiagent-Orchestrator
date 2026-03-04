@@ -1,5 +1,5 @@
-from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
+from typing import Annotated
 from fastapi.responses import StreamingResponse
 import asyncio
 from tools.gimo_server.security import verify_token
@@ -33,10 +33,10 @@ _ACTIONS_SAFE_PUBLIC_ENDPOINTS: tuple[tuple[str, str], ...] = (
     ("post", "/ui/repos/select"),
 )
 
-@router.get("/openapi.json")
+@router.get("/openapi.json", responses={404: {"description": "Not found"}})
 async def get_filtered_openapi(
     request: Request,
-    auth: AuthContext = Depends(verify_token),
+    auth: Annotated[AuthContext, Depends(verify_token)],
 ):
     """Return a filtered OpenAPI spec with only actions-safe endpoints.
 

@@ -31,6 +31,50 @@ class MergeGateService:
     PIPELINE_TIMEOUT_SECONDS = 900
 
     @classmethod
+    def _validate_policy(cls, run_id: str, context: dict, run: Any) -> bool:
+        policy_decision = str(context.get("policy_decision") or "").strip().lower()
+        policy_decision_id = str(context.get("policy_decision_id") or run.policy_decision_id or "").strip()
+        if not policy_decision_id:
+            OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg="missing policy_decision_id")
+            return False
+        if policy_decision == "deny":
+            OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg="Policy deny at merge gate")
+            return False
+        if policy_decision == "review":
+            OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg="policy review required")
+            return False
+        if policy_decision != "allow":
+            OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg="invalid policy decision")
+            return False
+
+        # Gate obligatorio de baseline hash (Fase 7): expected == runtime
+        policy_hash_expected = str(context.get("policy_hash_expected") or "")
+        policy_hash_runtime = str(context.get("policy_hash_runtime") or "")
+        if policy_hash_expected and policy_hash_runtime and policy_hash_expected != policy_hash_runtime:
+            OpsService.update_run_status(run_id, "BASELINE_TAMPER_DETECTED", msg="policy hash mismatch at merge gate")
+            return False
+        return True
+
+    @classmethod
+    def _validate_risk(cls, run_id: str, context: dict, run: Any) -> bool:
+        risk_score = float(context.get("risk_score") or run.risk_score or 0.0)
+        intent_effective = str(context.get("intent_effective") or "")
+        if not intent_effective:
+            OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg="missing effective intent")
+            return False
+
+        if risk_score >= 60:
+            OpsService.update_run_status(run_id, "RISK_SCORE_TOO_HIGH", msg="risk_gt_60")
+            return False
+        if 31 <= risk_score < 60:
+            OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg="risk_between_31_60")
+            return False
+        if intent_effective in {"SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"}:
+            OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg="intent_requires_human_review")
+            return False
+        return True
+
+    @classmethod
     async def execute_run(cls, run_id: str) -> bool:
         run = OpsService.get_run(run_id)
         if not run:
@@ -39,6 +83,7 @@ class MergeGateService:
         if not approved:
             OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg="Approved entry not found")
             return True
+            
         draft = OpsService.get_draft(approved.draft_id)
         context: Dict[str, Any] = dict((draft.context if draft else {}) or {})
         repo_context = dict(context.get("repo_context") or {})
@@ -46,50 +91,10 @@ class MergeGateService:
         source_ref = str(context.get("source_ref") or "HEAD")
         target_ref = str(repo_context.get("target_branch") or "main")
 
-        policy_decision = str(context.get("policy_decision") or "").strip().lower()
-        policy_decision_id = str(context.get("policy_decision_id") or run.policy_decision_id or "").strip()
-        if not policy_decision_id:
-            OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg="missing policy_decision_id")
+        if not cls._validate_policy(run_id, context, run):
             return True
-        if policy_decision == "deny":
-            OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg="Policy deny at merge gate")
-            return True
-        if policy_decision == "review":
-            OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg="policy review required")
-            return True
-        if policy_decision != "allow":
-            OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg="invalid policy decision")
-            return True
-
-        # Gate obligatorio de baseline hash (Fase 7): expected == runtime
-        policy_hash_expected = str(context.get("policy_hash_expected") or "")
-        policy_hash_runtime = str(context.get("policy_hash_runtime") or "")
-        if policy_hash_expected and policy_hash_runtime and policy_hash_expected != policy_hash_runtime:
-            OpsService.update_run_status(
-                run_id,
-                "BASELINE_TAMPER_DETECTED",
-                msg="policy hash mismatch at merge gate",
-            )
-            return True
-
-        risk_score = float(context.get("risk_score") or run.risk_score or 0.0)
-        intent_effective = str(context.get("intent_effective") or "")
-        if not intent_effective:
-            OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg="missing effective intent")
-            return True
-
-        if risk_score >= 60:
-            OpsService.update_run_status(run_id, "RISK_SCORE_TOO_HIGH", msg="risk_gt_60")
-            return True
-        if 31 <= risk_score < 60:
-            OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg="risk_between_31_60")
-            return True
-        if intent_effective in {"SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"}:
-            OpsService.update_run_status(
-                run_id,
-                "HUMAN_APPROVAL_REQUIRED",
-                msg="intent_requires_human_review",
-            )
+            
+        if not cls._validate_risk(run_id, context, run):
             return True
 
         OpsService.recover_stale_lock(repo_id)

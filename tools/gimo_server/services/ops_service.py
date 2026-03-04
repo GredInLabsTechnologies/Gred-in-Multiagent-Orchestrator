@@ -42,6 +42,10 @@ class OpsService:
 
     CONFIG_FILE = OPS_DIR / "config.json"
     LOCK_FILE = OPS_DIR / ".ops.lock"
+
+    _RUN_GLOB = "r_*.json"
+    _DRAFT_GLOB = "d_*.json"
+    _APPROVED_GLOB = "a_*.json"
     
     _gics: Optional[GicsService] = None
 
@@ -163,7 +167,7 @@ class OpsService:
         if not cls.DRAFTS_DIR.exists():
             return []
         out: List[OpsDraft] = []
-        for f in cls.DRAFTS_DIR.glob("d_*.json"):
+        for f in cls.DRAFTS_DIR.glob(cls._DRAFT_GLOB):
             try:
                 out.append(OpsDraft.model_validate_json(f.read_text(encoding="utf-8")))
             except Exception as exc:
@@ -277,7 +281,7 @@ class OpsService:
         if not cls.APPROVED_DIR.exists():
             return []
         out: List[OpsApproved] = []
-        for f in cls.APPROVED_DIR.glob("a_*.json"):
+        for f in cls.APPROVED_DIR.glob(cls._APPROVED_GLOB):
             try:
                 out.append(OpsApproved.model_validate_json(f.read_text(encoding="utf-8")))
             except Exception as exc:
@@ -300,7 +304,7 @@ class OpsService:
         if not cls.RUNS_DIR.exists():
             return []
         out: List[OpsRun] = []
-        for f in cls.RUNS_DIR.glob("r_*.json"):
+        for f in cls.RUNS_DIR.glob(cls._RUN_GLOB):
             try:
                 out.append(OpsRun.model_validate_json(f.read_text(encoding="utf-8")))
             except Exception as exc:
@@ -510,37 +514,7 @@ class OpsService:
             return False
 
     @classmethod
-    def get_run_preview(
-        cls,
-        run_id: str,
-        *,
-        request_id: Optional[str] = None,
-        trace_id: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """Return a stable preview payload for audit/UI contracts."""
-        run = cls.get_run(run_id)
-        if not run:
-            return None
-
-        approved = cls.get_approved(run.approved_id)
-        if not approved:
-            return None
-
-        draft = cls.get_draft(approved.draft_id)
-        context = dict((draft.context if draft else {}) or {})
-
-        content = approved.content or ""
-        diff_summary = context.get("diff_summary") or f"content_chars={len(content)}"
-        risk_score = float(context.get("risk_score", 0.0) or 0.0)
-        model_used = str(context.get("model_used") or approved.provider or "unknown")
-
-        expected = str(context.get("policy_hash_expected") or "")
-        runtime = str(context.get("policy_hash_runtime") or "")
-        if not expected:
-            expected = hashlib.sha256((approved.prompt or "").encode("utf-8", errors="ignore")).hexdigest()
-        if not runtime:
-            runtime = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
-
+    def _extract_strategy_fields(cls, run: Any) -> Dict[str, str]:
         strategy_line = ""
         for entry in reversed(run.log or []):
             msg = str((entry or {}).get("msg") or "")
@@ -552,59 +526,110 @@ class OpsService:
         if strategy_line:
             payload = strategy_line.replace("Model strategy:", "").strip()
             for part in payload.split(" "):
-                if "=" not in part:
-                    continue
-                k, v = part.split("=", 1)
-                strategy_fields[k.strip()] = v.strip()
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    strategy_fields[k.strip()] = v.strip()
+        return strategy_fields
 
-        model_attempted = str(context.get("model_attempted") or strategy_fields.get("attempted") or "")
-        failure_reason = str(context.get("failure_reason") or strategy_fields.get("failure_reason") or "")
-        final_model_used = str(
-            context.get("final_model_used")
-            or strategy_fields.get("final_model")
-            or model_used
-            or "unknown"
+    @classmethod
+    def _extract_hashes(cls, context: dict, approved: Any, content: str) -> tuple[str, str]:
+        expected = str(context.get("policy_hash_expected") or "")
+        runtime = str(context.get("policy_hash_runtime") or "")
+        if not expected:
+            expected = hashlib.sha256((approved.prompt or "").encode("utf-8", errors="ignore")).hexdigest()
+        if not runtime:
+            runtime = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
+        return expected, runtime
+
+    @classmethod
+    def _c_str(cls, ctx: dict, k1: str, k2: str = None, def_val: str = "") -> str:
+        v = ctx.get(k1)
+        if not v and k2:
+            v = ctx.get(k2)
+        return str(v or def_val)
+
+    @classmethod
+    def _build_preview_dict(
+        cls,
+        run,
+        approved,
+        context: dict,
+        strategy_fields: dict,
+        expected: str,
+        runtime: str,
+        request_id: Optional[str],
+        trace_id: Optional[str]
+    ) -> Dict[str, Any]:
+        content = approved.content or ""
+        diff_summary = context.get("diff_summary") or f"content_chars={len(content)}"
+        model_used = cls._c_str(context, "model_used", def_val=approved.provider or "unknown")
+
+        fallback_used = bool(
+            str(context.get("fallback_used", strategy_fields.get("fallback_used", False))).lower() in {"1", "true", "yes"}
         )
-        fallback_used_raw = context.get("fallback_used", strategy_fields.get("fallback_used", False))
-        fallback_used = bool(str(fallback_used_raw).lower() in {"1", "true", "yes"})
 
-        preview = {
+        return {
             "run_id": run.id,
             "draft_id": approved.draft_id,
             "status": run.status,
             "final_status": run.status,
             "diff_summary": diff_summary,
-            "risk_score": risk_score,
-            "intent_declared": str(context.get("intent_declared") or context.get("intent_class") or ""),
-            "intent_effective": str(context.get("intent_effective") or context.get("intent_class") or ""),
-            "decision_reason": str(context.get("decision_reason") or ""),
-            "execution_decision": str(context.get("execution_decision") or ""),
+            "risk_score": float(context.get("risk_score", 0.0) or 0.0),
+            "intent_declared": cls._c_str(context, "intent_declared", "intent_class"),
+            "intent_effective": cls._c_str(context, "intent_effective", "intent_class"),
+            "decision_reason": cls._c_str(context, "decision_reason"),
+            "execution_decision": cls._c_str(context, "execution_decision"),
             "model_used": model_used,
-            "model_attempted": model_attempted,
-            "failure_reason": failure_reason,
-            "final_model_used": final_model_used,
+            "model_attempted": cls._c_str(context, "model_attempted", def_val=strategy_fields.get("attempted") or ""),
+            "failure_reason": cls._c_str(context, "failure_reason", def_val=strategy_fields.get("failure_reason") or ""),
+            "final_model_used": cls._c_str(context, "final_model_used", def_val=strategy_fields.get("final_model") or model_used),
             "fallback_used": fallback_used,
-            "policy_decision_id": str(context.get("policy_decision_id") or ""),
-            "policy_decision": str(context.get("policy_decision") or ""),
-            "policy_status_code": str(context.get("policy_status_code") or ""),
+            "policy_decision_id": cls._c_str(context, "policy_decision_id"),
+            "policy_decision": cls._c_str(context, "policy_decision"),
+            "policy_status_code": cls._c_str(context, "policy_status_code"),
             "policy_triggered_rules": list(context.get("policy_triggered_rules") or []),
             "policy_hash_expected": expected,
             "policy_hash_runtime": runtime,
-            "baseline_version": str(context.get("baseline_version") or "v1"),
-            "commit_before": str(context.get("commit_before") or run.commit_before or "unknown"),
-            "commit_after": str(context.get("commit_after") or run.commit_after or "unknown"),
+            "baseline_version": cls._c_str(context, "baseline_version", def_val="v1"),
+            "commit_before": cls._c_str(context, "commit_before", def_val=run.commit_before or "unknown"),
+            "commit_after": cls._c_str(context, "commit_after", def_val=run.commit_after or "unknown"),
             "trace_id": str(trace_id or context.get("trace_id") or ""),
             "request_id": str(request_id or context.get("request_id") or ""),
             "updated_at": _utcnow().isoformat(),
         }
-        return preview
+
+    @classmethod
+    def get_run_preview(
+        cls,
+        run_id: str,
+        *,
+        request_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return a stable preview payload for audit/UI contracts."""
+        run = cls.get_run(run_id)
+        if not run:
+            return None
+        approved = cls.get_approved(run.approved_id)
+        if not approved:
+            return None
+        draft = cls.get_draft(approved.draft_id)
+        context = dict((draft.context if draft else {}) or {})
+
+        content = approved.content or ""
+        expected, runtime = cls._extract_hashes(context, approved, content)
+        strategy_fields = cls._extract_strategy_fields(run)
+
+        return cls._build_preview_dict(
+            run, approved, context, strategy_fields, expected, runtime, request_id, trace_id
+        )
 
     @classmethod
     def get_runs_by_status(cls, status: str) -> List[OpsRun]:
         if not cls.RUNS_DIR.exists():
             return []
         out: List[OpsRun] = []
-        for f in cls.RUNS_DIR.glob("r_*.json"):
+        for f in cls.RUNS_DIR.glob(cls._RUN_GLOB):
             try:
                 run = OpsRun.model_validate_json(f.read_text(encoding="utf-8"))
                 if run.status == status:
@@ -618,7 +643,7 @@ class OpsService:
         if not cls.RUNS_DIR.exists():
             return 0
         count = 0
-        for f in cls.RUNS_DIR.glob("r_*.json"):
+        for f in cls.RUNS_DIR.glob(cls._RUN_GLOB):
             try:
                 run = OpsRun.model_validate_json(f.read_text(encoding="utf-8"))
                 if run.status in ("pending", "running"):
@@ -632,7 +657,7 @@ class OpsService:
         if not cls.RUNS_DIR.exists():
             return []
         out: List[OpsRun] = []
-        for f in cls.RUNS_DIR.glob("r_*.json"):
+        for f in cls.RUNS_DIR.glob(cls._RUN_GLOB):
             try:
                 run = OpsRun.model_validate_json(f.read_text(encoding="utf-8"))
                 if run.status == "pending":
@@ -651,7 +676,7 @@ class OpsService:
         now = _utcnow()
         cutoff = now - timedelta(days=ttl_days)
         cleaned = 0
-        for f in cls.DRAFTS_DIR.glob("d_*.json"):
+        for f in cls.DRAFTS_DIR.glob(cls._DRAFT_GLOB):
             try:
                 draft = OpsDraft.model_validate_json(f.read_text(encoding="utf-8"))
                 if draft.status in ("rejected", "error") and draft.created_at.replace(tzinfo=timezone.utc) < cutoff:
@@ -672,7 +697,7 @@ class OpsService:
         now = _utcnow()
         cutoff = now - timedelta(seconds=ttl)
         cleaned = 0
-        for f in cls.RUNS_DIR.glob("r_*.json"):
+        for f in cls.RUNS_DIR.glob(cls._RUN_GLOB):
             try:
                 mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
                 if mtime < cutoff:
