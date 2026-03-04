@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Users ───────────────────────────────────────────────────────
+    // Solo el propio usuario puede leer su doc. Escritura solo via Admin SDK.
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // ── Licenses ─────────────────────────────────────────────────────
+    // Solo el propietario puede leer su licencia. Escritura solo via Admin SDK.
+    match /licenses/{licId} {
+      allow read: if request.auth != null &&
+        resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // ── Activations ──────────────────────────────────────────────────
+    // No acceso directo desde el cliente. Solo Admin SDK.
+    match /activations/{activId} {
+      allow read, write: if false;
+    }
+
+    // ── Subscriptions ─────────────────────────────────────────────────
+    // El propietario puede leer su suscripción.
+    match /subscriptions/{subId} {
+      allow read: if request.auth != null &&
+        resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // ── Pending Keys (show-once) ──────────────────────────────────────
+    // Solo el propio usuario puede leer su pending key.
+    // Se elimina en el mismo request (Admin SDK hace el delete).
+    match /pending_keys/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // ── Default: denegar todo lo demás ───────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
