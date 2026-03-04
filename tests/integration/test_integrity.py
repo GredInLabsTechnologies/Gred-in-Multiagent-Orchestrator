@@ -54,6 +54,15 @@ def test_environment_entropy():
     assert len(token) >= 32, "CRITICAL: Token too short (min 32 chars)"
     assert entropy > 4.5, f"CRITICAL: Token entropy too low ({entropy:.2f}), likely predictable"
 
+def _check_file_for_leaks(path: Path, forbidden_patterns: list[str]) -> None:
+    if path == Path(__file__): return
+    content = path.read_text(encoding='utf-8', errors='ignore')
+    for pattern in forbidden_patterns:
+        if pattern in content:
+            # Skip allowlisted occurrences (like the registry path itself if it's there)
+            if "repo_registry.json" in str(path): continue
+            print(f"[WARNING] Potential environment leak in {path}: '{pattern}' found.")
+
 def test_orphan_dependency_check():
     """Rigorous: Search for imports of files that don't exist in the restricted environment."""
     # This checks for references like "C:/Users/shilo/..." inherited from old envs
@@ -69,12 +78,4 @@ def test_orphan_dependency_check():
             continue
         for file in files:
             if file.endswith((".py", ".ts", ".js", ".cmd", ".ps1")):
-                path = Path(root) / file
-                if path == Path(__file__): continue
-                content = path.read_text(encoding='utf-8', errors='ignore')
-                for pattern in forbidden_patterns:
-                    if pattern in content:
-                        # Skip allowlisted occurrences (like the registry path itself if it's there)
-                        if "repo_registry.json" in str(path): continue
-                        print(f"[WARNING] Potential environment leak in {path}: '{pattern}' found.")
-                        # In strict mode this could be an assert
+                _check_file_for_leaks(Path(root) / file, forbidden_patterns)

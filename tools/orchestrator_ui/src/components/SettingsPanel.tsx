@@ -54,6 +54,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
 
     const toggleConfig = useCallback(async (key: keyof OpsConfig, value: boolean) => {
         if (!config) return;
+        const previousConfig = { ...config };
         const updated = { ...config, [key]: value };
         setConfig(updated);
         try {
@@ -63,10 +64,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                 credentials: 'include',
                 body: JSON.stringify(updated),
             });
-            if (!res.ok) throw new Error();
+            if (!res.ok) throw new Error('Failed to update config');
             addToast(`${key} ${value ? 'activado' : 'desactivado'}`, 'success');
         } catch {
-            setConfig(config);
+            setConfig(previousConfig);
             addToast('No se pudo guardar la configuración.', 'error');
         }
     }, [config, addToast]);

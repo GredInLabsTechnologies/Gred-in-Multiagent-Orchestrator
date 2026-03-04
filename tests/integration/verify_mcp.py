@@ -37,8 +37,6 @@ def setup_module(module):
     
     # We can manually patch them to be safe
     config.ORCH_TOKEN = "orch_token"
-    # config.ORCH_ACTIONS_TOKEN = "orch_actions_token" # Might be read from env or file
-    # config.ORCH_OPERATOR_TOKEN = "orch_operator_token"
     
     # Patch auth module directly 
     from tools.gimo_server.security import auth
@@ -52,8 +50,8 @@ def setup_module(module):
 def test_mcp_flow():
     # Use the token we know is in TOKENS and has admin rights (orch_token typically)
     # Ensure no trailing whitespace issues etc
-    token = "orch_token_long_enough_for_validation"
-    auth_headers = {"Authorization": f"Bearer {token}"}
+    auth_val = "orch_token_long_enough_for_validation"
+    auth_headers = {"Authorization": f"Bearer {auth_val}"}
     
     # 1. Configure MCP Server
 
@@ -69,7 +67,6 @@ def test_mcp_flow():
     # First get current config
     resp = client.get("/ops/provider", headers=auth_headers)
     assert resp.status_code == 200, f"Failed to get provider config: {resp.text}"
-    existing_config = resp.json()
     existing_config = resp.json()
     
     # Add dummy mcp server

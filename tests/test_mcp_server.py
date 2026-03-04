@@ -51,7 +51,7 @@ def main():
             
             print(json.dumps(response))
             sys.stdout.flush()
-        except:
+        except Exception:
             break
 
 if __name__ == "__main__":

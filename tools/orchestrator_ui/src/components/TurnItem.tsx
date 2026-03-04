@@ -1,14 +1,14 @@
 import { Bot, User, Cpu, Code, FileText, AlertCircle, Wrench } from 'lucide-react';
 
-interface GimoItem {
+export interface GimoItem {
     id: string;
     type: 'text' | 'tool_call' | 'tool_result' | 'diff' | 'thought' | 'error';
     content: string;
     status: 'started' | 'delta' | 'completed' | 'error';
-    metadata?: any;
+    metadata?: Record<string, unknown>;
 }
 
-interface GimoTurn {
+export interface GimoTurn {
     id: string;
     agent_id: string;
     items: GimoItem[];

@@ -46,7 +46,7 @@ def test_observability_service_records_metrics_and_traces():
     assert metrics["nodes_total"] == 2
     assert metrics["nodes_failed"] == 1
     assert metrics["tokens_total"] == 15
-    assert metrics["cost_total_usd"] == 0.02
+    assert metrics["cost_total_usd"] == pytest.approx(0.02)
 
     traces = ObservabilityService.list_traces(limit=10)
     # list_traces groups by OTel trace_id — all spans share one trace_id
@@ -85,7 +85,7 @@ async def test_provider_service_returns_metrics():
             assert result["prompt_tokens"] == 100
             assert result["completion_tokens"] == 50
             # Sonnet pricing: $3/1M input, $15/1M output
-            assert result["cost_usd"] == 0.00105
+            assert result["cost_usd"] == pytest.approx(0.00105)
             assert result["provider"] == "test_provider"
 
 @pytest.mark.asyncio
@@ -110,4 +110,4 @@ async def test_provider_service_handles_missing_usage_gracefully():
 
             assert result["content"] == "Hello world"
             assert result["tokens_used"] == 0
-            assert result["cost_usd"] == 0.0
+            assert result["cost_usd"] == pytest.approx(0.0)

@@ -32,12 +32,15 @@ def _build_mock_process(
     err_iter = iter(stderr_lines or [b""])
 
     async def mock_readline_stdout():
+        await asyncio.sleep(0)
         return next(out_iter, b"")
 
     async def mock_readline_stderr():
+        await asyncio.sleep(0)
         return next(err_iter, b"")
 
     async def mock_wait():
+        await asyncio.sleep(0)
         return returncode
 
     process.stdout.readline = mock_readline_stdout
@@ -540,7 +543,7 @@ async def test_model_router_policy_selection():
     """Verify router chooses a real model for security_review (high-tier task)."""
     router = ModelRouterService()
     node = WorkflowNode(id="n1", type="llm_call", config={"task_type": "security_review"})
-    decision = await router.choose_model(node, state={})
+    decision = await router.choose_model(node, _state={})
     # New agnostic router returns a real model ID, not a tier name
     assert decision.model != "unknown"
     assert decision.reason  # Should have routing explanation
@@ -552,7 +555,7 @@ async def test_model_router_degrades_on_low_budget():
     router = ModelRouterService()
     node = WorkflowNode(id="n2", type="llm_call", config={"task_type": "code_generation"})
     decision = await router.choose_model(
-        node, state={"budget": {"max_cost_usd": 10.0}, "budget_counters": {"cost_usd": 9.5}}
+        node, _state={"budget": {"max_cost_usd": 10.0}, "budget_counters": {"cost_usd": 9.5}}
     )
     # Should still return a valid model
     assert decision.model != "unknown"

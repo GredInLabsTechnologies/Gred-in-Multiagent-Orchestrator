@@ -70,8 +70,7 @@ export const Sidebar: React.FC = () => {
     };
 
     return (
-        <aside
-            role="navigation"
+        <nav
             aria-label="Navegación principal"
             className="w-[72px] bg-surface-0/80 backdrop-blur-xl border-r border-white/[0.04] flex flex-col py-3 px-1.5 shrink-0"
         >
@@ -93,7 +92,7 @@ export const Sidebar: React.FC = () => {
                 <Settings size={20} className="relative z-10" />
                 <span className="relative z-10 text-[9px] font-semibold uppercase tracking-wider leading-none">Ajustes</span>
             </button>
-        </aside>
+        </nav>
     );
 };
 

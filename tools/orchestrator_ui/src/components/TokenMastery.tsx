@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    BarChart, Bar, Cell
+    BarChart, Bar
 } from 'recharts';
 import { useMasteryService } from '../hooks/useMasteryService';
 import {
@@ -79,6 +79,12 @@ export function TokenMastery() {
         return <div className="p-8 text-center text-text-secondary">Loading Token Mastery...</div>;
     }
 
+    const getAlertColor = (level?: string) => {
+        if (level === 'critical') return 'bg-accent-alert';
+        if (level === 'warning') return 'bg-accent-warning';
+        return 'bg-accent-trust';
+    };
+
     return (
         <div className="flex flex-col gap-6 p-6 animate-in fade-in slide-in-from-bottom-2 duration-500 max-w-7xl mx-auto">
             {/* Header */}
@@ -134,14 +140,12 @@ export function TokenMastery() {
                             icon={<Shield size={20} className="text-accent-purple" />}
                             color="var(--accent-purple)"
                         />
-                        <div
-                            role="button"
-                            tabIndex={0}
-                            className="bg-surface-2 border border-border-primary rounded-xl p-4 flex flex-col justify-between cursor-pointer hover:border-accent-trust/50 transition-colors"
+                        <button
+                            type="button"
+                            className="bg-surface-2 border border-border-primary rounded-xl p-4 flex flex-col justify-between cursor-pointer hover:border-accent-trust/50 transition-colors text-left w-full h-full"
                             onClick={handleEcoToggle}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleEcoToggle(); }}
                         >
-                            <div className="flex justify-between items-start">
+                            <div className="flex justify-between items-start w-full">
                                 <div>
                                     <div className="text-[11px] text-text-secondary font-medium uppercase tracking-wider">Eco-Mode</div>
                                     <div className="text-xl font-bold mt-1 text-white capitalize">{config.eco_mode.mode}</div>
@@ -153,7 +157,7 @@ export function TokenMastery() {
                             <div className="mt-3 text-[11px] text-text-secondary">
                                 {config.eco_mode.mode === 'off' ? 'Tap to enable savings' : 'Active cost reduction'}
                             </div>
-                        </div>
+                        </button>
                     </div>
 
                     {/* Charts Row */}
@@ -199,11 +203,7 @@ export function TokenMastery() {
                                         contentStyle={{ backgroundColor: 'var(--surface-2)', borderColor: 'var(--border-primary)', fontSize: '12px' }}
                                         cursor={{ fill: 'var(--surface-3)', opacity: 0.4 }}
                                     />
-                                    <Bar dataKey="cost" fill={COLORS.warning} radius={[0, 4, 4, 0]}>
-                                        {analytics.by_model.map((entry, index) => (
-                                            <Cell key={`model-${entry.model}`} fill={[COLORS.warning, COLORS.primary, COLORS.success, COLORS.danger][index % 4]} />
-                                        ))}
-                                    </Bar>
+                                    <Bar dataKey="cost" fill={COLORS.warning} radius={[0, 4, 4, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
@@ -274,7 +274,7 @@ export function TokenMastery() {
                                         </div>
                                         <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
                                             <div
-                                                className={`h-full rounded-full ${f.alert_level === 'critical' ? 'bg-accent-alert' : f.alert_level === 'warning' ? 'bg-accent-warning' : 'bg-accent-trust'}`}
+                                                className={`h-full rounded-full ${getAlertColor(f.alert_level)}`}
                                                 style={{ width: `${Math.min(100, 100 - (f.remaining_pct ?? 100))}%` }}
                                             />
                                         </div>
@@ -292,8 +292,8 @@ export function TokenMastery() {
                                 <div className="mt-6 pt-4 border-t border-border-primary">
                                     <h4 className="text-xs font-semibold mb-2">Optimization Tips</h4>
                                     <div className="space-y-2">
-                                        {status.tips.slice(0, 3).map((tip, idx) => (
-                                            <div key={idx} className="bg-surface-3/30 border border-border-primary rounded p-2 text-[10px] leading-tight text-text-primary/90">
+                                        {status.tips.slice(0, 3).map((tip) => (
+                                            <div key={tip.substring(0, 20)} className="bg-surface-3/30 border border-border-primary rounded p-2 text-[10px] leading-tight text-text-primary/90">
                                                 {tip}
                                             </div>
                                         ))}
@@ -310,7 +310,15 @@ export function TokenMastery() {
     );
 }
 
-function StatusCard({ title, value, subtitle, icon, color }: any) {
+interface StatusCardProps {
+    readonly title: string;
+    readonly value: string;
+    readonly subtitle: string;
+    readonly icon: React.ReactNode;
+    readonly color: string;
+}
+
+function StatusCard({ title, value, subtitle, icon, color }: StatusCardProps) {
     return (
         <div className="bg-surface-2 border border-border-primary rounded-xl p-4 flex flex-col justify-between hover:border-border-focus transition-colors">
             <div className="flex justify-between items-start">
@@ -329,7 +337,7 @@ function StatusCard({ title, value, subtitle, icon, color }: any) {
     );
 }
 
-function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onChange: (u: Partial<UserEconomyConfig>) => void }) {
+function EconomySettings({ config, onChange }: { readonly config: UserEconomyConfig, readonly onChange: (u: Partial<UserEconomyConfig>) => void }) {
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-6">
@@ -338,13 +346,11 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
                     <h3 className="text-sm font-semibold mb-4 text-text-primary">Autonomy Level</h3>
                     <div className="space-y-3">
                         {['manual', 'advisory', 'guided', 'autonomous'].map((level) => (
-                            <div
+                            <button
                                 key={level}
-                                role="button"
-                                tabIndex={0}
+                                type="button"
                                 onClick={() => onChange({ autonomy_level: level as any })}
-                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onChange({ autonomy_level: level as any }); }}
-                                className={`p-3 rounded-lg border cursor-pointer transition-all ${config.autonomy_level === level ? 'bg-accent-purple/10 border-accent-purple ring-1 ring-accent-purple' : 'bg-surface-3/50 border-border-primary hover:bg-surface-3'}`}
+                                className={`text-left w-full p-3 rounded-lg border cursor-pointer transition-all ${config.autonomy_level === level ? 'bg-accent-purple/10 border-accent-purple ring-1 ring-accent-purple' : 'bg-surface-3/50 border-border-primary hover:bg-surface-3'}`}
                             >
                                 <div className="flex items-center justify-between">
                                     <span className="text-sm font-medium text-text-primary capitalize">{level}</span>
@@ -356,7 +362,7 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
                                     {level === 'guided' && 'Optimization within configured floor/ceiling bounds.'}
                                     {level === 'autonomous' && 'Full cascading and eco-mode enabled within budget.'}
                                 </div>
-                            </div>
+                            </button>
                         ))}
                     </div>
                 </div>
@@ -410,8 +416,9 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
                             {config.cascade.enabled && (
                                 <div className="grid grid-cols-2 gap-3 p-3 bg-surface-3/30 border border-border-primary rounded-lg mt-2 animate-in fade-in zoom-in-95 duration-200">
                                     <div>
-                                        <label className="text-[10px] text-text-secondary block mb-1">Min Tier</label>
+                                        <label htmlFor="min-tier" className="text-[10px] text-text-secondary block mb-1">Min Tier</label>
                                         <select
+                                            id="min-tier"
                                             value={config.cascade.min_tier}
                                             onChange={(e) => onChange({ cascade: { ...config.cascade, min_tier: e.target.value } })}
                                             className="w-full bg-surface-2 border border-border-primary rounded px-2 py-1 text-[10px] text-text-primary"
@@ -422,8 +429,9 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="text-[10px] text-text-secondary block mb-1">Max Tier</label>
+                                        <label htmlFor="max-tier" className="text-[10px] text-text-secondary block mb-1">Max Tier</label>
                                         <select
+                                            id="max-tier"
                                             value={config.cascade.max_tier}
                                             onChange={(e) => onChange({ cascade: { ...config.cascade, max_tier: e.target.value } })}
                                             className="w-full bg-surface-2 border border-border-primary rounded px-2 py-1 text-[10px] text-text-primary"
@@ -434,8 +442,9 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="text-[10px] text-text-secondary block mb-1">Quality Threshold (%)</label>
+                                        <label htmlFor="quality-threshold" className="text-[10px] text-text-secondary block mb-1">Quality Threshold (%)</label>
                                         <input
+                                            id="quality-threshold"
                                             type="number"
                                             value={config.cascade.quality_threshold}
                                             onChange={(e) => onChange({ cascade: { ...config.cascade, quality_threshold: Number(e.target.value) } })}
@@ -443,8 +452,9 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
                                         />
                                     </div>
                                     <div>
-                                        <label className="text-[10px] text-text-secondary block mb-1">Max Escalations</label>
+                                        <label htmlFor="max-escalations" className="text-[10px] text-text-secondary block mb-1">Max Escalations</label>
                                         <input
+                                            id="max-escalations"
                                             type="number"
                                             value={config.cascade.max_escalations}
                                             onChange={(e) => onChange({ cascade: { ...config.cascade, max_escalations: Number(e.target.value) } })}
@@ -471,8 +481,9 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
                             />
                             {config.cache_enabled && (
                                 <div className="p-3 bg-surface-3/30 border border-border-primary rounded-lg mt-2 animate-in fade-in zoom-in-95 duration-200">
-                                    <label className="text-[10px] text-text-secondary block mb-1">TTL (Hours)</label>
+                                    <label htmlFor="cache-ttl" className="text-[10px] text-text-secondary block mb-1">TTL (Hours)</label>
                                     <input
+                                        id="cache-ttl"
                                         type="number"
                                         value={config.cache_ttl_hours}
                                         onChange={(e) => onChange({ cache_ttl_hours: Number(e.target.value) })}
@@ -493,8 +504,9 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
                             <div className="grid grid-cols-2 gap-3 p-3 bg-accent-trust/10 border border-accent-trust/30 rounded-lg animate-in fade-in zoom-in-95 duration-200">
                                 <div className="col-span-2 text-[10px] font-semibold text-accent-trust uppercase tracking-wider">Smart Eco-Mode Thresholds</div>
                                 <div>
-                                    <label className="text-[10px] text-text-secondary block mb-1">Aggressive (0-1)</label>
+                                    <label htmlFor="aggressive-threshold" className="text-[10px] text-text-secondary block mb-1">Aggressive (0-1)</label>
                                     <input
+                                        id="aggressive-threshold"
                                         type="number"
                                         step="0.05"
                                         value={config.eco_mode.confidence_threshold_aggressive || 0.85}
@@ -503,11 +515,12 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-[10px] text-text-secondary block mb-1">Moderate (0-1)</label>
+                                    <label htmlFor="moderate-threshold" className="text-[10px] text-text-secondary block mb-1">Moderate (0-1)</label>
                                     <input
+                                        id="moderate-threshold"
                                         type="number"
                                         step="0.05"
-                                        value={config.eco_mode.confidence_threshold_moderate || 0.70}
+                                        value={config.eco_mode.confidence_threshold_moderate || 0.7}
                                         onChange={(e) => onChange({ eco_mode: { ...config.eco_mode, confidence_threshold_moderate: Number(e.target.value) } })}
                                         className="w-full bg-surface-2 border border-border-primary rounded px-2 py-1 text-[10px] text-text-primary"
                                     />
@@ -534,11 +547,12 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
                         </div>
 
                         <div>
-                            <label className="text-xs text-text-secondary block mb-2">Alert Thresholds (%)</label>
+                            <div className="text-xs text-text-secondary block mb-2">Alert Thresholds (%)</div>
                             <div className="flex gap-2">
                                 {config.alert_thresholds.map((t, i) => (
                                     <input
-                                        key={i}
+                                        // eslint-disable-next-line react/no-array-index-key
+                                        key={`threshold-${i}`}
                                         type="number"
                                         value={t}
                                         onChange={(e) => {
@@ -560,7 +574,7 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
 
                         <div className="pt-4 border-t border-border-primary">
                             <div className="flex justify-between items-center mb-3">
-                                <label className="text-xs text-text-secondary block">Provider Budgets</label>
+                                <div className="text-xs text-text-secondary block">Provider Budgets</div>
                                 <button
                                     onClick={() => {
                                         const newProviders = [...config.provider_budgets, { provider: 'openai', max_cost_usd: 10, period: 'monthly' }];
@@ -573,7 +587,7 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
                             </div>
                             <div className="space-y-3">
                                 {config.provider_budgets.map((pb, i) => (
-                                    <div key={i} className="flex gap-2 items-center p-2 bg-surface-3/50 border border-border-primary rounded-lg">
+                                    <div key={pb.provider || i} className="flex gap-2 items-center p-2 bg-surface-3/50 border border-border-primary rounded-lg">
                                         <select
                                             value={pb.provider}
                                             onChange={(e) => {
@@ -633,7 +647,14 @@ function EconomySettings({ config, onChange }: { config: UserEconomyConfig, onCh
     );
 }
 
-function Toggle({ label, desc, enabled, onToggle }: any) {
+interface ToggleProps {
+    readonly label: string;
+    readonly desc: string;
+    readonly enabled: boolean;
+    readonly onToggle: () => void;
+}
+
+function Toggle({ label, desc, enabled, onToggle }: ToggleProps) {
     return (
         <div className="flex items-center justify-between">
             <div>

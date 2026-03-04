@@ -1,22 +1,19 @@
-import { useEffect, useCallback, lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useState, useCallback } from 'react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { useAppStore } from './stores/appStore';
-import { checkSession, logout } from './lib/auth';
-import { getCommandHandlers } from './lib/commands';
-import { Sidebar } from './components/Sidebar';
-import { MenuBar } from './components/MenuBar';
-import { StatusBar } from './components/StatusBar';
-import { LoginModal } from './components/LoginModal';
-import { CommandPalette } from './components/Shell/CommandPalette';
-import { ProfilePanel } from './components/ProfilePanel';
-import { OverlayDrawer } from './components/OverlayDrawer';
 import { useToast } from './components/Toast';
 import { useProfile } from './hooks/useProfile';
 import { useProviderHealth } from './hooks/useProviderHealth';
-import { UiStatusResponse, API_BASE } from './types';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
-
-/* ── Lazy-loaded views ─────────────────────────────────── */
+import { checkSession, logout } from './lib/auth';
+import { API_BASE, UiStatusResponse } from './types';
+import { getCommandHandlers } from './lib/commands';
+import { LoginModal } from './components/LoginModal';
+import { MenuBar } from './components/MenuBar';
+import { Sidebar } from './components/Sidebar';
+import { StatusBar } from './components/StatusBar';
+import { OverlayDrawer } from './components/OverlayDrawer';
+import { CommandPalette } from './components/Shell/CommandPalette';
+import { ProfilePanel } from './components/ProfilePanel';/* ── Lazy-loaded views ─────────────────────────────────── */
 const GraphView = lazy(() => import('./views/GraphView'));
 const PlansView = lazy(() => import('./views/PlansView'));
 
@@ -68,7 +65,7 @@ export default function App() {
     const providerHealth = useProviderHealth(Boolean(store.authenticated));
 
     /* ── Boot ── */
-    useEffect(() => { void checkSession(); }, []);
+    useEffect(() => { checkSession(); }, []);
 
     /* ── Poll status ── */
     const authenticated = store.authenticated;
@@ -137,7 +134,7 @@ export default function App() {
     /* ── Commands ── */
     const commandHandlers = getCommandHandlers(addToast);
     const handleCommandAction = useCallback(
-        (actionId: string) => { void commandHandlers[actionId]?.(); },
+        (actionId: string) => { commandHandlers[actionId]?.(); },
         [commandHandlers],
     );
 
@@ -166,7 +163,7 @@ export default function App() {
     /* ── Boot states ── */
     if (store.bootState === 'checking' || store.authenticated === null) {
         return (
-            <div className="min-h-screen bg-surface-0 flex items-center justify-center" role="status" aria-label="Iniciando GIMO">
+            <output className="min-h-screen bg-surface-0 flex items-center justify-center block" aria-label="Iniciando GIMO">
                 <div className="flex flex-col items-center gap-5">
                     {/* Animated logo */}
                     <div className="relative">
@@ -180,7 +177,7 @@ export default function App() {
                         <span className="text-[10px] text-text-tertiary tracking-widest uppercase">Iniciando sistema</span>
                     </div>
                 </div>
-            </div>
+            </output>
         );
     }
 
@@ -281,7 +278,7 @@ export default function App() {
                 onSelectSettingsView={(tab) => store.navigate(tab)}
                 onRefreshSession={() => void checkSession()}
                 onOpenCommandPalette={() => store.toggleCommandPalette(true)}
-                onMcpSync={() => void commandHandlers.mcp_sync?.()}
+                onMcpSync={() => { commandHandlers.mcp_sync?.(); }}
                 userDisplayName={displayName}
                 userEmail={email}
                 userPhotoUrl={profile?.user?.photoURL}

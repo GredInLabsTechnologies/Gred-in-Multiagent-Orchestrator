@@ -17,6 +17,12 @@ export const CircuitBreakerPanel: React.FC<CircuitBreakerPanelProps> = ({ record
         return 'text-accent-trust';
     };
 
+    const getStatusIcon = (state: string) => {
+        if (state === 'open') return <XCircle size={12} />;
+        if (state === 'half_open' || state === 'half-open') return <AlertTriangle size={12} />;
+        return <Activity size={12} />;
+    };
+
     return (
         <div className="bg-surface-2 rounded-xl border border-border-subtle overflow-hidden">
             <div className="overflow-x-auto">
@@ -46,9 +52,7 @@ export const CircuitBreakerPanel: React.FC<CircuitBreakerPanelProps> = ({ record
                                     </td>
                                     <td className="px-4 py-3 text-xs">
                                         <div className={`flex items-center gap-1.5 font-medium ${getStatusColor(record.circuit_state, record.failures)}`}>
-                                            {record.circuit_state === 'open' ? <XCircle size={12} /> :
-                                                record.circuit_state === 'half_open' ? <AlertTriangle size={12} /> : // Note: original code used 'half_open', new code uses 'half-open'
-                                                    <Activity size={12} />}
+                                            {getStatusIcon(record.circuit_state)}
                                             <span className="capitalize">{record.circuit_state}</span>
                                         </div>
                                     </td>

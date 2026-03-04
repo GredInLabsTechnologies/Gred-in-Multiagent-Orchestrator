@@ -58,7 +58,7 @@ class TestUserEconomyConfig:
 
     def test_global_budget_validation(self):
         config = UserEconomyConfig(global_budget_usd=100.0)
-        assert config.global_budget_usd == 100.0
+        assert config.global_budget_usd == pytest.approx(100.0)
         with pytest.raises(ValidationError):
             UserEconomyConfig(global_budget_usd=-1.0)
 
@@ -78,6 +78,6 @@ class TestCascadeConfig:
 class TestEcoModeConfig:
     def test_confidence_threshold_validation(self):
         config = EcoModeConfig(confidence_threshold_aggressive=0.5)
-        assert config.confidence_threshold_aggressive == 0.5
+        assert config.confidence_threshold_aggressive == pytest.approx(0.5)
         with pytest.raises(ValidationError):
             EcoModeConfig(confidence_threshold_aggressive=1.1)

@@ -188,11 +188,10 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                         <button
                             key={tab.id}
                             onClick={() => setView(tab.id)}
-                            className={`relative px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider shrink-0 transition-all ${
-                                isActive
+                            className={`relative px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider shrink-0 transition-all ${isActive
                                     ? 'bg-accent-primary/15 text-accent-primary'
                                     : 'text-text-tertiary hover:text-text-secondary hover:bg-white/[0.04]'
-                            }`}
+                                }`}
                         >
                             <Icon size={12} />
                             {tab.label}
@@ -280,58 +279,59 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                                     </div>
 
                                     {/* Hardware & Routing Info */}
-                                    {hwInfo && (
-                                        <div className={`p-4 rounded-xl border space-y-3 ${
-                                            hwInfo.load_level === 'critical'
-                                                ? 'bg-red-500/10 border-red-500/20'
-                                                : hwInfo.load_level === 'caution'
-                                                    ? 'bg-amber-500/10 border-amber-500/20'
-                                                    : 'bg-surface-2/50 border-white/[0.04]'
-                                        }`}>
-                                            <div className="flex items-center gap-2 text-text-secondary">
-                                                <Cpu size={14} />
-                                                <span className="text-[10px] font-bold uppercase tracking-widest">
-                                                    Estado del Sistema
-                                                </span>
-                                            </div>
-                                            <div className="flex gap-4 text-xs">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="text-text-secondary">CPU</span>
-                                                    <span className={`font-mono ${hwInfo.cpu_percent > 80 ? 'text-amber-400' : 'text-text-primary'}`}>
-                                                        {hwInfo.cpu_percent.toFixed(0)}%
+                                    {hwInfo && (() => {
+                                        const bgClass = hwInfo.load_level === 'critical'
+                                            ? 'bg-red-500/10 border-red-500/20'
+                                            : hwInfo.load_level === 'caution'
+                                                ? 'bg-amber-500/10 border-amber-500/20'
+                                                : 'bg-surface-2/50 border-white/[0.04]';
+                                        return (
+                                            <div className={`p-4 rounded-xl border space-y-3 ${bgClass}`}>
+                                                <div className="flex items-center gap-2 text-text-secondary">
+                                                    <Cpu size={14} />
+                                                    <span className="text-[10px] font-bold uppercase tracking-widest">
+                                                        Estado del Sistema
                                                     </span>
                                                 </div>
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="text-text-secondary">RAM</span>
-                                                    <span className={`font-mono ${hwInfo.ram_percent > 85 ? 'text-amber-400' : 'text-text-primary'}`}>
-                                                        {hwInfo.ram_percent.toFixed(0)}%
-                                                    </span>
+                                                <div className="flex gap-4 text-xs">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-text-secondary">CPU</span>
+                                                        <span className={`font-mono ${hwInfo.cpu_percent > 80 ? 'text-amber-400' : 'text-text-primary'}`}>
+                                                            {hwInfo.cpu_percent.toFixed(0)}%
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-text-secondary">RAM</span>
+                                                        <span className={`font-mono ${hwInfo.ram_percent > 85 ? 'text-amber-400' : 'text-text-primary'}`}>
+                                                            {hwInfo.ram_percent.toFixed(0)}%
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-text-secondary">Modelos</span>
+                                                        <span className="font-mono text-text-primary">{hwInfo.available_models}</span>
+                                                    </div>
                                                 </div>
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="text-text-secondary">Modelos</span>
-                                                    <span className="font-mono text-text-primary">{hwInfo.available_models}</span>
-                                                </div>
+                                                {hwInfo.load_level === 'critical' && (
+                                                    <div className="flex items-center gap-2 text-[10px] text-red-400">
+                                                        <AlertTriangle size={12} />
+                                                        <span>Carga critica — solo modelos remotos disponibles</span>
+                                                    </div>
+                                                )}
+                                                {hwInfo.load_level === 'caution' && (
+                                                    <div className="flex items-center gap-2 text-[10px] text-amber-400">
+                                                        <AlertTriangle size={12} />
+                                                        <span>Carga elevada — modelos locales grandes limitados</span>
+                                                    </div>
+                                                )}
+                                                {hwInfo.load_level === 'safe' && !hwInfo.local_safe && (
+                                                    <div className="flex items-center gap-2 text-[10px] text-amber-400">
+                                                        <AlertTriangle size={12} />
+                                                        <span>RAM insuficiente para modelos locales grandes</span>
+                                                    </div>
+                                                )}
                                             </div>
-                                            {hwInfo.load_level === 'critical' && (
-                                                <div className="flex items-center gap-2 text-[10px] text-red-400">
-                                                    <AlertTriangle size={12} />
-                                                    <span>Carga critica — solo modelos remotos disponibles</span>
-                                                </div>
-                                            )}
-                                            {hwInfo.load_level === 'caution' && (
-                                                <div className="flex items-center gap-2 text-[10px] text-amber-400">
-                                                    <AlertTriangle size={12} />
-                                                    <span>Carga elevada — modelos locales grandes limitados</span>
-                                                </div>
-                                            )}
-                                            {hwInfo.load_level === 'safe' && !hwInfo.local_safe && (
-                                                <div className="flex items-center gap-2 text-[10px] text-amber-400">
-                                                    <AlertTriangle size={12} />
-                                                    <span>RAM insuficiente para modelos locales grandes</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
+                                        );
+                                    })()}
 
                                     {/* Last Routing Decision */}
                                     {routingInfo && (
@@ -354,11 +354,12 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                                                 </div>
                                                 <div className="flex justify-between">
                                                     <span className="text-text-secondary">Hardware</span>
-                                                    <span className={`font-mono ${
-                                                        routingInfo.hardware_state === 'critical' ? 'text-red-400'
-                                                        : routingInfo.hardware_state === 'caution' ? 'text-amber-400'
-                                                        : 'text-emerald-400'
-                                                    }`}>{routingInfo.hardware_state}</span>
+                                                    <span className={`font-mono ${(() => {
+                                                            if (routingInfo.hardware_state === 'critical') return 'text-red-400';
+                                                            if (routingInfo.hardware_state === 'caution') return 'text-amber-400';
+                                                            return 'text-emerald-400';
+                                                        })()
+                                                        }`}>{routingInfo.hardware_state}</span>
                                                 </div>
                                             </div>
                                             <div className="mt-2">

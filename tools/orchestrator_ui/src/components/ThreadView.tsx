@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, Plus, ChevronLeft, GitFork, Archive, MoreVertical, Send } from 'lucide-react';
-import { TurnItem } from './TurnItem';
+import { TurnItem, GimoTurn, GimoItem } from './TurnItem';
 import { API_BASE } from '../types';
 import { useToast } from './Toast';
 
 interface GimoThread {
     id: string;
     title: string;
-    turns: any[];
+    turns: GimoTurn[];
     status: string;
     updated_at: string;
 }
@@ -23,8 +23,8 @@ interface OpsDraft {
 }
 
 interface OpsApproveResponse {
-    approved: any;
-    run?: any;
+    approved: Record<string, unknown>;
+    run?: Record<string, unknown>;
 }
 
 export const ThreadView: React.FC = () => {
@@ -63,6 +63,7 @@ export const ThreadView: React.FC = () => {
                 fetchThreadDetail(data[0].id);
             }
         } catch (err) {
+            console.error(err);
             addToast('No se pudieron cargar las conversaciones.', 'error');
         } finally {
             setLoading(false);
@@ -75,6 +76,7 @@ export const ThreadView: React.FC = () => {
             const data = await resp.json();
             setSelectedThread(data);
         } catch (err) {
+            console.error(err);
             addToast('No se pudo cargar el detalle de la conversación.', 'error');
         }
     };
@@ -86,6 +88,7 @@ export const ThreadView: React.FC = () => {
             setThreads([data, ...threads]);
             setSelectedThread(data);
         } catch (err) {
+            console.error(err);
             addToast('No se pudo crear una conversación nueva.', 'error');
         }
     };
@@ -99,7 +102,7 @@ export const ThreadView: React.FC = () => {
 
         try {
             // Optimistic User Turn
-            const userTurn: any = {
+            const userTurn: GimoTurn = {
                 id: `temp-${Date.now()}`,
                 agent_id: 'User',
                 created_at: new Date().toISOString(),
@@ -117,7 +120,7 @@ export const ThreadView: React.FC = () => {
             const draft: OpsDraft = await generateResponse.json();
 
             // Agent Turn with Draft
-            const agentTurn: any = {
+            const agentTurn: GimoTurn = {
                 id: `agent-${Date.now()}`,
                 agent_id: 'Orchestrator',
                 created_at: new Date().toISOString(),
@@ -138,6 +141,7 @@ export const ThreadView: React.FC = () => {
             }
 
         } catch (err) {
+            console.error(err);
             addToast('No se pudo generar el draft desde el chat.', 'error');
         } finally {
             setSending(false);
@@ -164,7 +168,10 @@ export const ThreadView: React.FC = () => {
                     body: JSON.stringify({ approved_id: approvalData.approved.id }),
                 });
             }
-        } catch (err) { addToast('No se pudo aprobar/ejecutar el draft.', 'error'); }
+        } catch (err) {
+            console.error(err);
+            addToast('No se pudo aprobar/ejecutar el draft.', 'error');
+        }
     };
 
     const handleRejectDraft = async (draftId: string, turnId: string) => {
@@ -177,6 +184,7 @@ export const ThreadView: React.FC = () => {
                 return { ...prev, turns: prev.turns.map(t => t.id === turnId ? { ...t, items: [...t.items, { id: `reject-${Date.now()}`, type: 'text', content: 'Draft rejected.', status: 'completed' }] } : t) };
             });
         } catch (err) {
+            console.error(err);
             addToast('No se pudo rechazar el draft.', 'error');
         }
     };
@@ -259,18 +267,19 @@ export const ThreadView: React.FC = () => {
                             {selectedThread.turns.map((turn) => (
                                 <div key={turn.id} className="relative group animate-in slide-in-from-bottom-2 fade-in duration-300">
                                     <TurnItem turn={turn} />
-                                    {turn.items.map((item: any) => {
-                                        if (item.metadata?.draftId && pendingDrafts[item.metadata.draftId]) {
+                                    {turn.items.map((item: GimoItem) => {
+                                        const draftId = item.metadata?.draftId as string | undefined;
+                                        if (draftId && pendingDrafts[draftId]) {
                                             return (
                                                 <div key={`actions-${item.id}`} className="absolute -bottom-2 left-12 flex items-center gap-2 bg-surface-2/90 backdrop-blur-md p-1.5 rounded-lg border border-border-primary shadow-2xl z-10 opacity-0 group-hover:opacity-100 transition-all duration-200 transform translate-y-2 group-hover:translate-y-0">
                                                     <button
-                                                        onClick={() => handleApproveDraft(item.metadata.draftId, turn.id)}
+                                                        onClick={() => handleApproveDraft(draftId, turn.id)}
                                                         className="px-3 py-1 bg-accent-approval/15 text-accent-approval hover:bg-accent-approval/30 border border-accent-approval/30 hover:border-accent-approval/50 rounded-md text-[11px] font-medium transition-all duration-200 active:scale-95"
                                                     >
                                                         Aprobar & Ejecutar
                                                     </button>
                                                     <button
-                                                        onClick={() => handleRejectDraft(item.metadata.draftId, turn.id)}
+                                                        onClick={() => handleRejectDraft(draftId, turn.id)}
                                                         className="px-3 py-1 bg-accent-alert/15 text-accent-alert hover:bg-accent-alert/30 border border-accent-alert/30 hover:border-accent-alert/50 rounded-md text-[11px] font-medium transition-all duration-200 active:scale-95"
                                                     >
                                                         Rechazar
