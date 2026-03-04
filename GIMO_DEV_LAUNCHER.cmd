@@ -43,13 +43,20 @@ echo [INFO] Iniciando GIMO Frontend (Vite Hot-Reload)...
 cd tools\orchestrator_ui
 start "GIMO_FRONTEND_WATCHDOG" cmd /k "title GIMO Frontend && npm run dev -- --host 127.0.0.1"
 
-:: 5. Loop de Control
+:: 5. Lanzar GIMO Web (Next.js)
+cd /d "%ROOT_DIR%"
+echo [INFO] Iniciando GIMO Web (Next.js Hot-Reload)...
+cd apps\web
+start "GIMO_WEB_WATCHDOG" cmd /k "title GIMO Web && npm run dev"
+
+:: 6. Loop de Control
 cd /d "%ROOT_DIR%"
 echo.
 echo [SUCCESS] GIMO esta en el aire!
 echo.
 echo  - Backend:  http://127.0.0.1:9325
 echo  - Frontend: http://127.0.0.1:5173
+echo  - Web:      http://localhost:3000
 echo.
 echo [INFO] Abriendo ventana dedicada de Chrome...
 start chrome --new-window --app=http://127.0.0.1:5173
@@ -76,6 +83,7 @@ echo [INFO] Cerrando todo y limpiando...
 :: Matamos los procesos por titulo de ventana (mas fiable para CMDs lanzados con START)
 taskkill /F /FI "WINDOWTITLE eq GIMO Backend*" /T >nul 2>&1
 taskkill /F /FI "WINDOWTITLE eq GIMO Frontend*" /T >nul 2>&1
+taskkill /F /FI "WINDOWTITLE eq GIMO Web*" /T >nul 2>&1
 :: Limpieza final de puertos por si acaso algo queda colgado
 %PYTHON_EXE% scripts\ops\kill_port.py --all-gimo
 echo.

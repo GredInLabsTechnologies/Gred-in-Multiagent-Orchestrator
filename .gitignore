@@ -105,3 +105,11 @@ private_key.pem
 # Root-level accidental files
 /package-lock.json
 gimo_debug.log
+
+# ── GIMO Web (apps/web) ──────────────────────────────────────
+.next/
+.firebase/
+.vercel
+.dataconnect
+*.pem
+*.tgz

@@ -20,6 +20,65 @@ from .observability_service import ObservabilityService
 
 logger = logging.getLogger("orchestrator.ops.provider")
 
+_OPENAI_COMPAT_ADAPTER_TYPES = {
+    "custom_openai_compatible",
+    "ollama_local",
+    "openai",
+    "codex",
+    "groq",
+    "openrouter",
+    "anthropic",
+    "claude",
+    "google",
+    "mistral",
+    "cohere",
+    "deepseek",
+    "qwen",
+    "moonshot",
+    "zai",
+    "minimax",
+    "baidu",
+    "tencent",
+    "bytedance",
+    "iflytek",
+    "01-ai",
+    "together",
+    "fireworks",
+    "replicate",
+    "huggingface",
+    "azure-openai",
+    "aws-bedrock",
+    "vertex-ai",
+    "vllm",
+    "llama-cpp",
+    "tgi",
+}
+
+_DEFAULT_BASE_URLS: Dict[str, str] = {
+    "openai": "https://api.openai.com/v1",
+    "codex": "https://api.openai.com/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "claude": "https://api.anthropic.com/v1",
+    "google": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "mistral": "https://api.mistral.ai/v1",
+    "cohere": "https://api.cohere.ai/compatibility/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "moonshot": "https://api.moonshot.cn/v1",
+    "zai": "https://api.z.ai/api/paas/v4",
+    "minimax": "https://api.minimax.chat/v1",
+    "baidu": "https://qianfan.baidubce.com/v2",
+    "tencent": "https://api.lkeap.cloud.tencent.com/v1",
+    "bytedance": "https://ark.cn-beijing.volces.com/api/v3",
+    "iflytek": "https://spark-api-open.xf-yun.com/v1",
+    "01-ai": "https://api.lingyiwanwu.com/v1",
+    "together": "https://api.together.xyz/v1",
+    "fireworks": "https://api.fireworks.ai/inference/v1",
+    "huggingface": "https://router.huggingface.co/v1",
+}
+
 class ProviderService:
     """Punto de entrada unificado para interactuar y enviar prompts a LLMs."""
     CONFIG_FILE = OPS_DATA_DIR / "provider.json"
@@ -296,12 +355,10 @@ class ProviderService:
             raise ValueError(f"Active provider not found in config: {active}")
         entry = cfg.providers[active]
         canonical_type = cls.normalize_provider_type(entry.provider_type or entry.type)
-        if canonical_type in {"custom_openai_compatible", "ollama_local", "openai", "groq", "openrouter", "codex"}:
+        if canonical_type in _OPENAI_COMPAT_ADAPTER_TYPES:
             if not entry.base_url:
-                # For API providers without explicit base_url, keep backwards-safe default.
-                if canonical_type == "openai":
-                    base_url = "https://api.openai.com/v1"
-                else:
+                base_url = _DEFAULT_BASE_URLS.get(canonical_type)
+                if not base_url:
                     raise ValueError(f"{canonical_type} provider missing base_url")
             else:
                 base_url = entry.base_url

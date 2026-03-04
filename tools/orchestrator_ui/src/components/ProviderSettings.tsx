@@ -9,13 +9,73 @@ import { Server, Cloud, Cpu, Trash2, Activity, Download, CheckCircle2, AlertTria
 /* ── Friendly provider type labels ── */
 const PROVIDER_LABELS: Record<string, string> = {
     openai: 'OpenAI',
+    anthropic: 'Anthropic',
+    google: 'Google',
+    mistral: 'Mistral',
+    cohere: 'Cohere',
+    deepseek: 'DeepSeek',
+    qwen: 'Qwen',
+    moonshot: 'Moonshot',
+    zai: 'Z.ai',
+    minimax: 'MiniMax',
+    baidu: 'Baidu',
+    tencent: 'Tencent',
+    bytedance: 'ByteDance',
+    iflytek: 'iFlyTek',
+    '01-ai': '01.AI',
     codex: 'Codex CLI',
     claude: 'Anthropic (Claude CLI)',
+    together: 'Together',
+    fireworks: 'Fireworks',
+    replicate: 'Replicate',
+    huggingface: 'HuggingFace',
+    'azure-openai': 'Azure OpenAI',
+    'aws-bedrock': 'AWS Bedrock',
+    'vertex-ai': 'Vertex AI',
+    ollama: 'Ollama',
+    vllm: 'vLLM',
+    'llama-cpp': 'llama.cpp',
+    tgi: 'Text Generation Inference (TGI)',
     ollama_local: 'Ollama (Local)',
     groq: 'Groq',
     openrouter: 'OpenRouter',
     custom_openai_compatible: 'OpenAI Compatible',
 };
+
+const KNOWN_PROVIDER_TYPES = [
+    'openai',
+    'anthropic',
+    'google',
+    'mistral',
+    'cohere',
+    'deepseek',
+    'qwen',
+    'moonshot',
+    'zai',
+    'minimax',
+    'baidu',
+    'tencent',
+    'bytedance',
+    'iflytek',
+    '01-ai',
+    'codex',
+    'claude',
+    'together',
+    'fireworks',
+    'replicate',
+    'huggingface',
+    'azure-openai',
+    'aws-bedrock',
+    'vertex-ai',
+    'ollama',
+    'vllm',
+    'llama-cpp',
+    'tgi',
+    'ollama_local',
+    'groq',
+    'openrouter',
+    'custom_openai_compatible',
+];
 
 export const ProviderSettings: React.FC = () => {
     const {
@@ -41,6 +101,10 @@ export const ProviderSettings: React.FC = () => {
     const [providerType, setProviderType] = useState('openai');
     const [providerId, setProviderId] = useState('openai-main');
     const [modelId, setModelId] = useState('');
+    const [providerSearch, setProviderSearch] = useState('');
+    const [modelSearch, setModelSearch] = useState('');
+    const [providerDropdownOpen, setProviderDropdownOpen] = useState(false);
+    const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
     const [authMode, setAuthMode] = useState('api_key');
     const [apiKey, setApiKey] = useState('');
     const [account, setAccount] = useState('');
@@ -53,11 +117,13 @@ export const ProviderSettings: React.FC = () => {
     // Codex device flow state
     const [deviceLoginState, setDeviceLoginState] = useState<{ status: string; verification_url?: string; user_code?: string; message?: string } | null>(null);
 
-    // Merge dynamic types from backend with standard hardcoded types to ensure they always show up
-    const backendTypes = Object.keys(providerCapabilities);
-    const standardTypes = ['openai', 'codex', 'claude', 'ollama_local', 'groq', 'openrouter', 'custom_openai_compatible'];
-    const providerTypes = Array.from(new Set([...backendTypes, ...standardTypes]));
-
+    const providerTypes = Object.keys(providerCapabilities);
+    const providerTypeOptions = useMemo(() => {
+        const known = KNOWN_PROVIDER_TYPES.filter((ptype) => providerTypes.includes(ptype));
+        const missingKnown = KNOWN_PROVIDER_TYPES.filter((ptype) => !known.includes(ptype));
+        const extra = providerTypes.filter((ptype) => !KNOWN_PROVIDER_TYPES.includes(ptype));
+        return [...known, ...missingKnown, ...extra];
+    }, [providerTypes]);
     const catalog = catalogs[providerType];
     const isLoadingCatalog = Boolean(catalogLoading[providerType]);
     const authModes = catalog?.auth_modes_supported || providerCapabilities[providerType]?.auth_modes_supported || [];
@@ -79,15 +145,39 @@ export const ProviderSettings: React.FC = () => {
         return { installed, available, recommended };
     }, [catalog]);
 
+    const filteredProviderTypeOptions = useMemo(() => {
+        const q = providerSearch.trim().toLowerCase();
+        if (!q) return providerTypeOptions;
+        return providerTypeOptions.filter((ptype) => {
+            const label = (PROVIDER_LABELS[ptype] || ptype).toLowerCase();
+            return ptype.toLowerCase().includes(q) || label.includes(q);
+        });
+    }, [providerTypeOptions, providerSearch]);
+
+    const filteredModelGroups = useMemo(() => {
+        const q = modelSearch.trim().toLowerCase();
+        if (!q) return modelGroups;
+        const filterModels = (items: any[]) => items.filter((m) => {
+            const id = String(m?.id || '').toLowerCase();
+            const label = String(m?.label || '').toLowerCase();
+            return id.includes(q) || label.includes(q);
+        });
+        return {
+            installed: filterModels(modelGroups.installed),
+            available: filterModels(modelGroups.available),
+            recommended: filterModels(modelGroups.recommended),
+        };
+    }, [modelGroups, modelSearch]);
+
     useEffect(() => {
         loadProviders();
     }, []);
 
     useEffect(() => {
-        if (providerTypes.length > 0 && !providerTypes.includes(providerType)) {
-            setProviderType(providerTypes[0]);
+        if (providerTypeOptions.length > 0 && !providerTypeOptions.includes(providerType)) {
+            setProviderType(providerTypeOptions[0]);
         }
-    }, [providerTypes, providerType]);
+    }, [providerTypeOptions, providerType]);
 
     useEffect(() => {
         if (!providerType) return;
@@ -105,6 +195,10 @@ export const ProviderSettings: React.FC = () => {
         if (!modelId) {
             const first = catalog.installed_models[0]?.id || catalog.recommended_models[0]?.id || catalog.available_models[0]?.id || '';
             setModelId(first);
+        }
+        if ((providerType === 'codex' || providerType === 'claude') && authModes.includes('account') && authMode !== 'account') {
+            setAuthMode('account');
+            return;
         }
         if (!authModes.includes(authMode)) {
             setAuthMode(authModes[0] || 'none');
@@ -286,20 +380,50 @@ export const ProviderSettings: React.FC = () => {
                 <div className="grid grid-cols-1 gap-6 items-start">
                     <div className="col-span-full max-w-xl">
                         <label className="block text-sm font-medium text-text-primary mb-2">Proveedor API</label>
-                        <select
-                            value={providerType}
-                            onChange={(e) => {
-                                setProviderType(e.target.value);
-                                setProviderId(`${e.target.value}-main`);
-                                setModelId('');
-                                setValidateResult(null);
-                            }}
-                            className="w-full bg-surface-0 border border-border-primary rounded-lg p-2.5 text-sm text-text-primary focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-sm"
-                        >
-                            {(providerTypes.length > 0 ? providerTypes : ['openai', 'codex', 'claude', 'ollama_local', 'groq', 'openrouter', 'custom_openai_compatible']).map((canonical) => (
-                                <option key={canonical} value={canonical}>{PROVIDER_LABELS[canonical] || canonical}</option>
-                            ))}
-                        </select>
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setProviderDropdownOpen((v) => !v)}
+                                className="w-full bg-surface-0 border border-border-primary rounded-lg p-2.5 text-sm text-text-primary text-left focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-sm"
+                            >
+                                {PROVIDER_LABELS[providerType] || providerType}
+                            </button>
+                            {providerDropdownOpen && (
+                                <div className="absolute z-30 mt-2 w-full bg-surface-1 border border-border-primary rounded-lg shadow-xl p-2">
+                                    <Input
+                                        autoFocus
+                                        value={providerSearch}
+                                        onChange={(e) => setProviderSearch(e.target.value)}
+                                        placeholder="Buscar provider dentro del dropdown..."
+                                        className="mb-2 bg-surface-0 border-border-primary text-text-primary"
+                                    />
+                                    <div className="max-h-64 overflow-auto">
+                                        {filteredProviderTypeOptions.map((canonical) => (
+                                            <button
+                                                key={canonical}
+                                                type="button"
+                                                onClick={() => {
+                                                    setProviderType(canonical);
+                                                    setProviderId(`${canonical}-main`);
+                                                    setModelId('');
+                                                    setValidateResult(null);
+                                                    if (canonical === 'codex' || canonical === 'claude') {
+                                                        setAuthMode('account');
+                                                    }
+                                                    setProviderDropdownOpen(false);
+                                                }}
+                                                className={`w-full text-left px-2 py-1.5 text-sm rounded ${providerType === canonical ? 'bg-indigo-500/20 text-indigo-200' : 'hover:bg-surface-2 text-text-primary'}`}
+                                            >
+                                                {PROVIDER_LABELS[canonical] || canonical}
+                                            </button>
+                                        ))}
+                                        {filteredProviderTypeOptions.length === 0 && (
+                                            <div className="px-2 py-2 text-xs text-text-secondary">Sin resultados</div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                     {providerType === 'ollama_local' ? (
                         <div className="col-span-full mt-4 space-y-4">
@@ -546,29 +670,85 @@ export const ProviderSettings: React.FC = () => {
                             {/* Model Selection */}
                             <div className="space-y-2">
                                 <label htmlFor="modelIdSelect" className="block text-sm font-medium text-text-primary">Modelo</label>
-                                <select
-                                    id="modelIdSelect"
-                                    value={modelId}
-                                    onChange={(e) => setModelId(e.target.value)}
-                                    className="w-full bg-surface-0 border border-border-primary rounded-lg p-2.5 text-sm text-text-primary focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-sm"
-                                >
-                                    <option value="">{isLoadingCatalog ? 'Cargando catálogo...' : 'Selecciona modelo'}</option>
-                                    {modelGroups.installed.length > 0 && (
-                                        <optgroup label="Instalados">
-                                            {modelGroups.installed.map((m) => <option key={`i-${m.id}`} value={m.id}>{m.label}</option>)}
-                                        </optgroup>
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        onClick={() => setModelDropdownOpen((v) => !v)}
+                                        className="w-full bg-surface-0 border border-border-primary rounded-lg p-2.5 text-sm text-text-primary text-left focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-sm"
+                                    >
+                                        {modelId || (isLoadingCatalog ? 'Cargando catálogo...' : 'Selecciona modelo')}
+                                    </button>
+                                    {modelDropdownOpen && (
+                                        <div className="absolute z-30 mt-2 w-full bg-surface-1 border border-border-primary rounded-lg shadow-xl p-2">
+                                            <Input
+                                                autoFocus
+                                                value={modelSearch}
+                                                onChange={(e) => setModelSearch(e.target.value)}
+                                                placeholder="Buscar modelo dentro del dropdown..."
+                                                className="mb-2 bg-surface-0 border-border-primary text-text-primary"
+                                            />
+                                            <div className="max-h-72 overflow-auto space-y-2">
+                                                {filteredModelGroups.installed.length > 0 && (
+                                                    <div>
+                                                        <div className="px-2 py-1 text-[11px] uppercase text-text-secondary">Instalados</div>
+                                                        {filteredModelGroups.installed.map((m) => (
+                                                            <button
+                                                                key={`i-${m.id}`}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setModelId(m.id);
+                                                                    setModelDropdownOpen(false);
+                                                                }}
+                                                                className={`w-full text-left px-2 py-1.5 text-sm rounded ${modelId === m.id ? 'bg-indigo-500/20 text-indigo-200' : 'hover:bg-surface-2 text-text-primary'}`}
+                                                            >
+                                                                {m.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {filteredModelGroups.available.length > 0 && (
+                                                    <div>
+                                                        <div className="px-2 py-1 text-[11px] uppercase text-text-secondary">Disponibles para descargar</div>
+                                                        {filteredModelGroups.available.map((m) => (
+                                                            <button
+                                                                key={`a-${m.id}`}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setModelId(m.id);
+                                                                    setModelDropdownOpen(false);
+                                                                }}
+                                                                className={`w-full text-left px-2 py-1.5 text-sm rounded ${modelId === m.id ? 'bg-indigo-500/20 text-indigo-200' : 'hover:bg-surface-2 text-text-primary'}`}
+                                                            >
+                                                                {m.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {filteredModelGroups.recommended.length > 0 && (
+                                                    <div>
+                                                        <div className="px-2 py-1 text-[11px] uppercase text-text-secondary">Recomendados</div>
+                                                        {filteredModelGroups.recommended.map((m) => (
+                                                            <button
+                                                                key={`r-${m.id}`}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setModelId(m.id);
+                                                                    setModelDropdownOpen(false);
+                                                                }}
+                                                                className={`w-full text-left px-2 py-1.5 text-sm rounded ${modelId === m.id ? 'bg-indigo-500/20 text-indigo-200' : 'hover:bg-surface-2 text-text-primary'}`}
+                                                            >
+                                                                {m.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {filteredModelGroups.installed.length === 0 && filteredModelGroups.available.length === 0 && filteredModelGroups.recommended.length === 0 && (
+                                                    <div className="px-2 py-2 text-xs text-text-secondary">Sin resultados</div>
+                                                )}
+                                            </div>
+                                        </div>
                                     )}
-                                    {modelGroups.available.length > 0 && (
-                                        <optgroup label="Disponibles para descargar">
-                                            {modelGroups.available.map((m) => <option key={`a-${m.id}`} value={m.id}>{m.label}</option>)}
-                                        </optgroup>
-                                    )}
-                                    {modelGroups.recommended.length > 0 && (
-                                        <optgroup label="Recomendados">
-                                            {modelGroups.recommended.map((m) => <option key={`r-${m.id}`} value={m.id}>{m.label}</option>)}
-                                        </optgroup>
-                                    )}
-                                </select>
+                                </div>
                             </div>
 
                             {/* Advanced Options Accordion */}

@@ -35,7 +35,42 @@ class OpenAICompatAdapter(ProviderAdapter):
             headers["Authorization"] = f"Bearer {key}"
         return headers
 
+    @staticmethod
+    def _truthy_env(value: Optional[str]) -> bool:
+        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _is_mock_token(value: Optional[str]) -> bool:
+        token = str(value or "").strip().lower()
+        return token.startswith("mock:") or token.startswith("mock_") or token == "mock"
+
+    def _mock_mode_enabled(self, context: Optional[Dict[str, Any]] = None) -> bool:
+        if self._truthy_env(os.environ.get("ORCH_PROVIDER_MOCK_MODE")):
+            return True
+        if self._is_mock_token(self.api_key):
+            return True
+        if isinstance(context, dict):
+            if self._is_mock_token(context.get("api_key")):
+                return True
+            if self._is_mock_token(context.get("account")):
+                return True
+        return False
+
     async def generate(self, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        if self._mock_mode_enabled(context):
+            model = str((context or {}).get("model") or self.model)
+            content = f"[MOCK:{model}] {prompt[:200]}"
+            prompt_tokens = max(1, len(prompt.split()))
+            completion_tokens = max(4, min(64, prompt_tokens // 2 + 4))
+            return {
+                "content": content,
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                },
+            }
+
         # Keep context simple and safe.
         sys_hint = context.get("system") if isinstance(context, dict) else None
         messages = []
@@ -70,6 +105,8 @@ class OpenAICompatAdapter(ProviderAdapter):
             }
 
     async def health_check(self) -> bool:
+        if self._mock_mode_enabled({}):
+            return True
         # Best effort: try GET /models (OpenAI style). If fails, return False.
         async with httpx.AsyncClient(timeout=5) as client:
             try:

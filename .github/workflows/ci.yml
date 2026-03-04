@@ -108,6 +108,34 @@ jobs:
         working-directory: tools/orchestrator_ui
         run: npm run build
 
+  web:
+    name: web / lint-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Lint
+        working-directory: apps/web
+        run: npm run lint
+
+      - name: Build
+        working-directory: apps/web
+        run: npm run build
+
   llm-adversarial:
     name: llm / adversarial (required)
     runs-on: ubuntu-latest

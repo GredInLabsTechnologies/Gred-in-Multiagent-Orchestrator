@@ -28,6 +28,123 @@ _OLLAMA_RECOMMENDED = [
     {"id": "llama3.1:8b", "label": "Llama 3.1 8B", "quality_tier": "balanced"},
 ]
 
+_DEFAULT_PROVIDER_MODELS: Dict[str, List[Dict[str, str]]] = {
+    "openai": [{"id": "gpt-4o", "label": "GPT-4o"}, {"id": "gpt-4.1", "label": "GPT-4.1"}, {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"}],
+    "codex": [{"id": "gpt-5-codex", "label": "GPT-5 Codex"}, {"id": "gpt-4.1", "label": "GPT-4.1"}],
+    "anthropic": [{"id": "claude-3-7-sonnet-latest", "label": "Claude 3.7 Sonnet"}, {"id": "claude-3-5-haiku-latest", "label": "Claude 3.5 Haiku"}],
+    "claude": [{"id": "claude-3-7-sonnet-latest", "label": "Claude 3.7 Sonnet"}, {"id": "claude-3-5-haiku-latest", "label": "Claude 3.5 Haiku"}],
+    "google": [{"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash"}, {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"}],
+    "mistral": [{"id": "mistral-large-latest", "label": "Mistral Large"}, {"id": "mistral-small-latest", "label": "Mistral Small"}],
+    "cohere": [{"id": "command-r-plus", "label": "Command R+"}, {"id": "command-r", "label": "Command R"}],
+    "deepseek": [{"id": "deepseek-chat", "label": "DeepSeek Chat"}, {"id": "deepseek-reasoner", "label": "DeepSeek Reasoner"}],
+    "qwen": [{"id": "qwen-plus", "label": "Qwen Plus"}, {"id": "qwen-max", "label": "Qwen Max"}],
+    "moonshot": [{"id": "moonshot-v1-8k", "label": "Moonshot v1 8k"}, {"id": "moonshot-v1-32k", "label": "Moonshot v1 32k"}],
+    "zai": [{"id": "glm-4.6", "label": "GLM-4.6"}],
+    "minimax": [{"id": "minimax-m1", "label": "MiniMax M1"}],
+    "baidu": [{"id": "ernie-4.0", "label": "ERNIE 4.0"}],
+    "tencent": [{"id": "hunyuan-turbo", "label": "Hunyuan Turbo"}],
+    "bytedance": [{"id": "doubao-1-5-pro", "label": "Doubao 1.5 Pro"}],
+    "iflytek": [{"id": "spark-max", "label": "Spark Max"}],
+    "01-ai": [{"id": "yi-large", "label": "Yi Large"}],
+    "openrouter": [{"id": "openrouter/auto", "label": "OpenRouter Auto"}],
+    "groq": [{"id": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B"}],
+    "together": [{"id": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", "label": "Llama 3.1 70B Turbo"}],
+    "fireworks": [{"id": "accounts/fireworks/models/llama-v3p1-70b-instruct", "label": "Llama 3.1 70B"}],
+    "replicate": [{"id": "meta/meta-llama-3-70b-instruct", "label": "Llama 3 70B (Replicate)"}],
+    "huggingface": [{"id": "meta-llama/Llama-3.1-70B-Instruct", "label": "Llama 3.1 70B"}],
+    "azure-openai": [{"id": "gpt-4o", "label": "GPT-4o (deployment)"}],
+    "aws-bedrock": [{"id": "anthropic.claude-3-7-sonnet", "label": "Claude 3.7 Sonnet (Bedrock)"}],
+    "vertex-ai": [{"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash (Vertex)"}],
+    "vllm": [{"id": "meta-llama/Llama-3.1-8B-Instruct", "label": "Llama 3.1 8B Instruct"}],
+    "llama-cpp": [{"id": "llama-3.1-8b-instruct-q4_k_m", "label": "Llama 3.1 8B Q4_K_M"}],
+    "tgi": [{"id": "meta-llama/Llama-3.1-8B-Instruct", "label": "Llama 3.1 8B Instruct"}],
+}
+
+_OPENAI_COMPATIBLE_PROVIDERS = {
+    "openai",
+    "codex",
+    "groq",
+    "openrouter",
+    "custom_openai_compatible",
+    "deepseek",
+    "qwen",
+    "moonshot",
+    "zai",
+    "minimax",
+    "baidu",
+    "tencent",
+    "bytedance",
+    "iflytek",
+    "01-ai",
+    "together",
+    "fireworks",
+    "huggingface",
+    "vllm",
+    "llama-cpp",
+    "tgi",
+}
+
+_REMOTE_MODELS_BASE_URLS: Dict[str, str] = {
+    "openai": "https://api.openai.com/v1",
+    "codex": "https://api.openai.com/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "claude": "https://api.anthropic.com/v1",
+    "google": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "mistral": "https://api.mistral.ai/v1",
+    "cohere": "https://api.cohere.ai/compatibility/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "moonshot": "https://api.moonshot.cn/v1",
+    "zai": "https://api.z.ai/api/paas/v4",
+    "minimax": "https://api.minimax.chat/v1",
+    "baidu": "https://qianfan.baidubce.com/v2",
+    "tencent": "https://api.lkeap.cloud.tencent.com/v1",
+    "bytedance": "https://ark.cn-beijing.volces.com/api/v3",
+    "iflytek": "https://spark-api-open.xf-yun.com/v1",
+    "01-ai": "https://api.lingyiwanwu.com/v1",
+    "together": "https://api.together.xyz/v1",
+    "fireworks": "https://api.fireworks.ai/inference/v1",
+    "huggingface": "https://router.huggingface.co/v1",
+    "azure-openai": "",
+    "aws-bedrock": "",
+    "vertex-ai": "",
+    "replicate": "",
+    "custom_openai_compatible": "",
+    "vllm": "",
+    "llama-cpp": "",
+    "tgi": "",
+}
+
+
+def _is_truthy_env(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_mock_token(value: str | None) -> bool:
+    raw = str(value or "").strip().lower()
+    return raw.startswith("mock:") or raw.startswith("mock_") or raw == "mock"
+
+
+def _mock_mode_enabled(payload: ProviderValidateRequest | None = None) -> bool:
+    if _is_truthy_env(os.environ.get("ORCH_PROVIDER_MOCK_MODE")):
+        return True
+    if payload and (_is_mock_token(payload.api_key) or _is_mock_token(payload.account)):
+        return True
+    return False
+
+
+def _fallback_models_for(provider_type: str) -> List[NormalizedModelInfo]:
+    return [
+        ProviderCatalogService._normalize_model(
+            model_id=m["id"],
+            label=m.get("label"),
+            downloadable=False,
+        )
+        for m in _DEFAULT_PROVIDER_MODELS.get(provider_type, [])
+    ]
+
 
 class ProviderCatalogService:
     """Lleva el registro de proveedores LLM, modelos e integracion."""
@@ -37,6 +154,8 @@ class ProviderCatalogService:
         "ollama_local": 30,
         "openai": 300,
         "codex": 300,
+        "claude": 300,
+        "anthropic": 300,
         "groq": 300,
         "openrouter": 300,
         "custom_openai_compatible": 120,
@@ -368,6 +487,25 @@ class ProviderCatalogService:
     ) -> Tuple[List[NormalizedModelInfo], List[str]]:
         canonical = cls._canonical(provider_type)
         warnings: List[str] = []
+
+        if _mock_mode_enabled(payload):
+            if canonical == "ollama_local":
+                return [
+                    cls._normalize_model(
+                        model_id=m["id"],
+                        label=m.get("label"),
+                        downloadable=True,
+                        quality_tier=m.get("quality_tier"),
+                    )
+                    for m in _OLLAMA_RECOMMENDED
+                ], ["Mock mode enabled: returning deterministic catalog without network."]
+            mock_models = _fallback_models_for(canonical)
+            if mock_models:
+                return mock_models, ["Mock mode enabled: returning deterministic catalog without network."]
+            return [cls._normalize_model(model_id=f"{canonical}-mock-model", label=f"{canonical} mock model")], [
+                "Mock mode enabled: using synthetic model catalog for provider."
+            ]
+
         if canonical == "ollama_local":
             return [
                 cls._normalize_model(
@@ -379,17 +517,42 @@ class ProviderCatalogService:
                 for m in _OLLAMA_RECOMMENDED
             ], warnings
 
-        if canonical in {"openai", "codex", "groq", "openrouter", "custom_openai_compatible"}:
+        if canonical in {"replicate", "anthropic", "claude", "google", "mistral", "cohere"}:
+            warnings.append("This provider may not expose a universal /models endpoint. Showing curated defaults.")
+            return _fallback_models_for(canonical), warnings
+
+        if canonical in {"vllm", "llama-cpp", "tgi"}:
+            auth = payload or ProviderValidateRequest()
+            if auth.base_url:
+                remote = await cls._fetch_remote_models(canonical, auth)
+                if remote:
+                    return remote, warnings
+            warnings.append("Configure base_url to discover runtime models dynamically. Showing curated defaults.")
+            return _fallback_models_for(canonical), warnings
+
+        if canonical in {"azure-openai", "aws-bedrock", "vertex-ai"}:
+            warnings.append(
+                "This provider usually requires cloud-specific endpoint/project configuration. Set base_url and credentials first."
+            )
+            auth = payload or ProviderValidateRequest()
+            if auth.base_url and (auth.api_key or auth.account):
+                remote = await cls._fetch_remote_models(canonical, auth)
+                if remote:
+                    return remote, warnings
+            return _fallback_models_for(canonical), warnings
+
+        if canonical in _OPENAI_COMPATIBLE_PROVIDERS:
             auth = payload or ProviderValidateRequest()
             if not (auth.api_key or auth.account):
                 warnings.append("Authentication is required to fetch remote model catalog.")
-                return [], warnings
+                defaults = _fallback_models_for(canonical)
+                return defaults, warnings
 
             remote = await cls._fetch_remote_models(canonical, auth)
             if remote:
                 return remote, warnings
             warnings.append("Could not fetch remote models from provider API.")
-            return [], warnings
+            return _fallback_models_for(canonical), warnings
         return [], warnings
 
     @classmethod
@@ -398,13 +561,7 @@ class ProviderCatalogService:
     ) -> List[NormalizedModelInfo]:
         base_url = (payload.base_url or "").strip()
         if not base_url:
-            base_url = {
-                "openai": "https://api.openai.com/v1",
-                "codex": "https://api.openai.com/v1",
-                "groq": "https://api.groq.com/openai/v1",
-                "openrouter": "https://openrouter.ai/api/v1",
-                "custom_openai_compatible": "",
-            }.get(provider_type, "")
+            base_url = _REMOTE_MODELS_BASE_URLS.get(provider_type, "")
         if not base_url:
             return []
 
@@ -602,6 +759,25 @@ class ProviderCatalogService:
         canonical = cls._canonical(provider_type)
         cls.invalidate_cache(provider_type=canonical, reason="manual_test_connection")
         warnings: List[str] = []
+
+        if _mock_mode_enabled(payload):
+            mock_models, mock_warnings = await cls.list_available_models(canonical, payload=payload)
+            response = ProviderValidateResponse(
+                valid=True,
+                health="ok",
+                effective_model=(mock_models[0].id if mock_models else None),
+                warnings=list(mock_warnings),
+                error_actionable=None,
+            )
+            ProviderService.record_validation_result(
+                provider_type=canonical,
+                valid=response.valid,
+                health=response.health,
+                effective_model=response.effective_model,
+                error_actionable=response.error_actionable,
+                warnings=response.warnings,
+            )
+            return response
 
         if payload.account and str(payload.account).strip().lower().startswith("env:"):
             env_name = ProviderAuthService.parse_env_ref(payload.account)

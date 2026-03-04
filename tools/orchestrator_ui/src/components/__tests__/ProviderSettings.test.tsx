@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => {
         .fn()
         .mockResolvedValue({ status: 'done', message: 'ok', progress: 1, job_id: 'job-1' });
     const addToastMock = vi.fn();
+    const startCodexDeviceLoginMock = vi.fn().mockResolvedValue({ status: 'pending', verification_url: 'https://example.com', user_code: 'ABCD-1234' });
+    const startClaudeLoginMock = vi.fn().mockResolvedValue({ status: 'pending', verification_url: 'https://example.com' });
     return {
         loadProvidersMock,
         loadCatalogMock,
@@ -22,6 +24,8 @@ const mocks = vi.hoisted(() => {
         installModelMock,
         getInstallJobMock,
         addToastMock,
+        startCodexDeviceLoginMock,
+        startClaudeLoginMock,
     };
 });
 
@@ -102,6 +106,8 @@ vi.mock('../../hooks/useProviders', () => ({
         saveActiveProvider: mocks.saveActiveProviderMock,
         removeProvider: vi.fn(),
         testProvider: vi.fn(),
+        startCodexDeviceLogin: mocks.startCodexDeviceLoginMock,
+        startClaudeLogin: mocks.startClaudeLoginMock,
     }),
 }));
 
@@ -116,14 +122,14 @@ describe('ProviderSettings', () => {
 
     it('renderiza y carga providers al montar', () => {
         render(<ProviderSettings />);
-        expect(screen.getByText('Provider Settings')).toBeTruthy();
+        expect(screen.getByText('Configuración de Providers')).toBeTruthy();
         expect(mocks.loadProvidersMock).toHaveBeenCalled();
     });
 
     it('ejecuta validación y guardar provider activo', async () => {
         render(<ProviderSettings />);
-        fireEvent.click(screen.getByText('Test connection'));
-        fireEvent.click(screen.getByText('Save as active provider'));
+        fireEvent.click(screen.getByText('Probar conexión'));
+        fireEvent.click(screen.getByText('Guardar Configuración'));
 
         await waitFor(() => {
             expect(mocks.validateProviderMock).toHaveBeenCalled();
@@ -131,13 +137,32 @@ describe('ProviderSettings', () => {
         });
     });
 
-    it('recarga catálogo al cambiar provider type', async () => {
+    it('muestra Claude en dropdown y buscador de providers/modelos', async () => {
         render(<ProviderSettings />);
-        const providerTypeSelect = screen.getByDisplayValue('openai');
-        fireEvent.change(providerTypeSelect, { target: { value: 'codex' } });
+
+        fireEvent.click(screen.getByRole('button', { name: 'OpenAI' }));
+        expect(screen.getByPlaceholderText('Buscar provider dentro del dropdown...')).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Anthropic (Claude CLI)' })).toBeTruthy();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Anthropic (Claude CLI)' }));
+        await waitFor(() => {
+            expect(mocks.loadCatalogMock).toHaveBeenCalledWith('claude');
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /Selecciona modelo|gpt-4o-mini/i }));
+        expect(screen.getByPlaceholderText('Buscar modelo dentro del dropdown...')).toBeTruthy();
+    });
+
+    it('muestra botón de login con Codex en modo account', async () => {
+        render(<ProviderSettings />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'OpenAI' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Codex CLI' }));
 
         await waitFor(() => {
             expect(mocks.loadCatalogMock).toHaveBeenCalledWith('codex');
         });
+
+        expect(screen.getByRole('button', { name: 'Autenticar en OpenAI' })).toBeTruthy();
     });
 });

@@ -1,6 +1,6 @@
 # GIMO — Gred In Multi-Agent Orchestrator
 
-Orquestador multiagente local que coordina LLMs (Ollama, OpenAI, Anthropic) para ejecutar flujos de trabajo complejos con planificaci&oacute;n, aprobaci&oacute;n humana y trazabilidad completa.
+Monorepo unificado de GIMO: orquestador multiagente + plataforma web de licencias y suscripciones.
 
 ## Features
 
@@ -11,6 +11,7 @@ Orquestador multiagente local que coordina LLMs (Ollama, OpenAI, Anthropic) para
 - **Cold Room Auth** — Licenciamiento local con nonce protection y sesi&oacute;n segura (HMAC cookies)
 - **UI profesional** — React + Vite con grafo interactivo (ReactFlow), chat colapsable y 8 paneles funcionales
 - **Trust & Policy Engine** — Circuit breakers, guardrails anti-inyecci&oacute;n y pol&iacute;ticas configurables
+- **GIMO Web** — Landing, autenticaci&oacute;n Firebase, licencias y suscripciones Stripe
 - **575+ tests** automatizados con pytest
 
 ## Quickstart
@@ -24,10 +25,10 @@ Orquestador multiagente local que coordina LLMs (Ollama, OpenAI, Anthropic) para
 ### Opci&oacute;n 1: Launcher autom&aacute;tico (Windows)
 
 ```bash
-GIMO_LAUNCHER.cmd
+GIMO_DEV_LAUNCHER.cmd
 ```
 
-Genera el token, inicia backend y frontend, y abre el navegador.
+Genera el token, inicia backend, frontend y web, y abre el navegador.
 
 ### Opci&oacute;n 2: Manual
 
@@ -35,16 +36,20 @@ Genera el token, inicia backend y frontend, y abre el navegador.
 # 1. Instalar dependencias backend
 pip install -r requirements.txt
 
-# 2. Instalar dependencias frontend
+# 2. Instalar dependencias frontend (Orchestrator UI)
 cd tools/orchestrator_ui && npm install && cd ../..
 
-# 3. Iniciar backend (puerto 9325)
+# 3. Instalar dependencias web (GIMO Web)
+cd apps/web && npm install && cd ../..
+
+# 4. Iniciar backend (puerto 9325)
 python -m uvicorn tools.gimo_server.main:app --port 9325
 
-# 4. Iniciar frontend (puerto 5173)
+# 5. Iniciar frontend (puerto 5173)
 cd tools/orchestrator_ui && npm run dev
 
-# 5. Abrir http://localhost:5173
+# 6. Iniciar web (puerto 3000)
+cd apps/web && npm run dev
 ```
 
 ### Variables de entorno
@@ -55,6 +60,8 @@ cd tools/orchestrator_ui && npm run dev
 | `ORCH_PROVIDER` | Proveedor LLM (`ollama`, `openai`, `anthropic`) | `ollama` |
 | `ORCH_MODEL` | Modelo por defecto | `qwen2.5-coder:7b` |
 | `DEBUG` | Modo debug con reload | `false` |
+
+Para variables de GIMO Web (Firebase, Stripe, licencias), ver `apps/web/.env.example`.
 
 ## Documentaci&oacute;n
 
@@ -80,17 +87,23 @@ python -m pytest --cov=tools/gimo_server -x -q
 ## Estructura del proyecto
 
 ```
+apps/
+  web/                    # GIMO Web — Next.js (landing, licencias, Stripe)
+    src/app/              #   App Router (pages + API routes)
+    src/lib/              #   Firebase, Stripe, auth, entitlement
+    src/components/       #   Componentes React
 tools/
-  gimo_server/          # Backend FastAPI
-    routers/            # Endpoints (ops, ui, auth)
-    services/           # L&oacute;gica de negocio
-    data/               # Pricing DB, schemas
-  orchestrator_ui/      # Frontend React + Vite
-    src/components/     # Componentes UI
-    src/hooks/          # Custom hooks
-docs/                   # Documentaci&oacute;n activa
-scripts/                # Scripts de utilidad
-tests/                  # Test suite
+  gimo_server/            # Backend FastAPI (orquestador)
+    routers/              #   Endpoints (ops, ui, auth)
+    services/             #   L&oacute;gica de negocio (52+ servicios)
+    security/             #   License guard, auth, trust engine
+    data/                 #   Pricing DB, schemas
+  orchestrator_ui/        # Frontend React + Vite (UI del orquestador)
+    src/components/       #   Componentes UI
+    src/hooks/            #   Custom hooks
+docs/                     # Documentaci&oacute;n activa
+scripts/                  # Scripts de utilidad
+tests/                    # Test suite (575+ tests)
 ```
 
 ## License

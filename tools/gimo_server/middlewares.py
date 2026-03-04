@@ -11,10 +11,22 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from tools.gimo_server.config import CORS_ORIGINS, TOKENS
+from tools.gimo_server.config import CORS_ORIGINS, DEBUG, TOKENS
 from tools.gimo_server.security.threat_level import ThreatLevel
 
 logger = logging.getLogger("orchestrator")
+
+
+def _resolve_allowed_origin(origin: str | None) -> str | None:
+    if not origin:
+        return None
+    if origin in CORS_ORIGINS:
+        return origin
+    # DX fallback: allow localhost loopback origins in debug mode
+    # to avoid opaque browser "Failed to fetch" when Vite changes port.
+    if DEBUG and (origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:")):
+        return origin
+    return None
 
 
 async def threat_level_middleware(
@@ -77,7 +89,7 @@ async def allow_options_preflight_middleware(
 ) -> Response:
     """Handle CORS preflight requests."""
     origin = request.headers.get("origin")
-    allowed_origin = origin if origin in CORS_ORIGINS else None
+    allowed_origin = _resolve_allowed_origin(origin)
 
     if request.method == "OPTIONS":
         req_headers = request.headers.get("access-control-request-headers", "*")
