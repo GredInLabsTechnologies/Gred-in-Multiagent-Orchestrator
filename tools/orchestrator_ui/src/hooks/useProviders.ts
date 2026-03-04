@@ -158,6 +158,15 @@ export const useProviders = () => {
         return await res.json();
     }, []);
 
+    const startClaudeLogin = useCallback(async () => {
+        const res = await fetch(`${API_BASE}/ops/connectors/claude/login`, {
+            method: 'POST',
+            ...getRequestInit(true),
+        });
+        if (!res.ok) throw new Error('Failed to start Claude login flow');
+        return await res.json();
+    }, []);
+
     const saveActiveProvider = useCallback(async (payload: SaveActiveProviderPayload) => {
         const currentRes = await fetch(`${API_BASE}/ops/provider`, getRequestInit());
         if (!currentRes.ok) throw new Error('Failed to read provider config');
@@ -312,6 +321,7 @@ export const useProviders = () => {
         addProvider,
         removeProvider,
         testProvider,
-        startCodexDeviceLogin
+        startCodexDeviceLogin,
+        startClaudeLogin
     };
 };

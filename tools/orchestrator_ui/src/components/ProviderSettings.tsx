@@ -10,6 +10,7 @@ import { Server, Cloud, Cpu, Trash2, Activity, Download, CheckCircle2, AlertTria
 const PROVIDER_LABELS: Record<string, string> = {
     openai: 'OpenAI',
     codex: 'Codex CLI',
+    claude: 'Anthropic (Claude CLI)',
     ollama_local: 'Ollama (Local)',
     groq: 'Groq',
     openrouter: 'OpenRouter',
@@ -33,6 +34,7 @@ export const ProviderSettings: React.FC = () => {
         removeProvider,
         testProvider,
         startCodexDeviceLogin,
+        startClaudeLogin,
     } = useProviders();
     const { addToast } = useToast();
 
@@ -46,17 +48,22 @@ export const ProviderSettings: React.FC = () => {
     const [org, setOrg] = useState('');
     const [validateResult, setValidateResult] = useState<any>(null);
     const [installState, setInstallState] = useState<{ status: string; message: string; progress?: number; job_id?: string } | null>(null);
+    const [showAdvanced, setShowAdvanced] = useState(false);
 
     // Codex device flow state
     const [deviceLoginState, setDeviceLoginState] = useState<{ status: string; verification_url?: string; user_code?: string; message?: string } | null>(null);
 
-    const providerTypes = Object.keys(providerCapabilities);
+    // Merge dynamic types from backend with standard hardcoded types to ensure they always show up
+    const backendTypes = Object.keys(providerCapabilities);
+    const standardTypes = ['openai', 'codex', 'claude', 'ollama_local', 'groq', 'openrouter', 'custom_openai_compatible'];
+    const providerTypes = Array.from(new Set([...backendTypes, ...standardTypes]));
+
     const catalog = catalogs[providerType];
     const isLoadingCatalog = Boolean(catalogLoading[providerType]);
     const authModes = catalog?.auth_modes_supported || providerCapabilities[providerType]?.auth_modes_supported || [];
     const supportsInstall = Boolean(catalog?.can_install);
-    const accountModeAvailable = authModes.includes('account');
-    const accountModeRelevantProvider = providerType === 'openai' || providerType === 'codex';
+    const accountModeRelevantProvider = providerType === 'codex' || providerType === 'claude';
+    const accountModeAvailable = authModes.includes('account') || accountModeRelevantProvider;
     const effectiveHealth = validateResult?.health || effectiveState?.health || 'unknown';
     const effectiveActionableError = validateResult?.error_actionable || effectiveState?.last_error_actionable || 'sin errores recientes';
     const roleLabel = useMemo(() => {
@@ -86,6 +93,11 @@ export const ProviderSettings: React.FC = () => {
         if (!providerType) return;
         loadCatalog(providerType).catch(() => addToast('No se pudo cargar el catálogo de modelos', 'error'));
         if (!providerId) setProviderId(`${providerType}-main`);
+        if (providerType === 'custom_openai_compatible') {
+            setShowAdvanced(true);
+        } else {
+            setShowAdvanced(false);
+        }
     }, [providerType]);
 
     useEffect(() => {
@@ -167,23 +179,52 @@ export const ProviderSettings: React.FC = () => {
         }
     };
 
-    const handleStartDeviceLogin = async () => {
+    const handleOAuthLikeLogin = async () => {
         try {
-            setDeviceLoginState({ status: 'starting', message: 'Iniciando conexión interactiva...' });
+            setDeviceLoginState({ status: 'starting', message: 'Preparando autenticación segura...' });
             const data = await startCodexDeviceLogin();
             setDeviceLoginState(data);
+
             if (data.status === 'pending') {
-                // If it's real, the user finishes in browser, codex CLI saves token globally, 
-                // and the user can just click "Save" after. 
-                // In our implementation, we auto-fill a dummy account ref if empty 
-                // to satisfy the requirement of saving an account mode provider.
                 if (!account) {
                     setAccount('codex-device-session');
+                }
+
+                // Copy to clipboard automatically if possible
+                if (data.user_code && navigator.clipboard) {
+                    try {
+                        await navigator.clipboard.writeText(data.user_code);
+                        addToast('Código copiado al portapapeles', 'success');
+                    } catch (e) {
+                        console.error('No se pudo copiar el código', e);
+                    }
+                }
+
+                // Open window automatically
+                if (data.verification_url) {
+                    window.open(data.verification_url, '_blank', 'noopener,noreferrer');
                 }
             }
         } catch (err: any) {
             setDeviceLoginState({ status: 'error', message: err.message || 'Error al iniciar flujo' });
-            addToast('Error al conectar cuenta Codex', 'error');
+            addToast('Error al conectar cuenta OpenAI', 'error');
+        }
+    };
+
+    const handleClaudeLogin = async () => {
+        try {
+            setDeviceLoginState({ status: 'starting', message: 'Abriendo navegador para autenticación con Anthropic...' });
+            const data = await startClaudeLogin();
+            setDeviceLoginState(data);
+
+            if (data.status === 'pending') {
+                if (!account) {
+                    setAccount('claude-device-session');
+                }
+            }
+        } catch (err: any) {
+            setDeviceLoginState({ status: 'error', message: err.message || 'Error al iniciar flujo de Claude' });
+            addToast('Error al conectar cuenta Anthropic', 'error');
         }
     };
 
@@ -209,7 +250,7 @@ export const ProviderSettings: React.FC = () => {
             addToast('Provider activo guardado', 'success');
 
             // Clean up UI states after successful save, specially for Device Login flows
-            if (effectiveAuthMode === 'account' && providerType === 'codex') {
+            if (effectiveAuthMode === 'account' && (providerType === 'codex' || providerType === 'claude')) {
                 setDeviceLoginState(null);
             }
         } catch {
@@ -237,11 +278,14 @@ export const ProviderSettings: React.FC = () => {
                 </div>
             </Card>
 
-            <Card className="bg-surface-2 border-border-primary p-4">
-                <h3 className="text-sm font-semibold mb-3 text-text-secondary uppercase tracking-wider">Configurar provider</h3>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                    <div>
-                        <label className="block text-xs text-text-secondary mb-1">Tipo de Provider</label>
+            <Card className="bg-surface-2 border-border-primary p-5 overflow-hidden">
+                <h3 className="text-sm font-semibold mb-5 flex items-center gap-2">
+                    <Server className="w-4 h-4 text-indigo-400" />
+                    Ajustes de Conexión
+                </h3>
+                <div className="grid grid-cols-1 gap-6 items-start">
+                    <div className="col-span-full max-w-xl">
+                        <label className="block text-sm font-medium text-text-primary mb-2">Proveedor API</label>
                         <select
                             value={providerType}
                             onChange={(e) => {
@@ -250,9 +294,9 @@ export const ProviderSettings: React.FC = () => {
                                 setModelId('');
                                 setValidateResult(null);
                             }}
-                            className="w-full bg-surface-0 border border-border-primary rounded p-2 text-sm text-text-primary"
+                            className="w-full bg-surface-0 border border-border-primary rounded-lg p-2.5 text-sm text-text-primary focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-sm"
                         >
-                            {(providerTypes.length > 0 ? providerTypes : ['openai', 'codex', 'ollama_local', 'groq', 'openrouter', 'custom_openai_compatible']).map((canonical) => (
+                            {(providerTypes.length > 0 ? providerTypes : ['openai', 'codex', 'claude', 'ollama_local', 'groq', 'openrouter', 'custom_openai_compatible']).map((canonical) => (
                                 <option key={canonical} value={canonical}>{PROVIDER_LABELS[canonical] || canonical}</option>
                             ))}
                         </select>
@@ -374,19 +418,139 @@ export const ProviderSettings: React.FC = () => {
                             )}
                         </div>
                     ) : (
-                        <>
-                            <div>
-                                <label htmlFor="providerIdInput" className="block text-xs text-text-secondary mb-1">ID (Name)</label>
-                                <Input id="providerIdInput" value={providerId} onChange={(e) => setProviderId(e.target.value)} className="bg-surface-0 border-border-primary text-text-primary" />
+                        <div className="flex flex-col gap-5 col-span-full max-w-xl">
+                            {/* Authentication Section */}
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium text-text-primary">Autenticación</label>
+                                {authMode === 'account' && providerType === 'codex' ? (
+                                    <div className="p-4 border border-border-primary rounded-lg bg-surface-1">
+                                        {!deviceLoginState || deviceLoginState.status === 'error' ? (
+                                            <div className="flex flex-col gap-3">
+                                                <div>
+                                                    <div className="text-sm font-medium">Cuenta de OpenAI (Suscripción Plus/Pro)</div>
+                                                    <div className="text-xs text-text-secondary mt-1">Usa los modelos a los que ya tienes acceso sin pagar por token a través de API Keys.</div>
+                                                    {deviceLoginState?.status === 'error' && (
+                                                        <div className="mt-2 text-xs text-accent-alert bg-accent-alert/10 p-2 rounded">{deviceLoginState.message}</div>
+                                                    )}
+                                                </div>
+                                                <Button onClick={handleOAuthLikeLogin} className="w-full bg-[#10a37f] hover:bg-[#0e906f] text-white flex items-center justify-center gap-2 shadow-md h-10 transition-colors">
+                                                    Autenticar en OpenAI
+                                                </Button>
+                                                <div className="text-[10px] text-text-secondary flex justify-center mt-1">
+                                                    Soporte nativo mediante OpenAI Codex CLI
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                <div className="flex items-center gap-2 bg-surface-2 p-2 rounded justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-2.5 h-2.5 rounded-full bg-[#10a37f] animate-pulse shadow-[0_0_8px_rgba(16,163,127,0.6)]"></div>
+                                                        <p className="text-xs font-semibold text-[#10a37f] uppercase tracking-wider">Esperando Autorización...</p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="text-xs text-text-secondary">
+                                                    {deviceLoginState.status === 'starting' ? (
+                                                        <p className="animate-pulse">{deviceLoginState.message}</p>
+                                                    ) : (
+                                                        <div className="space-y-3">
+                                                            <p className="text-sm text-text-primary">Sigue estos pasos para finalizar:</p>
+
+                                                            <ol className="list-decimal list-inside space-y-2 ml-1">
+                                                                <li>
+                                                                    Ve a la ventana que acabamos de abrir (o entra a <a href={deviceLoginState.verification_url} target="_blank" rel="noreferrer" className="text-indigo-400 hover:text-indigo-300 hover:underline">{deviceLoginState.verification_url}</a>).
+                                                                </li>
+                                                                <li className="flex flex-col gap-1 mt-2">
+                                                                    <span>Pega este código de dispositivo allí:</span>
+                                                                    <div className="flex items-center gap-2 mt-1">
+                                                                        <span className="font-mono bg-surface-0 px-3 py-1.5 cursor-text rounded font-bold text-white tracking-widest text-lg border border-border-primary shadow-inner">
+                                                                            {deviceLoginState.user_code}
+                                                                        </span>
+                                                                        <Button
+                                                                            onClick={() => {
+                                                                                if (navigator.clipboard && deviceLoginState.user_code) {
+                                                                                    navigator.clipboard.writeText(deviceLoginState.user_code);
+                                                                                    addToast('Copiado manualmente', 'info');
+                                                                                }
+                                                                            }}
+                                                                            size="sm"
+                                                                            variant="outline"
+                                                                            className="h-8 border-border-primary bg-surface-2 hover:bg-surface-3 transition-colors text-xs"
+                                                                            title="Copiar Código"
+                                                                        >
+                                                                            Copiar
+                                                                        </Button>
+                                                                    </div>
+                                                                </li>
+                                                                <li className="mt-2">Haz clic en "Confirmar".</li>
+                                                            </ol>
+                                                            <p className="mt-4 p-2 bg-indigo-500/10 border border-indigo-500/20 rounded text-indigo-200">
+                                                                <strong>Nota:</strong> Una vez confirmado en el navegador, selecciona un `Modelo` abajo y presiona **"Guardar Configuración"**.
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <Button onClick={() => setDeviceLoginState(null)} size="sm" variant="ghost" className="w-full mt-4 text-xs text-text-secondary hover:text-text-primary border border-transparent hover:border-border-primary transition-all">
+                                                    Cancelar y Reintentar
+                                                </Button>
+                                            </div>
+                                        )}
+                                        <input type="hidden" value={account} />
+                                    </div>
+                                ) : authMode === 'account' && providerType === 'claude' ? (
+                                    <div className="p-4 border border-border-primary rounded-lg bg-surface-1">
+                                        {!deviceLoginState || deviceLoginState.status === 'error' ? (
+                                            <div className="flex flex-col gap-3">
+                                                <div>
+                                                    <div className="text-sm font-medium">Cuenta de Anthropic (Pro/Team)</div>
+                                                    <div className="text-xs text-text-secondary mt-1">Usa tu sesión local de Claude (requiere claude CLI instalada).</div>
+                                                    {deviceLoginState?.status === 'error' && (
+                                                        <div className="mt-2 text-xs text-accent-alert bg-accent-alert/10 p-2 rounded">{deviceLoginState.message}</div>
+                                                    )}
+                                                </div>
+                                                <Button onClick={handleClaudeLogin} className="w-full bg-[#d97757] hover:bg-[#b86246] text-white flex items-center justify-center gap-2 shadow-md h-10 transition-colors">
+                                                    Autenticar en Anthropic
+                                                </Button>
+                                                <div className="text-[10px] text-text-secondary flex justify-center mt-1">
+                                                    Abrirá el navegador automáticamente
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                <div className="flex items-center gap-2 bg-surface-2 p-2 rounded justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-2.5 h-2.5 rounded-full bg-[#d97757] animate-pulse shadow-[0_0_8px_rgba(217,119,87,0.6)]"></div>
+                                                        <p className="text-xs font-semibold text-[#d97757] uppercase tracking-wider">Esperando Autorización en el Navegador...</p>
+                                                    </div>
+                                                </div>
+                                                <div className="text-xs text-text-secondary">
+                                                    <p className="mb-2">Por favor, revisa la ventana de tu navegador que acabamos de abrir.</p>
+                                                    <p>Una vez completes el inicio de sesión exitosamente allí, cierra esta advertencia y haz clic en **Guardar Configuración**.</p>
+                                                </div>
+                                                <Button onClick={() => setDeviceLoginState(null)} size="sm" variant="ghost" className="w-full mt-4 text-xs text-text-secondary hover:text-text-primary border border-transparent hover:border-border-primary transition-all">
+                                                    Entendido, volver
+                                                </Button>
+                                            </div>
+                                        )}
+                                        <input type="hidden" value={account} />
+                                    </div>
+                                ) : authMode === 'account' ? (
+                                    <Input id="accountInput" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="Session token o identificador..." className="bg-surface-0 border-border-primary text-text-primary w-full p-2.5 rounded-lg shadow-sm" />
+                                ) : (
+                                    <Input id="apiKeyInput" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="bg-surface-0 border-border-primary text-text-primary w-full p-2.5 rounded-lg shadow-sm" />
+                                )}
+                                {authMode === 'api_key' && <div className="text-[11px] text-text-secondary px-1">La clave se enviará de forma segura al orquestador.</div>}
                             </div>
 
-                            <div>
-                                <label htmlFor="modelIdSelect" className="block text-xs text-text-secondary mb-1">ID/Name (modelo)</label>
+                            {/* Model Selection */}
+                            <div className="space-y-2">
+                                <label htmlFor="modelIdSelect" className="block text-sm font-medium text-text-primary">Modelo</label>
                                 <select
                                     id="modelIdSelect"
                                     value={modelId}
                                     onChange={(e) => setModelId(e.target.value)}
-                                    className="w-full bg-surface-0 border border-border-primary rounded p-2 text-sm text-text-primary"
+                                    className="w-full bg-surface-0 border border-border-primary rounded-lg p-2.5 text-sm text-text-primary focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-sm"
                                 >
                                     <option value="">{isLoadingCatalog ? 'Cargando catálogo...' : 'Selecciona modelo'}</option>
                                     {modelGroups.installed.length > 0 && (
@@ -407,86 +571,56 @@ export const ProviderSettings: React.FC = () => {
                                 </select>
                             </div>
 
-                            <div>
-                                <label htmlFor="authModeSelect" className="block text-xs text-text-secondary mb-1">Modo auth</label>
-                                <select
-                                    id="authModeSelect"
-                                    value={authMode}
-                                    onChange={(e) => setAuthMode(e.target.value)}
-                                    className="w-full bg-surface-0 border border-border-primary rounded p-2 text-sm text-text-primary"
+                            {/* Advanced Options Accordion */}
+                            <div className="mt-2 border border-border-primary rounded-lg overflow-hidden bg-surface-1">
+                                <button
+                                    onClick={() => setShowAdvanced(!showAdvanced)}
+                                    className="w-full text-xs text-text-secondary hover:text-text-primary transition-colors flex items-center justify-between font-medium p-3 bg-surface-2 hover:bg-surface-3"
                                 >
-                                    {authModes.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
-                                    {authModes.length === 0 && <option value="none">none</option>}
-                                </select>
-                            </div>
+                                    <span className="uppercase tracking-wider font-semibold">Opciones Avanzadas</span>
+                                    <span className="text-[10px]">{showAdvanced ? 'OCULTAR ▲' : 'MOSTRAR ▼'}</span>
+                                </button>
 
-                            <div>
-                                <label htmlFor="baseUrlInput" className="block text-xs text-text-secondary mb-1">Base URL (opcional)</label>
-                                <Input id="baseUrlInput" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://.../v1" className="bg-surface-0 border-border-primary text-text-primary" />
-                            </div>
-
-                            <div>
-                                <label htmlFor="orgInput" className="block text-xs text-text-secondary mb-1">Organization (opcional)</label>
-                                <Input id="orgInput" value={org} onChange={(e) => setOrg(e.target.value)} className="bg-surface-0 border-border-primary text-text-primary" />
-                            </div>
-
-                            {authMode === 'api_key' && (
-                                <div>
-                                    <label htmlFor="apiKeyInput" className="block text-xs text-text-secondary mb-1">API Key</label>
-                                    <Input id="apiKeyInput" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="bg-surface-0 border-border-primary text-text-primary" />
-                                </div>
-                            )}
-                            {authMode === 'account' && providerType !== 'codex' && (
-                                <div>
-                                    <label htmlFor="accountInput" className="block text-xs text-text-secondary mb-1">Account</label>
-                                    <Input id="accountInput" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="account/session token" className="bg-surface-0 border-border-primary text-text-primary" />
-                                </div>
-                            )}
-                            {authMode === 'account' && providerType === 'codex' && (
-                                <div className="col-span-full md:col-span-1 p-3 border border-border-primary rounded bg-surface-2">
-                                    <label className="block text-sm font-semibold mb-2">Conectar Cuenta (Device Auth)</label>
-                                    {!deviceLoginState || deviceLoginState.status === 'error' ? (
+                                {showAdvanced && (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 border-t border-border-primary bg-surface-0">
                                         <div>
-                                            <p className="text-xs text-text-secondary mb-3">
-                                                Inicia sesión con tu cuenta de OpenAI (ChatGPT Plus/Pro) en lugar de usar una API Key.
-                                            </p>
-                                            <Button onClick={handleStartDeviceLogin} className="w-full bg-accent-primary hover:bg-accent-primary/80 text-white">
-                                                Conectar Cuenta
-                                            </Button>
-                                            {deviceLoginState?.status === 'error' && (
-                                                <div className="mt-2 text-xs text-accent-alert">{deviceLoginState.message}</div>
-                                            )}
+                                            <label htmlFor="providerIdInput" className="block text-xs text-text-secondary mb-1">Nombre Conexión (ID Interno)</label>
+                                            <Input id="providerIdInput" value={providerId} onChange={(e) => setProviderId(e.target.value)} className="bg-surface-1 border-border-primary text-text-primary text-sm rounded" />
                                         </div>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            <p className="text-xs text-text-secondary">Estado: <span className="text-accent-trust uppercase">{deviceLoginState.status}</span></p>
-                                            {deviceLoginState.verification_url && (
-                                                <p className="text-xs">
-                                                    1. Abre <a href={deviceLoginState.verification_url} target="_blank" rel="noreferrer" className="text-accent-primary hover:underline">{deviceLoginState.verification_url}</a>
-                                                </p>
-                                            )}
-                                            {deviceLoginState.user_code && (
-                                                <p className="text-xs">
-                                                    2. Introduce el código: <span className="font-mono bg-surface-0 p-1 rounded font-bold">{deviceLoginState.user_code}</span>
-                                                </p>
-                                            )}
-                                            <p className="text-xs text-accent-warning italic">{deviceLoginState.message}</p>
-                                            <Button onClick={() => setDeviceLoginState(null)} size="sm" variant="outline" className="w-full mt-2 text-xs border-border-primary text-text-primary hover:bg-surface-3">
-                                                Cancelar / Reintentar
-                                            </Button>
+                                        <div>
+                                            <label htmlFor="authModeSelect" className="block text-xs text-text-secondary mb-1">Modo Auth (Forzado)</label>
+                                            <select
+                                                id="authModeSelect"
+                                                value={authMode}
+                                                onChange={(e) => setAuthMode(e.target.value)}
+                                                className="w-full bg-surface-1 border border-border-primary rounded p-2 text-sm text-text-primary"
+                                            >
+                                                {authModes.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+                                                {authModes.length === 0 && <option value="none">none</option>}
+                                            </select>
                                         </div>
-                                    )}
-                                    <input type="hidden" value={account} />
-                                </div>
-                            )}
+                                        <div>
+                                            <label htmlFor="baseUrlInput" className="block text-xs text-text-secondary mb-1">Base URL Personalizada</label>
+                                            <Input id="baseUrlInput" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://.../v1" className="bg-surface-1 border-border-primary text-text-primary text-sm rounded" />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="orgInput" className="block text-xs text-text-secondary mb-1">Organization ID</label>
+                                            <Input id="orgInput" value={org} onChange={(e) => setOrg(e.target.value)} className="bg-surface-1 border-border-primary text-text-primary text-sm rounded" />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
 
-                            <Button onClick={handleTestConnection} className="bg-surface-3 hover:bg-surface-3 text-white">
-                                Probar conexión
-                            </Button>
-                            <Button onClick={() => void handleSaveAsActive()} className="bg-indigo-600 hover:bg-indigo-500 text-white">
-                                Guardar como provider activo
-                            </Button>
-                        </>
+                            {/* Actions */}
+                            <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-6">
+                                <Button onClick={handleTestConnection} variant="ghost" className="w-full sm:w-auto text-text-secondary hover:text-text-primary border border-border-primary hover:bg-surface-3 rounded-lg px-6">
+                                    Probar conexión
+                                </Button>
+                                <Button onClick={() => void handleSaveAsActive()} className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-8 shadow-md">
+                                    Guardar Configuración
+                                </Button>
+                            </div>
+                        </div>
                     )}
                 </div>
 

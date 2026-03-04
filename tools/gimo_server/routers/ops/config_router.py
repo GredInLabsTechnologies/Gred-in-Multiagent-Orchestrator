@@ -20,6 +20,7 @@ from tools.gimo_server.services.provider_catalog_service import ProviderCatalogS
 from tools.gimo_server.services.tool_registry_service import ToolRegistryService
 from tools.gimo_server.services.policy_service import PolicyService
 from tools.gimo_server.services.codex_auth_service import CodexAuthService
+from tools.gimo_server.services.claude_auth_service import ClaudeAuthService
 from tools.gimo_server.services.provider_account_service import ProviderAccountService
 from .common import _require_role, _actor_label
 
@@ -192,6 +193,17 @@ async def codex_device_login(
     _require_role(auth, "operator")
     data = await CodexAuthService.start_device_flow()
     audit_log("OPS", "/ops/connectors/codex/login", "auth_flow_started", operation="READ", actor=_actor_label(auth))
+    return data
+
+@router.post("/connectors/claude/login")
+async def claude_login_start(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    data = await ClaudeAuthService.start_login_flow()
+    audit_log("OPS", "/ops/connectors/claude/login", "auth_flow_started", operation="READ", actor=_actor_label(auth))
     return data
 
 
