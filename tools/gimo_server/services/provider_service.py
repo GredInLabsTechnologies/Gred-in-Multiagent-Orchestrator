@@ -16,6 +16,7 @@ from .provider_auth_service import ProviderAuthService
 from .provider_state_service import ProviderStateService
 from .llm_cache import NormalizedLLMCache
 from .model_router_service import ModelRouterService
+from .observability_service import ObservabilityService
 
 logger = logging.getLogger("orchestrator.ops.provider")
 
@@ -432,52 +433,14 @@ class ProviderService:
         return result
 
     @classmethod
-    async def static_generate_phase6_strategy(
+    async def _execute_phase6_primary(
         cls,
-        *,
         prompt: str,
-        context: Dict[str, Any],
-        intent_effective: str,
-        path_scope: list[str],
-    ) -> Dict[str, Any]:
-        """Phase-6 deterministic cloud/local strategy resolver execution.
-
-        Rules:
-        - Primary: qwen3-coder:480b-cloud
-        - Fallback: qwen3:8b (local)
-        - Fallback only on: 429, session/weekly limits, timeout, network error, 5xx
-        - No fallback on: 400, policy/schema/merge-gate errors
-        - SECURITY_CHANGE / CORE_RUNTIME_CHANGE / sensitive scope => local-only
-        """
-
-        safe_context = dict(context or {})
-        decision = ModelRouterService.resolve_phase6_strategy(
-            intent_effective=str(intent_effective or ""),
-            path_scope=list(path_scope or []),
-            primary_failure_reason="",
-        )
-
-        if decision.strategy_reason == "forced_local_only":
-            local_result = await cls.static_generate(
-                prompt,
-                {**safe_context, "model": decision.final_model_used},
-            )
-            local_result.update(
-                {
-                    "strategy_decision_id": decision.strategy_decision_id,
-                    "strategy_reason": decision.strategy_reason,
-                    "model_attempted": decision.model_attempted,
-                    "failure_reason": "",
-                    "final_model_used": decision.final_model_used,
-                    "fallback_used": False,
-                    "execution_decision": "PRIMARY_MODEL_SUCCESS",
-                    "fallback_count_window": 0,
-                }
-            )
-            return local_result
-
+        safe_context: Dict[str, Any],
+        decision: Any,
+        started_at: float,
+    ) -> tuple[Optional[Dict[str, Any]], Optional[Exception], str]:
         primary_model = ModelRouterService.PHASE6_PRIMARY_MODEL
-        fallback_model = ModelRouterService.PHASE6_FALLBACK_MODEL
         max_primary_attempts = 2
         backoff_seconds = 0.25
         last_error: Optional[Exception] = None
@@ -501,7 +464,13 @@ class ProviderService:
                         "fallback_count_window": 0,
                     }
                 )
-                return primary_result
+                cls._record_phase65_ai_usage(
+                    result=primary_result,
+                    context=safe_context,
+                    latency_ms=(time.perf_counter() - started_at) * 1000.0,
+                    error_code="",
+                )
+                return primary_result, None, ""
             except Exception as exc:
                 last_error = exc
                 last_reason = ModelRouterService.classify_phase6_failure_reason(exc)
@@ -512,6 +481,68 @@ class ProviderService:
                     await asyncio.sleep(backoff_seconds * (2 ** (attempt - 1)))
                     continue
                 break
+        
+        return None, last_error, last_reason
+
+    @classmethod
+    async def static_generate_phase6_strategy(
+        cls,
+        *,
+        prompt: str,
+        context: Dict[str, Any],
+        intent_effective: str,
+        path_scope: list[str],
+    ) -> Dict[str, Any]:
+        """Phase-6 deterministic cloud/local strategy resolver execution.
+
+        Rules:
+        - Primary: qwen3-coder:480b-cloud
+        - Fallback: qwen3:8b (local)
+        - Fallback only on: 429, session/weekly limits, timeout, network error, 5xx
+        - No fallback on: 400, policy/schema/merge-gate errors
+        - SECURITY_CHANGE / CORE_RUNTIME_CHANGE / sensitive scope => local-only
+        """
+
+        safe_context = dict(context or {})
+        started_at = time.perf_counter()
+        decision = ModelRouterService.resolve_phase6_strategy(
+            intent_effective=str(intent_effective or ""),
+            path_scope=list(path_scope or []),
+            primary_failure_reason="",
+        )
+
+        if decision.strategy_reason == "forced_local_only":
+            local_result = await cls.static_generate(
+                prompt,
+                {**safe_context, "model": decision.final_model_used},
+            )
+            local_result.update(
+                {
+                    "strategy_decision_id": decision.strategy_decision_id,
+                    "strategy_reason": decision.strategy_reason,
+                    "model_attempted": decision.model_attempted,
+                    "failure_reason": "",
+                    "final_model_used": decision.final_model_used,
+                    "fallback_used": False,
+                    "execution_decision": "PRIMARY_MODEL_SUCCESS",
+                    "fallback_count_window": 0,
+                }
+            )
+            cls._record_phase65_ai_usage(
+                result=local_result,
+                context=safe_context,
+                latency_ms=(time.perf_counter() - started_at) * 1000.0,
+                error_code="",
+            )
+            return local_result
+
+        primary_result, last_error, last_reason = await cls._execute_phase6_primary(
+            prompt, safe_context, decision, started_at
+        )
+        if primary_result:
+            return primary_result
+
+        fallback_model = ModelRouterService.PHASE6_FALLBACK_MODEL
 
         resolved = ModelRouterService.resolve_phase6_strategy(
             intent_effective=str(intent_effective or ""),
@@ -542,7 +573,49 @@ class ProviderService:
                 "fallback_count_window": cls._record_fallback_and_get_window_count(),
             }
         )
+        cls._record_phase65_ai_usage(
+            result=fallback_result,
+            context=safe_context,
+            latency_ms=(time.perf_counter() - started_at) * 1000.0,
+            error_code=str(fallback_result.get("failure_reason") or ""),
+        )
         return fallback_result
+
+    @classmethod
+    def _record_phase65_ai_usage(
+        cls,
+        *,
+        result: Dict[str, Any],
+        context: Dict[str, Any],
+        latency_ms: float,
+        error_code: str,
+    ) -> None:
+        """Best-effort AI usage telemetry required by Phase 6.5."""
+        try:
+            cfg = cls.get_config()
+            provider_type = ""
+            auth_mode = ""
+            if cfg and cfg.active in cfg.providers:
+                entry = cfg.providers[cfg.active]
+                provider_type = str(entry.provider_type or entry.type or "")
+                auth_mode = str(entry.auth_mode or "")
+
+            ObservabilityService.record_ai_usage(
+                run_id=str(context.get("run_id") or ""),
+                draft_id=str(context.get("draft_id") or ""),
+                provider_type=provider_type,
+                auth_mode=auth_mode,
+                model=str(result.get("final_model_used") or result.get("model") or ""),
+                tokens_in=int(result.get("prompt_tokens") or 0),
+                tokens_out=int(result.get("completion_tokens") or 0),
+                cost_usd=float(result.get("cost_usd") or 0.0),
+                status=str(result.get("execution_decision") or ""),
+                latency_ms=float(latency_ms or 0.0),
+                request_id=str(context.get("request_id") or ""),
+                error_code=str(error_code or ""),
+            )
+        except Exception:
+            pass
 
     @classmethod
     async def health_check(cls) -> bool:

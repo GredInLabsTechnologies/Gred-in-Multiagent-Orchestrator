@@ -20,6 +20,7 @@ from tools.gimo_server.services.provider_catalog_service import ProviderCatalogS
 from tools.gimo_server.services.tool_registry_service import ToolRegistryService
 from tools.gimo_server.services.policy_service import PolicyService
 from tools.gimo_server.services.codex_auth_service import CodexAuthService
+from tools.gimo_server.services.provider_account_service import ProviderAccountService
 from .common import _require_role, _actor_label
 
 router = APIRouter()
@@ -192,6 +193,113 @@ async def codex_device_login(
     data = await CodexAuthService.start_device_flow()
     audit_log("OPS", "/ops/connectors/codex/login", "auth_flow_started", operation="READ", actor=_actor_label(auth))
     return data
+
+
+@router.post("/connectors/account/login/start")
+async def account_login_start(
+    request: Request,
+    body: dict,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """Phase 6.5: start account-mode device flow and persist flow state."""
+    _require_role(auth, "operator")
+    provider_id = str(body.get("provider_id") or "").strip() or None
+
+    data = await CodexAuthService.start_device_flow()
+    flow = ProviderAccountService.start_flow(
+        provider_id=provider_id,
+        verification_url=str(data.get("verification_url") or ""),
+        user_code=str(data.get("user_code") or ""),
+        poll_id=str(data.get("poll_id") or ""),
+    )
+    audit_log(
+        "OPS",
+        "/ops/connectors/account/login/start",
+        f"provider_connected:{flow.get('provider_id')}",
+        operation="WRITE",
+        actor=_actor_label(auth),
+    )
+    return {
+        "status": "PROVIDER_AUTH_PENDING",
+        "flow_id": flow.get("flow_id"),
+        "provider_id": flow.get("provider_id"),
+        "verification_url": flow.get("verification_url"),
+        "user_code": flow.get("user_code"),
+        "poll_id": flow.get("poll_id"),
+    }
+
+
+@router.get("/connectors/account/login/{flow_id}", responses={404: {"description": "Not Found"}})
+async def account_login_status(
+    request: Request,
+    flow_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    try:
+        flow = ProviderAccountService.get_flow(flow_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return flow
+
+
+@router.post("/connectors/account/refresh", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}})
+async def account_refresh(
+    request: Request,
+    body: dict,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """Phase 6.5: refresh account session and keep auth_ref in secure env indirection."""
+    _require_role(auth, "operator")
+    provider_id = str(body.get("provider_id") or "").strip()
+    if not provider_id:
+        raise HTTPException(status_code=400, detail="provider_id is required")
+
+    account_token = body.get("account_token")
+    try:
+        result = ProviderAccountService.refresh_account_ref(
+            provider_id=provider_id,
+            account_token=str(account_token) if account_token else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    audit_log(
+        "OPS",
+        "/ops/connectors/account/refresh",
+        f"provider_token_refreshed:{provider_id}",
+        operation="WRITE",
+        actor=_actor_label(auth),
+    )
+    return result
+
+
+@router.post("/connectors/account/logout", responses={400: {"description": "Bad Request"}, 404: {"description": "Not Found"}})
+async def account_logout(
+    request: Request,
+    body: dict,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    provider_id = str(body.get("provider_id") or "").strip()
+    if not provider_id:
+        raise HTTPException(status_code=400, detail="provider_id is required")
+    try:
+        result = ProviderAccountService.logout(provider_id=provider_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    audit_log(
+        "OPS",
+        "/ops/connectors/account/logout",
+        f"provider_disconnected:{provider_id}",
+        operation="WRITE",
+        actor=_actor_label(auth),
+    )
+    return result
 
 
 

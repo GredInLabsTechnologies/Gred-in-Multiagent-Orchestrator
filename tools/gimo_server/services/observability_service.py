@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import json
 import threading
 from collections import Counter
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional
 
 from opentelemetry import metrics, trace
@@ -15,6 +17,8 @@ from opentelemetry.sdk.trace import TracerProvider, Span
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from ..config import OPS_DATA_DIR
 
 
 from opentelemetry.sdk.trace import SpanProcessor
@@ -75,6 +79,7 @@ class ObservabilityService:
     _lock = threading.RLock()
     _initialized = False
     OBS_LOG_SCHEMA_VERSION = "1.0"
+    AI_USAGE_LOG_PATH: Path = OPS_DATA_DIR / "logs" / "ai_usage.jsonl"
     
     # Internal buffer for UI compatibility
     _ui_spans: Deque[Dict[str, Any]] = deque(maxlen=5000)
@@ -315,6 +320,48 @@ class ObservabilityService:
             if limit <= 0:
                 return []
             return list(cls._structured_events)[-limit:]
+
+    @classmethod
+    def record_ai_usage(
+        cls,
+        *,
+        run_id: str,
+        draft_id: str,
+        provider_type: str,
+        auth_mode: str,
+        model: str,
+        tokens_in: int,
+        tokens_out: int,
+        cost_usd: float,
+        status: str,
+        latency_ms: float,
+        request_id: str,
+        error_code: str = "",
+    ) -> Dict[str, Any]:
+        """Phase 6.5 usage/audit event persisted as JSONL (no secrets)."""
+        payload = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "run_id": str(run_id or ""),
+            "draft_id": str(draft_id or ""),
+            "provider_type": str(provider_type or ""),
+            "auth_mode": str(auth_mode or ""),
+            "model": str(model or ""),
+            "tokens_in": int(tokens_in or 0),
+            "tokens_out": int(tokens_out or 0),
+            "cost_usd": float(cost_usd or 0.0),
+            "status": str(status or ""),
+            "latency_ms": float(latency_ms or 0.0),
+            "request_id": str(request_id or ""),
+            "error_code": str(error_code or ""),
+        }
+        try:
+            cls.AI_USAGE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with cls.AI_USAGE_LOG_PATH.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception:
+            # Observability must never crash the run path.
+            pass
+        return payload
 
     @classmethod
     def get_alerts(cls) -> List[Dict[str, Any]]:

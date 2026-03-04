@@ -4,7 +4,7 @@ info:
   description: >
     Secure read-only access to a selected repository, plus UI/service operations.
     All endpoints require Bearer authentication.
-  version: UNRELEASED
+  version: 4.0.0
 
 servers:
   - url: http://127.0.0.1:9325
