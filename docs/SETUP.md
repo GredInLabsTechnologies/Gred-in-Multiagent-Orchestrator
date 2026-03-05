@@ -1,11 +1,9 @@
 # Setup
 
-**Status**: NEEDS_REVIEW
-**Last verified**: 2026-02-06 04:59 CET
+**Status**: CURRENT
+**Last verified**: 2026-03-04
 
-This document is being rebuilt from scratch. Every claim must be backed by reproducible evidence under `docs/evidence/`.
-
-> Scope: this repo’s backend lives in `tools/gimo_server/` and serves a read-only inspection API.
+> Scope: monorepo GIMO — backend (`tools/gimo_server/`), UI (`tools/orchestrator_ui/`), web (`apps/web/`).
 
 ## Backend (Python)
 
@@ -61,7 +59,7 @@ pip install -r requirements-dev.txt
 python scripts\\ci\\quality_gates.py
 ```
 
-## Frontend (UI)
+## Frontend (Orchestrator UI)
 
 ```cmd
 cd tools\orchestrator_ui
@@ -76,9 +74,22 @@ UI configuration:
 - `tools/orchestrator_ui/.env.local` may define `VITE_API_URL=http://localhost:9325`.
 - If `VITE_API_URL` is not set, the UI fallback uses port `9325`.
 
-Known inconsistency:
+## GIMO Web (apps/web)
 
-- The UI no longer hard-codes a port in the dashboard; it derives the display label from `VITE_API_URL`/fallback.
+```cmd
+cd apps\web
+npm ci
+npm run lint
+npm run build
+npm run dev   # → http://localhost:3000
+```
+
+Configuration:
+
+- Copy `apps/web/.env.example` to `apps/web/.env.local` and fill in values.
+- Key variables: `NEXT_PUBLIC_FIREBASE_*`, `STRIPE_*`, `LICENSE_SIGNING_PRIVATE_KEY`.
+- See `apps/web/README.md` for the full variable list.
+- Deploy: Vercel (configured to point to `apps/web`).
 
 ## MCP Integrations (Claude/Cline/Cursor/Antigravity)
 
@@ -143,14 +154,18 @@ python scripts\setup_mcp.py --check
 After changing MCP config, restart the client session (Cline/Antigravity).
 Without restart, you may see: `No connection found for server: gimo`.
 
-## Secure Launcher (`GIMO_LAUNCHER.cmd`)
+## Secure Launcher (`GIMO_DEV_LAUNCHER.cmd`)
 The launcher provides a safe development experience:
 - **Authentication**: Generates a 32-byte secure token on first run (`ORCH_TOKEN`).
 - **Localhost Binding**: Binds backend and frontend to `127.0.0.1` minimizing attack surface.
-- **Port Hygiene**: Kills zombie processes on 9325 and 5173.
+- **Port Hygiene**: Kills zombie processes on 9325, 5173, and 3000.
+- **Three Services**: Launches backend (9325), orchestrator UI (5173), and GIMO Web (3000).
 - **Health Verification**: Waits for backend readiness before starting frontend.
 
 ## CI & Testing Suites
+
+CI runs 4 jobs on every push: `python-gates`, `python-tests`, `ui/lint-test-build`, `web/lint-build`.
+
 Local gates recommended before any PR:
 ```cmd
 pip install -r requirements.txt -r requirements-dev.txt
@@ -158,6 +173,7 @@ pre-commit run --all-files
 python scripts\ci\check_no_artifacts.py --tracked
 python scripts\ci\quality_gates.py
 python -m pytest -m "not integration" -v
+cd apps\web && npm run build
 ```
 
 For LLM / adversarial test suites, run LM Studio or Ollama locally, then:

@@ -61,6 +61,19 @@ async def set_provider(
     audit_log("OPS", "/ops/provider", "set", operation="WRITE", actor=_actor_label(auth))
     return ProviderService.get_public_config() or cfg
 
+@router.get("/provider/recommendation")
+async def provider_recommendation(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    from tools.gimo_server.services.recommendation_service import RecommendationService
+    
+    recommendation = await RecommendationService.get_recommendation()
+    audit_log("OPS", "/ops/provider/recommendation", recommendation.get("provider", "unknown"), operation="READ", actor=_actor_label(auth))
+    return recommendation
+
 @router.get("/connectors")
 async def list_connectors(
     request: Request,

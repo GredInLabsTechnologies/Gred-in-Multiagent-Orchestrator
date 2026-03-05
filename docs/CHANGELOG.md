@@ -1,11 +1,23 @@
 # Changelog
 
-Todos los cambios notables de GIMO se documentan aqu&iacute;.
+Todos los cambios notables de GIMO se documentan aquí.
 
 ## [Unreleased]
-- Animaci&oacute;n pulse en nodos con status "running"
-- Archivado de docs deprecated (fase 4 completada)
-- README.md reescrito con documentaci&oacute;n completa
+- UI Masterplan fases 1.5-5 (graph rewrite, chat, overlays, polish)
+
+## [0.12.0] — 2026-03-04
+- **feat**: Unificación monorepo — `apps/web/` (GIMO Web) fusionado via git subtree
+- **feat**: Sistema completo de gestión de providers (UI + backend), catálogo, capability matrix
+- **feat**: Auth por cuenta (device flow) para Codex y Claude
+- **feat**: CI job `web / lint-build` para GIMO Web
+- **feat**: Dependabot para `apps/web`
+- **refactor**: Limpieza post-merge (archivos basura, firebase.json, .gitignore)
+- **docs**: Documentación actualizada al estado actual del monorepo
+
+## [0.11.0] — 2026-03-01
+- **feat**: UI Masterplan fase 0-1 (zustand, framer-motion, sidebar/menubar/statusbar redesign)
+- **feat**: Design tokens y glassmorphism system
+- **refactor**: App.tsx migrado de 18 useState a zustand store
 
 ## [0.10.0] — 2026-02-28
 - Completadas fases pendientes del REPO_MASTERPLAN (4, 6.3, 7)

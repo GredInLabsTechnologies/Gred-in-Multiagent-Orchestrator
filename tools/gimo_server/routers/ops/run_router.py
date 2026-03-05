@@ -66,10 +66,16 @@ async def approve_draft(
             asyncio.create_task(CustomPlanService.execute_plan(custom_plan_id))
             audit_log("OPS", f"/ops/custom-plans/{custom_plan_id}/execute", custom_plan_id, operation="WRITE_AUTO", actor=actor)
         else:
-            # Legacy: execute via RunWorker
+            # Legacy: execute via RunWorker -> Update for Phase B to execution via MergeGateService
             try:
                 run = OpsService.create_run(approved.id)
                 audit_log("OPS", "/ops/runs", run.id, operation="WRITE_AUTO", actor=actor)
+                
+                # Execute MergeGateService in background
+                from tools.gimo_server.services.merge_gate_service import MergeGateService
+                import asyncio
+                asyncio.create_task(MergeGateService.execute_run(run.id))
+                
             except (PermissionError, ValueError):
                 pass
     return OpsApproveResponse(approved=approved, run=run)

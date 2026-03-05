@@ -111,6 +111,20 @@ vi.mock('../../hooks/useProviders', () => ({
     }),
 }));
 
+// Mock global fetch for the recommendation call on mount
+globalThis.fetch = vi.fn(() =>
+    Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+            provider: 'sglang',
+            model: 'qwen',
+            workers: 1,
+            reason: 'mock',
+            hardware: {}
+        })
+    })
+) as any;
+
 vi.mock('../Toast', () => ({
     useToast: () => ({ addToast: mocks.addToastMock }),
 }));

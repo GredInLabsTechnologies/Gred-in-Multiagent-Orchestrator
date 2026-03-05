@@ -5,8 +5,9 @@ import asyncio
 import json
 import logging
 import time
+import subprocess
 from collections import deque
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -33,9 +34,82 @@ class HardwareSnapshot:
     ram_percent: float
     ram_available_gb: float
     timestamp: float
+    gpu_vendor: str = "none"
+    gpu_name: str = "none"
+    gpu_vram_gb: float = 0.0
+    gpu_vram_free_gb: float = 0.0
+    total_ram_gb: float = 0.0
+    wsl2_available: bool = False
+    installed_providers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+def _detect_wsl2() -> bool:
+    try:
+        result = subprocess.run(["wsl.exe", "-l", "-v"], capture_output=True, text=True, timeout=2)
+        return result.returncode == 0
+    except Exception:
+        return False
+
+def _detect_gpu() -> dict:
+    info = {"vendor": "none", "name": "none", "vram": 0.0, "vram_free": 0.0}
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        name = pynvml.nvmlDeviceGetName(handle)
+        if hasattr(name, "decode"):
+            name = name.decode("utf-8")
+        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        info["vendor"] = "nvidia"
+        info["name"] = name
+        info["vram"] = round(mem.total / (1024**3), 2)
+        info["vram_free"] = round(mem.free / (1024**3), 2)
+        pynvml.nvmlShutdown()
+        return info
+    except Exception:
+        pass
+
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM | ConvertTo-Json"],
+            capture_output=True, text=True, timeout=2
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            data = json.loads(result.stdout)
+            if isinstance(data, list) and len(data) > 0:
+                data = data[0]
+            name = data.get("Name", "unknown")
+            ram = data.get("AdapterRAM", 0)
+            if ram is None: ram = 0
+            
+            vendor = "none"
+            name_lower = name.lower()
+            if "amd" in name_lower or "radeon" in name_lower:
+                vendor = "amd"
+            elif "intel" in name_lower:
+                vendor = "intel"
+            
+            info["vendor"] = vendor
+            info["name"] = name
+            info["vram"] = round(float(ram) / (1024**3), 2)
+            info["vram_free"] = info["vram"]
+            return info
+    except Exception:
+        pass
+
+    return info
+
+def _get_installed_providers() -> list[str]:
+    try:
+        from .provider_service import ProviderService
+        cfg = ProviderService.get_public_config()
+        if cfg and cfg.providers:
+            return list(cfg.providers.keys())
+    except Exception:
+        pass
+    return []
 
 
 class HardwareMonitorService:
@@ -71,11 +145,20 @@ class HardwareMonitorService:
 
     def get_snapshot(self) -> HardwareSnapshot:
         mem = psutil.virtual_memory()
+        gpu_info = _detect_gpu()
+        
         return HardwareSnapshot(
             cpu_percent=psutil.cpu_percent(interval=0.1),
             ram_percent=mem.percent,
             ram_available_gb=round(mem.available / (1024 ** 3), 2),
             timestamp=time.time(),
+            gpu_vendor=gpu_info["vendor"],
+            gpu_name=gpu_info["name"],
+            gpu_vram_gb=gpu_info["vram"],
+            gpu_vram_free_gb=gpu_info["vram_free"],
+            total_ram_gb=round(mem.total / (1024 ** 3), 2),
+            wsl2_available=_detect_wsl2(),
+            installed_providers=_get_installed_providers()
         )
 
     def get_load_level(self, snapshot: Optional[HardwareSnapshot] = None) -> LoadLevel:

@@ -1,7 +1,7 @@
 # Security
 
-**Status**: NEEDS_REVIEW
-**Last verified**: N/A
+**Status**: CURRENT
+**Last verified**: 2026-03-04
 
 This document describes the security model implemented in the current codebase.
 
@@ -17,14 +17,16 @@ This document describes the security model implemented in the current codebase.
 ### Authentication
 
 - All API endpoints require `Authorization: Bearer <TOKEN>`.
-- Two token roles exist:
-  - **admin**: full access
-  - **actions** (read-only): blocked from non-read-only endpoints by `require_read_only_access`.
+- Three token roles exist:
+  - **actions** (read-only): lowest privilege, blocked from non-read-only endpoints.
+  - **operator**: can approve, create/cancel runs, view evals/trust/observability.
+  - **admin**: full control, can mutate plans/provider/config and manage drafts.
 
 Code:
 
 - `tools/gimo_server/security/auth.py`
-- `tools/gimo_server/routes.py`
+- `tools/gimo_server/routers/ops/common.py` (`_require_role()`)
+- `tools/gimo_server/routers/auth_router.py`
 
 ### Rate limiting
 
@@ -83,16 +85,30 @@ Required env for production license setup:
 - `ORCH_LICENSE_URL`
 - `ORCH_LICENSE_PUBLIC_KEY`
 
-## Allowlist (known gap)
+## Provider Authentication
 
-There is an allowlist mechanism intended to constrain enumeration.
+### Account mode (OAuth / Device Flow)
 
-Known mismatch to resolve before 1.0:
+- Supported for Codex (OpenAI) and Claude (Anthropic).
+- Device flow: user approves via browser, token stored securely.
+- Refresh token management with automatic renewal.
+- Fallback to `api_key` mode if account auth fails.
 
-- `tools/gimo_server/allowed_paths.json` currently contains objects with `{path, expires_at}`.
-- `get_allowed_paths()` currently expects a JSON with `timestamp` and a `paths` list of strings.
+Code:
 
-This can result in an empty allowlist at runtime and breaks the intended guardrail.
+- `tools/gimo_server/services/codex_auth_service.py`
+- `tools/gimo_server/services/claude_auth_service.py`
+- `tools/gimo_server/services/provider_auth_service.py`
+- `tools/gimo_server/services/provider_account_service.py`
+
+## GIMO Web Authentication
+
+- Firebase Auth (Google Sign-In) for user-facing web app.
+- JWT-based license validation between orchestrator and GIMO Web.
+- Ed25519 signature verification for offline license cache.
+- Internal auth via shared secret (`GIMO_INTERNAL_KEY`).
+
+Code: `apps/web/src/lib/`
 
 ## Verification approach
 1) Run all **non-LLM** security suites and quality gates first.
@@ -101,8 +117,7 @@ This can result in an empty allowlist at runtime and breaks the intended guardra
 Recommended evidence commands:
 
 ```cmd
-python scripts\\ci\\quality_gates.py
-python scripts\quality_gates.py
+python scripts\ci\quality_gates.py
 bandit -c pyproject.toml -r tools scripts
 pip-audit -r requirements.txt
 ```

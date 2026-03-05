@@ -1,7 +1,7 @@
 # GIMO Repository Master Refactor Plan
 
-> **Status:** ACTIVE — Documento autoritativo para la limpieza y refactor completo del repositorio
-> **Fecha:** 2026-02-23
+> **Status:** MOSTLY COMPLETE — Phases 0-4, 7 done. Tests consolidated (648→346). Monorepo unificado.
+> **Fecha:** 2026-02-23 (updated 2026-03-04)
 > **Objetivo:** Llevar el repo de 3/10 a 11/10 en salud de ingeniería
 > **Principio rector:** Si no se usa, se borra. Si se repite, se unifica. Si confunde, se simplifica.
 
@@ -590,17 +590,14 @@ FASE 7   → Polish final (15 min)
 
 ## Criterio Global de Éxito
 
-- [ ] `git branch -r` → solo `origin/main` + `origin/HEAD`
-- [ ] `ls tools/` → solo `gimo_server/` y `orchestrator_ui/`
-- [ ] `ls docs/*.md` → ≤8 archivos
-- [ ] `ls *.md` (root) → solo `README.md`
-- [ ] Zero archivos basura en root (no .json debug, no lock vacíos)
-- [ ] Zero `__pycache__` en workspace
-- [ ] Zero imports a módulos eliminados
-- [ ] `python -m pytest -x -q` → 100% pass, ~400-450 tests
-- [ ] `find tests -name "test_*.py" | wc -l` → ≤35 archivos
-- [ ] Zero tests con `_v2`, `_remaining`, `_hardened` en el nombre
-- [ ] Frontend sin bugs de auth, sin botones muertos, idioma unificado
+- [x] `ls tools/` → solo `gimo_server/` y `orchestrator_ui/`
+- [x] `ls docs/*.md` → ≤10 archivos activos
+- [x] Zero archivos basura en root
+- [x] Zero imports a módulos eliminados
+- [x] Frontend con auth funcional, idioma unificado
+- [x] Monorepo unificado con `apps/web/`
+- [ ] `python -m pytest -x -q` → 100% pass (~346 tests)
+- [ ] Frontend sin bugs restantes (UI Masterplan phases 1.5-5)
 - [ ] Un ingeniero nuevo puede entender el proyecto leyendo README + SYSTEM.md en <10 min
 
 ---

@@ -49,7 +49,7 @@ export default function GraphView({
                     <PanelGroup orientation="vertical">
                         <ResizePanel defaultSize={60} minSize={20} className="min-h-0 overflow-hidden relative">
                             <GraphCanvas
-                                onNodeSelect={(nodeId) => selectNode(nodeId)}
+                                onNodeSelect={selectNode}
                                 selectedNodeId={selectedNodeId}
                                 onNodeCountChange={onGraphNodeCountChange}
                                 onApprovePlan={onApprovePlan}

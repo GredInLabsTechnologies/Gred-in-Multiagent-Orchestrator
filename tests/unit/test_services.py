@@ -34,7 +34,7 @@ class TestModelRouter:
     async def test_policy_routing(self):
         router = ModelRouterService()
         node = WorkflowNode(id="n", type="llm_call", config={"task_type": "security_review"})
-        decision = await router.choose_model(node, state={})
+        decision = await router.choose_model(node, _state={})
         assert decision.model != "unknown"
         assert decision.tier >= 1
 
@@ -42,7 +42,7 @@ class TestModelRouter:
         router = ModelRouterService()
         node = WorkflowNode(id="n", type="llm_call", config={"task_type": "code_generation"})
         state = {"budget": {"max_cost_usd": 10.0}, "budget_counters": {"cost_usd": 9.5}}
-        decision = await router.choose_model(node, state=state)
+        decision = await router.choose_model(node, _state=state)
         assert decision.model != "unknown"
 
     async def test_phase6_forced_local_for_security_change(self):

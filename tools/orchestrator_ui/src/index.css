@@ -102,8 +102,13 @@
 
 /* ── Animated edge flow ── */
 @keyframes edgeFlow {
-    from { stroke-dashoffset: 24; }
-    to { stroke-dashoffset: 0; }
+    from {
+        stroke-dashoffset: 24;
+    }
+
+    to {
+        stroke-dashoffset: 0;
+    }
 }
 
 .react-flow__edge-path {
@@ -112,10 +117,21 @@
 }
 
 /* ── Glow utilities ── */
-.glow-primary { box-shadow: 0 0 30px var(--glow-primary); }
-.glow-approval { box-shadow: 0 0 20px var(--glow-approval); }
-.glow-trust { box-shadow: 0 0 20px var(--glow-trust); }
-.glow-alert { box-shadow: 0 0 20px var(--glow-alert); }
+.glow-primary {
+    box-shadow: 0 0 30px var(--glow-primary);
+}
+
+.glow-approval {
+    box-shadow: 0 0 20px var(--glow-approval);
+}
+
+.glow-trust {
+    box-shadow: 0 0 20px var(--glow-trust);
+}
+
+.glow-alert {
+    box-shadow: 0 0 20px var(--glow-alert);
+}
 
 .glow-green {
     box-shadow: 0 0 20px var(--glow-trust);
@@ -131,8 +147,13 @@
 
 /* ── Skeleton loading ── */
 @keyframes shimmer {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
+    0% {
+        background-position: -200% 0;
+    }
+
+    100% {
+        background-position: 200% 0;
+    }
 }
 
 .skeleton {
@@ -165,14 +186,26 @@
     fill: var(--text-primary) !important;
 }
 
-.react-flow__node.selected > div {
+.react-flow__nodesselection-rect {
+    stroke: transparent !important;
+    fill: transparent !important;
+}
+
+.react-flow__node.selected>div {
     outline: none;
 }
 
 /* ── Toast animation ── */
 @keyframes slideInRight {
-    from { transform: translateX(100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
 }
 
 .toast-enter {
@@ -181,8 +214,15 @@
 
 /* ── Status pulse ── */
 @keyframes statusPulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
 }
 
 .status-dot-active {
@@ -191,10 +231,13 @@
 
 /* ── Node pulse for running status ── */
 @keyframes nodePulse {
-    0%, 100% {
+
+    0%,
+    100% {
         border-color: rgba(59, 130, 246, 0.5);
         box-shadow: 0 0 8px rgba(59, 130, 246, 0.1);
     }
+
     50% {
         border-color: rgba(59, 130, 246, 0.8);
         box-shadow: 0 0 20px rgba(59, 130, 246, 0.25);
@@ -207,87 +250,202 @@
 
 /* ── Login boot sequence ── */
 @keyframes scanLine {
-    0% { transform: translateX(-100%); opacity: 0; }
-    20% { opacity: 1; }
-    100% { transform: translateX(100%); opacity: 0; }
+    0% {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+
+    20% {
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateX(100%);
+        opacity: 0;
+    }
 }
 
 @keyframes typeIn {
-    from { width: 0; }
-    to { width: 100%; }
+    from {
+        width: 0;
+    }
+
+    to {
+        width: 100%;
+    }
 }
 
 @keyframes glowPulse {
-    0%, 100% { box-shadow: 0 0 20px var(--glow-primary); }
-    50% { box-shadow: 0 0 40px var(--glow-primary), 0 0 60px rgba(59, 130, 246, 0.1); }
+
+    0%,
+    100% {
+        box-shadow: 0 0 20px var(--glow-primary);
+    }
+
+    50% {
+        box-shadow: 0 0 40px var(--glow-primary), 0 0 60px rgba(59, 130, 246, 0.1);
+    }
 }
 
 @keyframes materialize {
-    0% { opacity: 0; transform: scale(0.95); }
-    100% { opacity: 1; transform: scale(1); }
+    0% {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 
 @keyframes zoomFadeOut {
-    0% { opacity: 1; transform: scale(1); }
-    100% { opacity: 0; transform: scale(1.05); }
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    100% {
+        opacity: 0;
+        transform: scale(1.05);
+    }
 }
 
 @keyframes orbit {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* ── Micro-animation keyframes ── */
 @keyframes press {
-    0% { transform: scale(1); }
-    50% { transform: scale(0.97); }
-    100% { transform: scale(1); }
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(0.97);
+    }
+
+    100% {
+        transform: scale(1);
+    }
 }
 
 @keyframes slideInUp {
-    0% { transform: translateY(8px); opacity: 0; }
-    100% { transform: translateY(0); opacity: 1; }
+    0% {
+        transform: translateY(8px);
+        opacity: 0;
+    }
+
+    100% {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
 
 @keyframes slideInDown {
-    0% { transform: translateY(-8px); opacity: 0; }
-    100% { transform: translateY(0); opacity: 1; }
+    0% {
+        transform: translateY(-8px);
+        opacity: 0;
+    }
+
+    100% {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
 
 @keyframes slideInRightSmall {
-    0% { transform: translateX(12px); opacity: 0; }
-    100% { transform: translateX(0); opacity: 1; }
+    0% {
+        transform: translateX(12px);
+        opacity: 0;
+    }
+
+    100% {
+        transform: translateX(0);
+        opacity: 1;
+    }
 }
 
 @keyframes glowBreath {
-    0%, 100% { box-shadow: 0 0 12px var(--glow-primary); }
-    50% { box-shadow: 0 0 24px var(--glow-primary); }
+
+    0%,
+    100% {
+        box-shadow: 0 0 12px var(--glow-primary);
+    }
+
+    50% {
+        box-shadow: 0 0 24px var(--glow-primary);
+    }
 }
 
 @keyframes glowBreathApproval {
-    0%, 100% { box-shadow: 0 0 8px var(--glow-approval); }
-    50% { box-shadow: 0 0 20px var(--glow-approval); }
+
+    0%,
+    100% {
+        box-shadow: 0 0 8px var(--glow-approval);
+    }
+
+    50% {
+        box-shadow: 0 0 20px var(--glow-approval);
+    }
 }
 
 @keyframes confirmFlash {
-    0% { background-color: var(--accent-approval); opacity: 0.3; }
-    100% { background-color: transparent; opacity: 0; }
+    0% {
+        background-color: var(--accent-approval);
+        opacity: 0.3;
+    }
+
+    100% {
+        background-color: transparent;
+        opacity: 0;
+    }
 }
 
 @keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    20%, 60% { transform: translateX(-4px); }
-    40%, 80% { transform: translateX(4px); }
+
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    20%,
+    60% {
+        transform: translateX(-4px);
+    }
+
+    40%,
+    80% {
+        transform: translateX(4px);
+    }
 }
 
 @keyframes indeterminate {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(200%); }
+    0% {
+        transform: translateX(-100%);
+    }
+
+    100% {
+        transform: translateX(200%);
+    }
 }
 
 @keyframes countUp {
-    0% { transform: translateY(100%); opacity: 0; }
-    100% { transform: translateY(0); opacity: 1; }
+    0% {
+        transform: translateY(100%);
+        opacity: 0;
+    }
+
+    100% {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
 
 @layer base {
@@ -302,15 +460,21 @@
 }
 
 /* ── Global transitions for interactive elements ── */
-button, a, [role="button"], [tabindex="0"],
-input, select, textarea {
+button,
+a,
+[role="button"],
+[tabindex="0"],
+input,
+select,
+textarea {
     transition-property: color, background-color, border-color, box-shadow, opacity, transform;
     transition-duration: 150ms;
     transition-timing-function: ease-out;
 }
 
 /* Active state tactile global */
-button:active, [role="button"]:active {
+button:active,
+[role="button"]:active {
     transform: scale(0.97);
 }
 
@@ -347,8 +511,15 @@ button:active, [role="button"]:active {
 
 /* Diff Animations */
 @keyframes diffIn {
-    from { transform: translateY(10px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
+    from {
+        transform: translateY(10px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
 
 .animate-diff-in {
@@ -389,8 +560,13 @@ button:active, [role="button"]:active {
 
 /* Animation utilities */
 @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
 }
 
 .animate-fade-in {
@@ -436,14 +612,24 @@ button:active, [role="button"]:active {
 
 /* ── Edge flow animation for SVG ── */
 @keyframes edge-flow {
-    from { stroke-dashoffset: 12; }
-    to { stroke-dashoffset: 0; }
+    from {
+        stroke-dashoffset: 12;
+    }
+
+    to {
+        stroke-dashoffset: 0;
+    }
 }
 
 /* ── Node shimmer overlay ── */
 @keyframes node-shimmer {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(100%); }
+    0% {
+        transform: translateX(-100%);
+    }
+
+    100% {
+        transform: translateX(100%);
+    }
 }
 
 .animate-shimmer {
@@ -452,7 +638,10 @@ button:active, [role="button"]:active {
 
 /* ── Reduced motion: cancel ALL complex animations ── */
 @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
+
+    *,
+    *::before,
+    *::after {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;

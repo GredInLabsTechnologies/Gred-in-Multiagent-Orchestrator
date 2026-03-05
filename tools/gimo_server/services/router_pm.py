@@ -30,7 +30,7 @@ class RouterPM:
             f"- user_request_raw: {user_request_raw}\n"
             f"- repo_context (stack, commands, paths_of_interest): {repo_context.model_dump_json()}\n\n"
             "OUTPUT FORMAT: ONLY JSON compatible with this schema:\n"
-            '{"objective":"...", "constraints":["..."], "acceptance_criteria":["..."], "execution":{"intent_class":"feature|bugfix|refactor|chore"}, "out_of_scope":["..."]}\n'
+            '{"objective":"...", "constraints":["..."], "acceptance_criteria":["..."], "execution":{"intent_class":"feature|bugfix|refactor|chore", "path_scope":["src/file.py"]}, "out_of_scope":["..."]}\n'
             "NO MARKDOWN CODE BLOCKS. ONLY RAW JSON TEXT."
         )
 

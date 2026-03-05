@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 
@@ -37,20 +37,22 @@ const STYLES: Record<Toast['type'], string> = {
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [toasts, setToasts] = useState<Toast[]>([]);
 
-    const addToast = useCallback((message: string, type: Toast['type'] = 'info') => {
-        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        setToasts((prev) => [...prev, { id, message, type }]);
-        setTimeout(() => {
-            setToasts((prev) => prev.filter((t) => t.id !== id));
-        }, 4000);
-    }, []);
-
-    const removeToast = useCallback((id: string) => {
+    const dismissToast = useCallback((id: string) => {
         setToasts((prev) => prev.filter((t) => t.id !== id));
     }, []);
 
+    const addToast = useCallback((message: string, type: Toast['type'] = 'info') => {
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        setToasts((prev) => [...prev, { id, message, type }]);
+        setTimeout(() => dismissToast(id), 4000);
+    }, [dismissToast]);
+
+    const removeToast = dismissToast;
+
+    const contextValue = useMemo(() => ({ toasts, addToast, removeToast }), [toasts, addToast, removeToast]);
+
     return (
-        <ToastContext.Provider value={{ toasts, addToast, removeToast }}>
+        <ToastContext.Provider value={contextValue}>
             {children}
             <div
                 className="fixed bottom-16 right-4 z-[100] space-y-2 pointer-events-none"

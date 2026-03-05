@@ -173,7 +173,7 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
                                                 ${agent.trustLevel === level && level === 'autonomous' ? 'bg-accent-trust/10 border-accent-trust/30 text-accent-trust' : ''}
                                             ${agent.trustLevel === level && level === 'supervised' ? 'bg-accent-warning/10 border-accent-warning/30 text-accent-warning' : ''}
                                             ${agent.trustLevel === level && level === 'restricted' ? 'bg-accent-alert/10 border-accent-alert/30 text-accent-alert' : ''}
-                                            ${agent.trustLevel !== level ? 'bg-surface-0 border-border-primary text-text-secondary hover:bg-surface-3' : ''}
+                                            ${agent.trustLevel === level ? '' : 'bg-surface-0 border-border-primary text-text-secondary hover:bg-surface-3'}
                                             disabled:opacity-50 disabled:cursor-not-allowed
                                         `}
                                     >

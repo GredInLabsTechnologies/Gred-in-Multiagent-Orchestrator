@@ -37,6 +37,7 @@ filelock>=3.20.3  # Security fixes CVE-2025-68146, CVE-2026-22701
 
 # Hardware Monitoring
 psutil>=6.0.0  # CPU/RAM monitoring for intelligent model routing
+pynvml>=11.5.0 # NVIDIA GPU memory monitoring
 
 # ASN.1 Support (dependency of cryptography)
 pyasn1>=0.6.2  # Security fix CVE-2026-23490

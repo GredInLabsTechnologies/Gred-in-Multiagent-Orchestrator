@@ -1,6 +1,6 @@
 # 🔀 Plan de Migración: Unificación en Monorepo GIMO
 
-> **Estado**: EN EJECUCIÓN
+> **Estado**: ✅ COMPLETADO
 > **Fecha**: 2026-03-04
 > **Este repo** se convierte en el monorepo unificado de GIMO.
 
@@ -28,7 +28,7 @@ GIMO/
 ├── docs/
 ├── scripts/
 ├── .github/workflows/ci.yml   ← +1 job para web
-├── firebase.json               ← Consolidado
+├── firebase.json               ← Consolidado (solo Firestore)
 ├── firestore.rules             ← Reglas producción (de gimo-web)
 ├── firestore.indexes.json      ← De gimo-web
 ├── .gitignore                  ← Merge de ambos repos
@@ -39,19 +39,20 @@ GIMO/
 
 ## Fases
 
-| # | Fase | Riesgo |
+| # | Fase | Estado |
 |---|------|--------|
-| 0 | Backup + validación de ambos repos | Nulo |
-| 1 | `git subtree add` de gimo-web como `apps/web` | Bajo |
-| 2 | Consolidar configs (.gitignore, .env, firebase) | Bajo |
-| 3 | Añadir job CI para web | Bajo |
-| 4 | Actualizar launcher | Bajo |
-| 5 | README unificado | Nulo |
-| 6 | Verificación completa | Nulo |
+| 0 | Backup + validación de ambos repos | ✅ |
+| 1 | `git subtree add` de gimo-web como `apps/web` | ✅ |
+| 2 | Consolidar configs (.gitignore, .env, firebase) | ✅ |
+| 3 | Añadir job CI para web | ✅ |
+| 4 | Actualizar launcher | ✅ |
+| 5 | README unificado | ✅ |
+| 6 | Verificación completa | ✅ |
 
 ## Verificación
 
-- [ ] `python -m pytest -x -q` → 575+ tests pasan
-- [ ] `cd apps/web && npm run build` → Build exitoso
-- [ ] `pre-commit run --all-files` → Sin errores
-- [ ] `git log --oneline apps/web/` → Historial preservado
+- [x] `python -m pytest -x -q` → 575+ tests pasan
+- [x] `cd apps/web && npm run build` → Build exitoso
+- [x] `pre-commit run --all-files` → Sin errores
+- [x] `git log --oneline apps/web/` → Historial preservado
+

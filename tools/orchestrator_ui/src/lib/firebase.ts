@@ -19,14 +19,15 @@ export function isFirebaseConfigured(): boolean {
     );
 }
 
-let app: FirebaseApp | null = null;
-let auth: Auth | null = null;
-let googleProvider: GoogleAuthProvider | null = null;
+let _app: FirebaseApp | null = null;
+let _auth: Auth | null = null;
+let _googleProvider: GoogleAuthProvider | null = null;
 
 if (isFirebaseConfigured()) {
-    app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    googleProvider = new GoogleAuthProvider();
+    _app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+    _auth = getAuth(_app);
+    _googleProvider = new GoogleAuthProvider();
 }
 
-export { auth, googleProvider };
+export const auth = _auth;
+export const googleProvider = _googleProvider;

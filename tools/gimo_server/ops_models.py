@@ -10,6 +10,8 @@ from pydantic.config import ConfigDict
 ProviderType = Literal[
     "ollama_local",
     "ollama",
+    "sglang",
+    "lm_studio",
     "vllm",
     "llama-cpp",
     "tgi",
@@ -272,6 +274,12 @@ class ProviderConfig(BaseModel):
     effective_state: Dict[str, Any] = Field(default_factory=dict)
     capabilities_snapshot: Dict[str, Any] = Field(default_factory=dict)
 
+    # Phase C: Cloud + Local routing strategy
+    orchestrator_provider: Optional[str] = None
+    worker_provider: Optional[str] = None
+    orchestrator_model: Optional[str] = None
+    worker_model: Optional[str] = None
+
 
 class OpsCreateDraftRequest(BaseModel):
     # Legacy shape (kept for backward compatibility)
@@ -416,6 +424,7 @@ class RepoContext(BaseModel):
 
 class ContractExecution(BaseModel):
     intent_class: IntentClass
+    path_scope: List[str] = Field(default_factory=list)
 
 class StrictContract(BaseModel):
     objective: str = Field(min_length=10)

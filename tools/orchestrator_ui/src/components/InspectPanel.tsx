@@ -189,8 +189,8 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                             key={tab.id}
                             onClick={() => setView(tab.id)}
                             className={`relative px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider shrink-0 transition-all ${isActive
-                                    ? 'bg-accent-primary/15 text-accent-primary'
-                                    : 'text-text-tertiary hover:text-text-secondary hover:bg-white/[0.04]'
+                                ? 'bg-accent-primary/15 text-accent-primary'
+                                : 'text-text-tertiary hover:text-text-secondary hover:bg-white/[0.04]'
                                 }`}
                         >
                             <Icon size={12} />
@@ -280,11 +280,12 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
 
                                     {/* Hardware & Routing Info */}
                                     {hwInfo && (() => {
-                                        const bgClass = hwInfo.load_level === 'critical'
-                                            ? 'bg-red-500/10 border-red-500/20'
-                                            : hwInfo.load_level === 'caution'
-                                                ? 'bg-amber-500/10 border-amber-500/20'
-                                                : 'bg-surface-2/50 border-white/[0.04]';
+                                        const getBgClass = (level: string) => {
+                                            if (level === 'critical') return 'bg-red-500/10 border-red-500/20';
+                                            if (level === 'caution') return 'bg-amber-500/10 border-amber-500/20';
+                                            return 'bg-surface-2/50 border-white/[0.04]';
+                                        };
+                                        const bgClass = getBgClass(hwInfo.load_level);
                                         return (
                                             <div className={`p-4 rounded-xl border space-y-3 ${bgClass}`}>
                                                 <div className="flex items-center gap-2 text-text-secondary">
@@ -355,10 +356,10 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                                                 <div className="flex justify-between">
                                                     <span className="text-text-secondary">Hardware</span>
                                                     <span className={`font-mono ${(() => {
-                                                            if (routingInfo.hardware_state === 'critical') return 'text-red-400';
-                                                            if (routingInfo.hardware_state === 'caution') return 'text-amber-400';
-                                                            return 'text-emerald-400';
-                                                        })()
+                                                        if (routingInfo.hardware_state === 'critical') return 'text-red-400';
+                                                        if (routingInfo.hardware_state === 'caution') return 'text-amber-400';
+                                                        return 'text-emerald-400';
+                                                    })()
                                                         }`}>{routingInfo.hardware_state}</span>
                                                 </div>
                                             </div>

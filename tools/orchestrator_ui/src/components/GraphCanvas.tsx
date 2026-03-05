@@ -72,6 +72,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
     const { project } = useReactFlow();
     const hasFitViewRef = useRef(false);
+    const keysPressed = useRef(new Set<string>());
+    const tabConnectSourceRef = useRef<string | null>(null);
 
     /* Store slices — use selectors to avoid full-store re-renders */
     const isEditMode = useGraphStore((s) => s.isEditMode);
@@ -244,6 +246,15 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         loadPlan();
     }, [activePlanIdFromChat, setNodes, setEdges, addToast]);
 
+    /* -- Sync external selection -- */
+    useEffect(() => {
+        if (selectedNodeId) {
+            setNodes((nds) => nds.map(n =>
+                n.id === selectedNodeId && !n.selected ? { ...n, selected: true } : n
+            ));
+        }
+    }, [selectedNodeId, setNodes]);
+
     /* ── SSE for execution updates ── */
     useEffect(() => {
         if (!isEditMode || !activePlanId) return;
@@ -286,10 +297,31 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     /* ── Interactions ── */
     const onNodeClick: NodeMouseHandler = useCallback(
         (_event, node) => {
+            if (isEditMode && keysPressed.current.has('tab')) {
+                if (!tabConnectSourceRef.current) {
+                    tabConnectSourceRef.current = node.id;
+                    addToast('Nodo origen seleccionado para conectar. Haz tab+click en el destino.', 'info');
+                } else {
+                    if (tabConnectSourceRef.current !== node.id) {
+                        const source = tabConnectSourceRef.current;
+                        const target = node.id;
+                        setEdges((eds) => addEdge({
+                            id: `e-${source}-${target}-${Date.now()}`,
+                            source, target, type: 'animated', animated: true, style: { stroke: 'var(--status-pending)', strokeWidth: 2 }
+                        }, eds));
+                        addToast('Nodos conectados.', 'success');
+                    }
+                    tabConnectSourceRef.current = null;
+                }
+                return;
+            } else {
+                tabConnectSourceRef.current = null;
+            }
+
             onNodeSelect(node.id);
             if (isEditMode) useGraphStore.getState().setSelectedEditNodeId(node.id);
         },
-        [onNodeSelect, isEditMode],
+        [onNodeSelect, isEditMode, setEdges, addToast],
     );
 
     const createManualNode = useCallback(() => {
@@ -406,15 +438,113 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         [selectedEditNodeId, setNodes],
     );
 
+    const deleteSelectedElements = useCallback(() => {
+        if (!isEditMode) return;
+        const selectedNodes = nodes.filter((n: any) => n.selected || n.id === selectedEditNodeId);
+        if (selectedNodes.length === 0) return;
+
+        const ids = selectedNodes.map((n: any) => n.id);
+        setNodes((nds) => nds.filter((n: any) => !ids.includes(n.id)));
+        setEdges((eds) => eds.filter((e: any) => !ids.includes(e.source) && !ids.includes(e.target)));
+
+        if (selectedEditNodeId && ids.includes(selectedEditNodeId)) {
+            useGraphStore.getState().setSelectedEditNodeId(null);
+        }
+        addToast(`${ids.length} nodo(s) eliminado(s)`, 'info');
+    }, [isEditMode, nodes, selectedEditNodeId, setNodes, setEdges, addToast]);
+
+    const duplicateSelectedElements = useCallback(() => {
+        if (!isEditMode) return;
+        const selected = nodes.filter((n: any) => n.selected || n.id === selectedEditNodeId);
+        if (selected.length === 0) return;
+
+        const newNodes: any[] = [];
+        const newEdges: any[] = [];
+        const idMap = new Map<string, string>();
+
+        // Offset for duplicates
+        const offset = 50 + Math.random() * 20;
+
+        selected.forEach((n: any) => {
+            const newId = `${n.id}_copy_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+            idMap.set(n.id, newId);
+            newNodes.push({
+                id: newId,
+                type: n.type,
+                position: { x: n.position.x + offset, y: n.position.y + offset },
+                data: { ...n.data },
+                selected: true, // Only select the new duplicates
+            });
+        });
+
+        // Find edges between selected nodes
+        const selectedIds = new Set(selected.map((n: any) => n.id));
+        edges.forEach((e: any) => {
+            if (selectedIds.has(e.source) && selectedIds.has(e.target)) {
+                const newSource = idMap.get(e.source)!;
+                const newTarget = idMap.get(e.target)!;
+                newEdges.push({
+                    id: `e-${newSource}-${newTarget}-${Date.now()}`,
+                    source: newSource,
+                    target: newTarget,
+                    type: e.type,
+                    animated: e.animated,
+                    style: e.style,
+                    selected: true,
+                });
+            }
+        });
+
+        // Deselect original nodes
+        setNodes((nds) => [
+            ...nds.map((n: any) => ({ ...n, selected: false })),
+            ...newNodes
+        ]);
+        setEdges((eds) => [
+            ...eds.map((e: any) => ({ ...e, selected: false })),
+            ...newEdges
+        ]);
+
+        // Select the newest duplicate node for the editor panel if it was a single node
+        if (selected.length === 1) {
+            useGraphStore.getState().setSelectedEditNodeId(newNodes[0].id);
+        } else {
+            useGraphStore.getState().setSelectedEditNodeId(null);
+        }
+        addToast(`${newNodes.length} nodo(s) duplicado(s)`, 'success');
+    }, [isEditMode, nodes, edges, selectedEditNodeId, setNodes, setEdges, addToast]);
+
     const deleteSelectedNode = useCallback(() => {
-        if (!selectedEditNodeId) return;
-        setNodes((nds) => nds.filter((n: any) => n.id !== selectedEditNodeId));
-        setEdges((eds) =>
-            eds.filter((e: any) => e.source !== selectedEditNodeId && e.target !== selectedEditNodeId),
-        );
-        useGraphStore.getState().setSelectedEditNodeId(null);
-        addToast('Nodo eliminado.', 'info');
-    }, [selectedEditNodeId, setNodes, setEdges, addToast]);
+        deleteSelectedElements();
+    }, [deleteSelectedElements]);
+
+    useEffect(() => {
+        const handleGlobalKeyDown = (e: KeyboardEvent) => {
+            keysPressed.current.add(e.key.toLowerCase());
+
+            // Alt+X -> delete selected
+            if (e.altKey && e.key.toLowerCase() === 'x') {
+                e.preventDefault();
+                deleteSelectedElements();
+            }
+
+            // Alt+D -> duplicate selected
+            if (e.altKey && e.key.toLowerCase() === 'd') {
+                e.preventDefault();
+                duplicateSelectedElements();
+            }
+        };
+        const handleGlobalKeyUp = (e: KeyboardEvent) => {
+            keysPressed.current.delete(e.key.toLowerCase());
+        };
+
+        window.addEventListener('keydown', handleGlobalKeyDown);
+        window.addEventListener('keyup', handleGlobalKeyUp);
+        return () => {
+            window.removeEventListener('keydown', handleGlobalKeyDown);
+            window.removeEventListener('keyup', handleGlobalKeyUp);
+        };
+    }, [deleteSelectedElements, duplicateSelectedElements]);
 
     /* ── Save & Execute ── */
     const handleSaveDraft = useCallback(async () => {
@@ -496,13 +626,25 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     /* ── Render ─────────────────────────────────────── */
 
+    const onSelectionChange = useCallback(({ nodes: selectedNodes }: any) => {
+        if (selectedNodes.length === 1) {
+            onNodeSelect(selectedNodes[0].id);
+            if (isEditMode) useGraphStore.getState().setSelectedEditNodeId(selectedNodes[0].id);
+        } else if (selectedNodes.length === 0) {
+            // Unselect on empty selection
+            onNodeSelect(null);
+            if (isEditMode) useGraphStore.getState().setSelectedEditNodeId(null);
+        }
+    }, [isEditMode, onNodeSelect]);
+
     return (
         <div className="w-full h-full bg-surface-1">
             <ReactFlow
-                nodes={nodes.map((n) => ({ ...n, selected: n.id === selectedNodeId }))}
+                nodes={nodes}
                 edges={edges}
                 onNodesChange={handleNodesChange}
                 onEdgesChange={onEdgesChange}
+                onSelectionChange={onSelectionChange}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 onNodeClick={onNodeClick}
@@ -512,6 +654,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 fitView={!hasFitViewRef.current}
                 onInit={() => { hasFitViewRef.current = true; }}
                 proOptions={{ hideAttribution: true }}
+                selectionOnDrag={true}
+                panOnScroll={true}
+                panOnDrag={[1, 2]}
                 minZoom={0.3}
                 maxZoom={2}
                 defaultViewport={{ x: 0, y: 0, zoom: 0.85 }}

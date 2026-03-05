@@ -50,6 +50,10 @@ class ProviderCapabilityService:
         "aws_bedrock": "aws-bedrock",
         "vertex-ai": "vertex-ai",
         "vertex_ai": "vertex-ai",
+        "sglang": "sglang",
+        "lm_studio": "lm_studio",
+        "lmstudio": "lm_studio",
+        "lm-studio": "lm_studio",
     }
 
     _CAPABILITY_MATRIX: Dict[str, Dict[str, Any]] = {
@@ -59,6 +63,22 @@ class ProviderCapabilityService:
             "install_method": "local_runtime",
             "supports_account_mode": False,
             "supports_recommended_models": True,
+            "requires_remote_api": False,
+        },
+        "sglang": {
+            "auth_modes_supported": ["none"],
+            "can_install": False,
+            "install_method": "manual",
+            "supports_account_mode": False,
+            "supports_recommended_models": False,
+            "requires_remote_api": False,
+        },
+        "lm_studio": {
+            "auth_modes_supported": ["none"],
+            "can_install": False,
+            "install_method": "manual",
+            "supports_account_mode": False,
+            "supports_recommended_models": False,
             "requires_remote_api": False,
         },
         "vllm": {

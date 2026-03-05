@@ -23,6 +23,8 @@ logger = logging.getLogger("orchestrator.ops.provider")
 _OPENAI_COMPAT_ADAPTER_TYPES = {
     "custom_openai_compatible",
     "ollama_local",
+    "sglang",
+    "lm_studio",
     "openai",
     "codex",
     "groq",
@@ -77,6 +79,8 @@ _DEFAULT_BASE_URLS: Dict[str, str] = {
     "together": "https://api.together.xyz/v1",
     "fireworks": "https://api.fireworks.ai/inference/v1",
     "huggingface": "https://router.huggingface.co/v1",
+    "sglang": "http://localhost:30000/v1",
+    "lm_studio": "http://localhost:1234/v1",
 }
 
 class ProviderService:
@@ -164,6 +168,10 @@ class ProviderService:
             last_validated_at=cfg.last_validated_at,
             effective_state=dict(cfg.effective_state or {}),
             capabilities_snapshot=dict(cfg.capabilities_snapshot or {}),
+            orchestrator_provider=cfg.orchestrator_provider,
+            worker_provider=cfg.worker_provider,
+            orchestrator_model=cfg.orchestrator_model,
+            worker_model=cfg.worker_model,
         )
 
         return ProviderStateService.hydrate_v2_fields(normalized_cfg, cls.normalize_provider_type)
@@ -222,6 +230,10 @@ class ProviderService:
             last_validated_at=cfg.last_validated_at,
             effective_state=dict(cfg.effective_state or {}),
             capabilities_snapshot=dict(cfg.capabilities_snapshot or {}),
+            orchestrator_provider=cfg.orchestrator_provider,
+            worker_provider=cfg.worker_provider,
+            orchestrator_model=cfg.orchestrator_model,
+            worker_model=cfg.worker_model,
         )
 
     @classmethod
@@ -349,8 +361,8 @@ class ProviderService:
         return cfg
 
     @classmethod
-    def _build_adapter(cls, cfg: ProviderConfig) -> ProviderAdapter:
-        active = cfg.active
+    def _build_adapter(cls, cfg: ProviderConfig, provider_id: Optional[str] = None) -> ProviderAdapter:
+        active = provider_id or cfg.active
         if active not in cfg.providers:
             raise ValueError(f"Active provider not found in config: {active}")
         entry = cfg.providers[active]
@@ -421,18 +433,27 @@ class ProviderService:
         # Prioritize model from context if provided (Cascade override)
         requested_model = context.get("model") or context.get("selected_model")
         
-        # Determine task type for caching
+        # Determine task type for caching and routing
         task_type = context.get("task_type", "default")
         
+        # --- Phase C: Cloud + Local Architecture Routing ---
+        effective_provider = cfg.active
+        
+        if not context.get("model"):  # Only if not explicitly passed by Phase 6 logic
+            tier_prov, tier_model = ModelRouterService.resolve_tier_routing(task_type, cfg)
+            if tier_prov:
+                effective_provider = tier_prov
+                requested_model = tier_model or requested_model
+
         # 1. OPT-IN CACHE CHECK
         if economy.cache_enabled:
             cache = cls._get_cache(ttl_hours=economy.cache_ttl_hours)
             cached_result = cache.get(prompt, task_type)
             if cached_result:
-                model_name = requested_model or cfg.providers[cfg.active].model
+                model_name = requested_model or cfg.providers[effective_provider].model
                 logger.info("Cache hit for task_type='%s' (model='%s')", task_type, model_name)
                 return {
-                    "provider": cfg.active,
+                    "provider": effective_provider,
                     "model": model_name,
                     "content": cached_result["result"],
                     "tokens_used": 0,
@@ -444,8 +465,8 @@ class ProviderService:
                     "metadata": cached_result.get("metadata", {})
                 }
         
-        adapter = cls._build_adapter(cfg)
-        
+        adapter = cls._build_adapter(cfg, provider_id=effective_provider)
+
         # If a specific model is requested, try to use it if the provider supports it
         # Note: We still use the active provider adapter, but can tell it which model to use.
         if requested_model:
@@ -460,11 +481,11 @@ class ProviderService:
         total_t = prompt_t + completion_t
         
         # Determine model for pricing (use requested if available, else adapter default)
-        model_name = requested_model or getattr(adapter, "model", cfg.providers[cfg.active].model)
+        model_name = requested_model or getattr(adapter, "model", cfg.providers[effective_provider].model)
         cost_usd = CostService.calculate_cost(model_name, prompt_t, completion_t)
         
         result = {
-            "provider": cfg.active,
+            "provider": effective_provider,
             "model": model_name,
             "content": content,
             "tokens_used": total_t,
@@ -483,7 +504,7 @@ class ProviderService:
                 "metadata": {
                     "usage": usage,
                     "model": model_name,
-                    "provider": cfg.active
+                    "provider": effective_provider
                 }
             })
 

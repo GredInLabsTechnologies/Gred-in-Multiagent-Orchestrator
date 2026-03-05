@@ -113,3 +113,8 @@ gimo_debug.log
 .dataconnect
 *.pem
 *.tgz
+*.tsbuildinfo
+next-env.d.ts
+
+# ── Scratch / accidental files ───────────────────────────────
+tmp_*.py

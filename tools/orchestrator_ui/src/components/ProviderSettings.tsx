@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { useProviders } from '../hooks/useProviders';
 import { useToast } from './Toast';
+import { API_BASE } from '../types';
 import { Server, Cloud, Cpu, Trash2, Activity, Download, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 /* ── Friendly provider type labels ── */
@@ -117,6 +118,9 @@ export const ProviderSettings: React.FC = () => {
     // Codex device flow state
     const [deviceLoginState, setDeviceLoginState] = useState<{ status: string; verification_url?: string; user_code?: string; message?: string } | null>(null);
 
+    const [recommendation, setRecommendation] = useState<any>(null);
+    const [loadingRecommendation, setLoadingRecommendation] = useState(true);
+
     const providerTypes = Object.keys(providerCapabilities);
     const providerTypeOptions = useMemo(() => {
         const known = KNOWN_PROVIDER_TYPES.filter((ptype) => providerTypes.includes(ptype));
@@ -171,6 +175,21 @@ export const ProviderSettings: React.FC = () => {
 
     useEffect(() => {
         loadProviders();
+        let mounted = true;
+        const fetchRec = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/ops/provider/recommendation`, { credentials: 'include' });
+                if (res.ok && mounted) {
+                    setRecommendation(await res.json());
+                }
+            } catch (e) {
+                console.error(e);
+            } finally {
+                if (mounted) setLoadingRecommendation(false);
+            }
+        };
+        fetchRec();
+        return () => { mounted = false; };
     }, []);
 
     useEffect(() => {
@@ -352,6 +371,15 @@ export const ProviderSettings: React.FC = () => {
         }
     }, [providerId, modelId, authMode, providerType, apiKey, account, baseUrl, org, saveActiveProvider, addToast]);
 
+    const applyRecommendation = useCallback(() => {
+        if (!recommendation) return;
+        setProviderType(recommendation.provider);
+        setModelId(recommendation.model);
+        setAuthMode('none');
+        addToast(`Configuración sugerida aplicada: ${recommendation.provider} - ${recommendation.model}. Haz clic en Guardar Configuración.`, 'success');
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }, [recommendation, addToast]);
+
     return (
         <div className="space-y-6 text-text-primary p-4">
             <div className="flex items-center justify-between">
@@ -360,6 +388,27 @@ export const ProviderSettings: React.FC = () => {
                     Configuración de Providers
                 </h2>
             </div>
+
+            {!loadingRecommendation && recommendation && (
+                <Card className="bg-surface-2 border-indigo-500/50 p-4 border shadow-[0_0_15px_rgba(99,102,241,0.1)] relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
+                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                        <div>
+                            <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-1">
+                                <Cpu className="w-4 h-4 text-indigo-400" /> Intelligent Auto-Config
+                            </h3>
+                            <p className="text-xs text-text-secondary">
+                                Hardware detectado: {recommendation.hardware?.gpu_vendor && recommendation.hardware.gpu_vendor !== 'none' ? `${recommendation.hardware.gpu_vendor.toUpperCase()} GPU (${recommendation.hardware.gpu_vram_gb}GB)` : 'Sin GPU compatible detectada'}, RAM: {recommendation.hardware?.total_ram_gb}GB
+                            </p>
+                            <p className="text-xs text-indigo-200 mt-2 font-medium">Recomendación: {recommendation.provider} ({recommendation.model}) con {recommendation.workers} workers.</p>
+                            <p className="text-[10px] text-text-secondary mt-0.5">Motivo: {recommendation.reason}</p>
+                        </div>
+                        <Button onClick={applyRecommendation} className="bg-indigo-600 hover:bg-indigo-500 text-white shrink-0 text-xs">
+                            Aplicar Configuración
+                        </Button>
+                    </div>
+                </Card>
+            )}
 
             <Card className="bg-surface-2 border-border-primary p-4">
                 <h3 className="text-sm font-semibold mb-3 text-text-secondary uppercase tracking-wider">Estado efectivo actual</h3>

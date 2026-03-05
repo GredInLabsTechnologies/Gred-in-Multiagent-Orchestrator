@@ -66,6 +66,26 @@ class Phase6StrategyDecision:
 class ModelRouterService:
     """Agnostic model router that uses only the user's configured providers."""
 
+    @classmethod
+    def resolve_tier_routing(cls, task_type: str, config: Any) -> Tuple[Optional[str], Optional[str]]:
+        """Phase C: Returns (provider_id, model_id) based on configuration and task_type."""
+        orchestrator_tasks = {"contract", "review", "orchestrator", "intent_classification", "classification", "analysis", "security_review", "disruptive_planning"}
+        worker_tasks = {"coding", "code_generation", "test", "worker", "formatting", "doc_generation"}
+        
+        effective_provider = None
+        requested_model = None
+        
+        if task_type in orchestrator_tasks:
+            if getattr(config, "orchestrator_provider", None) and getattr(config, "providers", None) and config.orchestrator_provider in config.providers:
+                effective_provider = config.orchestrator_provider
+                requested_model = getattr(config, "orchestrator_model", None)
+        elif task_type in worker_tasks:
+            if getattr(config, "worker_provider", None) and getattr(config, "providers", None) and config.worker_provider in config.providers:
+                effective_provider = config.worker_provider
+                requested_model = getattr(config, "worker_model", None)
+                
+        return effective_provider, requested_model
+
     # Keep for backwards compat with CascadeService and tests
     _TIERS = _LEGACY_TIERS
 

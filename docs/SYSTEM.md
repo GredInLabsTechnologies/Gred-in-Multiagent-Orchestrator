@@ -1,9 +1,12 @@
 # GIMO — Gred in Multiagent Orchestrator (System & Operations)
 
 **Status**: AUTHORITATIVE (Source of Truth)
-**Last verified**: 2026-02-10
+**Last verified**: 2026-03-04
 
 This document defines **what GIMO is today** (not a roadmap). If something conflicts with this doc, this doc wins.
+
+> GIMO is part of the **Gred In Labs Technologies** monorepo.
+> Repo structure: `apps/web/` (GIMO Web — Next.js), `tools/gimo_server/` (backend), `tools/orchestrator_ui/` (frontend).
 
 ---
 
@@ -26,21 +29,33 @@ Core principles:
 High level:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ FastAPI (tools/gimo_server/main.py)               │
-│  - /status, /ui/*, /tree /file /search /diff            │
-│  - /ops/* (OPS runtime: drafts/approve/runs/config)     │
-│ middlewares: panic│cors│correlation│rate_limit│auth     │
-├─────────────────────────────────────────────────────────┤
-│ Services                                                │
-│  - OpsService (file-backed state)                       │
-│  - ProviderService (LLM adapters)                       │
-│  - RunWorker (executes pending runs)                    │
-├─────────────────────────────────────────────────────────┤
-│ Storage (.orch_data/ops)                                │
-│  - plan.json, config.json, provider.json                │
-│  - drafts/*.json, approved/*.json, runs/*.json          │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ GIMO Web (apps/web — Next.js 16)                           │
+│  - Landing, Firebase Auth, Stripe suscripciones            │
+│  - /api/license/*, /api/checkout, /api/webhooks/stripe     │
+│  - Deploy: Vercel (gimo-web.vercel.app)                    │
+├─────────────────────────────────────────────────────────────┤
+│ FastAPI (tools/gimo_server/main.py)                        │
+│  - /status, /ui/*, /tree, /file, /search, /diff            │
+│  - /ops/* (drafts/approve/runs/config/provider/evals/...)  │
+│  - /auth/* (session, login, provider accounts)             │
+│  middlewares: panic│cors│correlation│rate_limit│auth        │
+│  routers: 13 modular routers under routers/ops/            │
+├─────────────────────────────────────────────────────────────┤
+│ Services (52+ in tools/gimo_server/services/)              │
+│  - OpsService, ProviderService, RunWorker, GraphEngine     │
+│  - ProviderCatalogService, ProviderCapabilityService       │
+│  - CostService, TrustEngine, ObservabilityService          │
+│  - MergeGateService, PolicyService, SkillsService          │
+├─────────────────────────────────────────────────────────────┤
+│ Adapters (tools/gimo_server/adapters/)                     │
+│  - OpenAICompatible, ClaudeCode, Codex, Gemini             │
+│  - GenericCLI, MCPClient                                   │
+├─────────────────────────────────────────────────────────────┤
+│ Storage (.orch_data/ops)                                   │
+│  - plan.json, config.json, provider.json                   │
+│  - drafts/*.json, approved/*.json, runs/*.json             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 Durability model:
@@ -63,7 +78,7 @@ Roles are derived from which token is used:
 - `operator` — can approve and create/cancel runs (operational control)
 - `admin` — full control, can mutate plans/provider/config and manage drafts
 
-Role enforcement is implemented in `tools/gimo_server/ops_routes.py` using `_require_role()`.
+Role enforcement is implemented in `tools/gimo_server/routers/ops/common.py` using `_require_role()`.
 
 ### 2.2 Token safety
 
@@ -180,17 +195,24 @@ Background tasks started from FastAPI lifespan:
 
 ## 7) UI contract (current)
 
-The UI is served from `tools/orchestrator_ui/dist/` when built.
+The Orchestrator UI is served from `tools/orchestrator_ui/dist/` when built (dev server on port 5173).
 
-Implemented ops UI entrypoint:
+Stack: React + Vite + TypeScript + Zustand + Framer Motion.
 
-- `tools/orchestrator_ui/src/islands/system/OpsIsland.tsx`
+Key components:
 
-The UI is expected to:
+- `GraphCanvas` — interactive workflow graph (ReactFlow/xyflow)
+- `OrchestratorChat` — chat interface for plan creation
+- `SettingsPanel` / `ProviderSettings` — provider configuration and management
+- `InspectPanel` — node detail view
+- `StatusBar` — provider status, latency, cost
 
-- visualize drafts/approved/runs
-- allow safe operational actions (approve/reject/edit/cancel)
-- never circumvent approval gates
+The UI:
+
+- Visualizes drafts/approved/runs as interactive graph nodes
+- Allows safe operational actions (approve/reject/edit/cancel)
+- Never circumvents approval gates
+- Supports multi-provider configuration (Ollama, OpenAI, Anthropic, Groq, etc.)
 
 ---
 
@@ -224,41 +246,44 @@ python scripts\\ci\\quality_gates.py
 ## Appendix B — Component Architecture
 
 ### Capas
-0. **GICS Daemon (Node.js)** - Storage distribuido propietario
-1. **Services (Python)** - 30+ servicios, GraphEngine es el nucleo
-2. **REST API (FastAPI)** - ~95 endpoints en `/ops/*`, `/ui/*`, `/auth/*`
+0. **GIMO Web (Next.js 16)** - Landing, auth, licencias, Stripe (apps/web)
+1. **Services (Python)** - 52+ servicios, GraphEngine es el nucleo
+2. **REST API (FastAPI)** - ~100+ endpoints en `/ops/*`, `/ui/*`, `/auth/*`
 3. **MCP Server (FastMCP)** - 14 tools para IDEs via stdio/SSE
 4. **Frontend (React+Vite)** - Dashboard en puerto 5173
 
 ### Sistema de Storage
-- **Actual**: SQLite predominante en varios storages (`cost_storage`, `trust_storage`, `eval_storage`, etc.).
-- **GICS**: Daemon Node.js para almacenamiento. Tiene conectividad via socket y tiers de storage (hot/warm/cold).
-- **Pendiente**: Migrar todo el almacenamiento de SQLite a GICS para tener a GICS como unico origen de datos.
+- **Actual**: JSON file-backed para OPS state, SQLite para cost/trust/eval storage.
+- **GICS**: Daemon Node.js para almacenamiento distribuido (experimental).
 
 ### Flujo Principal Detallado
-1. **Draft**: Se recibe un prompt o intenct y se genera un borrador (`ExecutionPlanDraft`).
+1. **Draft**: Se recibe un prompt o intent y se genera un borrador (`ExecutionPlanDraft`).
 2. **Approved**: El usuario (o regla automatica) aprueba el plan.
 3. **Run**: El draft se convierte en un plan de ejecucion en el `GraphEngine`.
 4. **RunWorker**: El worker asincrono toma los nodos del grafo y delega el trabajo real.
-5. **ProviderService / LLM**: Se solicita inferencia al proveedor (ej. Qwen via Ollama, Groq, Codex).
+5. **ProviderService / LLM**: Se solicita inferencia al proveedor configurado.
 
-IDE → MCP tool → OpsService → RunWorker → ProviderService → LLM
+IDE → MCP tool → OpsService → RunWorker → ProviderService → Adapter → LLM
 
 ## Appendix C — LLM Adapters & Connectivity
 
 Desde esta fase, la **fuente unica de verdad** para providers es OPS (`/ops/provider`, `/ops/connectors`, etc.).
-Taxonomia canonica `provider_type`:
-- `ollama_local`, `openai`, `codex`, `groq`, `openrouter`, `custom_openai_compatible`
 
-### Matriz de Adaptadores (Compatibilidad)
-- **OpenAICompatibleAdapter**: Ollama, LM Studio, vLLM, DeepSeek, OpenAI (HTTP/JSON, Streaming, Tools limitados)
-- **ClaudeCodeAdapter**: Claude Code CLI (Stdio/MCP, Streaming, Tools)
-- **GeminiAdapter**: Gemini CLI (Stdio/JSON, Streaming, Tools)
-- **CodexAdapter**: Custom Codex CLI (Stdio/JSON, Streaming, Tools)
-- **GenericCLIAdapter**: Any CLI (Stdio/Text, Streaming)
+### Adaptadores Implementados (`tools/gimo_server/adapters/`)
+
+| Adapter | Protocolos | Providers |
+|---|---|---|
+| `OpenAICompatibleAdapter` | HTTP/JSON, Streaming | Ollama, LM Studio, vLLM, DeepSeek, OpenAI, Groq, OpenRouter |
+| `ClaudeCodeAdapter` | Stdio/MCP, Streaming | Claude Code CLI |
+| `CodexAdapter` | Stdio/JSON, Streaming | OpenAI Codex CLI |
+| `GeminiAdapter` | Stdio/JSON, Streaming | Gemini CLI |
+| `GenericCLIAdapter` | Stdio/Text, Streaming | Any CLI |
+| `MCPClientAdapter` | MCP Protocol | Any MCP-compatible server |
 
 ### Capability Matrix
 Cada provider declara `auth_modes_supported`, `can_install`, `install_method`, `supports_account_mode`, `supports_recommended_models`, `requires_remote_api`.
+
+Provider catalog: `tools/gimo_server/services/provider_catalog_service.py` (39K LOC).
 
 ## Appendix D — Sub-Delegation Protocol
 El protocolo define como un Primary Agent (e.g., Claude/GPT-4) delega sub-tareas a Sub-Agents (e.g., Ollama/CodeLlama).
@@ -267,9 +292,13 @@ El protocolo define como un Primary Agent (e.g., Claude/GPT-4) delega sub-tareas
 3. **Execution & Reporting**: Streaming output al contexto del Primary Agent.
 4. **Completion**: Retorna artefacto final como "tool result". Success or Failure.
 
-## Appendix E - Real State Map Priorities
-Prioridades basadas en el mapa de estado real de GIMO (P0/P1/P2/P3):
-- **P0**: Fix `gics_service.py` (import errors), fix `gimo_run_task()` (draft vacio), fix `custom_plan_router.py` (asyncio).
-- **P1**: Exponer ~80 endpoints faltantes via MCP bridge. Arreglar hooks frontend vacios y path mismatches.
-- **P2**: Migrar queries de agregacion (cost/trust/evals) de SQLite a GICS.
-- **P3**: Eliminar dependencias de servicios legacy. Actualizar `setup_mcp.py` para todos los IDEs.
+## Appendix E — Test Suite
+
+| Metric | Current |
+|---|---|
+| Test files | 37 |
+| Tests collected | 346 |
+| Directories | `unit/`, `integration/`, `fixtures/` |
+| Execution time | ~4s (unit), ~30s (with integration) |
+
+Run: `python -m pytest -m "not integration" -v`
