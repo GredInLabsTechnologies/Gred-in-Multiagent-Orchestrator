@@ -45,9 +45,12 @@ async def list_drafts(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
     rl: Annotated[None, Depends(check_rate_limit)],
+    status: Annotated[str | None, Query(description="Filter by status")] = None,
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
+    offset: Annotated[int | None, Query(ge=0)] = None,
 ):
     OpsService.set_gics(getattr(request.app.state, "gics", None))
-    return OpsService.list_drafts()
+    return OpsService.list_drafts(status=status, limit=limit, offset=offset)
 
 def _build_draft_context_and_scope(body: OpsCreateDraftRequest):
     context = dict(body.context or {})
@@ -160,14 +163,15 @@ async def update_draft(
     audit_log("OPS", f"/ops/drafts/{draft_id}", updated.id, operation="WRITE", actor=_actor_label(auth))
     return updated
 
-@router.post("/drafts/{draft_id}/reject", response_model=OpsDraft, responses={404: {"description": "Value error"}})
+@router.post("/drafts/{draft_id}/reject", response_model=OpsDraft, responses={403: {"description": "Role required"}, 404: {"description": "Value error"}})
 async def reject_draft(
     request: Request,
     draft_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
     rl: Annotated[None, Depends(check_rate_limit)],
 ):
-    _require_role(auth, "admin")
+    if auth.role not in ("admin", "operator"):
+        raise HTTPException(status_code=403, detail="admin/operator role required")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     try:
         updated = OpsService.reject_draft(draft_id)

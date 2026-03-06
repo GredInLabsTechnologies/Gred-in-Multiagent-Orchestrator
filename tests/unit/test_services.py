@@ -29,6 +29,24 @@ class _StubStorage:
     def __init__(self, records): self._records = records
     def list_trust_records(self, limit: int = 100): return self._records[:limit]
 
+
+class _StubGicsBridge:
+    def __init__(self):
+        self.calls = []
+        self.reliability = {"score": 0.77, "samples": 11}
+
+    def seed_model_prior(self, **kwargs):
+        self.calls.append(("seed", kwargs))
+        return {"ok": True, **kwargs}
+
+    def record_model_outcome(self, **kwargs):
+        self.calls.append(("record", kwargs))
+        return {"ok": True, **kwargs}
+
+    def get_model_reliability(self, **kwargs):
+        self.calls.append(("get", kwargs))
+        return dict(self.reliability)
+
 # ── Model Router & Budget ─────────────────────────────────
 
 @pytest.mark.asyncio
@@ -138,6 +156,45 @@ async def test_recommendation_service_returns_structured_topology():
     assert result["orchestrator"]["provider"] == result["provider"]
     assert isinstance(result["worker_pool"], list)
     assert result["worker_pool"][0]["count_hint"] == result["workers"]
+
+
+@pytest.mark.asyncio
+async def test_recommendation_service_separates_orchestrator_and_workers_with_reliability():
+    class _FakeMonitor:
+        @staticmethod
+        def get_current_state():
+            return {
+                "gpu_vendor": "nvidia",
+                "gpu_vram_gb": 40.0,
+                "gpu_vram_free_gb": 18.0,
+                "total_ram_gb": 64.0,
+                "wsl2_available": False,
+            }
+
+    catalog_models = [
+        SimpleNamespace(id="qwen-reasoner-coder:32b", size="32b", capabilities=["code", "reasoning"]),
+        SimpleNamespace(id="qwen-coder:7b", size="7b", capabilities=["code"]),
+        SimpleNamespace(id="llama-coder:13b", size="13b", capabilities=["code"]),
+    ]
+
+    def _fake_reliability(*, provider_type: str, model_id: str):
+        if model_id == "qwen-coder:7b":
+            return {"score": 0.95, "anomaly": False}
+        if model_id == "qwen-reasoner-coder:32b":
+            return {"score": 0.90, "anomaly": False}
+        if model_id == "llama-coder:13b":
+            return {"score": 0.70, "anomaly": False}
+        return {"score": 0.50, "anomaly": False}
+
+    with patch("tools.gimo_server.services.recommendation_service.HardwareMonitorService.get_instance", return_value=_FakeMonitor()):
+        with patch("tools.gimo_server.services.recommendation_service.ProviderCatalogService.list_available_models", new=AsyncMock(return_value=(catalog_models, []))):
+            with patch("tools.gimo_server.services.recommendation_service.OpsService.get_model_reliability", side_effect=_fake_reliability):
+                result = await RecommendationService.get_recommendation()
+
+    assert result["orchestrator"]["provider"] == "ollama"
+    assert result["orchestrator"]["model"] == "qwen-reasoner-coder:32b"
+    assert result["worker_pool"][0]["model"] == "qwen-coder:7b"
+    assert result["worker_pool"][0]["count_hint"] >= 1
 
 
 @pytest.mark.asyncio
@@ -334,3 +391,99 @@ def test_institutional_memory_suggests_block_on_failure_burst():
     suggestions = svc.generate_suggestions(limit=10)
     assert len(suggestions) == 1
     assert suggestions[0]["action"] == "block_dimension"
+
+
+def test_ops_service_gics_bridge_seed_record_get():
+    from tools.gimo_server.services.ops_service import OpsService
+
+    gics = _StubGicsBridge()
+    OpsService.set_gics(gics)
+
+    seeded = OpsService.seed_model_priors(
+        provider_type="openai",
+        model_id="gpt-4o",
+        prior_scores={"coding": 0.9},
+        metadata={"source": "test"},
+    )
+    assert seeded is not None and seeded["provider_type"] == "openai"
+
+    outcome = OpsService.record_model_outcome(
+        provider_type="openai",
+        model_id="gpt-4o",
+        success=True,
+        latency_ms=123.0,
+        cost_usd=0.01,
+        task_type="coding",
+    )
+    assert outcome is not None and outcome["success"] is True
+
+    reliability = OpsService.get_model_reliability(provider_type="openai", model_id="gpt-4o")
+    assert reliability is not None and math.isclose(reliability["score"], 0.77)
+
+    OpsService.set_gics(None)
+
+
+@pytest.mark.asyncio
+async def test_provider_service_static_generate_records_outcome_success():
+    fake_cfg = SimpleNamespace(
+        active="p1",
+        providers={
+            "p1": SimpleNamespace(model="gpt-4o-mini", provider_type="openai", type="openai")
+        },
+    )
+    fake_economy = SimpleNamespace(cache_enabled=False, cache_ttl_hours=24)
+
+    class _Adapter:
+        model = "gpt-4o-mini"
+
+        async def generate(self, prompt, context):
+            await asyncio.sleep(0)
+            return {
+                "content": "ok",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+
+    with patch.object(ProviderService, "get_config", return_value=fake_cfg):
+        with patch.object(ProviderService, "_build_adapter", return_value=_Adapter()):
+            with patch("tools.gimo_server.services.ops_service.OpsService.get_config", return_value=SimpleNamespace(economy=fake_economy)):
+                with patch("tools.gimo_server.services.ops_service.OpsService.record_model_outcome") as mock_record:
+                    result = await ProviderService.static_generate("hola", {"task_type": "coding"})
+
+    assert result["content"] == "ok"
+    assert mock_record.call_count == 1
+    kwargs = mock_record.call_args.kwargs
+    assert kwargs["success"] is True
+    assert kwargs["provider_type"] == "openai"
+    assert kwargs["model_id"] == "gpt-4o-mini"
+    assert kwargs["task_type"] == "coding"
+
+
+@pytest.mark.asyncio
+async def test_provider_service_static_generate_records_outcome_failure():
+    fake_cfg = SimpleNamespace(
+        active="p1",
+        providers={
+            "p1": SimpleNamespace(model="gpt-4o-mini", provider_type="openai", type="openai")
+        },
+    )
+    fake_economy = SimpleNamespace(cache_enabled=False, cache_ttl_hours=24)
+
+    class _Adapter:
+        model = "gpt-4o-mini"
+
+        async def generate(self, prompt, context):
+            raise RuntimeError("boom")
+
+    with patch.object(ProviderService, "get_config", return_value=fake_cfg):
+        with patch.object(ProviderService, "_build_adapter", return_value=_Adapter()):
+            with patch("tools.gimo_server.services.ops_service.OpsService.get_config", return_value=SimpleNamespace(economy=fake_economy)):
+                with patch("tools.gimo_server.services.ops_service.OpsService.record_model_outcome") as mock_record:
+                    with pytest.raises(RuntimeError):
+                        await ProviderService.static_generate("hola", {"task_type": "coding"})
+
+    assert mock_record.call_count == 1
+    kwargs = mock_record.call_args.kwargs
+    assert kwargs["success"] is False
+    assert kwargs["provider_type"] == "openai"
+    assert kwargs["model_id"] == "gpt-4o-mini"
+    assert kwargs["task_type"] == "coding"

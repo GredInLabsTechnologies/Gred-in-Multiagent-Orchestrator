@@ -2,7 +2,7 @@ import { ReactFlowProvider } from 'reactflow';
 import { Panel as ResizePanel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { GraphCanvas } from '../components/GraphCanvas';
 import { InspectPanel } from '../components/InspectPanel';
-import { OrchestratorChat } from '../components/OrchestratorChat';
+import { ChatTerminalLayout } from '../components/ChatTerminalLayout';
 import { WelcomeScreen } from '../components/WelcomeScreen';
 import { useAppStore } from '../stores/appStore';
 
@@ -73,8 +73,7 @@ export default function GraphView({
                                     >
                                         <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-text-secondary transition-transform" />
                                     </div>
-                                    <OrchestratorChat
-                                        isCollapsed={false}
+                                    <ChatTerminalLayout
                                         providerConnected={providerHealth.connected}
                                         onPlanGenerated={(planId) => setActivePlanIdFromChat(planId)}
                                         onNavigateToSettings={() => navigate('settings')}
@@ -93,12 +92,9 @@ export default function GraphView({
                             >
                                 <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-text-secondary transition-transform rotate-180" />
                             </div>
-                            <OrchestratorChat
-                                isCollapsed={true}
-                                providerConnected={providerHealth.connected}
-                                onPlanGenerated={(planId) => setActivePlanIdFromChat(planId)}
-                                onNavigateToSettings={() => navigate('settings')}
-                            />
+                            <div className="h-full flex items-center px-4 text-[11px] uppercase tracking-wider text-text-secondary">
+                                Chat/Terminal colapsado
+                            </div>
                         </div>
                     )}
 

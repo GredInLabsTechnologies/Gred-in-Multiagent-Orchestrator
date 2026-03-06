@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
@@ -6,6 +6,7 @@ from ...ops_models import CircuitBreakerConfigModel
 from ...services.storage_service import StorageService
 from ...services.trust_engine import TrustEngine
 from ...services.institutional_memory_service import InstitutionalMemoryService
+from ...services.ops_service import OpsService
 from .common import _require_role, _actor_label
 
 router = APIRouter()
@@ -104,3 +105,31 @@ async def trust_reset(
     save_security_db()
     audit_log("OPS", "/ops/trust/reset", "clear_all", operation="WRITE", actor=_actor_label(auth))
     return {"status": "success", "message": "Threat level reset to NOMINAL"}
+
+
+@router.get("/trust/ids/events")
+async def get_ids_events(
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+    agent_id: Annotated[Optional[str], Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+):
+    """Retrieve IDS agent action events."""
+    _require_role(auth, "operator")
+    # Using OpsService access to telemetry
+    if not OpsService._telemetry:
+         return {"items": [], "count": 0}
+    events = OpsService._telemetry.list_events(agent_id=agent_id, limit=limit)
+    return {"items": [e.model_dump() for e in events], "count": len(events)}
+
+
+@router.get("/trust/ids/insights")
+async def get_ids_insights(
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+    agent_id: Annotated[Optional[str], Query()] = None,
+):
+    """Retrieve structural recommendations for agent governance."""
+    _require_role(auth, "operator")
+    insights = OpsService.get_agent_insights(agent_id=agent_id)
+    return {"items": insights, "count": len(insights)}

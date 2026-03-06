@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, Loader2, Send, Sparkles, X, RefreshCw, AlertTriangle, ChevronDown } from 'lucide-react';
+import { Check, Loader2, Send, Sparkles, X, RefreshCw, AlertTriangle, ChevronDown, Activity } from 'lucide-react';
 import { API_BASE, ChatExecutionStep, ChatExecutionStepStatus, OpsApproveResponse, OpsDraft, Skill, SkillExecuteResponse } from '../types';
 import { useToast } from './Toast';
 
 type ComposerMode = 'generate' | 'draft';
+type DraftViewTab = 'pending' | 'approved' | 'rejected_error' | 'all';
 
 interface ChatMessage {
     id: string;
@@ -82,6 +83,9 @@ interface OrchestratorChatProps {
     providerConnected?: boolean;
     onPlanGenerated?: (planId: string) => void;
     onNavigateToSettings?: () => void;
+    onSendToTerminal?: (payload: { text: string; ts: string; source: 'chat' }) => void;
+    onViewInFlow?: (agentId?: string) => void;
+    inboundTerminalSummary?: { id: string; text: string; ts: string } | null;
 }
 
 /* ── Timestamp formatter ── */
@@ -107,6 +111,9 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     providerConnected = true,
     onPlanGenerated,
     onNavigateToSettings,
+    onSendToTerminal,
+    onViewInFlow,
+    inboundTerminalSummary,
 }) => {
     const [messages, setMessages] = useState<ChatMessage[]>([
         {
@@ -121,6 +128,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     const [mode, setMode] = useState<ComposerMode>('generate');
     const [isSending, setIsSending] = useState(false);
     const [isLoadingDrafts, setIsLoadingDrafts] = useState(false);
+    const [draftViewTab, setDraftViewTab] = useState<DraftViewTab>('pending');
     const [approvingId, setApprovingId] = useState<string | null>(null);
     const [stepsCollapsed, setStepsCollapsed] = useState<Set<string>>(new Set());
     const [skillsCatalog, setSkillsCatalog] = useState<Skill[]>([]);
@@ -139,10 +147,29 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
         }
     }, [messages]);
 
-    const pendingDrafts = useMemo(
-        () => drafts.filter((d) => d.status === 'draft').sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)),
+    const sortedDrafts = useMemo(
+        () => [...drafts].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)),
         [drafts],
     );
+
+    const draftCounts = useMemo(() => {
+        const pending = drafts.filter((d) => d.status === 'draft').length;
+        const approved = drafts.filter((d) => d.status === 'approved').length;
+        const rejectedError = drafts.filter((d) => d.status === 'rejected' || d.status === 'error').length;
+        return {
+            pending,
+            approved,
+            rejectedError,
+            all: drafts.length,
+        };
+    }, [drafts]);
+
+    const visibleDrafts = useMemo(() => {
+        if (draftViewTab === 'pending') return sortedDrafts.filter((d) => d.status === 'draft');
+        if (draftViewTab === 'approved') return sortedDrafts.filter((d) => d.status === 'approved');
+        if (draftViewTab === 'rejected_error') return sortedDrafts.filter((d) => d.status === 'rejected' || d.status === 'error');
+        return sortedDrafts;
+    }, [draftViewTab, sortedDrafts]);
 
     const parseSlash = useCallback((value: string) => {
         const trimmed = value.trim();
@@ -243,6 +270,16 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
 
     useEffect(() => { fetchDrafts(); }, [fetchDrafts]);
 
+    useEffect(() => {
+        if (!inboundTerminalSummary) return;
+        appendMessage({
+            id: `m-terminal-summary-${inboundTerminalSummary.id}`,
+            role: 'system',
+            text: `[Terminal] ${inboundTerminalSummary.text}`,
+            ts: inboundTerminalSummary.ts,
+        });
+    }, [appendMessage, inboundTerminalSummary]);
+
     const fetchSkillsCatalog = useCallback(async (): Promise<Skill[]> => {
         if (skillsLoadingRef.current) return [];
         skillsLoadingRef.current = true;
@@ -317,7 +354,13 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     const rejectDraft = async (draftId: string) => {
         try {
             const response = await fetch(`${API_BASE}/ops/drafts/${draftId}/reject`, { method: 'POST', credentials: 'include' });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            if (!response.ok) {
+                if (response.status === 403) {
+                    addToast('No autorizado para rechazar draft (requiere operator/admin)', 'error');
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}`);
+            }
             setDrafts((prev) => prev.map((d) => (d.id === draftId ? { ...d, status: 'rejected' } : d)));
             appendMessage({ id: `m-reject-${Date.now()}`, role: 'system', text: `Draft ${draftId} rechazado.`, ts: new Date().toISOString(), draftId });
             addToast('Draft rechazado', 'info');
@@ -585,6 +628,16 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                     <p className="text-xs text-text-primary leading-relaxed whitespace-pre-wrap">
                                         {message.text}
                                     </p>
+                                    {onSendToTerminal && (
+                                        <div className="mt-2">
+                                            <button
+                                                onClick={() => onSendToTerminal({ text: message.text, ts: new Date().toISOString(), source: 'chat' })}
+                                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] bg-accent-primary/10 text-accent-primary border border-accent-primary/20 transition-colors hover:bg-accent-primary/15"
+                                            >
+                                                Enviar a terminal
+                                            </button>
+                                        </div>
+                                    )}
 
                                     {/* Intent / Decision badges */}
                                     {(message.detectedIntent || message.decisionPath || message.executionDecision || typeof message.riskScore === 'number') && (
@@ -674,7 +727,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                     )}
 
                                     {/* Draft actions */}
-                                    {message.draftId && pendingDrafts.some((d) => d.id === message.draftId) && (
+                                    {message.draftId && drafts.some((d) => d.id === message.draftId && d.status === 'draft') && (
                                         <div className="mt-2 flex items-center gap-2">
                                             <button
                                                 onClick={() => approveDraft(message.draftId!)}
@@ -704,6 +757,16 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                                 <Sparkles size={11} />
                                                 Ejecutar run
                                             </button>
+                                            {onViewInFlow && (
+                                                <button
+                                                    onClick={() => onViewInFlow(message.approvedId)}
+                                                    className="ml-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] bg-white/[0.04] text-text-tertiary border border-white/[0.06] transition-colors hover:text-text-secondary hover:bg-white/[0.06]"
+                                                    title="Investigar telemetría en el Flujo IDS"
+                                                >
+                                                    <Activity size={10} />
+                                                    Flujo
+                                                </button>
+                                            )}
                                         </div>
                                     )}
                                 </motion.div>
@@ -808,12 +871,38 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                         </button>
                     </div>
                     <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 custom-scrollbar">
-                        {pendingDrafts.length === 0 ? (
+                        <div className="grid grid-cols-2 gap-1.5 mb-2">
+                            <button
+                                onClick={() => setDraftViewTab('pending')}
+                                className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${draftViewTab === 'pending' ? 'border-accent-primary/30 text-accent-primary bg-accent-primary/8' : 'border-white/[0.06] text-text-secondary hover:text-text-primary'}`}
+                            >
+                                Pendientes ({draftCounts.pending})
+                            </button>
+                            <button
+                                onClick={() => setDraftViewTab('approved')}
+                                className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${draftViewTab === 'approved' ? 'border-accent-primary/30 text-accent-primary bg-accent-primary/8' : 'border-white/[0.06] text-text-secondary hover:text-text-primary'}`}
+                            >
+                                Aprobados ({draftCounts.approved})
+                            </button>
+                            <button
+                                onClick={() => setDraftViewTab('rejected_error')}
+                                className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${draftViewTab === 'rejected_error' ? 'border-accent-primary/30 text-accent-primary bg-accent-primary/8' : 'border-white/[0.06] text-text-secondary hover:text-text-primary'}`}
+                            >
+                                Rech/Error ({draftCounts.rejectedError})
+                            </button>
+                            <button
+                                onClick={() => setDraftViewTab('all')}
+                                className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${draftViewTab === 'all' ? 'border-accent-primary/30 text-accent-primary bg-accent-primary/8' : 'border-white/[0.06] text-text-secondary hover:text-text-primary'}`}
+                            >
+                                Todos ({draftCounts.all})
+                            </button>
+                        </div>
+                        {visibleDrafts.length === 0 ? (
                             <p className="text-[11px] text-text-tertiary text-center py-8">
-                                No hay drafts pendientes.
+                                No hay drafts para este filtro.
                             </p>
                         ) : (
-                            pendingDrafts.map((draft) => (
+                            visibleDrafts.map((draft) => (
                                 <div
                                     key={draft.id}
                                     className="rounded-xl border border-white/[0.04] bg-surface-2/50 p-2.5 space-y-2 hover:border-white/[0.08] transition-colors"
@@ -822,21 +911,24 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                         <div className="text-[9px] text-text-tertiary">{formatTime(draft.created_at)}</div>
                                         <div className="text-[11px] text-text-primary line-clamp-3 mt-0.5">{draft.prompt}</div>
                                     </div>
-                                    <div className="flex gap-1.5">
-                                        <button
-                                            onClick={() => void approveDraft(draft.id)}
-                                            disabled={!!approvingId}
-                                            className="flex-1 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] disabled:opacity-50 hover:bg-emerald-500/15 transition-colors"
-                                        >
-                                            Aprobar
-                                        </button>
-                                        <button
-                                            onClick={() => void rejectDraft(draft.id)}
-                                            className="flex-1 h-7 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] hover:bg-red-500/15 transition-colors"
-                                        >
-                                            Rechazar
-                                        </button>
-                                    </div>
+                                    <div className="text-[9px] text-text-tertiary uppercase tracking-wider">Estado: {draft.status}</div>
+                                    {draft.status === 'draft' && (
+                                        <div className="flex gap-1.5">
+                                            <button
+                                                onClick={() => void approveDraft(draft.id)}
+                                                disabled={!!approvingId}
+                                                className="flex-1 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] disabled:opacity-50 hover:bg-emerald-500/15 transition-colors"
+                                            >
+                                                Aprobar
+                                            </button>
+                                            <button
+                                                onClick={() => void rejectDraft(draft.id)}
+                                                className="flex-1 h-7 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] hover:bg-red-500/15 transition-colors"
+                                            >
+                                                Rechazar
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             ))
                         )}

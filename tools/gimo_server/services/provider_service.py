@@ -99,6 +99,8 @@ class ProviderService:
         OPS_DATA_DIR.mkdir(parents=True, exist_ok=True)
         if cls.CONFIG_FILE.exists():
             return
+            
+        default_model = "qwen2.5-coder:3b"
         default = ProviderConfig(
             active="local_ollama",
             providers={
@@ -107,14 +109,14 @@ class ProviderService:
                     provider_type="ollama_local",
                     display_name="Ollama Local",
                     base_url="http://localhost:11434/v1",
-                    model="qwen2.5-coder:3b",
-                    model_id="qwen2.5-coder:3b",
+                    model=default_model,
+                    model_id=default_model,
                     api_key=None,
                     capabilities=cls.capabilities_for("ollama_local"),
                 )
             },
             roles=ProviderRolesConfig(
-                orchestrator=ProviderRoleBinding(provider_id="local_ollama", model="qwen2.5-coder:3b"),
+                orchestrator=ProviderRoleBinding(provider_id="local_ollama", model=default_model),
                 workers=[],
             ),
         )
@@ -190,70 +192,79 @@ class ProviderService:
         return ProviderStateService.hydrate_v2_fields(normalized_cfg, cls.normalize_provider_type)
 
     @classmethod
-    def _normalize_roles(cls, cfg: ProviderConfig, providers: Dict[str, ProviderEntry]) -> ProviderRolesConfig:
-        def _entry_model(provider_id: str) -> str:
-            entry = providers.get(provider_id)
-            if not entry:
-                return ""
-            return str(entry.model_id or entry.model or "").strip()
+    def _get_entry_model(cls, provider_id: str, providers: Dict[str, ProviderEntry]) -> str:
+        entry = providers.get(provider_id)
+        return str(entry.model_id or entry.model or "").strip() if entry else ""
 
-        def _valid_binding(provider_id: str, model: str | None) -> ProviderRoleBinding | None:
-            if not provider_id or provider_id not in providers:
-                return None
-            resolved_model = str(model or "").strip() or _entry_model(provider_id)
-            if not resolved_model:
-                return None
-            return ProviderRoleBinding(provider_id=provider_id, model=resolved_model)
+    @classmethod
+    def _create_binding(cls, provider_id: str, model: str | None, providers: Dict[str, ProviderEntry]) -> ProviderRoleBinding | None:
+        if not provider_id or provider_id not in providers:
+            return None
+        resolved_model = str(model or "").strip() or cls._get_entry_model(provider_id, providers)
+        return ProviderRoleBinding(provider_id=provider_id, model=resolved_model) if resolved_model else None
 
-        orchestrator_binding: ProviderRoleBinding | None = None
-        worker_bindings: list[ProviderRoleBinding] = []
-
-        # New schema first
+    @classmethod
+    def _get_roles_from_schema(cls, cfg: ProviderConfig, providers: Dict[str, ProviderEntry]) -> tuple[ProviderRoleBinding | None, list[ProviderRoleBinding]]:
+        orchestrator = None
+        workers = []
         if cfg.roles:
-            orch = _valid_binding(cfg.roles.orchestrator.provider_id, cfg.roles.orchestrator.model)
-            if orch:
-                orchestrator_binding = orch
+            orchestrator = cls._create_binding(cfg.roles.orchestrator.provider_id, cfg.roles.orchestrator.model, providers)
             for worker in cfg.roles.workers:
-                wb = _valid_binding(worker.provider_id, worker.model)
-                if wb:
-                    worker_bindings.append(wb)
+                if wb := cls._create_binding(worker.provider_id, worker.model, providers):
+                    workers.append(wb)
+        return orchestrator, workers
 
-        # Legacy compatibility fallback
-        if not orchestrator_binding:
-            orch_provider = cfg.orchestrator_provider or cfg.active
-            orch_model = cfg.orchestrator_model or cfg.model_id
-            orch = _valid_binding(str(orch_provider or ""), orch_model)
-            if not orch and cfg.active in providers:
-                orch = _valid_binding(cfg.active, None)
-            if orch:
-                orchestrator_binding = orch
+    @classmethod
+    def _get_legacy_roles(cls, cfg: ProviderConfig, providers: Dict[str, ProviderEntry]) -> tuple[ProviderRoleBinding | None, list[ProviderRoleBinding]]:
+        orch_provider = cfg.orchestrator_provider or cfg.active
+        orch_model = cfg.orchestrator_model or cfg.model_id
+        orch = cls._create_binding(str(orch_provider or ""), orch_model, providers)
+        
+        if not orch and cfg.active in providers:
+            orch = cls._create_binding(cfg.active, None, providers)
+            
+        workers = []
+        if worker := cls._create_binding(str(cfg.worker_provider or ""), cfg.worker_model, providers):
+            workers.append(worker)
+            
+        return orch, workers
 
-            worker = _valid_binding(str(cfg.worker_provider or ""), cfg.worker_model)
-            if worker:
-                worker_bindings.append(worker)
+    @classmethod
+    def _get_fallback_orchestrator(cls, cfg: ProviderConfig, providers: Dict[str, ProviderEntry]) -> ProviderRoleBinding | None:
+        fallback_provider = cfg.active if cfg.active in providers else next(iter(providers.keys()), "")
+        return cls._create_binding(fallback_provider, None, providers)
 
-        # Last-resort stable default
-        if not orchestrator_binding:
-            fallback_provider = cfg.active if cfg.active in providers else next(iter(providers.keys()), "")
-            fallback = _valid_binding(fallback_provider, None)
-            if fallback:
-                orchestrator_binding = fallback
-
+    @classmethod
+    def _deduplicate_workers(cls, orchestrator: ProviderRoleBinding | None, worker_bindings: list[ProviderRoleBinding]) -> list[ProviderRoleBinding]:
         workers: list[ProviderRoleBinding] = []
         seen_workers: set[tuple[str, str]] = set()
         for candidate in worker_bindings:
             key = (candidate.provider_id, candidate.model)
             if key in seen_workers:
                 continue
-            if orchestrator_binding and key == (orchestrator_binding.provider_id, orchestrator_binding.model):
+            if orchestrator and key == (orchestrator.provider_id, orchestrator.model):
                 continue
             seen_workers.add(key)
             workers.append(candidate)
+        return workers
 
-        if not orchestrator_binding:
+    @classmethod
+    def _normalize_roles(cls, cfg: ProviderConfig, providers: Dict[str, ProviderEntry]) -> ProviderRolesConfig:
+        orchestrator, worker_bindings = cls._get_roles_from_schema(cfg, providers)
+
+        if not orchestrator:
+            legacy_orch, legacy_workers = cls._get_legacy_roles(cfg, providers)
+            orchestrator = legacy_orch
+            worker_bindings.extend(legacy_workers)
+
+        if not orchestrator:
+            orchestrator = cls._get_fallback_orchestrator(cfg, providers)
+
+        if not orchestrator:
             raise ValueError("Provider topology requires a valid orchestrator binding")
 
-        return ProviderRolesConfig(orchestrator=orchestrator_binding, workers=workers)
+        workers = cls._deduplicate_workers(orchestrator, worker_bindings)
+        return ProviderRolesConfig(orchestrator=orchestrator, workers=workers)
 
     @classmethod
     def get_config(cls) -> Optional[ProviderConfig]:
@@ -462,6 +473,79 @@ class ProviderService:
 
         raise ValueError(f"Unsupported provider type: {entry.type}")
 
+    @classmethod
+    def _append_role_binding(
+        cls, cfg: ProviderConfig, provider_id: str, model_id: str | None, out: list[tuple[str, str, str]]
+    ) -> None:
+        entry = cfg.providers.get(provider_id)
+        if not entry:
+            return
+        model = str(model_id or entry.model_id or entry.model or "").strip()
+        if not model:
+            return
+        ptype = cls.normalize_provider_type(entry.provider_type or entry.type)
+        out.append((provider_id, ptype, model))
+
+    @classmethod
+    def _collect_role_bindings(cls, cfg: ProviderConfig, default_provider_id: str, default_model: str) -> list[tuple[str, str, str]]:
+        """Collect candidate bindings for runtime model selection."""
+        out: list[tuple[str, str, str]] = []
+        cls._append_role_binding(cfg, default_provider_id, default_model, out)
+
+        roles = getattr(cfg, "roles", None)
+        if roles:
+            orch = getattr(roles, "orchestrator", None)
+            if orch:
+                cls._append_role_binding(cfg, str(getattr(orch, "provider_id", "") or ""), getattr(orch, "model", None), out)
+            for w in (getattr(roles, "workers", []) or []):
+                cls._append_role_binding(cfg, str(getattr(w, "provider_id", "") or ""), getattr(w, "model", None), out)
+
+        dedup: list[tuple[str, str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for p_id, p_type, model in out:
+            if (p_id, model) not in seen:
+                seen.add((p_id, model))
+                dedup.append((p_id, p_type, model))
+        return dedup
+
+    @classmethod
+    def _select_runtime_binding_with_reliability(
+        cls,
+        cfg: ProviderConfig,
+        *,
+        provider_id: str,
+        model_id: str,
+    ) -> tuple[str, str]:
+        """Pick a more reliable binding when GICS indicates anomaly/low confidence."""
+        candidates = cls._collect_role_bindings(cfg, provider_id, model_id)
+        if not candidates:
+            return provider_id, model_id
+
+        def _rel(ptype: str, model: str) -> tuple[float, bool]:
+            from .ops_service import OpsService
+
+            data = OpsService.get_model_reliability(provider_type=ptype, model_id=model) or {}
+            score = float(data.get("score", 0.5) or 0.5)
+            anomaly = bool(data.get("anomaly", False))
+            return max(0.0, min(1.0, score)), anomaly
+
+        current_provider_type = cls.normalize_provider_type(
+            cfg.providers.get(provider_id).provider_type if cfg.providers.get(provider_id) else provider_id
+        )
+        current_score, current_anomaly = _rel(current_provider_type, model_id)
+        if not current_anomaly and current_score >= 0.35:
+            return provider_id, model_id
+
+        best = (provider_id, model_id, current_score)
+        for cand_provider, cand_type, cand_model in candidates:
+            score, anomaly = _rel(cand_type, cand_model)
+            if anomaly:
+                continue
+            if score > best[2]:
+                best = (cand_provider, cand_model, score)
+
+        return best[0], best[1]
+
     async def generate(self, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Generate content. Returns a rich dict with metrics."""
         return await self.__class__.static_generate(prompt, context)
@@ -498,6 +582,59 @@ class ProviderService:
         return cls._cache_instance
 
     @classmethod
+    def _resolve_effective_provider_and_model(
+        cls, cfg: ProviderConfig, context: Dict[str, Any], task_type: str
+    ) -> tuple[str, str | None]:
+        requested_model = context.get("model") or context.get("selected_model")
+        effective_provider = cfg.active
+        
+        if not context.get("model"):
+            tier_prov, tier_model = ModelRouterService.resolve_tier_routing(task_type, cfg)
+            if tier_prov:
+                effective_provider = tier_prov
+                requested_model = tier_model or requested_model
+
+        default_entry = cfg.providers.get(effective_provider)
+        default_model = str(requested_model or (default_entry.model if default_entry else "") or "").strip()
+        if default_model:
+            effective_provider, requested_model = cls._select_runtime_binding_with_reliability(
+                cfg, provider_id=effective_provider, model_id=default_model,
+            )
+        return effective_provider, requested_model
+
+    @classmethod
+    def _check_cache(
+        cls, prompt: str, task_type: str, economy: Any, model_name: str, effective_provider: str
+    ) -> Dict[str, Any] | None:
+        if not economy.cache_enabled:
+            return None
+        cache = cls._get_cache(ttl_hours=economy.cache_ttl_hours)
+        cached_result = cache.get(prompt, task_type)
+        if cached_result:
+            logger.info("Cache hit for task_type='%s' (model='%s')", task_type, model_name)
+            return {
+                "provider": effective_provider, "model": model_name,
+                "content": cached_result["result"], "tokens_used": 0,
+                "prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0,
+                "cache_hit": True, "usage": cached_result.get("metadata", {}).get("usage", {}),
+                "metadata": cached_result.get("metadata", {})
+            }
+        return None
+        
+    @classmethod
+    def _record_outcome_safe(
+        cls, provider_type: str, model_id: str, success: bool, start_ts: float, cost_usd: float, task_type: str
+    ) -> None:
+        from .ops_service import OpsService
+        try:
+            OpsService.record_model_outcome(
+                provider_type=provider_type, model_id=model_id, success=success,
+                latency_ms=(time.perf_counter() - start_ts) * 1000.0, cost_usd=cost_usd, task_type=task_type,
+            )
+        except Exception:
+            pass
+
+    @classmethod
     async def static_generate(cls, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Static version of generate for legacy/class-level calls."""
         from .cost_service import CostService
@@ -507,85 +644,57 @@ class ProviderService:
         if not cfg:
             raise ValueError("Provider config missing")
             
-        # Load economy config
         economy = OpsService.get_config().economy
-        
-        # Prioritize model from context if provided (Cascade override)
-        requested_model = context.get("model") or context.get("selected_model")
-        
-        # Determine task type for caching and routing
         task_type = context.get("task_type", "default")
         
-        # --- Phase C: Cloud + Local Architecture Routing ---
-        effective_provider = cfg.active
-        
-        if not context.get("model"):  # Only if not explicitly passed by Phase 6 logic
-            tier_prov, tier_model = ModelRouterService.resolve_tier_routing(task_type, cfg)
-            if tier_prov:
-                effective_provider = tier_prov
-                requested_model = tier_model or requested_model
+        effective_provider, requested_model = cls._resolve_effective_provider_and_model(cfg, context, task_type)
 
-        # 1. OPT-IN CACHE CHECK
-        if economy.cache_enabled:
-            cache = cls._get_cache(ttl_hours=economy.cache_ttl_hours)
-            cached_result = cache.get(prompt, task_type)
-            if cached_result:
-                model_name = requested_model or cfg.providers[effective_provider].model
-                logger.info("Cache hit for task_type='%s' (model='%s')", task_type, model_name)
-                return {
-                    "provider": effective_provider,
-                    "model": model_name,
-                    "content": cached_result["result"],
-                    "tokens_used": 0,
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "cost_usd": 0.0,
-                    "cache_hit": True,
-                    "usage": cached_result.get("metadata", {}).get("usage", {}),
-                    "metadata": cached_result.get("metadata", {})
-                }
+        model_name = requested_model or cfg.providers[effective_provider].model
+        cached = cls._check_cache(prompt, task_type, economy, model_name, effective_provider)
+        if cached:
+            return cached
         
         adapter = cls._build_adapter(cfg, provider_id=effective_provider)
-
-        # If a specific model is requested, try to use it if the provider supports it
-        # Note: We still use the active provider adapter, but can tell it which model to use.
         if requested_model:
-             context["model"] = requested_model # Ensure adapter sees it
+             context["model"] = requested_model
              
-        response = await adapter.generate(prompt, context)
+        start_ts = time.perf_counter()
+        provider_entry = cfg.providers.get(effective_provider)
+        provider_type = cls.normalize_provider_type(provider_entry.provider_type if provider_entry else effective_provider)
         
-        content = response["content"]
+        try:
+            response = await adapter.generate(prompt, context)
+        except Exception:
+            cls._record_outcome_safe(
+                provider_type=provider_type,
+                model_id=str(requested_model or getattr(adapter, "model", "unknown")),
+                success=False, start_ts=start_ts, cost_usd=0.0, task_type=str(task_type)
+            )
+            raise
+        
         usage = response.get("usage", {})
         prompt_t = usage.get("prompt_tokens", 0)
         completion_t = usage.get("completion_tokens", 0)
-        total_t = prompt_t + completion_t
         
-        # Determine model for pricing (use requested if available, else adapter default)
         model_name = requested_model or getattr(adapter, "model", cfg.providers[effective_provider].model)
         cost_usd = CostService.calculate_cost(model_name, prompt_t, completion_t)
         
         result = {
-            "provider": effective_provider,
-            "model": model_name,
-            "content": content,
-            "tokens_used": total_t,
-            "prompt_tokens": prompt_t,
-            "completion_tokens": completion_t,
-            "cost_usd": cost_usd,
-            "cache_hit": False
+            "provider": effective_provider, "model": model_name,
+            "content": response["content"], "tokens_used": prompt_t + completion_t,
+            "prompt_tokens": prompt_t, "completion_tokens": completion_t,
+            "cost_usd": cost_usd, "cache_hit": False
         }
 
-        # 2. CACHE RESULT IF ENABLED
+        cls._record_outcome_safe(
+            provider_type=provider_type, model_id=str(model_name),
+            success=True, start_ts=start_ts, cost_usd=float(cost_usd or 0.0), task_type=str(task_type)
+        )
+
         if economy.cache_enabled:
-            cache = cls._get_cache(ttl_hours=economy.cache_ttl_hours)
-            cache.set(prompt, task_type, {
-                "success": True,
-                "response": content,
-                "metadata": {
-                    "usage": usage,
-                    "model": model_name,
-                    "provider": effective_provider
-                }
+            cls._get_cache(ttl_hours=economy.cache_ttl_hours).set(prompt, task_type, {
+                "success": True, "response": response["content"],
+                "metadata": {"usage": usage, "model": model_name, "provider": effective_provider}
             })
 
         return result
@@ -809,3 +918,15 @@ class ProviderService:
     @classmethod
     async def connector_health(cls, connector_id: str, provider_id: Optional[str] = None) -> Dict[str, Any]:
         return await ProviderConnectorService.connector_health(cls, connector_id, provider_id)
+
+    @classmethod
+    async def list_cli_dependencies(cls) -> Dict[str, Any]:
+        return await ProviderConnectorService.list_cli_dependencies()
+
+    @classmethod
+    async def install_cli_dependency(cls, dependency_id: str):
+        return await ProviderConnectorService.install_cli_dependency(dependency_id)
+
+    @classmethod
+    def get_cli_dependency_install_job(cls, dependency_id: str, job_id: str):
+        return ProviderConnectorService.get_cli_dependency_install_job(dependency_id, job_id)

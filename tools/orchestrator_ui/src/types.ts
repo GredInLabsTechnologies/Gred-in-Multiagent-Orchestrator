@@ -318,6 +318,27 @@ export interface ProviderInstallResult {
     job_id?: string;
 }
 
+export interface CliDependencyStatus {
+    id: string;
+    provider_type: string;
+    binary: string;
+    installed: boolean;
+    version?: string | null;
+    installable: boolean;
+    install_method: 'npm' | 'manual';
+    install_command?: string | null;
+    message?: string | null;
+}
+
+export interface CliDependencyInstallResult {
+    status: 'queued' | 'running' | 'done' | 'error';
+    message: string;
+    dependency_id: string;
+    progress?: number;
+    job_id?: string;
+    logs?: string[];
+}
+
 export interface SaveActiveProviderPayload {
     providerId: string;
     providerType: string;
@@ -435,6 +456,37 @@ export interface OpsConfig {
     draft_cleanup_ttl_days: number;
     max_concurrent_runs: number;
     operator_can_generate: boolean;
+    ui_show_ids_events: boolean;
+    ui_enable_chat_investigation: boolean;
+}
+
+export type AgentRole = 'orchestrator' | 'worker' | 'external_action';
+export type AgentChannel = 'cli' | 'provider_api' | 'gpt_actions' | 'mcp_remote';
+export type PolicyDecision = 'allow' | 'review' | 'deny';
+export type AgentOutcome = 'success' | 'error' | 'timeout' | 'rejected';
+
+export interface AgentActionEvent {
+    timestamp: string;
+    agent_id: string;
+    agent_role: AgentRole;
+    channel: AgentChannel;
+    trust_tier?: string;
+    capability_profile?: string;
+    tool?: string;
+    action?: string;
+    context?: string;
+    policy_decision: PolicyDecision;
+    outcome: AgentOutcome;
+    error_code?: string;
+    duration_ms?: number;
+    cost_usd?: number;
+}
+
+export interface AgentInsight {
+    type: 'CONFIG_ADJUSTMENT' | 'POLICY_DEGRADATION' | 'POLICY_ADJUSTMENT';
+    priority: 'high' | 'medium' | 'low';
+    message: string;
+    recommendation: string;
 }
 
 export interface ProviderEntry {

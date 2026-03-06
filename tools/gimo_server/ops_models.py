@@ -49,6 +49,9 @@ GimoItemType = Literal["text", "tool_call", "tool_result", "diff", "thought", "e
 GimoItemStatus = Literal["started", "delta", "completed", "error"]
 GimoThreadStatus = Literal["active", "archived", "deleted"]
 
+AgentRole = Literal["orchestrator", "worker", "external_action"]
+AgentChannel = Literal["cli", "provider_api", "gpt_actions", "mcp_remote"]
+
 
 import uuid
 
@@ -243,6 +246,31 @@ class ProviderModelInstallResponse(BaseModel):
     message: str
     progress: Optional[float] = None
     job_id: Optional[str] = None
+
+
+class CliDependencyStatus(BaseModel):
+    id: str
+    provider_type: str
+    binary: str
+    installed: bool
+    version: Optional[str] = None
+    installable: bool = True
+    install_method: Literal["npm", "manual"] = "npm"
+    install_command: Optional[str] = None
+    message: Optional[str] = None
+
+
+class CliDependencyInstallRequest(BaseModel):
+    dependency_id: str
+
+
+class CliDependencyInstallResponse(BaseModel):
+    status: Literal["queued", "running", "done", "error"]
+    message: str
+    dependency_id: str
+    progress: Optional[float] = None
+    job_id: Optional[str] = None
+    logs: List[str] = Field(default_factory=list)
 
 
 class ProviderValidateRequest(BaseModel):
@@ -708,6 +736,10 @@ class OpsConfig(BaseModel):
     max_concurrent_runs: int = 3
     operator_can_generate: bool = False
     economy: UserEconomyConfig = Field(default_factory=UserEconomyConfig)
+    
+    # Phase 4: IDS UI Flags
+    ui_show_ids_events: bool = True
+    ui_enable_chat_investigation: bool = True
 
 
 class OpsApproveResponse(BaseModel):
@@ -773,6 +805,34 @@ class WorkflowExecuteRequest(BaseModel):
     initial_state: Dict[str, Any] = Field(default_factory=dict)
     persist_checkpoints: bool = True
     workflow_timeout_seconds: Optional[int] = None
+
+class AgentActionEvent(BaseModel):
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    agent_id: str
+    agent_role: AgentRole
+    channel: AgentChannel
+    trust_tier: Optional[str] = "t1"  # t0..t3
+    capability_profile: Optional[str] = "execute_safe"
+    tool: Optional[str] = None
+    action: Optional[str] = None
+    context: Optional[str] = None
+    policy_decision: Literal["allow", "review", "deny"] = "allow"
+    outcome: Literal["success", "error", "timeout", "rejected"] = "success"
+    error_code: Optional[str] = None
+    duration_ms: Optional[float] = None
+    cost_usd: Optional[float] = None
+
+
+class AgentInsight(BaseModel):
+    id: str = Field(default_factory=lambda: f"ins_{uuid.uuid4().hex[:8]}")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    type: Literal["CONFIG_ADJUSTMENT", "POLICY_DEGRADATION", "POLICY_ADJUSTMENT", "SECURITY_ALERT"]
+    priority: Literal["low", "medium", "high", "critical"]
+    message: str
+    recommendation: str
+    agent_id: Optional[str] = None
+    tool: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
 
 
 class TrustEvent(BaseModel):

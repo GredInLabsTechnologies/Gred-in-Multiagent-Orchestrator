@@ -25,6 +25,7 @@ export const OpsIsland: React.FC<OpsIslandProps> = ({ token }) => {
     const [autoRunToggle, setAutoRunToggle] = useState(false);
     const [expandedRun, setExpandedRun] = useState<string | null>(null);
     const [previewDraft, setPreviewDraft] = useState<string | null>(null);
+    const [draftTab, setDraftTab] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
 
     const handleGenerate = async () => {
         if (!prompt.trim()) return;
@@ -97,8 +98,8 @@ export const OpsIsland: React.FC<OpsIslandProps> = ({ token }) => {
                                 key={tab.key}
                                 onClick={() => setActiveTab(tab.key)}
                                 className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center space-x-1.5 ${activeTab === tab.key
-                                        ? 'bg-white/10 text-white shadow-lg'
-                                        : 'text-zinc-500 hover:text-zinc-300'
+                                    ? 'bg-white/10 text-white shadow-lg'
+                                    : 'text-zinc-500 hover:text-zinc-300'
                                     }`}
                             >
                                 <span>{tab.label}</span>
@@ -135,8 +136,8 @@ export const OpsIsland: React.FC<OpsIslandProps> = ({ token }) => {
                                 </div>
                                 {plan.constraints.length > 0 && (
                                     <div className="mb-4 flex flex-wrap gap-2">
-                                        {plan.constraints.map((c, i) => (
-                                            <span key={i} className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[9px] text-amber-400">
+                                        {plan.constraints.map((c) => (
+                                            <span key={c} className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[9px] text-amber-400">
                                                 <Shield className="w-3 h-3 inline mr-1" />{c}
                                             </span>
                                         ))}
@@ -198,17 +199,38 @@ export const OpsIsland: React.FC<OpsIslandProps> = ({ token }) => {
                             </div>
                         </div>
 
-                        {/* Draft Filter Summary */}
-                        <div className="flex items-center space-x-4 text-[10px] text-zinc-500">
-                            <span>{drafts.length} total</span>
-                            <span className="text-emerald-500">{drafts.filter(d => d.status === 'approved').length} approved</span>
-                            <span className="text-blue-400">{drafts.filter(d => d.status === 'draft').length} pending</span>
-                            <span className="text-red-400">{drafts.filter(d => d.status === 'rejected' || d.status === 'error').length} rejected/error</span>
+                        {/* Draft Sub-Tabs */}
+                        <div className="flex bg-zinc-900/50 p-1 rounded-xl mb-6 border border-white/5">
+                            {[
+                                { key: 'pending', label: 'Pendientes', count: drafts.filter(d => d.status === 'draft').length, selColor: 'text-blue-400' },
+                                { key: 'approved', label: 'Aprobados', count: drafts.filter(d => d.status === 'approved').length, selColor: 'text-emerald-400' },
+                                { key: 'rejected', label: 'Rechazados/Error', count: drafts.filter(d => d.status === 'rejected' || d.status === 'error').length, selColor: 'text-red-400' },
+                                { key: 'all', label: 'Todos', count: drafts.length, selColor: 'text-white' }
+                            ].map(t => (
+                                <button
+                                    key={t.key}
+                                    onClick={() => setDraftTab(t.key as any)}
+                                    className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all flex items-center space-x-2 ${draftTab === t.key
+                                        ? `bg-white/10 ${t.selColor} shadow-lg`
+                                        : 'text-zinc-500 hover:text-zinc-300'
+                                        }`}
+                                >
+                                    <span>{t.label}</span>
+                                    {t.count > 0 && (
+                                        <span className="bg-black/40 px-2 py-0.5 rounded-full text-[9px]">{t.count}</span>
+                                    )}
+                                </button>
+                            ))}
                         </div>
 
                         {/* Draft Cards */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {drafts.map(draft => (
+                            {drafts.filter(d => {
+                                if (draftTab === 'pending') return d.status === 'draft';
+                                if (draftTab === 'approved') return d.status === 'approved';
+                                if (draftTab === 'rejected') return d.status === 'rejected' || d.status === 'error';
+                                return true;
+                            }).map(draft => (
                                 <div key={draft.id} className="glass-card p-5 group border border-white/5 rounded-2xl bg-[#1c1c1e] hover:border-white/10 transition-colors">
                                     <div className="flex justify-between items-start mb-3">
                                         <div className="flex items-center space-x-2">
@@ -349,8 +371,16 @@ export const OpsIsland: React.FC<OpsIslandProps> = ({ token }) => {
                             runs.map(run => (
                                 <div key={run.id} className="glass-card overflow-hidden border border-white/5 rounded-2xl bg-[#1c1c1e]">
                                     <div
+                                        role="button"
+                                        tabIndex={0}
                                         className="p-4 flex items-center justify-between border-b border-white/5 bg-white/[0.02] cursor-pointer"
                                         onClick={() => setExpandedRun(expandedRun === run.id ? null : run.id)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                                e.preventDefault();
+                                                setExpandedRun(expandedRun === run.id ? null : run.id);
+                                            }
+                                        }}
                                     >
                                         <div className="flex items-center space-x-4">
                                             <div className="flex items-center space-x-2">
@@ -376,14 +406,19 @@ export const OpsIsland: React.FC<OpsIslandProps> = ({ token }) => {
                                     {(expandedRun === run.id || run.status === 'running') && (
                                         <div className="bg-zinc-950/40 p-4 max-h-64 overflow-y-auto font-mono text-[10px] space-y-1">
                                             {run.log.length > 0 ? (
-                                                run.log.map((log, i) => (
-                                                    <div key={`${run.id}-${i}`} className="flex space-x-3">
-                                                        <span className="text-zinc-700 whitespace-nowrap">[{log.ts.split('T')[1]?.split('.')[0] || log.ts}]</span>
-                                                        <span className={log.level === 'ERROR' ? 'text-red-400' : log.level === 'WARN' ? 'text-amber-400' : 'text-zinc-400'}>
-                                                            {log.msg}
-                                                        </span>
-                                                    </div>
-                                                ))
+                                                run.log.map((log, i) => {
+                                                    let levelColor = 'text-zinc-400';
+                                                    if (log.level === 'ERROR') levelColor = 'text-red-400';
+                                                    else if (log.level === 'WARN') levelColor = 'text-amber-400';
+                                                    return (
+                                                        <div key={`${run.id}-${i}`} className="flex space-x-3">
+                                                            <span className="text-zinc-700 whitespace-nowrap">[{log.ts.split('T')[1]?.split('.')[0] || log.ts}]</span>
+                                                            <span className={levelColor}>
+                                                                {log.msg}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })
                                             ) : (
                                                 <div className="text-zinc-700 flex items-center space-x-2">
                                                     <Terminal className="w-3 h-3" />
@@ -485,8 +520,8 @@ const ConfigNumber: React.FC<{
                 value={value}
                 min={min} max={max}
                 onChange={(e) => {
-                    const n = parseInt(e.target.value, 10);
-                    if (!isNaN(n) && n >= min && n <= max) onChange(n);
+                    const n = Number.parseInt(e.target.value, 10);
+                    if (!Number.isNaN(n) && n >= min && n <= max) onChange(n);
                 }}
                 className="w-16 bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-xs text-white text-center outline-none focus:border-blue-500/40"
             />

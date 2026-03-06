@@ -4,6 +4,8 @@ import logging
 import socket
 import subprocess
 import time
+import os
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -223,3 +225,101 @@ class GicsService:
     def flush(self) -> Any:
         """No-op: GICS daemon auto-flushes. Manual flush not exposed via JSON-RPC."""
         pass
+
+    @staticmethod
+    def _model_key(provider_type: str, model_id: str) -> str:
+        p = str(provider_type or "unknown").strip().lower().replace(" ", "_")
+        m = str(model_id or "unknown").strip().lower().replace(" ", "_")
+        return f"ops:model_score:{p}:{m}"
+
+    def seed_model_prior(
+        self,
+        *,
+        provider_type: str,
+        model_id: str,
+        prior_scores: Dict[str, float],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Seed initial model priors (phase-1 catalog metadata -> GICS)."""
+        key = self._model_key(provider_type, model_id)
+        existing = self.get(key)
+        fields = dict((existing or {}).get("fields") or {})
+        priors = dict(prior_scores or {})
+        if priors:
+            avg_prior = sum(float(v) for v in priors.values()) / max(1, len(priors))
+        else:
+            avg_prior = float(fields.get("score", 0.5) or 0.5)
+
+        merged = {
+            "provider_type": provider_type,
+            "model_id": model_id,
+            "score": float(fields.get("score", avg_prior) or avg_prior),
+            "priors": priors,
+            "samples": int(fields.get("samples", 0) or 0),
+            "successes": int(fields.get("successes", 0) or 0),
+            "failures": int(fields.get("failures", 0) or 0),
+            "failure_streak": int(fields.get("failure_streak", 0) or 0),
+            "avg_latency_ms": float(fields.get("avg_latency_ms", 0.0) or 0.0),
+            "avg_cost_usd": float(fields.get("avg_cost_usd", 0.0) or 0.0),
+            "anomaly": bool(fields.get("anomaly", False)),
+            "metadata": dict(metadata or fields.get("metadata") or {}),
+            "updated_at": int(time.time()),
+        }
+        self.put(key, merged)
+        return merged
+
+    def record_model_outcome(
+        self,
+        *,
+        provider_type: str,
+        model_id: str,
+        success: bool,
+        latency_ms: Optional[float] = None,
+        cost_usd: Optional[float] = None,
+        task_type: str = "general",
+    ) -> Dict[str, Any]:
+        """Register post-task evidence and update reliability score."""
+        key = self._model_key(provider_type, model_id)
+        existing = self.get(key)
+        fields = dict((existing or {}).get("fields") or {})
+
+        samples = int(fields.get("samples", 0) or 0) + 1
+        successes = int(fields.get("successes", 0) or 0) + (1 if success else 0)
+        failures = int(fields.get("failures", 0) or 0) + (0 if success else 1)
+        failure_streak = 0 if success else int(fields.get("failure_streak", 0) or 0) + 1
+
+        prev_latency = float(fields.get("avg_latency_ms", 0.0) or 0.0)
+        prev_cost = float(fields.get("avg_cost_usd", 0.0) or 0.0)
+        new_latency = float(latency_ms or 0.0)
+        new_cost = float(cost_usd or 0.0)
+        avg_latency = ((prev_latency * (samples - 1)) + new_latency) / max(1, samples)
+        avg_cost = ((prev_cost * (samples - 1)) + new_cost) / max(1, samples)
+
+        success_rate = successes / max(1, samples)
+        prior_score = float(fields.get("score", 0.5) or 0.5)
+        blended_score = max(0.0, min(1.0, (prior_score * 0.2) + (success_rate * 0.8)))
+        anomaly = failure_streak >= 3
+
+        outcome = {
+            "provider_type": provider_type,
+            "model_id": model_id,
+            "task_type": task_type,
+            "score": blended_score,
+            "samples": samples,
+            "successes": successes,
+            "failures": failures,
+            "failure_streak": failure_streak,
+            "avg_latency_ms": avg_latency,
+            "avg_cost_usd": avg_cost,
+            "anomaly": anomaly,
+            "updated_at": int(time.time()),
+        }
+        self.put(key, {**fields, **outcome})
+        return {**fields, **outcome}
+
+    def get_model_reliability(self, *, provider_type: str, model_id: str) -> Optional[Dict[str, Any]]:
+        key = self._model_key(provider_type, model_id)
+        result = self.get(key)
+        if not result:
+            return None
+        return dict(result.get("fields") or {})

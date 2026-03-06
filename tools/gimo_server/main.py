@@ -125,6 +125,31 @@ async def _mcp_sampling_loop():
         except Exception as exc:
             logger.warning("MCP sampling loop error: %s", exc)
 
+async def _shutdown_services(logger, app, hw_monitor, run_worker, tasks):
+    try:
+        await hw_monitor.stop_monitoring()
+    except Exception as exc:
+        logger.debug("Hardware monitor shutdown warning: %s", exc)
+
+    if hasattr(app.state, "gics"):
+        try:
+            app.state.gics.stop_daemon()
+        except Exception as exc:
+            logger.debug("GICS daemon shutdown warning: %s", exc)
+
+    try:
+        await run_worker.stop()
+    except Exception as exc:
+        logger.debug("Run worker shutdown warning: %s", exc)
+
+    for t in tasks:
+        t.cancel()
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for result in results:
+        if isinstance(result, Exception):
+            logger.debug("Cleanup task shutdown result: %s", type(result).__name__)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Perform infrastructure checks and initialization without side-effects on import
@@ -212,6 +237,8 @@ async def lifespan(app: FastAPI):
     gics_service = GicsService()
     gics_service.start_daemon()
     app.state.gics = gics_service
+    from tools.gimo_server.services.ops_service import OpsService
+    OpsService.set_gics(gics_service)
 
     # Initialize Security Threat Engine
     from tools.gimo_server.security import save_security_db, threat_engine
@@ -249,29 +276,13 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown: Clean up resources
+    # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
     logger.info("Shutting down Repo Orchestrator...")
-    await hw_monitor.stop_monitoring()
-    if hasattr(app.state, "gics"):
-        app.state.gics.stop_daemon()
-    await run_worker.stop()
-    cleanup_task.cancel()
-    threat_cleanup_task.cancel()
-    ops_cleanup_task.cancel()
-    mcp_sampling_task.cancel()
-    integrity_task.cancel()
-    
     try:
-        await cleanup_task
-        await threat_cleanup_task
-        await ops_cleanup_task
-        await mcp_sampling_task
-        await integrity_task
-    except asyncio.CancelledError:
-        logger.debug("Cleanup tasks cancelled successfully.")
-        raise
+        tasks = [cleanup_task, threat_cleanup_task, ops_cleanup_task, mcp_sampling_task, integrity_task]
+        await _shutdown_services(logger, app, hw_monitor, run_worker, tasks)
     except Exception as exc:
-        logger.error(f"Cleanup task failed during shutdown: {exc}")
+        logger.debug("Lifespan shutdown suppressed exception: %s", exc)
 
 
 

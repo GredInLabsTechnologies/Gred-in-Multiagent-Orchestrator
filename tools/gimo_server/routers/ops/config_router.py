@@ -13,6 +13,7 @@ from tools.gimo_server.ops_models import (
     ProviderModelInstallResponse,
     ProviderValidateRequest,
     ProviderValidateResponse,
+    CliDependencyInstallRequest,
 )
 from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.provider_service import ProviderService
@@ -99,6 +100,60 @@ async def connector_health(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     audit_log("OPS", f"/ops/connectors/{connector_id}/health", connector_id, operation="READ", actor=_actor_label(auth))
+    return data
+
+
+@router.get("/system/dependencies")
+async def list_system_dependencies(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    data = await ProviderService.list_cli_dependencies()
+    audit_log("OPS", "/ops/system/dependencies", str(data.get("count", 0)), operation="READ", actor=_actor_label(auth))
+    return data
+
+
+@router.post("/system/dependencies/install")
+async def install_system_dependency(
+    request: Request,
+    body: CliDependencyInstallRequest,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "admin")
+    try:
+        data = await ProviderService.install_cli_dependency(body.dependency_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    audit_log(
+        "OPS",
+        "/ops/system/dependencies/install",
+        f"{body.dependency_id}:{data.status}",
+        operation="EXECUTE",
+        actor=_actor_label(auth),
+    )
+    return data
+
+
+@router.get("/system/dependencies/install/{dependency_id}/{job_id}")
+async def get_system_dependency_install_job(
+    request: Request,
+    dependency_id: str,
+    job_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    data = ProviderService.get_cli_dependency_install_job(dependency_id, job_id)
+    audit_log(
+        "OPS",
+        f"/ops/system/dependencies/install/{dependency_id}/{job_id}",
+        f"{dependency_id}:{job_id}:{data.status}",
+        operation="READ",
+        actor=_actor_label(auth),
+    )
     return data
 
 
@@ -206,6 +261,29 @@ async def codex_device_login(
     _require_role(auth, "operator")
     data = await CodexAuthService.start_device_flow()
     audit_log("OPS", "/ops/connectors/codex/login", "auth_flow_started", operation="READ", actor=_actor_label(auth))
+    return data
+
+
+@router.post("/provider/codex/device-login")
+async def codex_device_login_legacy(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """Backward-compatible alias for legacy clients.
+
+    Kept for production safety while the UI and external clients migrate to:
+    POST /ops/connectors/codex/login
+    """
+    _require_role(auth, "operator")
+    data = await CodexAuthService.start_device_flow()
+    audit_log(
+        "OPS",
+        "/ops/provider/codex/device-login",
+        "auth_flow_started",
+        operation="READ",
+        actor=_actor_label(auth),
+    )
     return data
 
 @router.post("/connectors/claude/login")

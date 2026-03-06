@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react';
 import {
     API_BASE,
+    CliDependencyInstallResult,
+    CliDependencyStatus,
     ProviderCatalogResponse,
     ProviderInfo,
     ProviderInstallResult,
@@ -193,6 +195,32 @@ export const useProviders = () => {
         return await res.json();
     }, []);
 
+    const listCliDependencies = useCallback(async () => {
+        const res = await fetch(`${API_BASE}/ops/system/dependencies`, getRequestInit());
+        if (!res.ok) throw new Error('Failed to list CLI dependencies');
+        const data = await res.json() as { items: CliDependencyStatus[]; count: number };
+        return data;
+    }, []);
+
+    const installCliDependency = useCallback(async (dependencyId: string) => {
+        const res = await fetch(`${API_BASE}/ops/system/dependencies/install`, {
+            method: 'POST',
+            ...getRequestInit(true),
+            body: JSON.stringify({ dependency_id: dependencyId }),
+        });
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body?.detail || 'Failed to install CLI dependency');
+        }
+        return await res.json() as CliDependencyInstallResult;
+    }, []);
+
+    const getCliDependencyInstallJob = useCallback(async (dependencyId: string, jobId: string) => {
+        const res = await fetch(`${API_BASE}/ops/system/dependencies/install/${encodeURIComponent(dependencyId)}/${encodeURIComponent(jobId)}`, getRequestInit());
+        if (!res.ok) throw new Error('Failed to fetch dependency install job');
+        return await res.json() as CliDependencyInstallResult;
+    }, []);
+
     const saveActiveProvider = useCallback(async (payload: SaveActiveProviderPayload) => {
         const currentRes = await fetch(`${API_BASE}/ops/provider`, getRequestInit());
         if (!currentRes.ok) throw new Error('Failed to read provider config');
@@ -381,6 +409,9 @@ export const useProviders = () => {
         removeProvider,
         testProvider,
         startCodexDeviceLogin,
-        startClaudeLogin
+        startClaudeLogin,
+        listCliDependencies,
+        installCliDependency,
+        getCliDependencyInstallJob,
     };
 };

@@ -120,7 +120,10 @@ export const useOpsService = (_token?: string) => {
             const res = await fetch(`${API_BASE}/ops/drafts/${id}/reject`, {
                 method: 'POST', headers: getHeaders(), credentials: 'include'
             });
-            if (!res.ok) throw new Error('Rejection failed');
+            if (!res.ok) {
+                if (res.status === 403) throw new Error('Permission denied: You need operator or admin role to reject drafts.');
+                throw new Error('Rejection failed');
+            }
             setDrafts(prev => prev.map(d => d.id === id ? { ...d, status: 'rejected' as const } : d));
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Rejection failed');

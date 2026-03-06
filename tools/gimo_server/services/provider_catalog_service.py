@@ -20,6 +20,7 @@ from ..ops_models import (
 )
 from .provider_service import ProviderService
 from .provider_auth_service import ProviderAuthService
+from .ops_service import OpsService
 from ..security import audit_log
 
 
@@ -160,6 +161,7 @@ class ProviderCatalogService:
         "openrouter": 300,
         "custom_openai_compatible": 120,
     }
+    _SYSTEM_ACTOR_INSTALL = "system:provider_install"
 
     @classmethod
     def _canonical(cls, provider_type: str) -> str:
@@ -331,6 +333,33 @@ class ProviderCatalogService:
         return caps
 
     @classmethod
+    def _build_prior_scores(
+        cls,
+        *,
+        model_id: str,
+        capabilities: List[str],
+        context_window: int | None,
+    ) -> Dict[str, float]:
+        priors: Dict[str, float] = {
+            "coding": 0.45,
+            "reasoning": 0.45,
+            "tools": 0.35,
+        }
+        caps = set(capabilities or [])
+        if "code" in caps:
+            priors["coding"] = max(priors["coding"], 0.85)
+        if "reasoning" in caps:
+            priors["reasoning"] = max(priors["reasoning"], 0.8)
+        if "tools" in caps:
+            priors["tools"] = max(priors["tools"], 0.75)
+        if context_window and context_window >= 128000:
+            priors["reasoning"] = max(priors["reasoning"], 0.75)
+        raw = model_id.lower()
+        if "codex" in raw or "coder" in raw:
+            priors["coding"] = max(priors["coding"], 0.9)
+        return priors
+
+    @classmethod
     def _infer_weakness(cls, model_id: str) -> str | None:
         raw = model_id.lower()
         if any(k in raw for k in ["opus", "gpt-5", "o1", "r1", "70b"]):
@@ -401,71 +430,80 @@ class ProviderCatalogService:
             return []
 
     @classmethod
-    async def _ollama_list_installed(cls) -> List[NormalizedModelInfo]:
-        # 1. Try local API tags first (most accurate for running state)
+    def _parse_ollama_api_item(cls, item: Dict[str, Any]) -> NormalizedModelInfo | None:
+        model_id = str(item.get("name") or "").strip()
+        if not model_id:
+            return None
+        details = item.get("details") if isinstance(item.get("details"), dict) else {}
+        size = details.get("parameter_size") or item.get("size")
+        return cls._normalize_model(
+            model_id=model_id,
+            installed=True,
+            downloadable=True,
+            size=str(size) if size is not None else None,
+        )
+
+    @classmethod
+    async def _ollama_api_list(cls) -> List[NormalizedModelInfo]:
         try:
             async with httpx.AsyncClient(timeout=2) as client:
                 resp = await client.get("http://localhost:11434/api/tags")
                 if 200 <= resp.status_code < 300:
                     data = resp.json() if resp.content else {}
                     models_data = data.get("models", []) if isinstance(data, dict) else []
-                    models: List[NormalizedModelInfo] = []
-                    for item in models_data:
-                        model_id = str(item.get("name") or "").strip()
-                        if not model_id:
-                            continue
-                        details = item.get("details") if isinstance(item.get("details"), dict) else {}
-                        size = details.get("parameter_size") or item.get("size")
-                        models.append(
-                            cls._normalize_model(
-                                model_id=model_id,
-                                installed=True,
-                                downloadable=True,
-                                size=str(size) if size is not None else None,
-                            )
-                        )
+                    models = [m for item in models_data if (m := cls._parse_ollama_api_item(item)) is not None]
                     if models:
                         return models
         except Exception:
             pass
+        return []
 
-        # 2. Robust Fallback: CLI parsing when API is not reachable.
+    @classmethod
+    def _parse_ollama_cli_line(cls, line: str) -> NormalizedModelInfo | None:
+        parts = [p for p in line.strip().split() if p]
+        if not parts:
+            return None
+        model_id = parts[0]
+        size = parts[2] if len(parts) >= 3 else None
+        return cls._normalize_model(
+            model_id=model_id,
+            installed=True,
+            downloadable=True,
+            size=size,
+        )
+
+    @classmethod
+    async def _ollama_cli_list(cls) -> List[NormalizedModelInfo]:
         if shutil.which("ollama") is None:
-            pass # Continue to disk scan
-        else:
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "ollama",
-                    "list",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, _stderr = await proc.communicate()
-                if proc.returncode == 0:
-                    lines = stdout.decode("utf-8", errors="ignore").splitlines()
-                    models: List[NormalizedModelInfo] = []
-                    for idx, line in enumerate(lines):
-                        if idx == 0 and "NAME" in line.upper():
-                            continue
-                        parts = [p for p in line.strip().split() if p]
-                        if not parts:
-                            continue
-                        model_id = parts[0]
-                        size = parts[2] if len(parts) >= 3 else None
-                        models.append(
-                            cls._normalize_model(
-                                model_id=model_id,
-                                installed=True,
-                                downloadable=True,
-                                size=size,
-                            )
-                        )
-                    if models:
-                        return models
-            except Exception:
-                pass
+            return []
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ollama",
+                "list",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _stderr = await proc.communicate()
+            if proc.returncode == 0:
+                lines = stdout.decode("utf-8", errors="ignore").splitlines()
+                models = [
+                    m for idx, line in enumerate(lines)
+                    if not (idx == 0 and "NAME" in line.upper()) and (m := cls._parse_ollama_cli_line(line)) is not None
+                ]
+                if models:
+                    return models
+        except Exception:
+            pass
+        return []
 
-        # 3. Final Fallback: Direct Manifest Scanning (Truly Offline)
+    @classmethod
+    async def _ollama_list_installed(cls) -> List[NormalizedModelInfo]:
+        models = await cls._ollama_api_list()
+        if models:
+            return models
+        models = await cls._ollama_cli_list()
+        if models:
+            return models
         return cls._ollama_list_from_disk()
 
     @classmethod
@@ -480,15 +518,11 @@ class ProviderCatalogService:
 
         try:
             # Start 'ollama serve' in background
-            # Note: On Windows, we use CREATE_NO_WINDOW or similar via subproc flags if needed,
-            # but a simple detached start usually works for Ollama's design.
-            import subprocess
-            subprocess.Popen(
-                ["ollama", "serve"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+            await asyncio.create_subprocess_exec(
+                "ollama", "serve",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-                start_new_session=True
             )
             
             # Poll for readiness (max 30s)
@@ -525,79 +559,108 @@ class ProviderCatalogService:
         warnings: List[str] = []
 
         if _mock_mode_enabled(payload):
-            if canonical == "ollama_local":
-                return [
-                    cls._normalize_model(
-                        model_id=m["id"],
-                        label=m.get("label"),
-                        downloadable=True,
-                        quality_tier=m.get("quality_tier"),
-                    )
-                    for m in _OLLAMA_RECOMMENDED
-                ], ["Mock mode enabled: returning deterministic catalog without network."]
-            mock_models = _fallback_models_for(canonical)
-            if mock_models:
-                return mock_models, ["Mock mode enabled: returning deterministic catalog without network."]
-            return [cls._normalize_model(model_id=f"{canonical}-mock-model", label=f"{canonical} mock model")], [
-                "Mock mode enabled: using synthetic model catalog for provider."
-            ]
+            return cls._handle_mock_mode_catalog(canonical)
 
         if canonical == "ollama_local":
             return [
                 cls._normalize_model(
-                    model_id=m["id"],
-                    label=m.get("label"),
-                    downloadable=True,
-                    quality_tier=m.get("quality_tier"),
-                )
-                for m in _OLLAMA_RECOMMENDED
+                    model_id=m["id"], label=m.get("label"),
+                    downloadable=True, quality_tier=m.get("quality_tier"),
+                ) for m in _OLLAMA_RECOMMENDED
             ], warnings
 
         if canonical in {"replicate", "anthropic", "claude", "google", "mistral", "cohere"}:
             warnings.append("This provider may not expose a universal /models endpoint. Showing curated defaults.")
             return _fallback_models_for(canonical), warnings
 
-        if canonical in {"vllm", "llama-cpp", "tgi"}:
-            auth = payload or ProviderValidateRequest()
-            if auth.base_url:
-                remote = await cls._fetch_remote_models(canonical, auth)
-                if remote:
-                    return remote, warnings
-            warnings.append("Configure base_url to discover runtime models dynamically. Showing curated defaults.")
-            return _fallback_models_for(canonical), warnings
-
-        if canonical in {"azure-openai", "aws-bedrock", "vertex-ai"}:
-            warnings.append(
-                "This provider usually requires cloud-specific endpoint/project configuration. Set base_url and credentials first."
-            )
-            auth = payload or ProviderValidateRequest()
-            if auth.base_url and (auth.api_key or auth.account):
-                remote = await cls._fetch_remote_models(canonical, auth)
-                if remote:
-                    return remote, warnings
+        if canonical in {"vllm", "llama-cpp", "tgi", "azure-openai", "aws-bedrock", "vertex-ai"}:
+            remote = await cls._fetch_remote_if_auth(canonical, payload)
+            if remote:
+                return remote, warnings
+            warnings.append("This provider needs endpoint/credentials configuration to discover runtime models dynamically. Showing curated defaults.")
             return _fallback_models_for(canonical), warnings
 
         if canonical in _OPENAI_COMPATIBLE_PROVIDERS:
-            auth = payload or ProviderValidateRequest()
-            if canonical == "openrouter" and not (auth.api_key or auth.account):
-                remote = await cls._fetch_remote_models(canonical, auth)
-                if remote:
-                    warnings.append("Using OpenRouter public catalog without credentials.")
-                    return remote, warnings
-                warnings.append("OpenRouter public catalog unavailable. Showing curated defaults.")
-                return _fallback_models_for(canonical), warnings
+            return await cls._handle_openai_compatible_catalog(canonical, payload, warnings)
+            
+        return [], warnings
 
-            if not (auth.api_key or auth.account):
-                warnings.append("Authentication is required to fetch remote model catalog.")
-                defaults = _fallback_models_for(canonical)
-                return defaults, warnings
+    @classmethod
+    async def _fetch_remote_if_auth(cls, canonical: str, payload: ProviderValidateRequest | None) -> List[NormalizedModelInfo]:
+        auth = payload or ProviderValidateRequest()
+        if (auth.base_url and (auth.api_key or auth.account)) or auth.base_url:
+            return await cls._fetch_remote_models(canonical, auth)
+        return []
 
+    @classmethod
+    def _handle_mock_mode_catalog(cls, canonical: str) -> Tuple[List[NormalizedModelInfo], List[str]]:
+        if canonical == "ollama_local":
+            return [
+                cls._normalize_model(
+                    model_id=m["id"], label=m.get("label"),
+                    downloadable=True, quality_tier=m.get("quality_tier"),
+                ) for m in _OLLAMA_RECOMMENDED
+            ], ["Mock mode enabled: returning deterministic catalog without network."]
+        mock_models = _fallback_models_for(canonical)
+        if mock_models:
+            return mock_models, ["Mock mode enabled: returning deterministic catalog without network."]
+        return [cls._normalize_model(model_id=f"{canonical}-mock-model", label=f"{canonical} mock model")], [
+            "Mock mode enabled: using synthetic model catalog for provider."
+        ]
+
+    @classmethod
+    async def _handle_openai_compatible_catalog(cls, canonical: str, payload: ProviderValidateRequest | None, warnings: List[str]) -> Tuple[List[NormalizedModelInfo], List[str]]:
+        auth = payload or ProviderValidateRequest()
+        if canonical == "openrouter" and not (auth.api_key or auth.account):
             remote = await cls._fetch_remote_models(canonical, auth)
             if remote:
+                warnings.append("Using OpenRouter public catalog without credentials.")
                 return remote, warnings
-            warnings.append("Could not fetch remote models from provider API.")
+            warnings.append("OpenRouter public catalog unavailable. Showing curated defaults.")
             return _fallback_models_for(canonical), warnings
-        return [], warnings
+
+        if not (auth.api_key or auth.account):
+            warnings.append("Authentication is required to fetch remote model catalog.")
+            return _fallback_models_for(canonical), warnings
+
+        remote = await cls._fetch_remote_models(canonical, auth)
+        if remote:
+            return remote, warnings
+        warnings.append("Could not fetch remote models from provider API.")
+        return _fallback_models_for(canonical), warnings
+
+    @classmethod
+    def _parse_remote_model_item(cls, provider_type: str, item: Dict[str, Any]) -> NormalizedModelInfo | None:
+        model_id = str(item.get("id") or "").strip()
+        if not model_id:
+            return None
+        description = str(item.get("description") or "").strip() or None
+        context_window = cls._safe_int(item.get("context_length"))
+        capabilities = cls._infer_capabilities(model_id=model_id, description=description)
+        priors = cls._build_prior_scores(
+            model_id=model_id,
+            capabilities=capabilities,
+            context_window=context_window,
+        )
+        OpsService.seed_model_priors(
+            provider_type=provider_type,
+            model_id=model_id,
+            prior_scores=priors,
+            metadata={
+                "description": description or "",
+                "context_window": context_window,
+                "capabilities": capabilities,
+            },
+        )
+        return cls._normalize_model(
+            model_id=model_id,
+            label=str(item.get("name") or item.get("id") or model_id),
+            downloadable=False,
+            context_window=context_window,
+            description=description,
+            capabilities=capabilities,
+            weakness=cls._infer_weakness(model_id),
+        )
 
     @classmethod
     async def _fetch_remote_models(
@@ -613,8 +676,6 @@ class ProviderCatalogService:
         if payload.api_key:
             headers["Authorization"] = f"Bearer {payload.api_key}"
         elif payload.account:
-            # Account mode is feature-gated at capabilities level; when enabled, we treat
-            # provided account/session token as bearer credential for official endpoints.
             headers["Authorization"] = f"Bearer {payload.account}"
         if payload.org:
             headers["OpenAI-Organization"] = payload.org
@@ -626,25 +687,7 @@ class ProviderCatalogService:
                     return []
                 data = resp.json()
                 items = data.get("data", []) if isinstance(data, dict) else []
-                out: List[NormalizedModelInfo] = []
-                for item in items:
-                    model_id = str(item.get("id") or "").strip()
-                    if not model_id:
-                        continue
-                    description = str(item.get("description") or "").strip() or None
-                    context_window = cls._safe_int(item.get("context_length"))
-                    capabilities = cls._infer_capabilities(model_id=model_id, description=description)
-                    out.append(
-                        cls._normalize_model(
-                            model_id=model_id,
-                            label=str(item.get("name") or item.get("id") or model_id),
-                            downloadable=False,
-                            context_window=context_window,
-                            description=description,
-                            capabilities=capabilities,
-                            weakness=cls._infer_weakness(model_id),
-                        )
-                    )
+                out = [m for item in items if (m := cls._parse_remote_model_item(provider_type, item)) is not None]
                 return out
         except Exception:
             return []
@@ -680,7 +723,7 @@ class ProviderCatalogService:
                 "/ops/connectors/ollama_local/models/install/start",
                 f"{canonical}:{model_id}:{job_id}",
                 operation="EXECUTE",
-                actor="system:provider_install",
+                actor=cls._SYSTEM_ACTOR_INSTALL,
             )
             asyncio.create_task(
                 cls._execute_install_job(
@@ -716,7 +759,7 @@ class ProviderCatalogService:
                 "/ops/connectors/codex/models/install/success",
                 f"{canonical}:{model_id}:{job_id}",
                 operation="EXECUTE",
-                actor="system:provider_install",
+                actor=cls._SYSTEM_ACTOR_INSTALL,
             )
             result = ProviderModelInstallResponse(
                 status="done",
@@ -784,7 +827,7 @@ class ProviderCatalogService:
                 f"/ops/connectors/{provider_type}/models/install/success",
                 f"{provider_type}:{model_id}:{job_id}",
                 operation="EXECUTE",
-                actor="system:provider_install",
+                actor=cls._SYSTEM_ACTOR_INSTALL,
             )
             return
 
@@ -801,7 +844,7 @@ class ProviderCatalogService:
             f"/ops/connectors/{provider_type}/models/install/fail",
             f"{provider_type}:{model_id}:{job_id}",
             operation="EXECUTE",
-            actor="system:provider_install",
+            actor=cls._SYSTEM_ACTOR_INSTALL,
         )
 
     @classmethod
@@ -810,12 +853,41 @@ class ProviderCatalogService:
         return list(ProviderService.capabilities_for(canonical).get("auth_modes_supported") or [])
 
     @classmethod
+    async def _validate_ollama_local(cls, canonical: str) -> ProviderValidateResponse:
+        installed = shutil.which("ollama") is not None
+        if not installed:
+            return ProviderValidateResponse(
+                valid=False,
+                health="down",
+                warnings=["Ollama command not found."],
+                error_actionable="Install Ollama and ensure it is available in PATH.",
+            )
+        ok = await cls._ollama_health()
+        return ProviderValidateResponse(
+            valid=ok,
+            health="ok" if ok else "degraded",
+            warnings=[] if ok else ["Ollama runtime not reachable at local endpoint."],
+            error_actionable=None if ok else "Start Ollama daemon and retry validation.",
+        )
+
+    @classmethod
+    def _record_and_return_validation(cls, canonical: str, response: ProviderValidateResponse) -> ProviderValidateResponse:
+        ProviderService.record_validation_result(
+            provider_type=canonical,
+            valid=response.valid,
+            health=response.health,
+            effective_model=response.effective_model,
+            error_actionable=response.error_actionable,
+            warnings=response.warnings,
+        )
+        return response
+
+    @classmethod
     async def validate_credentials(
         cls, provider_type: str, payload: ProviderValidateRequest
     ) -> ProviderValidateResponse:
         canonical = cls._canonical(provider_type)
         cls.invalidate_cache(provider_type=canonical, reason="manual_test_connection")
-        warnings: List[str] = []
 
         if _mock_mode_enabled(payload):
             mock_models, mock_warnings = await cls.list_available_models(canonical, payload=payload)
@@ -824,17 +896,8 @@ class ProviderCatalogService:
                 health="ok",
                 effective_model=(mock_models[0].id if mock_models else None),
                 warnings=list(mock_warnings),
-                error_actionable=None,
             )
-            ProviderService.record_validation_result(
-                provider_type=canonical,
-                valid=response.valid,
-                health=response.health,
-                effective_model=response.effective_model,
-                error_actionable=response.error_actionable,
-                warnings=response.warnings,
-            )
-            return response
+            return cls._record_and_return_validation(canonical, response)
 
         if payload.account and str(payload.account).strip().lower().startswith("env:"):
             env_name = ProviderAuthService.parse_env_ref(payload.account)
@@ -842,108 +905,36 @@ class ProviderCatalogService:
                 payload = payload.model_copy(update={"account": (ProviderAuthService.resolve_env_expression(f"${{{env_name}}}") or "")})
 
         if canonical == "ollama_local":
-            installed = shutil.which("ollama") is not None
-            if not installed:
-                response = ProviderValidateResponse(
-                    valid=False,
-                    health="down",
-                    warnings=["Ollama command not found."],
-                    error_actionable="Install Ollama and ensure it is available in PATH.",
-                )
-                ProviderService.record_validation_result(
-                    provider_type=canonical,
-                    valid=response.valid,
-                    health=response.health,
-                    effective_model=None,
-                    error_actionable=response.error_actionable,
-                    warnings=response.warnings,
-                )
-                return response
-            ok = await cls._ollama_health()
-            response = ProviderValidateResponse(
-                valid=ok,
-                health="ok" if ok else "degraded",
-                warnings=[] if ok else ["Ollama runtime not reachable at local endpoint."],
-                error_actionable=None if ok else "Start Ollama daemon and retry validation.",
-            )
-            ProviderService.record_validation_result(
-                provider_type=canonical,
-                valid=response.valid,
-                health=response.health,
-                effective_model=None,
-                error_actionable=response.error_actionable,
-                warnings=response.warnings,
-            )
-            return response
+            response = await cls._validate_ollama_local(canonical)
+            return cls._record_and_return_validation(canonical, response)
 
         supports_account = bool(ProviderService.capabilities_for(canonical).get("supports_account_mode", False))
         if payload.account and not supports_account:
             response = ProviderValidateResponse(
-                valid=False,
-                health="down",
+                valid=False, health="down",
                 warnings=["Account mode is not officially supported for this provider in current environment."],
                 error_actionable="Use api_key mode for this provider.",
             )
-            ProviderService.record_validation_result(
-                provider_type=canonical,
-                valid=response.valid,
-                health=response.health,
-                effective_model=None,
-                error_actionable=response.error_actionable,
-                warnings=response.warnings,
-            )
-            return response
+            return cls._record_and_return_validation(canonical, response)
 
         if not payload.api_key and not payload.account:
             response = ProviderValidateResponse(
-                valid=False,
-                health="down",
-                warnings=["Missing credentials payload."],
+                valid=False, health="down", warnings=["Missing credentials payload."],
                 error_actionable="Provide api_key or account according to selected auth mode.",
             )
-            ProviderService.record_validation_result(
-                provider_type=canonical,
-                valid=response.valid,
-                health=response.health,
-                effective_model=None,
-                error_actionable=response.error_actionable,
-                warnings=response.warnings,
-            )
-            return response
+            return cls._record_and_return_validation(canonical, response)
 
         remote = await cls._fetch_remote_models(canonical, payload)
         if remote:
+            response = ProviderValidateResponse(valid=True, health="ok", effective_model=remote[0].id, warnings=[])
+        else:
             response = ProviderValidateResponse(
-                valid=True,
-                health="ok",
-                effective_model=remote[0].id,
-                warnings=warnings,
+                valid=False, health="degraded",
+                warnings=["Remote API reachable check failed or returned empty catalog."],
+                error_actionable="Verify base_url, api_key/org and provider account permissions.",
             )
-            ProviderService.record_validation_result(
-                provider_type=canonical,
-                valid=response.valid,
-                health=response.health,
-                effective_model=response.effective_model,
-                error_actionable=response.error_actionable,
-                warnings=response.warnings,
-            )
-            return response
 
-        response = ProviderValidateResponse(
-            valid=False,
-            health="degraded",
-            warnings=["Remote API reachable check failed or returned empty catalog."],
-            error_actionable="Verify base_url, api_key/org and provider account permissions.",
-        )
-        ProviderService.record_validation_result(
-            provider_type=canonical,
-            valid=response.valid,
-            health=response.health,
-            effective_model=None,
-            error_actionable=response.error_actionable,
-            warnings=response.warnings,
-        )
-        return response
+        return cls._record_and_return_validation(canonical, response)
 
     @classmethod
     async def _ollama_health(cls) -> bool:

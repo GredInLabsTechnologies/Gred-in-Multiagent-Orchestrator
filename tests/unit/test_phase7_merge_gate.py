@@ -246,3 +246,24 @@ def test_phase7_merge_gate_post_merge_failure_triggers_rollback(tmp_path, monkey
     updated = OpsService.get_run(run.id)
     assert updated is not None
     assert updated.status == "ROLLBACK_EXECUTED"
+
+
+def test_ops_service_list_drafts_filters_limit_offset(tmp_path):
+    _setup_ops_dirs(tmp_path)
+
+    now = datetime.now(timezone.utc)
+
+    drafts = [
+        OpsDraft(id="d_a", prompt="a", status="draft", created_at=now - timedelta(minutes=3)),
+        OpsDraft(id="d_b", prompt="b", status="approved", created_at=now - timedelta(minutes=2)),
+        OpsDraft(id="d_c", prompt="c", status="draft", created_at=now - timedelta(minutes=1)),
+        OpsDraft(id="d_d", prompt="d", status="rejected", created_at=now),
+    ]
+    for item in drafts:
+        OpsService._draft_path(item.id).write_text(item.model_dump_json(indent=2), encoding="utf-8")
+
+    only_draft = OpsService.list_drafts(status="draft")
+    assert [d.id for d in only_draft] == ["d_c", "d_a"]
+
+    paged = OpsService.list_drafts(status="draft", offset=1, limit=1)
+    assert [d.id for d in paged] == ["d_a"]
