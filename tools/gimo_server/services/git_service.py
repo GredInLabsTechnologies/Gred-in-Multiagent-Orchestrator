@@ -34,7 +34,7 @@ class GitService:
             safe_head = _sanitize_git_ref(head)
 
             process = subprocess.Popen(
-                ["git", "diff", "--stat", "--", safe_base, safe_head],
+                ["git", "diff", "--stat", f"{safe_base}..{safe_head}"],
                 cwd=base_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

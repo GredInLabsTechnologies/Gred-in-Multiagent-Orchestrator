@@ -26,6 +26,7 @@ class OpenAICompatAdapter(ProviderAdapter):
         self.model = model
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
+        self._client: Optional[httpx.AsyncClient] = None
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -56,6 +57,16 @@ class OpenAICompatAdapter(ProviderAdapter):
                 return True
         return False
 
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.timeout_seconds)
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
     async def generate(self, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         if self._mock_mode_enabled(context):
             model = str((context or {}).get("model") or self.model)
@@ -84,36 +95,36 @@ class OpenAICompatAdapter(ProviderAdapter):
             "temperature": 0.2,
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            resp = await client.post(
+        client = self._get_client()
+        resp = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers=self._headers(),
                 json=payload,
             )
-            resp.raise_for_status()
-            data = resp.json()
-            usage = data.get("usage", {"prompt_tokens": 0, "completion_tokens": 0})
-            try:
-                content = data["choices"][0]["message"]["content"]
-            except Exception:
-                # Fall back to raw JSON if provider does not follow schema
-                content = str(data)
-            
-            return {
-                "content": content,
-                "usage": usage
-            }
+        resp.raise_for_status()
+        data = resp.json()
+        usage = data.get("usage", {"prompt_tokens": 0, "completion_tokens": 0})
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except Exception:
+            # Fall back to raw JSON if provider does not follow schema
+            content = str(data)
+
+        return {
+            "content": content,
+            "usage": usage
+        }
 
     async def health_check(self) -> bool:
         if self._mock_mode_enabled({}):
             return True
         # Best effort: try GET /models (OpenAI style). If fails, return False.
-        async with httpx.AsyncClient(timeout=5) as client:
-            try:
-                resp = await client.get(
-                    f"{self.base_url}/models",
-                    headers=self._headers(),
-                )
-                return 200 <= resp.status_code < 300
-            except Exception:
-                return False
+        client = self._get_client()
+        try:
+            resp = await client.get(
+                f"{self.base_url}/models",
+                headers=self._headers(),
+            )
+            return 200 <= resp.status_code < 300
+        except Exception:
+            return False

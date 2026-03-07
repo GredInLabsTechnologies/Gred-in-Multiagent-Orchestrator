@@ -40,6 +40,7 @@ class OpsService:
     DRAFTS_DIR = OPS_DIR / "drafts"
     APPROVED_DIR = OPS_DIR / "approved"
     RUNS_DIR = OPS_DIR / "runs"
+    RUN_LOGS_DIR = OPS_DIR / "run_logs"
     LOCKS_DIR = OPS_DIR / "locks"
 
     CONFIG_FILE = OPS_DIR / "config.json"
@@ -48,6 +49,7 @@ class OpsService:
     _RUN_GLOB = "r_*.json"
     _DRAFT_GLOB = "d_*.json"
     _APPROVED_GLOB = "a_*.json"
+    _RUN_LOG_TAIL = 200
     
     _gics: Optional[GicsService] = None
     _telemetry: Optional[AgentTelemetryService] = None
@@ -146,6 +148,7 @@ class OpsService:
         cls.DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
         cls.APPROVED_DIR.mkdir(parents=True, exist_ok=True)
         cls.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        cls.RUN_LOGS_DIR.mkdir(parents=True, exist_ok=True)
         cls.LOCKS_DIR.mkdir(parents=True, exist_ok=True)
 
     @classmethod
@@ -164,6 +167,51 @@ class OpsService:
     @classmethod
     def _run_path(cls, run_id: str) -> Path:
         return cls.RUNS_DIR / f"{run_id}.json"
+
+    @classmethod
+    def _run_log_path(cls, run_id: str) -> Path:
+        return cls.RUN_LOGS_DIR / f"{run_id}.jsonl"
+
+    @classmethod
+    def _persist_run(cls, run: OpsRun) -> None:
+        payload = run.model_dump(mode="json")
+        payload["log"] = []
+        cls._run_path(run.id).write_text(_json_dump(payload), encoding="utf-8")
+
+    @classmethod
+    def _append_run_log_entry(cls, run_id: str, *, level: str, msg: str) -> Dict[str, Any]:
+        entry = {"ts": _utcnow().isoformat(), "level": level, "msg": msg}
+        log_path = cls._run_log_path(run_id)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        return entry
+
+    @classmethod
+    def _read_run_logs(cls, run_id: str, *, tail: int | None = None) -> List[Dict[str, Any]]:
+        log_path = cls._run_log_path(run_id)
+        if not log_path.exists():
+            return []
+        entries: List[Dict[str, Any]] = []
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                parsed = json.loads(line)
+                if isinstance(parsed, dict):
+                    entries.append(parsed)
+            except Exception:
+                continue
+        if tail and tail > 0:
+            return entries[-tail:]
+        return entries
+
+    @classmethod
+    def _load_run_metadata(cls, run_id: str) -> Optional[OpsRun]:
+        f = cls._run_path(run_id)
+        if not f.exists():
+            return None
+        return OpsRun.model_validate_json(f.read_text(encoding="utf-8"))
 
     @classmethod
     def _merge_lock_path(cls, repo_id: str) -> Path:
@@ -408,17 +456,20 @@ class OpsService:
         out: List[OpsRun] = []
         for f in cls.RUNS_DIR.glob(cls._RUN_GLOB):
             try:
-                out.append(OpsRun.model_validate_json(f.read_text(encoding="utf-8")))
+                run = OpsRun.model_validate_json(f.read_text(encoding="utf-8"))
+                run.log = cls._read_run_logs(run.id, tail=cls._RUN_LOG_TAIL)
+                out.append(run)
             except Exception as exc:
                 logger.warning("Failed to parse run %s: %s", f.name, exc)
         return sorted(out, key=lambda r: r.created_at, reverse=True)
 
     @classmethod
     def get_run(cls, run_id: str) -> Optional[OpsRun]:
-        f = cls._run_path(run_id)
-        if not f.exists():
+        run = cls._load_run_metadata(run_id)
+        if not run:
             return None
-        return OpsRun.model_validate_json(f.read_text(encoding="utf-8"))
+        run.log = cls._read_run_logs(run_id, tail=cls._RUN_LOG_TAIL)
+        return run
 
     @classmethod
     def create_run(cls, approved_id: str) -> OpsRun:
@@ -450,47 +501,51 @@ class OpsService:
                 run_key=run_id,
                 risk_score=float(context.get("risk_score") or 0.0),
                 policy_decision_id=str(context.get("policy_decision_id") or ""),
-                log=[{"ts": _utcnow().isoformat(), "level": "INFO", "msg": "Run created"}],
+                log=[],
                 started_at=None,
                 created_at=_utcnow(),
             )
-            cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
+            entry = cls._append_run_log_entry(run.id, level="INFO", msg="Run created")
+            run.log = [entry]
+            cls._persist_run(run)
             return run
 
     @classmethod
     def append_log(cls, run_id: str, *, level: str, msg: str) -> OpsRun:
         with cls._lock():
-            run = cls.get_run(run_id)
+            run = cls._load_run_metadata(run_id)
             if not run:
                 raise ValueError(f"Run {run_id} not found")
-            run.log.append({"ts": _utcnow().isoformat(), "level": level, "msg": msg})
-            cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
+            cls._append_run_log_entry(run_id, level=level, msg=msg)
+            run.log = cls._read_run_logs(run_id, tail=cls._RUN_LOG_TAIL)
             return run
 
     @classmethod
     def update_run_status(cls, run_id: str, status: str, *, msg: str | None = None) -> OpsRun:
         with cls._lock():
-            run = cls.get_run(run_id)
+            run = cls._load_run_metadata(run_id)
             if not run:
                 raise ValueError(f"Run {run_id} not found")
             run.status = status  # type: ignore[assignment]
             if status == "running" and not run.started_at:
                 run.started_at = _utcnow()
             if msg:
-                run.log.append({"ts": _utcnow().isoformat(), "level": "INFO", "msg": msg})
-            cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
+                cls._append_run_log_entry(run_id, level="INFO", msg=msg)
+            cls._persist_run(run)
+            run.log = cls._read_run_logs(run_id, tail=cls._RUN_LOG_TAIL)
             return run
 
     @classmethod
     def set_run_stage(cls, run_id: str, stage: str, *, msg: str | None = None) -> OpsRun:
         with cls._lock():
-            run = cls.get_run(run_id)
+            run = cls._load_run_metadata(run_id)
             if not run:
                 raise ValueError(f"Run {run_id} not found")
             run.stage = stage
             if msg:
-                run.log.append({"ts": _utcnow().isoformat(), "level": "INFO", "msg": msg})
-            cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
+                cls._append_run_log_entry(run_id, level="INFO", msg=msg)
+            cls._persist_run(run)
+            run.log = cls._read_run_logs(run_id, tail=cls._RUN_LOG_TAIL)
             return run
 
     @classmethod
@@ -505,7 +560,7 @@ class OpsService:
         heartbeat_at: Optional[datetime] = None,
     ) -> OpsRun:
         with cls._lock():
-            run = cls.get_run(run_id)
+            run = cls._load_run_metadata(run_id)
             if not run:
                 raise ValueError(f"Run {run_id} not found")
             if commit_before is not None:
@@ -518,255 +573,9 @@ class OpsService:
                 run.lock_expires_at = lock_expires_at
             if heartbeat_at is not None:
                 run.heartbeat_at = heartbeat_at
-            cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
+            cls._persist_run(run)
+            run.log = cls._read_run_logs(run_id, tail=cls._RUN_LOG_TAIL)
             return run
-
-    @classmethod
-    def acquire_merge_lock(cls, repo_id: str, run_id: str, *, ttl_seconds: int = 120) -> Dict[str, Any]:
-        now = _utcnow()
-        expires_at = now + timedelta(seconds=max(1, int(ttl_seconds)))
-        lock_id = f"ml_{int(time.time() * 1000)}_{os.urandom(2).hex()}"
-        lock_payload = {
-            "lock_id": lock_id,
-            "repo_id": repo_id,
-            "run_id": run_id,
-            "acquired_at": now.isoformat(),
-            "heartbeat_at": now.isoformat(),
-            "expires_at": expires_at.isoformat(),
-            "ttl_seconds": max(1, int(ttl_seconds)),
-        }
-        with cls._lock():
-            lock_file = cls._merge_lock_path(repo_id)
-            if lock_file.exists():
-                try:
-                    current = json.loads(lock_file.read_text(encoding="utf-8"))
-                except Exception:
-                    current = {}
-                current_expiry = str(current.get("expires_at") or "")
-                stale = True
-                if current_expiry:
-                    try:
-                        stale = datetime.fromisoformat(current_expiry) <= now
-                    except Exception:
-                        stale = True
-                if not stale and str(current.get("run_id") or "") != run_id:
-                    raise RuntimeError("MERGE_LOCKED")
-            lock_file.write_text(_json_dump(lock_payload), encoding="utf-8")
-            run = cls.get_run(run_id)
-            if run:
-                run.lock_id = lock_id
-                run.lock_expires_at = expires_at
-                run.heartbeat_at = now
-                cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
-            return lock_payload
-
-    @classmethod
-    def heartbeat_merge_lock(cls, repo_id: str, run_id: str, *, ttl_seconds: int = 120) -> Dict[str, Any]:
-        now = _utcnow()
-        expires_at = now + timedelta(seconds=max(1, int(ttl_seconds)))
-        with cls._lock():
-            lock_file = cls._merge_lock_path(repo_id)
-            if not lock_file.exists():
-                raise RuntimeError("MERGE_LOCKED")
-            payload = json.loads(lock_file.read_text(encoding="utf-8"))
-            if str(payload.get("run_id") or "") != run_id:
-                raise RuntimeError("MERGE_LOCKED")
-            payload["heartbeat_at"] = now.isoformat()
-            payload["expires_at"] = expires_at.isoformat()
-            payload["ttl_seconds"] = max(1, int(ttl_seconds))
-            lock_file.write_text(_json_dump(payload), encoding="utf-8")
-            run = cls.get_run(run_id)
-            if run:
-                run.lock_expires_at = expires_at
-                run.heartbeat_at = now
-                cls._run_path(run.id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
-            return payload
-
-    @classmethod
-    def release_merge_lock(cls, repo_id: str, run_id: str) -> bool:
-        with cls._lock():
-            lock_file = cls._merge_lock_path(repo_id)
-            if not lock_file.exists():
-                return False
-            try:
-                payload = json.loads(lock_file.read_text(encoding="utf-8"))
-            except Exception:
-                payload = {}
-            if str(payload.get("run_id") or "") != run_id:
-                return False
-            lock_file.unlink(missing_ok=True)
-            return True
-
-    @classmethod
-    def recover_stale_lock(cls, repo_id: str) -> bool:
-        now = _utcnow()
-        with cls._lock():
-            lock_file = cls._merge_lock_path(repo_id)
-            if not lock_file.exists():
-                return False
-            try:
-                payload = json.loads(lock_file.read_text(encoding="utf-8"))
-                expires_at = datetime.fromisoformat(str(payload.get("expires_at") or ""))
-            except Exception:
-                lock_file.unlink(missing_ok=True)
-                return True
-            if expires_at <= now:
-                lock_file.unlink(missing_ok=True)
-                return True
-            return False
-
-    @classmethod
-    def _extract_strategy_fields(cls, run: Any) -> Dict[str, str]:
-        strategy_line = ""
-        for entry in reversed(run.log or []):
-            msg = str((entry or {}).get("msg") or "")
-            if msg.startswith("Model strategy:"):
-                strategy_line = msg
-                break
-
-        strategy_fields: Dict[str, str] = {}
-        if strategy_line:
-            payload = strategy_line.replace("Model strategy:", "").strip()
-            for part in payload.split(" "):
-                if "=" in part:
-                    k, v = part.split("=", 1)
-                    strategy_fields[k.strip()] = v.strip()
-        return strategy_fields
-
-    @classmethod
-    def _extract_hashes(cls, context: dict, approved: Any, content: str) -> tuple[str, str]:
-        expected = str(context.get("policy_hash_expected") or "")
-        runtime = str(context.get("policy_hash_runtime") or "")
-        if not expected:
-            expected = hashlib.sha256((approved.prompt or "").encode("utf-8", errors="ignore")).hexdigest()
-        if not runtime:
-            runtime = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
-        return expected, runtime
-
-    @classmethod
-    def _c_str(cls, ctx: dict, k1: str, k2: str = None, def_val: str = "") -> str:
-        v = ctx.get(k1)
-        if not v and k2:
-            v = ctx.get(k2)
-        return str(v or def_val)
-
-    @classmethod
-    def _build_preview_dict(
-        cls,
-        run,
-        approved,
-        context: dict,
-        strategy_fields: dict,
-        expected: str,
-        runtime: str,
-        request_id: Optional[str],
-        trace_id: Optional[str]
-    ) -> Dict[str, Any]:
-        content = approved.content or ""
-        diff_summary = context.get("diff_summary") or f"content_chars={len(content)}"
-        model_used = cls._c_str(context, "model_used", def_val=approved.provider or "unknown")
-
-        fallback_used = bool(
-            str(context.get("fallback_used", strategy_fields.get("fallback_used", False))).lower() in {"1", "true", "yes"}
-        )
-
-        return {
-            "run_id": run.id,
-            "draft_id": approved.draft_id,
-            "status": run.status,
-            "final_status": run.status,
-            "diff_summary": diff_summary,
-            "risk_score": float(context.get("risk_score", 0.0) or 0.0),
-            "intent_declared": cls._c_str(context, "intent_declared", "intent_class"),
-            "intent_effective": cls._c_str(context, "intent_effective", "intent_class"),
-            "decision_reason": cls._c_str(context, "decision_reason"),
-            "execution_decision": cls._c_str(context, "execution_decision"),
-            "model_used": model_used,
-            "model_attempted": cls._c_str(context, "model_attempted", def_val=strategy_fields.get("attempted") or ""),
-            "failure_reason": cls._c_str(context, "failure_reason", def_val=strategy_fields.get("failure_reason") or ""),
-            "final_model_used": cls._c_str(context, "final_model_used", def_val=strategy_fields.get("final_model") or model_used),
-            "fallback_used": fallback_used,
-            "policy_decision_id": cls._c_str(context, "policy_decision_id"),
-            "policy_decision": cls._c_str(context, "policy_decision"),
-            "policy_status_code": cls._c_str(context, "policy_status_code"),
-            "policy_triggered_rules": list(context.get("policy_triggered_rules") or []),
-            "policy_hash_expected": expected,
-            "policy_hash_runtime": runtime,
-            "baseline_version": cls._c_str(context, "baseline_version", def_val="v1"),
-            "commit_before": cls._c_str(context, "commit_before", def_val=run.commit_before or "unknown"),
-            "commit_after": cls._c_str(context, "commit_after", def_val=run.commit_after or "unknown"),
-            "trace_id": str(trace_id or context.get("trace_id") or ""),
-            "request_id": str(request_id or context.get("request_id") or ""),
-            "updated_at": _utcnow().isoformat(),
-        }
-
-    @classmethod
-    def get_run_preview(
-        cls,
-        run_id: str,
-        *,
-        request_id: Optional[str] = None,
-        trace_id: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """Return a stable preview payload for audit/UI contracts."""
-        run = cls.get_run(run_id)
-        if not run:
-            return None
-        approved = cls.get_approved(run.approved_id)
-        if not approved:
-            return None
-        draft = cls.get_draft(approved.draft_id)
-        context = dict((draft.context if draft else {}) or {})
-
-        content = approved.content or ""
-        expected, runtime = cls._extract_hashes(context, approved, content)
-        strategy_fields = cls._extract_strategy_fields(run)
-
-        return cls._build_preview_dict(
-            run, approved, context, strategy_fields, expected, runtime, request_id, trace_id
-        )
-
-    @classmethod
-    def get_runs_by_status(cls, status: str) -> List[OpsRun]:
-        if not cls.RUNS_DIR.exists():
-            return []
-        out: List[OpsRun] = []
-        for f in cls.RUNS_DIR.glob(cls._RUN_GLOB):
-            try:
-                run = OpsRun.model_validate_json(f.read_text(encoding="utf-8"))
-                if run.status == status:
-                    out.append(run)
-            except Exception:
-                continue
-        return sorted(out, key=lambda r: r.created_at)
-
-    @classmethod
-    def count_active_runs(cls) -> int:
-        if not cls.RUNS_DIR.exists():
-            return 0
-        count = 0
-        for f in cls.RUNS_DIR.glob(cls._RUN_GLOB):
-            try:
-                run = OpsRun.model_validate_json(f.read_text(encoding="utf-8"))
-                if run.status in ("pending", "running"):
-                    count += 1
-            except Exception:
-                continue
-        return count
-
-    @classmethod
-    def list_pending_runs(cls) -> List[OpsRun]:
-        if not cls.RUNS_DIR.exists():
-            return []
-        out: List[OpsRun] = []
-        for f in cls.RUNS_DIR.glob(cls._RUN_GLOB):
-            try:
-                run = OpsRun.model_validate_json(f.read_text(encoding="utf-8"))
-                if run.status == "pending":
-                    out.append(run)
-            except Exception:
-                continue
-        return sorted(out, key=lambda r: r.created_at)
 
     @classmethod
     def cleanup_old_drafts(cls) -> int:
@@ -804,6 +613,7 @@ class OpsService:
                 mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
                 if mtime < cutoff:
                     f.unlink(missing_ok=True)
+                    cls._run_log_path(f.stem).unlink(missing_ok=True)
                     cleaned += 1
             except Exception:
                 continue

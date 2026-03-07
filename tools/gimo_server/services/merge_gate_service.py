@@ -141,59 +141,87 @@ class MergeGateService:
                 OpsService.append_log(run_id, level="WARN", msg="Heartbeat failed; lock may be stale")
                 break
 
+
+    @classmethod
+    def _sandbox_worktree_path(cls, run_id: str) -> Path:
+        settings = get_settings()
+        return Path(settings.ops_data_dir) / "worktrees" / run_id
+
+    @classmethod
+    def _create_sandbox_worktree(cls, run_id: str, source_ref: str) -> Path:
+        settings = get_settings()
+        repo_root = Path(settings.repo_root_dir)
+        sandbox_path = cls._sandbox_worktree_path(run_id)
+        sandbox_path.parent.mkdir(parents=True, exist_ok=True)
+        if sandbox_path.exists():
+            GitService.remove_worktree(repo_root, sandbox_path)
+        GitService.add_worktree(repo_root, sandbox_path, branch=source_ref)
+        return sandbox_path
+
+    @classmethod
+    def _cleanup_sandbox_worktree(cls, run_id: str) -> None:
+        settings = get_settings()
+        repo_root = Path(settings.repo_root_dir)
+        sandbox_path = cls._sandbox_worktree_path(run_id)
+        if sandbox_path.exists():
+            GitService.remove_worktree(repo_root, sandbox_path)
+
     @classmethod
     async def _pipeline(cls, run_id: str, *, repo_id: str, source_ref: str, target_ref: str) -> None:
-        base_dir = Path(get_settings().repo_root_dir)
+        del repo_id
+        OpsService.set_run_stage(run_id, "gate_worktree", msg="Phase7: creating sandbox worktree")
 
-        OpsService.set_run_stage(run_id, "gate_worktree", msg="Phase7: validating worktree clean")
         try:
-            clean = GitService.is_worktree_clean(base_dir)
+            base_dir = cls._create_sandbox_worktree(run_id, source_ref)
         except Exception as exc:
-            OpsService.update_run_status(run_id, "WORKTREE_CORRUPTED", msg=f"worktree check failed: {exc}")
-            return
-        if not clean:
-            OpsService.update_run_status(run_id, "WORKTREE_CORRUPTED", msg="worktree not clean")
-            return
-
-        OpsService.set_run_stage(run_id, "gate_tests", msg="Phase7: running tests")
-        ok_tests, tests_out = GitService.run_tests(base_dir)
-        OpsService.append_log(run_id, level="INFO", msg=f"tests_output_tail={tests_out[-1000:]}")
-        if not ok_tests:
-            OpsService.update_run_status(run_id, "VALIDATION_FAILED_TESTS", msg="tests failed")
-            return
-
-        OpsService.set_run_stage(run_id, "gate_lint", msg="Phase7: running lint/typecheck")
-        ok_lint, lint_out = GitService.run_lint_typecheck(base_dir)
-        OpsService.append_log(run_id, level="INFO", msg=f"lint_output_tail={lint_out[-1000:]}")
-        if not ok_lint:
-            OpsService.update_run_status(run_id, "VALIDATION_FAILED_LINT", msg="lint/typecheck failed")
-            return
-
-        OpsService.set_run_stage(run_id, "dry_run_merge", msg="Phase7: dry-run merge")
-        ok_dry, dry_out = GitService.dry_run_merge(base_dir, source_ref, target_ref)
-        OpsService.append_log(run_id, level="INFO", msg=f"dry_run_tail={dry_out[-1000:]}")
-        if not ok_dry:
-            OpsService.update_run_status(run_id, "MERGE_CONFLICT", msg="dry-run merge conflict")
-            return
-
-        OpsService.set_run_stage(run_id, "merge_real", msg="Phase7: performing merge")
-        commit_before = GitService.get_head_commit(base_dir)
-        OpsService.update_run_merge_metadata(run_id, commit_before=commit_before)
-        ok_merge, merge_out = GitService.perform_merge(base_dir, source_ref, target_ref)
-        OpsService.append_log(run_id, level="INFO", msg=f"merge_tail={merge_out[-1000:]}")
-        if not ok_merge:
-            OpsService.update_run_status(run_id, "MERGE_CONFLICT", msg="merge failed")
+            OpsService.update_run_status(run_id, "WORKTREE_CORRUPTED", msg=f"sandbox worktree create failed: {exc}")
             return
 
         try:
-            commit_after = GitService.get_head_commit(base_dir)
-            OpsService.update_run_merge_metadata(run_id, commit_after=commit_after)
-            OpsService.update_run_status(run_id, "done", msg="merge pipeline completed")
-        except Exception as exc:
-            # post-merge failure => rollback determinista
-            ok_rb, rb_out = GitService.rollback_to_commit(base_dir, commit_before)
-            OpsService.append_log(run_id, level="WARN", msg=f"rollback_tail={rb_out[-1000:]}")
-            if ok_rb:
-                OpsService.update_run_status(run_id, "ROLLBACK_EXECUTED", msg=f"rollback after post-merge failure: {exc}")
-            else:
-                OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg=f"rollback failed: {exc}")
+            OpsService.set_run_stage(run_id, "gate_tests", msg="Phase7: running tests in sandbox")
+            ok_tests, tests_out = GitService.run_tests(base_dir)
+            OpsService.append_log(run_id, level="INFO", msg=f"tests_output_tail={tests_out[-1000:]}")
+            if not ok_tests:
+                OpsService.update_run_status(run_id, "VALIDATION_FAILED_TESTS", msg="tests failed")
+                return
+
+            OpsService.set_run_stage(run_id, "gate_lint", msg="Phase7: running lint/typecheck in sandbox")
+            ok_lint, lint_out = GitService.run_lint_typecheck(base_dir)
+            OpsService.append_log(run_id, level="INFO", msg=f"lint_output_tail={lint_out[-1000:]}")
+            if not ok_lint:
+                OpsService.update_run_status(run_id, "VALIDATION_FAILED_LINT", msg="lint/typecheck failed")
+                return
+
+            OpsService.set_run_stage(run_id, "dry_run_merge", msg="Phase7: dry-run merge in sandbox")
+            ok_dry, dry_out = GitService.dry_run_merge(base_dir, source_ref, target_ref)
+            OpsService.append_log(run_id, level="INFO", msg=f"dry_run_tail={dry_out[-1000:]}")
+            if not ok_dry:
+                OpsService.update_run_status(run_id, "MERGE_CONFLICT", msg="dry-run merge conflict")
+                return
+
+            OpsService.set_run_stage(run_id, "merge_real", msg="Phase7: performing merge in sandbox")
+            commit_before = GitService.get_head_commit(base_dir)
+            OpsService.update_run_merge_metadata(run_id, commit_before=commit_before)
+            ok_merge, merge_out = GitService.perform_merge(base_dir, source_ref, target_ref)
+            OpsService.append_log(run_id, level="INFO", msg=f"merge_tail={merge_out[-1000:]}")
+            if not ok_merge:
+                OpsService.update_run_status(run_id, "MERGE_CONFLICT", msg="merge failed")
+                return
+
+            try:
+                commit_after = GitService.get_head_commit(base_dir)
+                OpsService.update_run_merge_metadata(run_id, commit_after=commit_after)
+                OpsService.update_run_status(run_id, "done", msg="merge pipeline completed")
+            except Exception as exc:
+                # post-merge failure => rollback determinista
+                ok_rb, rb_out = GitService.rollback_to_commit(base_dir, commit_before)
+                OpsService.append_log(run_id, level="WARN", msg=f"rollback_tail={rb_out[-1000:]}")
+                if ok_rb:
+                    OpsService.update_run_status(run_id, "ROLLBACK_EXECUTED", msg=f"rollback after post-merge failure: {exc}")
+                else:
+                    OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg=f"rollback failed: {exc}")
+        finally:
+            try:
+                cls._cleanup_sandbox_worktree(run_id)
+            except Exception as exc:
+                OpsService.append_log(run_id, level="WARN", msg=f"sandbox cleanup failed: {exc}")
