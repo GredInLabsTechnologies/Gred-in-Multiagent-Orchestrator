@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@stripe/stripe-js": "^8.7.0",
-    "firebase": "^12.9.0",
+    "firebase": "^12.10.0",
     "firebase-admin": "^13.6.1",
     "jose": "^6.0.8",
     "jsonwebtoken": "^9.0.3",
