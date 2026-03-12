@@ -22,24 +22,35 @@ Monorepo unificado de GIMO: orquestador multiagente + plataforma web de licencia
 - Node.js 18+
 - Ollama (opcional, para modelos locales)
 
-### Flujo recomendado: clone → 2 comandos
+### Flujo recomendado: clone &rarr; 2 comandos
 
 ```bash
-bootstrap.cmd
-GIMO_DEV_LAUNCHER.cmd
+gimo bootstrap
+gimo
 ```
 
-`bootstrap.cmd` prepara entorno portable (venv, dependencias, `.env`, `.env.local`, MCP).
+> **`gimo.cmd` es el UNICO launcher de desarrollo oficial del repo.** Todos los dem&aacute;s scripts (`GIMO_DEV_LAUNCHER.cmd`, `up.cmd`, `bootstrap.cmd`, etc.) son wrappers deprecated que redirigen a `gimo.cmd`.
 
-`GIMO_DEV_LAUNCHER.cmd` inicia backend + UI + web y abre la UI.
-
-### Comandos operativos
+### Comandos
 
 ```bash
-scripts\dev\up.cmd      # levantar servicios
-scripts\dev\down.cmd    # detener servicios y liberar puertos
-scripts\dev\doctor.cmd  # diagn&oacute;stico r&aacute;pido del entorno
+gimo               # levantar todo (= gimo up)
+gimo down           # detener todo y liberar puertos
+gimo doctor         # diagnostico del entorno
+gimo bootstrap      # setup completo desde cero
+gimo mcp            # MCP server standalone (puerto 8000)
+gimo up --no-web    # sin apps/web
+gimo up --backend-only  # solo backend
 ```
+
+Dentro de `gimo up`, comandos interactivos:
+- `r` &mdash; restart backend
+- `rf` &mdash; restart frontend
+- `ra` &mdash; restart todo
+- `s` &mdash; ver estado
+- `q` &mdash; apagar todo y salir
+
+Cambios en Python se aplican autom&aacute;ticamente via `uvicorn --reload` (no necesitas reiniciar).
 
 ### Flujo manual (avanzado)
 

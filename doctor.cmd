@@ -1,8 +1,3 @@
 @echo off
-setlocal
-
-set "ROOT_DIR=%~dp0"
-cd /d "%ROOT_DIR%"
-
-call scripts\dev\doctor.cmd %*
-exit /b %ERRORLEVEL%
+:: DEPRECATED — Use: gimo doctor
+call "%~dp0gimo.cmd" doctor %*

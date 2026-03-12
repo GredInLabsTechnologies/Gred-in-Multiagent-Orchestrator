@@ -5,7 +5,12 @@ import { Input } from './ui/input';
 import { useProviders } from '../hooks/useProviders';
 import { useToast } from './Toast';
 import { API_BASE } from '../types';
-import { Server, Cloud, Cpu, Trash2, Activity, Download, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Server, Cpu, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { CodexAuthSection } from './provider/CodexAuthSection';
+import { ClaudeAuthSection } from './provider/ClaudeAuthSection';
+import { OllamaLocalSection } from './provider/OllamaLocalSection';
+import { ModelSelector } from './provider/ModelSelector';
+import { ProviderList } from './provider/ProviderList';
 
 /* ── Friendly provider type labels ── */
 const PROVIDER_LABELS: Record<string, string> = {
@@ -44,37 +49,10 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 const KNOWN_PROVIDER_TYPES = [
-    'openai',
-    'anthropic',
-    'google',
-    'mistral',
-    'cohere',
-    'deepseek',
-    'qwen',
-    'moonshot',
-    'zai',
-    'minimax',
-    'baidu',
-    'tencent',
-    'bytedance',
-    'iflytek',
-    '01-ai',
-    'codex',
-    'claude',
-    'together',
-    'fireworks',
-    'replicate',
-    'huggingface',
-    'azure-openai',
-    'aws-bedrock',
-    'vertex-ai',
-    'ollama',
-    'vllm',
-    'llama-cpp',
-    'tgi',
-    'ollama_local',
-    'groq',
-    'openrouter',
+    'openai', 'anthropic', 'google', 'mistral', 'cohere', 'deepseek', 'qwen', 'moonshot',
+    'zai', 'minimax', 'baidu', 'tencent', 'bytedance', 'iflytek', '01-ai', 'codex', 'claude',
+    'together', 'fireworks', 'replicate', 'huggingface', 'azure-openai', 'aws-bedrock',
+    'vertex-ai', 'ollama', 'vllm', 'llama-cpp', 'tgi', 'ollama_local', 'groq', 'openrouter',
     'custom_openai_compatible',
 ];
 
@@ -97,6 +75,8 @@ export const ProviderSettings: React.FC = () => {
         testProvider,
         startCodexDeviceLogin,
         startClaudeLogin,
+        fetchCliAuthStatus,
+        cliLogout,
         installCliDependency,
         getCliDependencyInstallJob,
     } = useProviders();
@@ -118,8 +98,9 @@ export const ProviderSettings: React.FC = () => {
     const [installState, setInstallState] = useState<{ status: string; message: string; progress?: number; job_id?: string; is_cli?: boolean; dependency_id?: string } | null>(null);
     const [showAdvanced, setShowAdvanced] = useState(false);
 
-    // Codex device flow state
     const [deviceLoginState, setDeviceLoginState] = useState<{ status: string; verification_url?: string; user_code?: string; message?: string; action?: string } | null>(null);
+    const [cliAuthStatus, setCliAuthStatus] = useState<{ authenticated: boolean; method?: string | null; email?: string | null; plan?: string | null; detail?: string } | null>(null);
+    const [cliAuthLoading, setCliAuthLoading] = useState(false);
 
     const [recommendation, setRecommendation] = useState<any>(null);
     const [loadingRecommendation, setLoadingRecommendation] = useState(true);
@@ -131,14 +112,16 @@ export const ProviderSettings: React.FC = () => {
         const extra = providerTypes.filter((ptype) => !KNOWN_PROVIDER_TYPES.includes(ptype));
         return [...known, ...missingKnown, ...extra];
     }, [providerTypes]);
+
     const catalog = catalogs[providerType];
     const isLoadingCatalog = Boolean(catalogLoading[providerType]);
     const authModes = catalog?.auth_modes_supported || providerCapabilities[providerType]?.auth_modes_supported || [];
-    const supportsInstall = Boolean(catalog?.can_install);
+    const supportsInstall = (catalog?.install_method as string) === 'local_runtime';
     const accountModeRelevantProvider = providerType === 'codex' || providerType === 'claude';
     const accountModeAvailable = authModes.includes('account') || accountModeRelevantProvider;
     const effectiveHealth = validateResult?.health || effectiveState?.health || 'unknown';
     const effectiveActionableError = validateResult?.error_actionable || effectiveState?.last_error_actionable || 'sin errores recientes';
+
     const roleLabel = useMemo(() => {
         if (roles?.orchestrator?.provider_id) {
             return `orchestrator + ${roles.workers?.length || 0} workers`;
@@ -150,8 +133,9 @@ export const ProviderSettings: React.FC = () => {
 
     const modelGroups = useMemo(() => {
         const installed = catalog?.installed_models || [];
-        const available = catalog?.available_models || [];
-        const recommended = catalog?.recommended_models || [];
+        const installedIds = new Set(installed.map((m: any) => m.id));
+        const available = (catalog?.available_models || []).filter((m: any) => !installedIds.has(m.id));
+        const recommended = (catalog?.recommended_models || []).filter((m: any) => !installedIds.has(m.id));
         return { installed, available, recommended };
     }, [catalog]);
 
@@ -164,20 +148,22 @@ export const ProviderSettings: React.FC = () => {
         });
     }, [providerTypeOptions, providerSearch]);
 
-    const filteredModelGroups = useMemo(() => {
-        const q = modelSearch.trim().toLowerCase();
-        if (!q) return modelGroups;
-        const filterModels = (items: any[]) => items.filter((m) => {
-            const id = String(m?.id || '').toLowerCase();
-            const label = String(m?.label || '').toLowerCase();
-            return id.includes(q) || label.includes(q);
-        });
-        return {
-            installed: filterModels(modelGroups.installed),
-            available: filterModels(modelGroups.available),
-            recommended: filterModels(modelGroups.recommended),
-        };
-    }, [modelGroups, modelSearch]);
+    const healthBadgeClass = useMemo(() => {
+        const health = String(effectiveHealth || '').toLowerCase();
+        if (health === 'ok') return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+        if (health === 'degraded') return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+        if (health === 'down') return 'bg-red-500/15 text-red-300 border-red-500/30';
+        return 'bg-surface-3 text-text-secondary border-border-primary';
+    }, [effectiveHealth]);
+
+    const renderModelMeta = useCallback((m: any) => {
+        const caps = Array.isArray(m?.capabilities) ? m.capabilities : [];
+        const capText = caps.length ? `Excelente en: ${caps.join(', ')}` : null;
+        const weakness = m?.weakness ? `Debilidad: ${m.weakness}` : null;
+        const context = typeof m?.context_window === 'number' ? `${m.context_window.toLocaleString()} ctx` : null;
+        const pieces = [capText, weakness, context].filter(Boolean);
+        return pieces.length ? pieces.join(' | ') : (m?.description || 'Sin metadata adicional');
+    }, []);
 
     useEffect(() => {
         loadProviders();
@@ -232,23 +218,6 @@ export const ProviderSettings: React.FC = () => {
 
     const selectedModelInstalados = modelGroups.installed.some((m) => m.id === modelId);
 
-    const healthBadgeClass = useMemo(() => {
-        const health = String(effectiveHealth || '').toLowerCase();
-        if (health === 'ok') return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
-        if (health === 'degraded') return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
-        if (health === 'down') return 'bg-red-500/15 text-red-300 border-red-500/30';
-        return 'bg-surface-3 text-text-secondary border-border-primary';
-    }, [effectiveHealth]);
-
-    const renderModelMeta = useCallback((m: any) => {
-        const caps = Array.isArray(m?.capabilities) ? m.capabilities : [];
-        const capText = caps.length ? `Excelente en: ${caps.join(', ')}` : null;
-        const weakness = m?.weakness ? `Debilidad: ${m.weakness}` : null;
-        const context = typeof m?.context_window === 'number' ? `${m.context_window.toLocaleString()} ctx` : null;
-        const pieces = [capText, weakness, context].filter(Boolean);
-        return pieces.length ? pieces.join(' | ') : (m?.description || 'Sin metadata adicional');
-    }, []);
-
     const handleInstallAndUse = useCallback(async (explicitModelId?: string) => {
         const targetModel = explicitModelId || modelId;
         if (!targetModel) {
@@ -287,13 +256,11 @@ export const ProviderSettings: React.FC = () => {
                 } else {
                     next = await getInstallJob(providerType, installState.job_id!);
                 }
-
                 if (cancelled) return;
                 setInstallState(next);
                 if (next.status === 'done') {
                     addToast('Instalación completada correctamente', 'success');
                     clearInterval(timer);
-                    // Clear error states so the user can proceed
                     setDeviceLoginState(null);
                 }
                 if (next.status === 'error') {
@@ -334,18 +301,35 @@ export const ProviderSettings: React.FC = () => {
         }
     };
 
+    useEffect(() => {
+        if (authMode !== 'account') { setCliAuthStatus(null); return; }
+        const provider = providerType === 'codex' ? 'codex' : providerType === 'claude' ? 'claude' : null;
+        if (!provider || !fetchCliAuthStatus) { setCliAuthStatus(null); return; }
+        setCliAuthLoading(true);
+        fetchCliAuthStatus(provider)
+            .then(setCliAuthStatus)
+            .catch(() => setCliAuthStatus({ authenticated: false }))
+            .finally(() => setCliAuthLoading(false));
+    }, [authMode, providerType, fetchCliAuthStatus]);
+
+    const handleCliLogout = async () => {
+        const provider = providerType === 'codex' ? 'codex' : 'claude';
+        try {
+            await cliLogout(provider);
+            setCliAuthStatus({ authenticated: false });
+            setDeviceLoginState(null);
+            addToast(`Sesión de ${provider === 'codex' ? 'Codex' : 'Claude'} cerrada`, 'info');
+        } catch {
+            addToast('Error al cerrar sesión', 'error');
+        }
+    };
+
     const handleOAuthLikeLogin = async () => {
         try {
             setDeviceLoginState({ status: 'starting', message: 'Preparando autenticación segura...' });
             const data = await startCodexDeviceLogin();
             setDeviceLoginState(data);
-
             if (data.status === 'pending') {
-                if (!account) {
-                    setAccount('codex-device-session');
-                }
-
-                // Copy to clipboard automatically if possible
                 if (data.user_code && navigator.clipboard) {
                     try {
                         await navigator.clipboard.writeText(data.user_code);
@@ -354,8 +338,6 @@ export const ProviderSettings: React.FC = () => {
                         console.error('No se pudo copiar el código', e);
                     }
                 }
-
-                // Open window automatically
                 if (data.verification_url) {
                     window.open(data.verification_url, '_blank', 'noopener,noreferrer');
                 }
@@ -371,12 +353,6 @@ export const ProviderSettings: React.FC = () => {
             setDeviceLoginState({ status: 'starting', message: 'Abriendo navegador para autenticación con Anthropic...' });
             const data = await startClaudeLogin();
             setDeviceLoginState(data);
-
-            if (data.status === 'pending') {
-                if (!account) {
-                    setAccount('claude-device-session');
-                }
-            }
         } catch (err: any) {
             setDeviceLoginState({ status: 'error', message: err.message || 'Error al iniciar flujo de Claude', action: err?.action });
             addToast('Error al conectar cuenta Anthropic', 'error');
@@ -405,8 +381,6 @@ export const ProviderSettings: React.FC = () => {
                 org: org || undefined,
             });
             addToast('Provider activo guardado', 'success');
-
-            // Clean up UI states after successful save, specially for Device Login flows
             if (effectiveAuthMode === 'account' && (providerType === 'codex' || providerType === 'claude')) {
                 setDeviceLoginState(null);
             }
@@ -425,6 +399,54 @@ export const ProviderSettings: React.FC = () => {
         addToast(`Configuración sugerida aplicada: ${orchestratorReco.provider} - ${orchestratorReco.model}. Haz clic en Guardar Configuración.`, 'success');
         window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
     }, [recommendation, addToast]);
+
+    const renderAuthSection = () => {
+        if (authMode === 'account' && providerType === 'codex') {
+            return (
+                <CodexAuthSection
+                    cliAuthStatus={cliAuthStatus}
+                    cliAuthLoading={cliAuthLoading}
+                    deviceLoginState={deviceLoginState}
+                    installState={installState}
+                    account={account}
+                    onLogin={handleOAuthLikeLogin}
+                    onLogout={handleCliLogout}
+                    onInstallCli={handleInstallCliDependency}
+                    onCancelDeviceLogin={() => setDeviceLoginState(null)}
+                    onCopyCode={() => {
+                        if (navigator.clipboard && deviceLoginState?.user_code) {
+                            navigator.clipboard.writeText(deviceLoginState.user_code);
+                            addToast('Copiado manualmente', 'info');
+                        }
+                    }}
+                    addToast={addToast}
+                />
+            );
+        }
+        if (authMode === 'account' && providerType === 'claude') {
+            return (
+                <ClaudeAuthSection
+                    cliAuthStatus={cliAuthStatus}
+                    cliAuthLoading={cliAuthLoading}
+                    deviceLoginState={deviceLoginState}
+                    installState={installState}
+                    account={account}
+                    onLogin={handleClaudeLogin}
+                    onLogout={handleCliLogout}
+                    onInstallCli={handleInstallCliDependency}
+                    onCancelDeviceLogin={() => setDeviceLoginState(null)}
+                />
+            );
+        }
+        if (authMode === 'account') {
+            return (
+                <Input id="accountInput" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="Session token o identificador..." className="bg-surface-0 border-border-primary text-text-primary w-full p-2.5 rounded-lg shadow-sm" />
+            );
+        }
+        return (
+            <Input id="apiKeyInput" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="bg-surface-0 border-border-primary text-text-primary w-full p-2.5 rounded-lg shadow-sm" />
+        );
+    };
 
     return (
         <div className="space-y-6 text-text-primary p-4">
@@ -528,381 +550,64 @@ export const ProviderSettings: React.FC = () => {
                             )}
                         </div>
                     </div>
+
                     {providerType === 'ollama_local' ? (
-                        <div className="col-span-full mt-4 space-y-4">
-                            {!catalog ? (
-                                <div className="p-8 text-center bg-surface-0 rounded border border-border-primary text-text-secondary">
-                                    {isLoadingCatalog ? 'Buscando servidor Ollama local...' : 'No se pudo conectar con Ollama.'}
-                                </div>
-                            ) : (
-                                <>
-                                    <div className="flex items-center justify-between mb-2">
-                                        <div>
-                                            <h4 className="text-sm font-semibold text-white">Modelos Detectados (Zero-Config)</h4>
-                                            <p className="text-xs text-text-secondary">No necesitas API Keys. Selecciona un modelo para asignar su rol en el enjambre.</p>
-                                        </div>
-                                    </div>
-                                    {modelGroups.installed.length === 0 ? (
-                                        <div className="p-8 text-center bg-surface-0 rounded border border-border-primary text-text-secondary">
-                                            Ollama está instalado, pero no tienes modelos descargados.
-                                        </div>
-                                    ) : (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                            {modelGroups.installed.map(m => (
-                                                <div key={m.id} className="p-3 bg-surface-0 border border-border-primary hover:border-surface-3 rounded-xl flex flex-col justify-between transition-colors">
-                                                    <div>
-                                                        <div className="font-semibold text-sm text-white truncate" title={m.label}>{m.label}</div>
-                                                        <div className="text-[10px] text-text-secondary uppercase tracking-wider">{m.size || 'Desconocido'}</div>
-                                                    </div>
-                                                    <div className="flex items-center gap-2 mt-4">
-                                                        <Button
-                                                            size="sm"
-                                                            className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] h-7 px-2"
-                                                            onClick={() => {
-                                                                setProviderId('ollama-main');
-                                                                setModelId(m.id);
-                                                                setAuthMode('none');
-                                                                void handleSaveAsActive({ providerId: 'ollama-main', modelId: m.id, authMode: 'none', roleTarget: 'orchestrator' });
-                                                            }}
-                                                        >
-                                                            Asignar Orchestrator
-                                                        </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            className="flex-1 bg-surface-3 hover:bg-surface-3 text-white text-[11px] h-7 px-2"
-                                                            onClick={async () => {
-                                                                try {
-                                                                    await saveActiveProvider({
-                                                                        providerId: `ollama-worker-${m.id.split(':')[0]}`,
-                                                                        providerType: 'ollama_local',
-                                                                        modelId: m.id,
-                                                                        authMode: 'none',
-                                                                        roleTarget: 'worker',
-                                                                    });
-                                                                    addToast(`Worker ${m.label} enrolado`, 'success');
-                                                                } catch {
-                                                                    addToast(`Error al añadir Worker ${m.label}`, 'error');
-                                                                }
-                                                            }}
-                                                        >
-                                                            Añadir Worker
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-
-                                    <div className="mt-6 border-t border-border-primary pt-4">
-                                        <h4 className="text-sm font-semibold text-white mb-2">Descargar Modelos (Pull)</h4>
-                                        <p className="text-xs text-text-secondary mb-4">Descarga nuevos modelos directamente desde el registro de Ollama.</p>
-
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            {modelGroups.recommended.filter((m: any) => !m.installed).map((m: any) => (
-                                                <div key={m.id} className="p-3 bg-surface-2 border border-border-primary hover:border-surface-3 transition-colors rounded-xl flex items-center justify-between">
-                                                    <div>
-                                                        <div className="text-sm text-white font-medium">{m.label || m.id}</div>
-                                                        <div className="text-xs text-text-secondary">{m.id}</div>
-                                                    </div>
-                                                    <Button
-                                                        size="sm"
-                                                        className="bg-surface-3 hover:bg-accent-primary hover:text-white transition-colors text-xs"
-                                                        onClick={() => {
-                                                            setModelId(m.id);
-                                                            void handleInstallAndUse(m.id);
-                                                        }}
-                                                    >
-                                                        <Download className="w-3.5 h-3.5 mr-1" />
-                                                        Descargar
-                                                    </Button>
-                                                </div>
-                                            ))}
-
-                                            <div className="p-3 bg-surface-2 border border-border-primary rounded-xl flex flex-col justify-between">
-                                                <div className="text-sm text-white font-medium mb-2">Otro Modelo...</div>
-                                                <div className="flex items-center gap-2">
-                                                    <Input
-                                                        placeholder="ej: mistral:instruct"
-                                                        className="h-8 text-xs bg-surface-0 border-border-primary text-white"
-                                                        value={modelId}
-                                                        onChange={(e) => setModelId(e.target.value)}
-                                                    />
-                                                    <Button
-                                                        size="sm"
-                                                        title="Descargar desde Ollama"
-                                                        className="bg-surface-3 hover:bg-accent-primary hover:text-white transition-colors text-xs shrink-0 h-8 w-8 p-0 flex items-center justify-center"
-                                                        onClick={() => {
-                                                            if (modelId) void handleInstallAndUse();
-                                                            else addToast('Escribe el tag del modelo', 'info');
-                                                        }}
-                                                    >
-                                                        <Download className="w-4 h-4" />
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </>
-                            )}
+                        <div className="col-span-full mt-4">
+                            <OllamaLocalSection
+                                catalog={catalog}
+                                modelGroups={modelGroups}
+                                isLoadingCatalog={isLoadingCatalog}
+                                modelId={modelId}
+                                onModelIdChange={setModelId}
+                                onAssignOrchestrator={(mId) => {
+                                    setProviderId('ollama-main');
+                                    setModelId(mId);
+                                    setAuthMode('none');
+                                    void handleSaveAsActive({ providerId: 'ollama-main', modelId: mId, authMode: 'none', roleTarget: 'orchestrator' });
+                                }}
+                                onAddWorker={async (mId) => {
+                                    try {
+                                        await saveActiveProvider({
+                                            providerId: `ollama-worker-${mId.split(':')[0]}`,
+                                            providerType: 'ollama_local',
+                                            modelId: mId,
+                                            authMode: 'none',
+                                            roleTarget: 'worker',
+                                        });
+                                        const label = modelGroups.installed.find(m => m.id === mId)?.label || mId;
+                                        addToast(`Worker ${label} enrolado`, 'success');
+                                    } catch {
+                                        addToast(`Error al añadir Worker`, 'error');
+                                    }
+                                }}
+                                onInstallModel={handleInstallAndUse}
+                                addToast={addToast}
+                            />
                         </div>
                     ) : (
                         <div className="flex flex-col gap-5 col-span-full max-w-xl">
-                            {/* Authentication Section */}
                             <div className="space-y-2">
                                 <label className="block text-sm font-medium text-text-primary">Autenticación</label>
-                                {authMode === 'account' && providerType === 'codex' ? (
-                                    <div className="p-4 border border-border-primary rounded-lg bg-surface-1">
-                                        {!deviceLoginState || deviceLoginState.status === 'error' ? (
-                                            <div className="flex flex-col gap-3">
-                                                <div>
-                                                    <div className="text-sm font-medium">Cuenta de OpenAI (Suscripción Plus/Pro)</div>
-                                                    <div className="text-xs text-text-secondary mt-1">Usa los modelos a los que ya tienes acceso sin pagar por token a través de API Keys.</div>
-                                                    {deviceLoginState?.status === 'error' && (
-                                                        <div className="mt-2 text-xs text-accent-alert bg-accent-alert/10 p-2 rounded space-y-2">
-                                                            <div>{deviceLoginState.message}</div>
-                                                            {deviceLoginState.action ? (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        handleInstallCliDependency('codex_cli');
-                                                                    }}
-                                                                    className="inline-flex items-center gap-1 px-2 py-1 rounded border border-accent-alert/40 hover:bg-accent-alert/20 text-[11px]"
-                                                                    disabled={installState?.status === 'queued' || installState?.status === 'running'}
-                                                                >
-                                                                    {(installState?.status === 'queued' || installState?.status === 'running') && installState.is_cli ? (
-                                                                        <>
-                                                                            <Download className="w-3 h-3 animate-bounce" /> Instalando...
-                                                                        </>
-                                                                    ) : (
-                                                                        <>
-                                                                            <Download className="w-3 h-3" /> Instalar Codex CLI automáticamente
-                                                                        </>
-                                                                    )}
-                                                                </button>
-                                                            ) : null}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <Button onClick={handleOAuthLikeLogin} className="w-full bg-[#10a37f] hover:bg-[#0e906f] text-white flex items-center justify-center gap-2 shadow-md h-10 transition-colors">
-                                                    Autenticar en OpenAI
-                                                </Button>
-                                                <div className="text-[10px] text-text-secondary flex justify-center mt-1">
-                                                    Soporte nativo mediante OpenAI Codex CLI
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-4">
-                                                <div className="flex items-center gap-2 bg-surface-2 p-2 rounded justify-between">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="w-2.5 h-2.5 rounded-full bg-[#10a37f] animate-pulse shadow-[0_0_8px_rgba(16,163,127,0.6)]"></div>
-                                                        <p className="text-xs font-semibold text-[#10a37f] uppercase tracking-wider">Esperando Autorización...</p>
-                                                    </div>
-                                                </div>
-
-                                                <div className="text-xs text-text-secondary">
-                                                    {deviceLoginState.status === 'starting' ? (
-                                                        <p className="animate-pulse">{deviceLoginState.message}</p>
-                                                    ) : (
-                                                        <div className="space-y-3">
-                                                            <p className="text-sm text-text-primary">Sigue estos pasos para finalizar:</p>
-
-                                                            <ol className="list-decimal list-inside space-y-2 ml-1">
-                                                                <li>
-                                                                    Ve a la ventana que acabamos de abrir (o entra a <a href={deviceLoginState.verification_url} target="_blank" rel="noreferrer" className="text-indigo-400 hover:text-indigo-300 hover:underline">{deviceLoginState.verification_url}</a>).
-                                                                </li>
-                                                                <li className="flex flex-col gap-1 mt-2">
-                                                                    <span>Pega este código de dispositivo allí:</span>
-                                                                    <div className="flex items-center gap-2 mt-1">
-                                                                        <span className="font-mono bg-surface-0 px-3 py-1.5 cursor-text rounded font-bold text-white tracking-widest text-lg border border-border-primary shadow-inner">
-                                                                            {deviceLoginState.user_code}
-                                                                        </span>
-                                                                        <Button
-                                                                            onClick={() => {
-                                                                                if (navigator.clipboard && deviceLoginState.user_code) {
-                                                                                    navigator.clipboard.writeText(deviceLoginState.user_code);
-                                                                                    addToast('Copiado manualmente', 'info');
-                                                                                }
-                                                                            }}
-                                                                            size="sm"
-                                                                            variant="outline"
-                                                                            className="h-8 border-border-primary bg-surface-2 hover:bg-surface-3 transition-colors text-xs"
-                                                                            title="Copiar Código"
-                                                                        >
-                                                                            Copiar
-                                                                        </Button>
-                                                                    </div>
-                                                                </li>
-                                                                <li className="mt-2">Haz clic en "Confirmar".</li>
-                                                            </ol>
-                                                            <p className="mt-4 p-2 bg-indigo-500/10 border border-indigo-500/20 rounded text-indigo-200">
-                                                                <strong>Nota:</strong> Una vez confirmado en el navegador, selecciona un `Modelo` abajo y presiona **"Guardar Configuración"**.
-                                                            </p>
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                <Button onClick={() => setDeviceLoginState(null)} size="sm" variant="ghost" className="w-full mt-4 text-xs text-text-secondary hover:text-text-primary border border-transparent hover:border-border-primary transition-all">
-                                                    Cancelar y Reintentar
-                                                </Button>
-                                            </div>
-                                        )}
-                                        <input type="hidden" value={account} />
-                                    </div>
-                                ) : authMode === 'account' && providerType === 'claude' ? (
-                                    <div className="p-4 border border-border-primary rounded-lg bg-surface-1">
-                                        {!deviceLoginState || deviceLoginState.status === 'error' ? (
-                                            <div className="flex flex-col gap-3">
-                                                <div>
-                                                    <div className="text-sm font-medium">Cuenta de Anthropic (Pro/Team)</div>
-                                                    <div className="text-xs text-text-secondary mt-1">Usa tu sesión local de Claude (requiere claude CLI instalada).</div>
-                                                    {deviceLoginState?.status === 'error' && (
-                                                        <div className="mt-2 text-xs text-accent-alert bg-accent-alert/10 p-2 rounded space-y-2">
-                                                            <div>{deviceLoginState.message}</div>
-                                                            {deviceLoginState.action ? (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        handleInstallCliDependency('claude_cli');
-                                                                    }}
-                                                                    className="inline-flex items-center gap-1 px-2 py-1 rounded border border-accent-alert/40 hover:bg-accent-alert/20 text-[11px]"
-                                                                    disabled={installState?.status === 'queued' || installState?.status === 'running'}
-                                                                >
-                                                                    {(installState?.status === 'queued' || installState?.status === 'running') && installState.is_cli ? (
-                                                                        <>
-                                                                            <Download className="w-3 h-3 animate-bounce" /> Instalando...
-                                                                        </>
-                                                                    ) : (
-                                                                        <>
-                                                                            <Download className="w-3 h-3" /> Instalar Claude CLI automáticamente
-                                                                        </>
-                                                                    )}
-                                                                </button>
-                                                            ) : null}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <Button onClick={handleClaudeLogin} className="w-full bg-[#d97757] hover:bg-[#b86246] text-white flex items-center justify-center gap-2 shadow-md h-10 transition-colors">
-                                                    Autenticar en Anthropic
-                                                </Button>
-                                                <div className="text-[10px] text-text-secondary flex justify-center mt-1">
-                                                    Abrirá el navegador automáticamente
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-4">
-                                                <div className="flex items-center gap-2 bg-surface-2 p-2 rounded justify-between">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="w-2.5 h-2.5 rounded-full bg-[#d97757] animate-pulse shadow-[0_0_8px_rgba(217,119,87,0.6)]"></div>
-                                                        <p className="text-xs font-semibold text-[#d97757] uppercase tracking-wider">Esperando Autorización en el Navegador...</p>
-                                                    </div>
-                                                </div>
-                                                <div className="text-xs text-text-secondary">
-                                                    <p className="mb-2">Por favor, revisa la ventana de tu navegador que acabamos de abrir.</p>
-                                                    <p>Una vez completes el inicio de sesión exitosamente allí, cierra esta advertencia y haz clic en **Guardar Configuración**.</p>
-                                                </div>
-                                                <Button onClick={() => setDeviceLoginState(null)} size="sm" variant="ghost" className="w-full mt-4 text-xs text-text-secondary hover:text-text-primary border border-transparent hover:border-border-primary transition-all">
-                                                    Entendido, volver
-                                                </Button>
-                                            </div>
-                                        )}
-                                        <input type="hidden" value={account} />
-                                    </div>
-                                ) : authMode === 'account' ? (
-                                    <Input id="accountInput" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="Session token o identificador..." className="bg-surface-0 border-border-primary text-text-primary w-full p-2.5 rounded-lg shadow-sm" />
-                                ) : (
-                                    <Input id="apiKeyInput" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="bg-surface-0 border-border-primary text-text-primary w-full p-2.5 rounded-lg shadow-sm" />
-                                )}
+                                {renderAuthSection()}
                                 {authMode === 'api_key' && <div className="text-[11px] text-text-secondary px-1">La clave se enviará de forma segura al orquestador.</div>}
                             </div>
 
-                            {/* Model Selection */}
                             <div className="space-y-2">
                                 <label htmlFor="modelIdSelect" className="block text-sm font-medium text-text-primary">Modelo</label>
-                                <div className="relative">
-                                    <button
-                                        type="button"
-                                        onClick={() => setModelDropdownOpen((v) => !v)}
-                                        className="w-full bg-surface-0 border border-border-primary rounded-lg p-2.5 text-sm text-text-primary text-left focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-sm"
-                                    >
-                                        {modelId || (isLoadingCatalog ? 'Cargando catálogo...' : 'Selecciona modelo')}
-                                    </button>
-                                    {modelDropdownOpen && (
-                                        <div className="absolute z-30 mt-2 w-full bg-surface-1 border border-border-primary rounded-lg shadow-xl p-2">
-                                            <Input
-                                                autoFocus
-                                                value={modelSearch}
-                                                onChange={(e) => setModelSearch(e.target.value)}
-                                                placeholder="Buscar modelo dentro del dropdown..."
-                                                className="mb-2 bg-surface-0 border-border-primary text-text-primary"
-                                            />
-                                            <div className="max-h-72 overflow-auto space-y-2">
-                                                {filteredModelGroups.installed.length > 0 && (
-                                                    <div>
-                                                        <div className="px-2 py-1 text-[11px] uppercase text-text-secondary">Instalados</div>
-                                                        {filteredModelGroups.installed.map((m) => (
-                                                            <button
-                                                                key={`i-${m.id}`}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setModelId(m.id);
-                                                                    setModelDropdownOpen(false);
-                                                                }}
-                                                                className={`w-full text-left px-2 py-1.5 text-sm rounded ${modelId === m.id ? 'bg-indigo-500/20 text-indigo-200' : 'hover:bg-surface-2 text-text-primary'}`}
-                                                            >
-                                                                <div className="font-medium">{m.label}</div>
-                                                                <div className="text-[10px] text-text-secondary mt-0.5">{renderModelMeta(m)}</div>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                                {filteredModelGroups.available.length > 0 && (
-                                                    <div>
-                                                        <div className="px-2 py-1 text-[11px] uppercase text-text-secondary">Disponibles para descargar</div>
-                                                        {filteredModelGroups.available.map((m) => (
-                                                            <button
-                                                                key={`a-${m.id}`}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setModelId(m.id);
-                                                                    setModelDropdownOpen(false);
-                                                                }}
-                                                                className={`w-full text-left px-2 py-1.5 text-sm rounded ${modelId === m.id ? 'bg-indigo-500/20 text-indigo-200' : 'hover:bg-surface-2 text-text-primary'}`}
-                                                            >
-                                                                <div className="font-medium">{m.label}</div>
-                                                                <div className="text-[10px] text-text-secondary mt-0.5">{renderModelMeta(m)}</div>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                                {filteredModelGroups.recommended.length > 0 && (
-                                                    <div>
-                                                        <div className="px-2 py-1 text-[11px] uppercase text-text-secondary">Recomendados</div>
-                                                        {filteredModelGroups.recommended.map((m) => (
-                                                            <button
-                                                                key={`r-${m.id}`}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setModelId(m.id);
-                                                                    setModelDropdownOpen(false);
-                                                                }}
-                                                                className={`w-full text-left px-2 py-1.5 text-sm rounded ${modelId === m.id ? 'bg-indigo-500/20 text-indigo-200' : 'hover:bg-surface-2 text-text-primary'}`}
-                                                            >
-                                                                <div className="font-medium">{m.label}</div>
-                                                                <div className="text-[10px] text-text-secondary mt-0.5">{renderModelMeta(m)}</div>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                                {filteredModelGroups.installed.length === 0 && filteredModelGroups.available.length === 0 && filteredModelGroups.recommended.length === 0 && (
-                                                    <div className="px-2 py-2 text-xs text-text-secondary">Sin resultados</div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
+                                <ModelSelector
+                                    modelId={modelId}
+                                    modelGroups={modelGroups}
+                                    isLoading={isLoadingCatalog}
+                                    supportsInstall={supportsInstall}
+                                    modelSearch={modelSearch}
+                                    modelDropdownOpen={modelDropdownOpen}
+                                    onSelect={(id) => { setModelId(id); setModelDropdownOpen(false); }}
+                                    onSearchChange={setModelSearch}
+                                    onToggleDropdown={() => setModelDropdownOpen((v) => !v)}
+                                    renderModelMeta={renderModelMeta}
+                                />
                             </div>
 
-                            {/* Advanced Options Accordion */}
                             <div className="mt-2 border border-border-primary rounded-lg overflow-hidden bg-surface-1">
                                 <button
                                     onClick={() => setShowAdvanced(!showAdvanced)}
@@ -911,7 +616,6 @@ export const ProviderSettings: React.FC = () => {
                                     <span className="uppercase tracking-wider font-semibold">Opciones Avanzadas</span>
                                     <span className="text-[10px]">{showAdvanced ? 'OCULTAR ▲' : 'MOSTRAR ▼'}</span>
                                 </button>
-
                                 {showAdvanced && (
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 border-t border-border-primary bg-surface-0">
                                         <div>
@@ -942,7 +646,6 @@ export const ProviderSettings: React.FC = () => {
                                 )}
                             </div>
 
-                            {/* Actions */}
                             <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-6">
                                 <Button onClick={handleTestConnection} variant="ghost" className="w-full sm:w-auto text-text-secondary hover:text-text-primary border border-border-primary hover:bg-surface-3 rounded-lg px-6">
                                     Probar conexión
@@ -957,7 +660,7 @@ export const ProviderSettings: React.FC = () => {
 
                 {catalog?.warnings?.length ? (
                     <div className="mt-3 text-xs text-accent-warning space-y-1">
-                        {catalog.warnings.map((w, idx) => <div key={`${w}-${idx}`}>⚠ {w}</div>)}
+                        {catalog.warnings.map((w: string, idx: number) => <div key={`${w}-${idx}`}>⚠ {w}</div>)}
                     </div>
                 ) : null}
 
@@ -969,7 +672,6 @@ export const ProviderSettings: React.FC = () => {
                     <div className="mt-4 p-3 rounded border border-border-primary bg-surface-0 flex items-center justify-between gap-3">
                         <div className="text-xs text-text-primary">Modelo no instalado. ¿Quieres descargarlo ahora?</div>
                         <Button onClick={() => void handleInstallAndUse()} className="bg-accent-primary hover:bg-accent-primary/80 text-white text-xs px-3 py-2">
-                            <Download className="w-3.5 h-3.5 mr-1" />
                             Descargar y usar
                         </Button>
                     </div>
@@ -997,7 +699,6 @@ export const ProviderSettings: React.FC = () => {
                 ) : null}
             </Card>
 
-            {/* Node Status */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {Object.entries(nodes).map(([id, node]: [string, any]) => (
                     <Card key={id} className="bg-surface-2/70 border-border-primary p-3">
@@ -1022,63 +723,12 @@ export const ProviderSettings: React.FC = () => {
                 ))}
             </div>
 
-            <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">Providers Activos</h3>
-                {providers.length === 0 && (
-                    <div className="text-text-secondary text-center py-6 bg-surface-0/60 rounded border border-dashed border-border-primary">
-                        Sin providers configurados. Gred funcionará en modo local limitado.
-                    </div>
-                )}
-                {providers.map((p) => (
-                    <Card key={p.id} className="bg-surface-2 border-border-primary p-4 flex items-center justify-between group hover:border-surface-3 transition-colors">
-                        <div className="flex items-center gap-3">
-                            <div className={`p-2 rounded-lg ${p.is_local ? 'bg-emerald-500/10 text-emerald-400' : 'bg-blue-500/10 text-blue-400'}`}>
-                                {p.is_local ? <Cpu className="w-5 h-5" /> : <Cloud className="w-5 h-5" />}
-                            </div>
-                            <div>
-                                <div className="font-medium text-text-primary">{p.config?.display_name || PROVIDER_LABELS[p.type] || p.id}</div>
-                                <div className="text-xs text-text-secondary uppercase">{PROVIDER_LABELS[p.type] || p.type} • {p.is_local ? 'Local' : 'Cloud'}</div>
-                                {p.capabilities && (
-                                    <div className="text-[10px] text-text-secondary mt-1">
-                                        auth: {(p.capabilities.auth_modes_supported || []).join(', ') || 'n/a'}
-                                    </div>
-                                )}
-                                <div className="text-[10px] text-text-secondary">model: {p.model || p.config?.model || 'n/a'}</div>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={async () => {
-                                    const result = await testProvider(p.id);
-                                    addToast(result.message, result.healthy ? 'success' : 'error');
-                                }}
-                                className="text-text-secondary hover:text-text-primary"
-                            >
-                                <Activity className="w-4 h-4 mr-1" />
-                                Probar
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={async () => {
-                                    try {
-                                        await removeProvider(p.id);
-                                        addToast(`Provider ${p.config?.display_name || p.id} eliminado`, 'info');
-                                    } catch (err: any) {
-                                        addToast(err?.message || 'No se pudo eliminar el provider', 'error');
-                                    }
-                                }}
-                                className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
-                            >
-                                <Trash2 className="w-4 h-4" />
-                            </Button>
-                        </div>
-                    </Card>
-                ))}
-            </div>
+            <ProviderList
+                providers={providers}
+                onTest={testProvider}
+                onRemove={removeProvider}
+                addToast={addToast}
+            />
         </div>
     );
 };

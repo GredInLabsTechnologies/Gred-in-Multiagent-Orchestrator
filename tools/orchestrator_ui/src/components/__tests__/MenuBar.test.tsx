@@ -8,12 +8,12 @@ describe('MenuBar', () => {
 
         render(
             <MenuBar
-                onNewPlan={vi.fn()}
                 onSelectView={vi.fn()}
-                onSelectSettingsView={vi.fn()}
+                onOpenSettings={vi.fn()}
                 onRefreshSession={vi.fn()}
                 onOpenCommandPalette={vi.fn()}
                 onMcpSync={onMcpSync}
+                onOpenConnections={vi.fn()}
             />
         );
 

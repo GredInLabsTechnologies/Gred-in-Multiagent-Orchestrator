@@ -123,7 +123,7 @@ class ProviderCapabilityService:
         },
         "codex": {
             "auth_modes_supported": ["api_key", "account"],
-            "can_install": True,
+            "can_install": False,
             "install_method": "cli",
             "supports_account_mode": True,
             "supports_recommended_models": True,
@@ -131,7 +131,7 @@ class ProviderCapabilityService:
         },
         "claude": {
             "auth_modes_supported": ["api_key", "account"],
-            "can_install": True,
+            "can_install": False,
             "install_method": "cli",
             "supports_account_mode": True,
             "supports_recommended_models": True,

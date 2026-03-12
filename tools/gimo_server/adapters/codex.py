@@ -72,18 +72,28 @@ class CodexAdapter(AgentAdapter):
     ) -> AgentSession:
         logger.info("Spawning Codex CLI: %s", self.binary_path)
 
-        command = [self.binary_path, "execute", task, "--output-format", "stream-json"]
+        command = [self.binary_path, "exec", task, "--json"]
         if context:
             command.extend(["--context", json.dumps(context)])
         if policy:
             command.extend(["--policy", json.dumps(policy)])
 
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        # On Windows, npm .cmd shims require shell execution
+        import sys
+        if sys.platform == "win32":
+            process = await asyncio.create_subprocess_shell(
+                " ".join(command),
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        else:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
         task_type = str((context or {}).get("task_type") or (policy or {}).get("task_type") or "agent_task")
         role_profile = str((context or {}).get("role_profile") or (policy or {}).get("role_profile") or "").strip() or None

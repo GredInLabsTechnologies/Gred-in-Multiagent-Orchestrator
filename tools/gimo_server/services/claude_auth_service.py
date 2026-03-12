@@ -1,53 +1,176 @@
+"""Claude CLI authentication service.
+
+Uses subprocess.Popen (sync) via run_in_executor so that it works under
+uvicorn's SelectorEventLoop on Windows, which does not support
+asyncio.create_subprocess_*.
+"""
+from __future__ import annotations
+
 import asyncio
 import logging
-from typing import Dict, Any
+import shutil
+import subprocess
+import sys
+import threading
+from typing import Any, Dict
 
 logger = logging.getLogger("orchestrator.services.claude_auth")
 
 
-class ClaudeAuthService:
-    """Gestiona la autenticacion nativa para Claude CLI."""
-    @classmethod
-    async def start_login_flow(cls) -> Dict[str, Any]:
-        """
-        Inicia el proceso de login de claude. Este comando típicamente
-        abre el navegador web predeterminado del sistema operativo local.
-        """
+def _popen(args: list[str], **kwargs) -> subprocess.Popen:
+    """Spawn a subprocess; use shell=True on Windows for .cmd shim compat."""
+    if sys.platform == "win32":
+        return subprocess.Popen(" ".join(args), shell=True, **kwargs)
+    return subprocess.Popen(args, **kwargs)
+
+
+def _run(args: list[str], timeout: float = 8) -> tuple[int, str]:
+    """Run a command synchronously and return (returncode, combined_output)."""
+    try:
+        proc = _popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        out, _ = proc.communicate(timeout=timeout)
+        return proc.returncode, (out or b"").decode("utf-8", errors="replace").strip()
+    except subprocess.TimeoutExpired as exc:
         try:
-            # Nota: 'claude login' abre el navegador y espera el callback.
-            process = await asyncio.create_subprocess_exec(
-                "claude",
-                "login",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-        except FileNotFoundError:
-            logger.warning("Claude CLI not found. Simulating login flow for development.")
-            return {
-                "status": "pending",
-                "message": "Claude CLI no está instalada o no está en el PATH.",
-                "poll_id": "mock_poll_id"
-            }
+            exc.process.kill()
+        except Exception:
+            pass
+        raise
+    except Exception:
+        raise
 
-        # Lanzamos la tarea de fondo para esperar a que termine el comando
-        # vaciando el buffer de salida para evitar bloqueos del SO.
-        asyncio.create_task(cls._wait_for_login(process))
 
+def _login_flow_sync(binary: str) -> Dict[str, Any]:
+    """Blocking: start 'claude auth login' which opens a browser tab."""
+    try:
+        proc = _popen(
+            [binary, "auth", "login"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        logger.error("[claude-login] failed to spawn: %s", detail, exc_info=True)
         return {
-            "status": "pending",
-            "message": "Se ha abierto una pestaña en tu navegador. Por favor completa el login allí.",
-            "poll_id": "real_poll_id"
+            "status": "error",
+            "message": f"No se pudo iniciar Claude CLI: {detail}",
+            "action": "npm install -g @anthropic-ai/claude-code",
         }
 
-    @classmethod
-    async def _wait_for_login(cls, process: asyncio.subprocess.Process):
-        """Espera a que termine el comando de claude."""
+    logger.info("[claude-login] process started, pid=%s", proc.pid)
+
+    # Keep the process alive in a daemon thread so it completes the auth handshake
+    def _wait():
         try:
-            # Consumimos la salida para que no se bloquee la pipe
-            stdout_data, _ = await process.communicate()
-            if process.returncode == 0:
-                logger.info(f"Claude CLI login completado con éxito. Salida: {stdout_data.decode(errors='ignore').strip()}")
+            out, _ = proc.communicate()
+            rc = proc.returncode
+            if rc == 0:
+                logger.info("[claude-login] auth completed successfully")
             else:
-                logger.error(f"Claude CLI login falló con código {process.returncode}. Salida: {stdout_data.decode(errors='ignore').strip()}")
+                output = (out or b"").decode("utf-8", errors="replace").strip()
+                logger.error("[claude-login] auth exited with code %s. Output: %s", rc, output)
         except Exception as e:
-            logger.error(f"Error esperando a que claude login terminara: {e}")
+            logger.error("[claude-login] wait error: %s", e)
+
+    threading.Thread(target=_wait, daemon=True, name="claude-login-wait").start()
+
+    return {
+        "status": "pending",
+        "message": "Se ha abierto una pestaña en tu navegador. Por favor completa el login allí.",
+        "poll_id": "real_poll_id",
+    }
+
+
+class ClaudeAuthService:
+    """Gestiona la autenticacion nativa para Claude CLI."""
+
+    @classmethod
+    async def start_login_flow(cls) -> Dict[str, Any]:
+        binary = "claude"
+        which_result = shutil.which(binary)
+        logger.info("[claude-login] shutil.which('%s') = %s", binary, which_result)
+
+        if which_result is None:
+            logger.error("[claude-login] binary not found in PATH")
+            return {
+                "status": "error",
+                "message": "Claude CLI no detectado",
+                "action": "npm install -g @anthropic-ai/claude-code",
+            }
+
+        loop = asyncio.get_event_loop()
+        try:
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, _login_flow_sync, binary),
+                timeout=20.0,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            logger.error("[claude-login] overall timeout (20s)")
+            return {
+                "status": "error",
+                "message": "Timeout esperando inicio de sesión de Claude CLI",
+                "action": "Reintenta el login o reinstala Claude CLI: npm install -g @anthropic-ai/claude-code",
+            }
+        return result
+
+    @classmethod
+    async def get_auth_status(cls) -> Dict[str, Any]:
+        """Check if claude CLI is authenticated via `claude auth status`."""
+        import json as _json
+        if shutil.which("claude") is None:
+            return {"authenticated": False, "method": None, "detail": "Claude CLI not installed"}
+
+        loop = asyncio.get_event_loop()
+        try:
+            rc, output = await asyncio.wait_for(
+                loop.run_in_executor(None, _run, ["claude", "auth", "status"]),
+                timeout=10.0,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            return {"authenticated": False, "method": None, "detail": "timeout"}
+        except Exception as exc:
+            logger.error("[claude-status] error: %s", exc)
+            return {"authenticated": False, "method": None, "detail": str(exc)}
+
+        logger.info("[claude-status] rc=%s output=%r", rc, output[:120])
+
+        # Try JSON parse first
+        try:
+            data = _json.loads(output)
+            return {
+                "authenticated": bool(data.get("loggedIn")),
+                "method": data.get("authMethod"),
+                "email": data.get("email"),
+                "plan": data.get("subscriptionType"),
+                "detail": output,
+            }
+        except _json.JSONDecodeError:
+            pass
+
+        authenticated = "logged in" in output.lower() or rc == 0
+        return {"authenticated": authenticated, "method": None, "detail": output}
+
+    @classmethod
+    async def logout(cls) -> Dict[str, Any]:
+        """Log out from claude CLI via `claude auth logout`."""
+        if shutil.which("claude") is None:
+            return {"status": "error", "message": "Claude CLI not installed"}
+
+        loop = asyncio.get_event_loop()
+        try:
+            rc, output = await asyncio.wait_for(
+                loop.run_in_executor(None, _run, ["claude", "auth", "logout"]),
+                timeout=10.0,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            return {"status": "error", "message": "Timeout al cerrar sesión de Claude"}
+        except Exception as exc:
+            logger.error("[claude-logout] error: %s", exc)
+            return {"status": "error", "message": str(exc)}
+
+        logger.info("[claude-logout] rc=%s output=%s", rc, output)
+        return {"status": "ok", "message": output or "Sesión de Claude cerrada"}

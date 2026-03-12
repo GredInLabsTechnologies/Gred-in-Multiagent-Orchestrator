@@ -48,7 +48,7 @@ const mockRecords: TrustRecord[] = [
 describe('TrustDashboard', () => {
     it('renders empty state correctly', () => {
         render(<TrustDashboard records={[]} />);
-        expect(screen.getByText('No trust records found.')).toBeInTheDocument();
+        expect(screen.getByText(/no hay datos de confianza/i)).toBeInTheDocument();
     });
 
     it('renders records correctly', () => {

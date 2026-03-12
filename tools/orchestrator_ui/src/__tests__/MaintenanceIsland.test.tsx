@@ -73,6 +73,7 @@ describe('MaintenanceIsland', () => {
         error: null,
         bootstrap: vi.fn(),
         selectRepo: vi.fn(),
+        registerRepo: vi.fn(),
         refresh: vi.fn()
     }
 

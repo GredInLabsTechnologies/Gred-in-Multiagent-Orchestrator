@@ -1,5 +1,7 @@
+import base64
 import hashlib
 import hmac
+import json
 import logging
 import secrets
 import time
@@ -23,7 +25,7 @@ FIREBASE_SESSION_TTL = 86400 * 30  # 30 days
 
 
 # ---------------------------------------------------------------------------
-# Session store (in-memory, survives as long as the process runs)
+# Session dataclass (used in-memory after decode)
 # ---------------------------------------------------------------------------
 @dataclass
 class _Session:
@@ -39,50 +41,86 @@ class _Session:
     last_seen: float = field(default_factory=time.time)
 
 
+# ---------------------------------------------------------------------------
+# Stateless SessionStore — cookie is a signed JWT-like token.
+#
+# Format: base64url(payload_json) + "." + hmac_hex
+# The payload contains all session fields + created_at.
+# No server-side state → survives backend restarts unchanged.
+# Revocation is handled via a small in-memory revocation set (only logout
+# needs it; restarts clear revocations, which is acceptable for dev).
+# ---------------------------------------------------------------------------
 class SessionStore:
     def __init__(self):
-        self._sessions: Dict[str, _Session] = {}
-        self._lock = Lock()
-        # Derive a signing key from the set of valid tokens for HMAC
         self._signing_key = hashlib.sha256(
             "|".join(sorted(TOKENS)).encode()
         ).digest()
+        self._revoked: set[str] = set()  # revoked session_ids (cleared on restart)
+        self._lock = Lock()
+
+    def _sign(self, payload_b64: str) -> str:
+        return hmac.new(self._signing_key, payload_b64.encode(), hashlib.sha256).hexdigest()
 
     def create(self, role: str, **kwargs: Any) -> str:
-        session_id = secrets.token_urlsafe(32)
-        sig = hmac.new(self._signing_key, session_id.encode(), hashlib.sha256).hexdigest()[:16]
-        cookie_value = f"{session_id}.{sig}"
-        with self._lock:
-            self._sessions[session_id] = _Session(
-                session_id=session_id,
-                role=role,
-                uid=str(kwargs.get("uid", "")),
-                email=str(kwargs.get("email", "")),
-                display_name=str(kwargs.get("display_name", "")),
-                plan=str(kwargs.get("plan", "")),
-                firebase_user=bool(kwargs.get("firebase_user", False)),
-                profile_cache=dict(kwargs.get("profile_cache") or {}),
-            )
-        return cookie_value
+        session_id = secrets.token_urlsafe(16)
+        payload = {
+            "sid": session_id,
+            "role": role,
+            "uid": str(kwargs.get("uid", "")),
+            "email": str(kwargs.get("email", "")),
+            "dn": str(kwargs.get("display_name", "")),
+            "plan": str(kwargs.get("plan", "")),
+            "fb": bool(kwargs.get("firebase_user", False)),
+            "iat": time.time(),
+            "profile": dict(kwargs.get("profile_cache") or {}),
+        }
+        payload_b64 = base64.urlsafe_b64encode(
+            json.dumps(payload, separators=(",", ":")).encode()
+        ).decode().rstrip("=")
+        sig = self._sign(payload_b64)
+        return f"{payload_b64}.{sig}"
 
-    def validate(self, cookie_value: str) -> Optional[_Session]:
+    def _decode(self, cookie_value: str) -> Optional[tuple[dict, str]]:
+        """Decode and verify cookie. Returns (payload_dict, session_id) or None."""
         parts = cookie_value.split(".", 1)
         if len(parts) != 2:
             return None
-        session_id, sig = parts
-        expected_sig = hmac.new(self._signing_key, session_id.encode(), hashlib.sha256).hexdigest()[:16]
-        if not hmac.compare_digest(sig, expected_sig):
+        payload_b64, sig = parts
+        expected = self._sign(payload_b64)
+        if not hmac.compare_digest(sig, expected):
             return None
+        try:
+            padding = 4 - len(payload_b64) % 4
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=" * padding))
+        except Exception:
+            return None
+        return payload, payload.get("sid", "")
+
+    def validate(self, cookie_value: str) -> Optional[_Session]:
+        result = self._decode(cookie_value)
+        if not result:
+            return None
+        payload, session_id = result
         with self._lock:
-            session = self._sessions.get(session_id)
-            if not session:
+            if session_id in self._revoked:
                 return None
-            ttl = FIREBASE_SESSION_TTL if session.firebase_user else SESSION_TTL_SECONDS
-            if time.time() - session.created_at > ttl:
-                del self._sessions[session_id]
-                return None
-            session.last_seen = time.time()
-            return session
+        firebase_user = bool(payload.get("fb"))
+        ttl = FIREBASE_SESSION_TTL if firebase_user else SESSION_TTL_SECONDS
+        created_at = float(payload.get("iat", 0))
+        if time.time() - created_at > ttl:
+            return None
+        return _Session(
+            session_id=session_id,
+            role=str(payload.get("role", "admin")),
+            uid=str(payload.get("uid", "")),
+            email=str(payload.get("email", "")),
+            display_name=str(payload.get("dn", "")),
+            plan=str(payload.get("plan", "")),
+            firebase_user=firebase_user,
+            profile_cache=dict(payload.get("profile") or {}),
+            created_at=created_at,
+            last_seen=time.time(),
+        )
 
     def get_session_info(self, cookie_value: str) -> Optional[Dict[str, Any]]:
         session = self.validate(cookie_value)
@@ -90,7 +128,6 @@ class SessionStore:
             return None
         ttl = FIREBASE_SESSION_TTL if session.firebase_user else SESSION_TTL_SECONDS
         now = time.time()
-        expires_in_seconds = max(0, int((session.created_at + ttl) - now))
         return {
             "role": session.role,
             "uid": session.uid,
@@ -101,27 +138,20 @@ class SessionStore:
             "createdAt": session.created_at,
             "lastSeen": session.last_seen,
             "ttlSeconds": ttl,
-            "expiresInSeconds": expires_in_seconds,
+            "expiresInSeconds": max(0, int((session.created_at + ttl) - now)),
             "profile": dict(session.profile_cache),
         }
 
     def revoke(self, cookie_value: str) -> None:
-        parts = cookie_value.split(".", 1)
-        if len(parts) == 2:
+        result = self._decode(cookie_value)
+        if result:
+            _, session_id = result
             with self._lock:
-                self._sessions.pop(parts[0], None)
+                self._revoked.add(session_id)
 
     def cleanup_expired(self) -> int:
-        now = time.time()
-        with self._lock:
-            expired = []
-            for sid, session in self._sessions.items():
-                ttl = FIREBASE_SESSION_TTL if session.firebase_user else SESSION_TTL_SECONDS
-                if now - session.created_at > ttl:
-                    expired.append(sid)
-            for sid in expired:
-                del self._sessions[sid]
-            return len(expired)
+        # Stateless — nothing to clean up server-side
+        return 0
 
 
 session_store = SessionStore()

@@ -4,8 +4,16 @@ import asyncio
 import hashlib
 import os
 import shutil
+import sys
 from asyncio.subprocess import PIPE
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+
+async def _create_process(cmd: List[str], **kwargs) -> asyncio.subprocess.Process:
+    """Create subprocess, using shell on Windows for npm .cmd shim compat."""
+    if sys.platform == "win32":
+        return await asyncio.create_subprocess_shell(" ".join(cmd), **kwargs)
+    return await asyncio.create_subprocess_exec(*cmd, **kwargs)
 
 from ..ops_models import CliDependencyInstallResponse, CliDependencyStatus
 
@@ -60,8 +68,8 @@ class ProviderConnectorService:
         # Validate npm registry connectivity (required for npm-based dependencies).
         if npm_path:
             try:
-                ping = await asyncio.create_subprocess_exec(
-                    "npm", "ping", "--registry=https://registry.npmjs.org/", stdout=PIPE, stderr=PIPE
+                ping = await _create_process(
+                    ["npm", "ping", "--registry=https://registry.npmjs.org/"], stdout=PIPE, stderr=PIPE
                 )
                 _, ping_err = await asyncio.wait_for(ping.communicate(), timeout=15)
                 if ping.returncode != 0:
@@ -75,7 +83,7 @@ class ProviderConnectorService:
         # Validate writable npm global prefix for "npm install -g ...".
         if " -g " in f" {install_command} " and npm_path:
             try:
-                proc = await asyncio.create_subprocess_exec("npm", "config", "get", "prefix", stdout=PIPE, stderr=PIPE)
+                proc = await _create_process(["npm", "config", "get", "prefix"], stdout=PIPE, stderr=PIPE)
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=8)
                 prefix = (out or b"").decode("utf-8", errors="ignore").strip()
                 if not prefix:
@@ -101,7 +109,7 @@ class ProviderConnectorService:
         if not cls._is_cli_installed(binary_name):
             return None
         try:
-            proc = await asyncio.create_subprocess_exec(binary_name, version_arg, stdout=PIPE, stderr=PIPE)
+            proc = await _create_process([binary_name, version_arg], stdout=PIPE, stderr=PIPE)
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=4)
             output = (stdout or b"").decode("utf-8", errors="ignore").strip() or (stderr or b"").decode("utf-8", errors="ignore").strip()
             return output.splitlines()[0][:160] if output else None

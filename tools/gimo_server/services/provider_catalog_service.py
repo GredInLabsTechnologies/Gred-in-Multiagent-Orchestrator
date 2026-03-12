@@ -871,6 +871,59 @@ class ProviderCatalogService:
         )
 
     @classmethod
+    async def _validate_cli_account_provider(cls, canonical: str) -> ProviderValidateResponse:
+        """Validate CLI-native account mode providers (Codex/Claude).
+
+        Account-mode for these providers is backed by local authenticated CLI sessions,
+        not API keys or remote /models probing.
+        """
+        binary = "codex" if canonical == "codex" else "claude"
+        install_hint = "npm install -g @openai/codex" if canonical == "codex" else "npm install -g @anthropic-ai/claude-code"
+        if shutil.which(binary) is None:
+            return ProviderValidateResponse(
+                valid=False,
+                health="down",
+                warnings=[f"{binary} CLI not found in PATH."],
+                error_actionable=f"Install {binary} CLI and retry: {install_hint}",
+            )
+
+        try:
+            cmd = [binary, "--version"]
+            if sys.platform == "win32":
+                proc = await asyncio.create_subprocess_shell(
+                    f"{binary} --version",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+            await asyncio.wait_for(proc.communicate(), timeout=8)
+            if proc.returncode != 0:
+                return ProviderValidateResponse(
+                    valid=False,
+                    health="degraded",
+                    warnings=[f"{binary} CLI is installed but not healthy."],
+                    error_actionable=f"Re-authenticate with '{binary} login' and retry.",
+                )
+        except Exception:
+            return ProviderValidateResponse(
+                valid=False,
+                health="degraded",
+                warnings=[f"Unable to run '{binary} --version'."],
+                error_actionable=f"Verify local {binary} CLI install and session with '{binary} login'.",
+            )
+
+        recommended = _fallback_models_for(canonical)
+        effective_model = recommended[0].id if recommended else None
+        return ProviderValidateResponse(
+            valid=True,
+            health="ok",
+            effective_model=effective_model,
+            warnings=[f"Validated via local {binary} CLI account session."],
+        )
+
+    @classmethod
     def _record_and_return_validation(cls, canonical: str, response: ProviderValidateResponse) -> ProviderValidateResponse:
         ProviderService.record_validation_result(
             provider_type=canonical,
@@ -906,6 +959,11 @@ class ProviderCatalogService:
 
         if canonical == "ollama_local":
             response = await cls._validate_ollama_local(canonical)
+            return cls._record_and_return_validation(canonical, response)
+
+        # Codex/Claude account mode is CLI-native. Do not rely on remote /models.
+        if canonical in {"codex", "claude"} and (payload.account is not None or payload.api_key is None):
+            response = await cls._validate_cli_account_provider(canonical)
             return cls._record_and_return_validation(canonical, response)
 
         supports_account = bool(ProviderService.capabilities_for(canonical).get("supports_account_mode", False))

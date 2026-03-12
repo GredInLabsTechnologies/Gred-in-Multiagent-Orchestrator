@@ -5,7 +5,8 @@ import asyncio
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from .routers.ops import (
-    plan_router, run_router, eval_router, trust_router, config_router, observability_router, mastery_router, skills_router, custom_plan_router, conversation_router, hitl_router
+    plan_router, run_router, eval_router, trust_router, config_router, observability_router, mastery_router, skills_router, custom_plan_router, conversation_router, hitl_router,
+    provider_auth_router, catalog_router, tools_router, policy_router, dependencies_router,
 )
 
 router = APIRouter(prefix="/ops", tags=["ops"])
@@ -16,6 +17,11 @@ router.include_router(run_router.router)
 router.include_router(eval_router.router)
 router.include_router(trust_router.router)
 router.include_router(config_router.router)
+router.include_router(provider_auth_router.router)
+router.include_router(catalog_router.router)
+router.include_router(tools_router.router)
+router.include_router(policy_router.router)
+router.include_router(dependencies_router.router)
 router.include_router(observability_router.router)
 router.include_router(mastery_router.router)
 router.include_router(skills_router.router)

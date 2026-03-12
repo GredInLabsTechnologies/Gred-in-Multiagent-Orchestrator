@@ -79,7 +79,7 @@ describe('useRepoService', () => {
         })
 
         expect(fetch).toHaveBeenCalledWith(
-            expect.stringContaining('/ui/repos/bootstrap?path='),
+            expect.stringContaining('/ui/repos/vitaminize?path='),
             expect.objectContaining({ method: 'POST' })
         )
     })

@@ -7,10 +7,12 @@
 
 ## Portable Dev Workflow (Windows)
 
+> **`gimo.cmd` es el UNICO launcher de desarrollo oficial.** Cualquier otro script (.cmd) que encuentres en el repo es un wrapper deprecated que redirige a `gimo.cmd`. No uses otro.
+
 ### One-time per device
 
 ```cmd
-bootstrap.cmd
+gimo bootstrap
 ```
 
 What it does automatically:
@@ -23,20 +25,27 @@ What it does automatically:
 - Creates `tools/orchestrator_ui/.env.local` with portable defaults
 - Runs `python scripts\setup_mcp.py`
 
-### Daily commands
+### Daily usage
 
 ```cmd
-GIMO_DEV_LAUNCHER.cmd      :: Canonical launcher (backend + UI + web)
-scripts\dev\down.cmd      :: Stop all local services and free ports
-scripts\dev\doctor.cmd    :: Diagnose local setup quickly
+gimo                     :: Launch all (interactive, multiplexed logs)
+gimo down                :: Stop all services and free ports
+gimo doctor              :: Diagnose local setup
+gimo up --no-web         :: Skip web app
+gimo up --backend-only   :: Only backend
 ```
 
-### Legacy launchers (kept as compatibility wrappers)
+Inside `gimo up`, interactive commands: `r` (restart backend), `rf` (restart frontend), `ra` (restart all), `s` (status), `q` (quit).
 
-- `scripts\ops\launch_full.cmd`
-- `scripts\ops\start_orch.cmd`
+Backend uses `uvicorn --reload` — Python changes apply automatically without manual restart.
 
-Both forward to the canonical `scripts\dev\up.cmd`.
+### Deprecated scripts (DO NOT USE directly)
+
+- `GIMO_DEV_LAUNCHER.cmd`, `up.cmd`, `down.cmd`, `bootstrap.cmd`, `doctor.cmd`
+- `scripts\ops\launch_full.cmd`, `scripts\ops\start_orch.cmd`
+- `scripts\dev\up.cmd`, `scripts\dev\down.cmd`, etc.
+
+All redirect to `gimo.cmd`.
 
 ## Backend (Python)
 

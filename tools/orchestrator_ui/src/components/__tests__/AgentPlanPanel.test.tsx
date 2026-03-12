@@ -19,7 +19,7 @@ describe('AgentPlanPanel', () => {
 
     it('renders empty state when no plan is provided', () => {
         render(<AgentPlanPanel />);
-        expect(screen.getByText(/No active plan found/i)).toBeInTheDocument();
+        expect(screen.getByText(/Sin plan activo/i)).toBeInTheDocument();
     });
 
     it('renders task list when plan is provided', () => {

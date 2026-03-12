@@ -1,16 +1,14 @@
 import { useState, useCallback } from 'react';
 import {
     API_BASE,
-    CliDependencyInstallResult,
-    CliDependencyStatus,
-    ProviderCatalogResponse,
     ProviderInfo,
-    ProviderInstallResult,
     ProviderRolesConfig,
     ProviderValidatePayload,
     ProviderValidateResult,
     SaveActiveProviderPayload,
 } from '../types';
+import { useProviderAuth } from './useProviderAuth';
+import { useProviderCatalog } from './useProviderCatalog';
 
 export const useProviders = () => {
     const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -18,8 +16,6 @@ export const useProviders = () => {
     const [providerCapabilities, setProviderCapabilities] = useState<Record<string, any>>({});
     const [effectiveState, setEffectiveState] = useState<Record<string, any>>({});
     const [roles, setRoles] = useState<ProviderRolesConfig | null>(null);
-    const [catalogs, setCatalogs] = useState<Record<string, ProviderCatalogResponse>>({});
-    const [catalogLoading, setCatalogLoading] = useState<Record<string, boolean>>({});
     const [loading, setLoading] = useState(false);
 
     const mapOpsConfigToProviders = (cfg: any): ProviderInfo[] => {
@@ -110,49 +106,18 @@ export const useProviders = () => {
         }
     }, []);
 
-    const loadCatalog = useCallback(async (providerType: string) => {
-        if (!providerType) return null;
-        setCatalogLoading(prev => ({ ...prev, [providerType]: true }));
-        try {
-            const res = await fetch(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/models`, getRequestInit());
-            if (!res.ok) throw new Error('Failed to load provider catalog');
-            const data: ProviderCatalogResponse = await res.json();
-            const normalizedAuthModes = Array.from(new Set((data.auth_modes_supported || []).map(normalizeAuthMode)));
-            const normalizedData: ProviderCatalogResponse = {
-                ...data,
-                auth_modes_supported: normalizedAuthModes,
-            };
-            setCatalogs(prev => ({ ...prev, [providerType]: normalizedData }));
-            return normalizedData;
-        } finally {
-            setCatalogLoading(prev => ({ ...prev, [providerType]: false }));
-        }
-    }, []);
+    const {
+        catalogs,
+        catalogLoading,
+        loadCatalog,
+        installModel,
+        getInstallJob,
+        listCliDependencies,
+        installCliDependency,
+        getCliDependencyInstallJob,
+    } = useProviderCatalog(loadProviders);
 
-    const installModel = useCallback(async (providerType: string, modelId: string) => {
-        const res = await fetch(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/models/install`, {
-            method: 'POST',
-            ...getRequestInit(true),
-            body: JSON.stringify({ model_id: modelId }),
-        });
-        if (!res.ok) throw new Error('Failed to install model');
-        const data = await res.json() as ProviderInstallResult;
-        if (data.status === 'done' || data.status === 'error') {
-            await loadCatalog(providerType);
-        }
-        return data;
-    }, [loadCatalog]);
-
-    const getInstallJob = useCallback(async (providerType: string, jobId: string) => {
-        const res = await fetch(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/models/install/${encodeURIComponent(jobId)}`, getRequestInit());
-        if (!res.ok) throw new Error('Failed to fetch install job status');
-        const data = await res.json() as ProviderInstallResult;
-        if (data.status === 'done' || data.status === 'error') {
-            await loadCatalog(providerType);
-            await loadProviders();
-        }
-        return data;
-    }, [loadCatalog, loadProviders]);
+    const { startCodexDeviceLogin, startClaudeLogin, fetchCliAuthStatus, cliLogout } = useProviderAuth();
 
     const validateProvider = useCallback(async (providerType: string, payload: ProviderValidatePayload) => {
         const res = await fetch(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/validate`, {
@@ -165,72 +130,6 @@ export const useProviders = () => {
         await loadProviders();
         return data;
     }, [loadProviders]);
-
-    const startCodexDeviceLogin = useCallback(async () => {
-        const res = await fetch(`${API_BASE}/ops/connectors/codex/login`, {
-            method: 'POST',
-            ...getRequestInit(true),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (data?.status === 'error') {
-            const err: any = new Error(data?.message || 'Codex login error');
-            if (data?.action) err.action = data.action;
-            throw err;
-        }
-        if (!res.ok) {
-            const message = data?.message || data?.detail || 'Failed to start Codex device login flow';
-            const err: any = new Error(message);
-            if (data?.action) err.action = data.action;
-            throw err;
-        }
-        return data;
-    }, []);
-
-    const startClaudeLogin = useCallback(async () => {
-        const res = await fetch(`${API_BASE}/ops/connectors/claude/login`, {
-            method: 'POST',
-            ...getRequestInit(true),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (data?.status === 'error') {
-            const err: any = new Error(data?.message || 'Claude login error');
-            if (data?.action) err.action = data.action;
-            throw err;
-        }
-        if (!res.ok) {
-            const message = data?.message || data?.detail || 'Failed to start Claude login flow';
-            const err: any = new Error(message);
-            if (data?.action) err.action = data.action;
-            throw err;
-        }
-        return data;
-    }, []);
-
-    const listCliDependencies = useCallback(async () => {
-        const res = await fetch(`${API_BASE}/ops/system/dependencies`, getRequestInit());
-        if (!res.ok) throw new Error('Failed to list CLI dependencies');
-        const data = await res.json() as { items: CliDependencyStatus[]; count: number };
-        return data;
-    }, []);
-
-    const installCliDependency = useCallback(async (dependencyId: string) => {
-        const res = await fetch(`${API_BASE}/ops/system/dependencies/install`, {
-            method: 'POST',
-            ...getRequestInit(true),
-            body: JSON.stringify({ dependency_id: dependencyId }),
-        });
-        if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw new Error(body?.detail || 'Failed to install CLI dependency');
-        }
-        return await res.json() as CliDependencyInstallResult;
-    }, []);
-
-    const getCliDependencyInstallJob = useCallback(async (dependencyId: string, jobId: string) => {
-        const res = await fetch(`${API_BASE}/ops/system/dependencies/install/${encodeURIComponent(dependencyId)}/${encodeURIComponent(jobId)}`, getRequestInit());
-        if (!res.ok) throw new Error('Failed to fetch dependency install job');
-        return await res.json() as CliDependencyInstallResult;
-    }, []);
 
     const saveActiveProvider = useCallback(async (payload: SaveActiveProviderPayload) => {
         const currentRes = await fetch(`${API_BASE}/ops/provider`, getRequestInit());
@@ -269,6 +168,14 @@ export const useProviders = () => {
             nextRoles.orchestrator = { provider_id: providerId, model: payload.modelId };
         }
 
+        const safeAccountRef = ((): string | undefined => {
+            const raw = String(payload.account || '').trim();
+            if (!raw) return undefined;
+            if (raw.toLowerCase().startsWith('env:')) return raw;
+            if (/^\$\{[A-Z0-9_]+\}$/.test(raw)) return raw;
+            return undefined;
+        })();
+
         const next = {
             ...current,
             active: nextRoles.orchestrator.provider_id,
@@ -293,7 +200,7 @@ export const useProviders = () => {
                     model_id: payload.modelId,
                     capabilities,
                     ...(payload.apiKey ? { api_key: payload.apiKey } : {}),
-                    ...(payload.account ? { auth_ref: payload.account } : {}),
+                    ...(safeAccountRef ? { auth_ref: safeAccountRef } : {}),
                 },
             },
         };
@@ -421,6 +328,8 @@ export const useProviders = () => {
         testProvider,
         startCodexDeviceLogin,
         startClaudeLogin,
+        fetchCliAuthStatus,
+        cliLogout,
         listCliDependencies,
         installCliDependency,
         getCliDependencyInstallJob,

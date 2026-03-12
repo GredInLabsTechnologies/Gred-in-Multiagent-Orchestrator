@@ -1,100 +1,33 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import App from '../App';
+import { useAppStore } from '../stores/appStore';
 
-// Mock Sidebar
+/* ── Mock all child components ── */
 vi.mock('../components/Sidebar', () => ({
-    Sidebar: () => <div data-testid="sidebar">Sidebar Mock</div>
+    Sidebar: () => <div data-testid="sidebar">Sidebar</div>
 }));
-
-// Mock GraphCanvas
-vi.mock('../components/GraphCanvas', () => ({
-    GraphCanvas: () => <div data-testid="graph-canvas">GraphCanvas Mock</div>
-}));
-
-// Mock InspectPanel
-vi.mock('../components/InspectPanel', () => ({
-    InspectPanel: ({ children }: any) => (
-        <div data-testid="inspect-panel">{children}</div>
-    )
-}));
-
-// Mock MaintenanceIsland
-vi.mock('../islands/system/MaintenanceIsland', () => ({
-    MaintenanceIsland: () => <div data-testid="maintenance-island">MaintenanceIsland Mock</div>
-}));
-
-// Mock usePlanEngine
-vi.mock('../hooks/usePlanEngine', () => ({
-    usePlanEngine: () => ({
-        currentPlan: null,
-        loading: false,
-        createPlan: vi.fn(),
-        approvePlan: vi.fn(),
-    })
-}));
-
-// Mock PlanBuilder
-vi.mock('../components/PlanBuilder', () => ({
-    PlanBuilder: () => <div data-testid="plan-builder">PlanBuilder Mock</div>
-}));
-
-// Mock PlanReview
-vi.mock('../components/PlanReview', () => ({
-    PlanReview: () => <div data-testid="plan-review">PlanReview Mock</div>
-}));
-
-// Mock PlansPanel
-vi.mock('../components/PlansPanel', () => ({
-    PlansPanel: () => <div data-testid="plans-panel">PlansPanel Mock</div>
-}));
-
-// Mock EvalDashboard
-vi.mock('../components/evals/EvalDashboard', () => ({
-    EvalDashboard: () => <div data-testid="eval-dashboard">EvalDashboard Mock</div>
-}));
-
-// Mock ObservabilityPanel
-vi.mock('../components/observability/ObservabilityPanel', () => ({
-    ObservabilityPanel: () => <div data-testid="observability-panel">ObservabilityPanel Mock</div>
-}));
-
-// Mock TrustSettings
-vi.mock('../components/TrustSettings', () => ({
-    TrustSettings: () => <div data-testid="trust-settings">TrustSettings Mock</div>
-}));
-
-// Mock SettingsPanel
-vi.mock('../components/SettingsPanel', () => ({
-    SettingsPanel: () => <div data-testid="settings-panel">SettingsPanel Mock</div>
-}));
-
-// Mock MenuBar
 vi.mock('../components/MenuBar', () => ({
-    MenuBar: () => <div data-testid="menu-bar">MenuBar Mock</div>
+    MenuBar: () => <div data-testid="menu-bar">MenuBar</div>
 }));
-
-// Mock OrchestratorChat
-vi.mock('../components/OrchestratorChat', () => ({
-    OrchestratorChat: () => <div data-testid="orchestrator-chat">OrchestratorChat Mock</div>
+vi.mock('../components/StatusBar', () => ({
+    StatusBar: () => <div data-testid="status-bar">StatusBar</div>
 }));
-
-// Mock WelcomeScreen
-vi.mock('../components/WelcomeScreen', () => ({
-    WelcomeScreen: () => <div data-testid="welcome-screen">WelcomeScreen Mock</div>
+vi.mock('../components/OverlayDrawer', () => ({
+    OverlayDrawer: ({ children }: any) => <div data-testid="overlay-drawer">{children}</div>
 }));
-
-// Mock CommandPalette
 vi.mock('../components/Shell/CommandPalette', () => ({
     CommandPalette: () => null
 }));
-
-// Mock TokenMastery
-vi.mock('../components/TokenMastery', () => ({
-    TokenMastery: () => <div data-testid="token-mastery">TokenMastery Mock</div>
+vi.mock('../components/ProfilePanel', () => ({
+    ProfilePanel: () => null
 }));
-
-// Mock LoginModal
+vi.mock('../components/BackgroundRunner', () => ({
+    BackgroundRunner: () => null
+}));
+vi.mock('../components/SkillsRail', () => ({
+    SkillsRail: () => null
+}));
 vi.mock('../components/LoginModal', () => ({
     LoginModal: ({ onAuthenticated }: { onAuthenticated: () => void }) => (
         <div data-testid="login-modal">
@@ -103,100 +36,140 @@ vi.mock('../components/LoginModal', () => ({
     )
 }));
 
-// Mock Toast
+/* Lazy-loaded views */
+vi.mock('../views/GraphView', () => ({
+    default: () => <div data-testid="graph-view">GraphView</div>
+}));
+vi.mock('../views/PlansView', () => ({
+    default: () => <div data-testid="plans-view">PlansView</div>
+}));
+vi.mock('../components/SettingsPanel', () => ({
+    SettingsPanel: () => <div data-testid="settings-panel">Settings</div>
+}));
+vi.mock('../components/ProviderSettings', () => ({
+    ProviderSettings: () => <div>ProviderSettings</div>
+}));
+vi.mock('../components/evals/EvalDashboard', () => ({
+    EvalDashboard: () => <div>Evals</div>
+}));
+vi.mock('../components/observability/ObservabilityPanel', () => ({
+    ObservabilityPanel: () => <div>Observability</div>
+}));
+vi.mock('../components/TrustSettings', () => ({
+    TrustSettings: () => <div>TrustSettings</div>
+}));
+vi.mock('../islands/system/MaintenanceIsland', () => ({
+    MaintenanceIsland: () => <div>Maintenance</div>
+}));
+vi.mock('../components/TokenMastery', () => ({
+    TokenMastery: () => <div>TokenMastery</div>
+}));
+
+/* Hooks */
+vi.mock('../hooks/useProfile', () => ({
+    useProfile: () => ({ profile: null, loading: false, error: null, unauthorized: false, refetch: vi.fn() })
+}));
+vi.mock('../hooks/useProviderHealth', () => ({
+    useProviderHealth: () => ({})
+}));
+vi.mock('../hooks/useSkillNotifications', () => ({
+    useSkillNotifications: () => {}
+}));
+vi.mock('../lib/auth', () => ({
+    checkSession: vi.fn(),
+    logout: vi.fn()
+}));
+vi.mock('../lib/commands', () => ({
+    getCommandHandlers: () => ({})
+}));
+
+/* Toast */
 vi.mock('../components/Toast', () => ({
-    useToast: () => ({ addToast: vi.fn() })
+    useToast: () => ({ addToast: vi.fn(), removeToast: vi.fn(), toasts: [] })
 }));
 
-// Mock ReactFlow
-vi.mock('reactflow', () => ({
-    ReactFlowProvider: ({ children }: any) => <>{children}</>
+/* framer-motion minimal mock */
+vi.mock('framer-motion', () => ({
+    motion: {
+        div: ({ children, ...props }: any) => <div {...filterDomProps(props)}>{children}</div>,
+    },
+    AnimatePresence: ({ children }: any) => <>{children}</>,
 }));
 
-// Mock ResizeObserver
-globalThis.ResizeObserver = class ResizeObserver {
-    observe() { }
-    unobserve() { }
-    disconnect() { }
-};
-
-const mockFetchAuthenticated = () => {
-    vi.mocked(fetch).mockImplementation(async (url: any) => {
-        const urlStr = String(url);
-        if (urlStr.includes('/auth/check')) {
-            return { ok: true, json: () => Promise.resolve({ authenticated: true }) } as Response;
+function filterDomProps(props: Record<string, any>) {
+    const filtered: Record<string, any> = {};
+    for (const [k, v] of Object.entries(props)) {
+        if (['className', 'style', 'id', 'role', 'aria-label', 'data-testid'].includes(k)) {
+            filtered[k] = v;
         }
-        if (urlStr.includes('/ui/status')) {
-            return {
-                ok: true,
-                json: () => Promise.resolve({ version: '1.0.0', service_status: 'RUNNING' })
-            } as Response;
-        }
-        if (urlStr.includes('/ui/graph')) {
-            return {
-                ok: true,
-                json: () => Promise.resolve({ nodes: [{ id: '1' }] })
-            } as Response;
-        }
-        return { ok: true, json: () => Promise.resolve({}) } as Response;
-    });
-};
+    }
+    return filtered;
+}
 
 describe('App', () => {
     beforeEach(() => {
-        vi.mocked(fetch).mockReset();
-        mockFetchAuthenticated();
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({})
+        }));
     });
 
-    it('renders footer with company name', async () => {
+    afterEach(() => {
+        // Reset store to defaults
+        useAppStore.setState({
+            authenticated: null,
+            bootState: 'checking',
+            activeTab: 'graph',
+            activeOverlay: null,
+        });
+        vi.restoreAllMocks();
+    });
+
+    it('shows boot screen when checking', () => {
+        useAppStore.setState({ bootState: 'checking', authenticated: null });
         render(<App />);
-        await waitFor(() => {
-            expect(screen.getAllByText('Gred In Labs')[0]).toBeInTheDocument();
-        });
+        expect(screen.getByLabelText('Iniciando GIMO')).toBeInTheDocument();
+        expect(screen.getByText('GIMO')).toBeInTheDocument();
+        expect(screen.getByText('Iniciando sistema')).toBeInTheDocument();
     });
 
-    it('renders footer with version', async () => {
+    it('shows login modal when not authenticated', () => {
+        useAppStore.setState({ bootState: 'ready', authenticated: false });
         render(<App />);
-        await waitFor(() => {
-            expect(screen.getByText(/v1\.0\.0/)).toBeInTheDocument();
-        });
+        expect(screen.getByTestId('login-modal')).toBeInTheDocument();
     });
 
-    it('has correct structure with main and footer', async () => {
-        render(<App />);
-        await waitFor(() => {
-            expect(screen.getByRole('main')).toBeInTheDocument();
-            expect(screen.getByRole('contentinfo')).toBeInTheDocument();
-        });
-    });
-
-    it('applies dark mode classes', async () => {
-        const { container } = render(<App />);
-        await waitFor(() => {
-            const rootDiv = container.firstChild as HTMLElement;
-            expect(rootDiv).toHaveClass('min-h-screen');
-            expect(rootDiv).toHaveClass('bg-[#000000]');
-        });
-    });
-
-    it('shows login modal when not authenticated', async () => {
-        vi.mocked(fetch).mockImplementation(async (url: any) => {
-            const urlStr = String(url);
-            if (urlStr.includes('/auth/check')) {
-                return { ok: true, json: () => Promise.resolve({ authenticated: false }) } as Response;
-            }
-            return { ok: true, json: () => Promise.resolve({}) } as Response;
-        });
-        render(<App />);
-        await waitFor(() => {
-            expect(screen.getByTestId('login-modal')).toBeInTheDocument();
-        });
-    });
-
-    it('renders sidebar when authenticated', async () => {
+    it('shows sidebar and menu when authenticated', async () => {
+        useAppStore.setState({ bootState: 'ready', authenticated: true });
         render(<App />);
         await waitFor(() => {
             expect(screen.getByTestId('sidebar')).toBeInTheDocument();
+            expect(screen.getByTestId('menu-bar')).toBeInTheDocument();
+            expect(screen.getByTestId('status-bar')).toBeInTheDocument();
+        });
+    });
+
+    it('shows offline alert when backend unavailable', () => {
+        useAppStore.setState({ bootState: 'offline', authenticated: true, bootError: 'No hay conexión con el backend.' });
+        render(<App />);
+        expect(screen.getByRole('alert')).toBeInTheDocument();
+        expect(screen.getByText('Backend no disponible')).toBeInTheDocument();
+    });
+
+    it('has main content area with role=main when authenticated', async () => {
+        useAppStore.setState({ bootState: 'ready', authenticated: true });
+        render(<App />);
+        await waitFor(() => {
+            expect(screen.getByRole('main')).toBeInTheDocument();
+        });
+    });
+
+    it('renders skip navigation link for accessibility', async () => {
+        useAppStore.setState({ bootState: 'ready', authenticated: true });
+        render(<App />);
+        await waitFor(() => {
+            expect(screen.getByText('Saltar al contenido principal')).toBeInTheDocument();
         });
     });
 });

@@ -34,7 +34,6 @@ vi.mock('../../../lib/firebase', () => ({
 
 describe('LoginModal (Cold Room)', () => {
     beforeEach(() => {
-        vi.useFakeTimers();
         vi.clearAllMocks();
 
         mockedColdStatus = {
@@ -61,7 +60,7 @@ describe('LoginModal (Cold Room)', () => {
     });
 
     afterEach(() => {
-        vi.useRealTimers();
+        vi.restoreAllMocks();
     });
 
     it('mapea invalid_signature en activación cold-room', async () => {
@@ -157,8 +156,9 @@ describe('LoginModal (Cold Room)', () => {
             expect(addToastMock).toHaveBeenCalledWith('Renovación Cold Room aplicada', 'success');
         });
 
-        vi.advanceTimersByTime(500);
-        expect(onAuthenticated).toHaveBeenCalled();
+        await waitFor(() => {
+            expect(onAuthenticated).toHaveBeenCalled();
+        });
     });
 
     it('accede con cold-room activa sin pedir blob', async () => {
@@ -198,7 +198,8 @@ describe('LoginModal (Cold Room)', () => {
             expect(addToastMock).toHaveBeenCalledWith('Acceso Cold Room validado', 'success');
         });
 
-        vi.advanceTimersByTime(500);
-        expect(onAuthenticated).toHaveBeenCalled();
+        await waitFor(() => {
+            expect(onAuthenticated).toHaveBeenCalled();
+        });
     });
 });

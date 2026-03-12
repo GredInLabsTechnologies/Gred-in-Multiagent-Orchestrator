@@ -4,6 +4,7 @@ import asyncio
 import logging
 import json
 import time
+import shutil
 from typing import Any, Dict, Optional
 
 from ..config import OPS_DATA_DIR
@@ -15,6 +16,7 @@ from ..ops_models import (
     ProviderRolesConfig,
 )
 from ..providers.base import ProviderAdapter
+from ..providers.cli_account import CliAccountAdapter
 from ..providers.openai_compat import OpenAICompatAdapter
 from .provider_capability_service import ProviderCapabilityService
 from .provider_connector_service import ProviderConnectorService
@@ -162,11 +164,73 @@ class ProviderService:
         )
 
     @classmethod
+    def _has_account_mode_provider(cls, providers: Dict[str, ProviderEntry], provider_type: str) -> bool:
+        canonical = cls.normalize_provider_type(provider_type)
+        for entry in providers.values():
+            entry_type = cls.normalize_provider_type(entry.provider_type or entry.type)
+            auth_mode = str(entry.auth_mode or "").strip().lower()
+            if entry_type == canonical and auth_mode == "account":
+                return True
+        return False
+
+    @classmethod
+    def _inject_cli_account_providers(cls, providers: Dict[str, ProviderEntry]) -> Dict[str, ProviderEntry]:
+        """Auto-provision account-mode providers when local CLIs are available.
+
+        This keeps GIMO as an orchestrator of host-installed tools: if a supported
+        authenticated CLI exists in PATH, expose an account-mode provider entry
+        without forcing dependency re-installation.
+        """
+        out = dict(providers)
+        specs = [
+            {
+                "provider_type": "codex",
+                "provider_id": "codex-account",
+                "binary": "codex",
+                "display_name": "Codex Account Mode",
+                "model": "gpt-5-codex",
+            },
+            {
+                "provider_type": "claude",
+                "provider_id": "claude-account",
+                "binary": "claude",
+                "display_name": "Claude Account Mode",
+                "model": "claude-3-7-sonnet-latest",
+            },
+        ]
+
+        for spec in specs:
+            provider_type = str(spec["provider_type"])
+            provider_id = str(spec["provider_id"])
+            binary = str(spec["binary"])
+            if shutil.which(binary) is None:
+                continue
+            if provider_id in out:
+                continue
+            if cls._has_account_mode_provider(out, provider_type):
+                continue
+
+            model = str(spec["model"])
+            out[provider_id] = ProviderEntry(
+                type=provider_type,
+                provider_type=provider_type,
+                display_name=str(spec["display_name"]),
+                auth_mode="account",
+                model=model,
+                model_id=model,
+                capabilities=cls.capabilities_for(provider_type),
+            )
+
+        return out
+
+    @classmethod
     def _normalize_config(cls, cfg: ProviderConfig) -> ProviderConfig:
         normalized: Dict[str, ProviderEntry] = {}
         for pid, entry in cfg.providers.items():
             normalized_entry = cls._normalize_provider_entry(entry)
             normalized[pid] = ProviderAuthService.sanitize_entry_for_storage(pid, normalized_entry)
+
+        normalized = cls._inject_cli_account_providers(normalized)
 
         roles = cls._normalize_roles(cfg, normalized)
 
@@ -458,6 +522,13 @@ class ProviderService:
             raise ValueError(f"Active provider not found in config: {active}")
         entry = cfg.providers[active]
         canonical_type = cls.normalize_provider_type(entry.provider_type or entry.type)
+
+        # Account-mode for CLI-native providers must route through local CLIs,
+        # not through remote OpenAI-compatible HTTP APIs.
+        if canonical_type in {"codex", "claude"} and str(entry.auth_mode or "").strip().lower() == "account":
+            binary = "codex" if canonical_type == "codex" else "claude"
+            return CliAccountAdapter(binary=binary)
+
         if canonical_type in _OPENAI_COMPAT_ADAPTER_TYPES:
             if not entry.base_url:
                 base_url = _DEFAULT_BASE_URLS.get(canonical_type)
