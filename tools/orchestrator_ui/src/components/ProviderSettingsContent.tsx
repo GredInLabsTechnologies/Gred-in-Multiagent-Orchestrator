@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useCallback } from 'react';
+import React, { useMemo, useEffect, useCallback, useState } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -104,6 +104,7 @@ export const ProviderSettings: React.FC = () => {
         loadingRecommendation, setLoadingRecommendation,
     } = useProviderSettingsState();
     const { addToast } = useToast();
+    const [providerHealthMap, setProviderHealthMap] = useState<Record<string, string>>({});
 
     const providerTypes = Object.keys(providerCapabilities);
     const providerTypeOptions = useMemo(() => {
@@ -164,6 +165,18 @@ export const ProviderSettings: React.FC = () => {
         const pieces = [capText, weakness, context].filter(Boolean);
         return pieces.length ? pieces.join(' | ') : (m?.description || 'Sin metadata adicional');
     }, []);
+
+    useEffect(() => {
+        if (effectiveState?.active && effectiveState?.health) {
+            setProviderHealthMap(prev => ({ ...prev, [effectiveState.active]: effectiveState.health }));
+        }
+    }, [effectiveState?.active, effectiveState?.health]);
+
+    const handleTestWithHealthUpdate = useCallback(async (id: string) => {
+        const result = await testProvider(id);
+        setProviderHealthMap(prev => ({ ...prev, [id]: result.healthy ? 'ok' : 'down' }));
+        return result;
+    }, [testProvider]);
 
     useEffect(() => {
         loadProviders();
@@ -466,12 +479,29 @@ export const ProviderSettings: React.FC = () => {
                                 <Cpu className="w-4 h-4 text-indigo-400" /> Intelligent Auto-Config
                             </h3>
                             <p className="text-xs text-text-secondary">
-                                Hardware detectado: {recommendation.hardware?.gpu_vendor && recommendation.hardware.gpu_vendor !== 'none' ? `${recommendation.hardware.gpu_vendor.toUpperCase()} GPU (${recommendation.hardware.gpu_vram_gb}GB)` : 'Sin GPU compatible detectada'}, RAM: {recommendation.hardware?.total_ram_gb}GB
+                                Hardware detectado: {recommendation.hardware?.gpu_vendor && recommendation.hardware.gpu_vendor !== 'none' ? `${recommendation.hardware.gpu_vendor.toUpperCase()} GPU (${recommendation.hardware.gpu_vram_gb}GB VRAM)` : 'Sin GPU dedicada'}, RAM: {recommendation.hardware?.total_ram_gb}GB
+                                {recommendation.hardware?.npu_vendor && recommendation.hardware.npu_vendor !== 'none' && (
+                                    <span className="ml-1 text-indigo-300">· NPU: {recommendation.hardware.npu_name} ({recommendation.hardware.npu_tops} TOPS)</span>
+                                )}
                             </p>
                             <p className="text-xs text-indigo-200 mt-2 font-medium">
                                 Recomendación: {recommendation.orchestrator?.provider || recommendation.provider} ({recommendation.orchestrator?.model || recommendation.model})
                                 {' '}con {recommendation.worker_pool?.[0]?.count_hint || recommendation.workers} workers.
                             </p>
+                            {recommendation.scoring && (
+                                <div className="flex items-center gap-3 mt-1">
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-16 h-1.5 rounded-full bg-surface-0 overflow-hidden">
+                                            <div className="h-full rounded-full bg-indigo-500" style={{ width: `${Math.min(100, recommendation.scoring.total)}%` }} />
+                                        </div>
+                                        <span className="text-[10px] text-indigo-300">{recommendation.scoring.total}/100</span>
+                                    </div>
+                                    <span className="text-[10px] text-text-secondary">{recommendation.scoring.tier_label}</span>
+                                    {recommendation.scoring.bottleneck && (
+                                        <span className="text-[10px] text-amber-400">⚠ {recommendation.scoring.bottleneck}</span>
+                                    )}
+                                </div>
+                            )}
                             <p className="text-[10px] text-text-secondary mt-0.5">Motivo: {recommendation.topology_reason || recommendation.reason}</p>
                         </div>
                         <Button onClick={applyRecommendation} className="bg-indigo-600 hover:bg-indigo-500 text-white shrink-0 text-xs">
@@ -502,8 +532,9 @@ export const ProviderSettings: React.FC = () => {
                     <Server className="w-4 h-4 text-indigo-400" />
                     Ajustes de Conexión
                 </h3>
-                <div className="grid grid-cols-1 gap-6 items-start">
-                    <div className="col-span-full max-w-xl">
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6 items-start">
+                <div className="flex flex-col gap-6">
+                    <div className="max-w-xl">
                         <label className="block text-sm font-medium text-text-primary mb-2">Proveedor API</label>
                         <div className="relative">
                             <button
@@ -656,7 +687,6 @@ export const ProviderSettings: React.FC = () => {
                             </div>
                         </div>
                     )}
-                </div>
 
                 {catalog?.warnings?.length ? (
                     <div className="mt-3 text-xs text-accent-warning space-y-1">
@@ -697,6 +727,65 @@ export const ProviderSettings: React.FC = () => {
                         {validateResult.error_actionable ? <div className="mt-2 text-xs">Acción sugerida: {validateResult.error_actionable}</div> : null}
                     </div>
                 ) : null}
+                </div>
+
+                {/* ── Provider status sidebar ─────────────────────────────── */}
+                <div className="hidden lg:flex flex-col gap-1 border-l border-border-primary pl-5 pt-0.5">
+                    <h4 className="text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-2">Providers configurados</h4>
+                    {providers.length === 0 ? (
+                        <p className="text-xs text-text-secondary italic">Sin providers guardados.</p>
+                    ) : (
+                        providers.map((p) => {
+                            const rawHealth = providerHealthMap[p.id] ?? (p.id === effectiveState?.active ? effectiveState?.health : 'unknown');
+                            const health = String(rawHealth || 'unknown').toLowerCase();
+                            const dotClass =
+                                health === 'ok'
+                                    ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
+                                    : health === 'degraded'
+                                    ? 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.8)]'
+                                    : health === 'down'
+                                    ? 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.7)]'
+                                    : 'bg-surface-3 animate-pulse';
+                            const statusLabel =
+                                health === 'ok' ? 'OK'
+                                : health === 'degraded' ? 'Reconectando'
+                                : health === 'down' ? 'Desconectado'
+                                : '—';
+                            return (
+                                <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => {
+                                        setProviderType(p.type);
+                                        setProviderId(p.id);
+                                        setModelId(p.model || p.config?.model || '');
+                                    }}
+                                    title={`Seleccionar ${p.config?.display_name || p.id} • Estado: ${statusLabel}`}
+                                    className={`flex items-center gap-2.5 py-2 px-2 rounded-lg text-left transition-colors hover:bg-surface-3/60 w-full group ${providerType === p.type && providerId === p.id ? 'bg-indigo-500/10 ring-1 ring-indigo-500/30' : ''}`}
+                                >
+                                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${dotClass}`} />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="text-xs font-medium text-text-primary truncate leading-tight">
+                                            {p.config?.display_name || PROVIDER_LABELS[p.type] || p.id}
+                                        </div>
+                                        <div className="text-[10px] text-text-secondary truncate leading-tight">
+                                            {p.model || p.config?.model || 'modelo n/a'}
+                                        </div>
+                                    </div>
+                                    {p.id === effectiveState?.active && (
+                                        <span className="text-[9px] text-indigo-400 font-semibold uppercase tracking-wide flex-shrink-0">activo</span>
+                                    )}
+                                </button>
+                            );
+                        })
+                    )}
+                    {providers.length > 0 && (
+                        <p className="text-[10px] text-text-secondary mt-2 px-2">
+                            Haz clic en un provider para editar su configuración.
+                        </p>
+                    )}
+                </div>
+                </div>
             </Card>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -725,7 +814,7 @@ export const ProviderSettings: React.FC = () => {
 
             <ProviderList
                 providers={providers}
-                onTest={testProvider}
+                onTest={handleTestWithHealthUpdate}
                 onRemove={removeProvider}
                 addToast={addToast}
             />

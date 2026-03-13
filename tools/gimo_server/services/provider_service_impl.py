@@ -35,31 +35,52 @@ class ProviderService:
 
     @classmethod
     def ensure_default_config(cls) -> None:
-        """Create provider.json template if missing."""
+        """Create provider.json template if missing.
+
+        Priority: codex CLI (if installed) → claude CLI (if installed) → empty config.
+        Never default to Ollama — the user may not have it installed.
+        """
+        import shutil as _shutil
         OPS_DATA_DIR.mkdir(parents=True, exist_ok=True)
         if cls.CONFIG_FILE.exists():
             return
-            
-        default_model = "qwen2.5-coder:3b"
-        default = ProviderConfig(
-            active="local_ollama",
-            providers={
-                "local_ollama": ProviderEntry(
-                    type="openai_compat",
-                    provider_type="ollama_local",
-                    display_name="Ollama Local",
-                    base_url="http://localhost:11434/v1",
-                    model=default_model,
-                    model_id=default_model,
-                    api_key=None,
-                    capabilities=cls.capabilities_for("ollama_local"),
-                )
-            },
-            roles=ProviderRolesConfig(
-                orchestrator=ProviderRoleBinding(provider_id="local_ollama", model=default_model),
-                workers=[],
-            ),
+
+        providers: dict = {}
+        active: str = ""
+        orch_model: str = ""
+
+        if _shutil.which("codex") is not None:
+            providers["codex-account"] = ProviderEntry(
+                type="codex",
+                provider_type="codex",
+                display_name="Codex Account Mode",
+                auth_mode="account",
+                model="gpt-5-codex",
+                model_id="gpt-5-codex",
+                capabilities=cls.capabilities_for("codex"),
+            )
+            active = "codex-account"
+            orch_model = "gpt-5-codex"
+
+        if _shutil.which("claude") is not None:
+            providers["claude-account"] = ProviderEntry(
+                type="claude",
+                provider_type="claude",
+                display_name="Claude Account Mode",
+                auth_mode="account",
+                model="claude-3-7-sonnet-latest",
+                model_id="claude-3-7-sonnet-latest",
+                capabilities=cls.capabilities_for("claude"),
+            )
+            if not active:
+                active = "claude-account"
+                orch_model = "claude-3-7-sonnet-latest"
+
+        roles = ProviderRolesConfig(
+            orchestrator=ProviderRoleBinding(provider_id=active, model=orch_model) if active else None,
+            workers=[],
         )
+        default = ProviderConfig(active=active, providers=providers, roles=roles)
         cls.CONFIG_FILE.write_text(default.model_dump_json(indent=2), encoding="utf-8")
 
     @classmethod

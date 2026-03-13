@@ -36,7 +36,7 @@ export const CodexAuthSection: React.FC<CodexAuthSectionProps> = ({
                 <div className="flex flex-col gap-3">
                     <div className="flex items-center gap-2">
                         <div className="w-2.5 h-2.5 rounded-full bg-[#10a37f] shadow-[0_0_8px_rgba(16,163,127,0.6)]" />
-                        <span className="text-sm font-semibold text-[#10a37f]">Conectado con OpenAI</span>
+                        <span className="text-sm font-semibold text-[#10a37f]">Conectado con OpenAI Codex</span>
                     </div>
                     <div className="text-xs text-text-secondary space-y-1">
                         {cliAuthStatus.method && <div>Método: <span className="text-text-primary">{cliAuthStatus.method}</span></div>}
@@ -53,8 +53,8 @@ export const CodexAuthSection: React.FC<CodexAuthSectionProps> = ({
             ) : (!deviceLoginState || deviceLoginState.status === 'error') ? (
                 <div className="flex flex-col gap-3">
                     <div>
-                        <div className="text-sm font-medium">Cuenta de OpenAI (Suscripción Plus/Pro)</div>
-                        <div className="text-xs text-text-secondary mt-1">Usa los modelos a los que ya tienes acceso sin pagar por token a través de API Keys.</div>
+                        <div className="text-sm font-medium">Cuenta OpenAI – Codex CLI</div>
+                        <div className="text-xs text-text-secondary mt-1">Usa los modelos Codex a los que ya tienes acceso (Plus/Pro) sin pagar por token vía API Key.</div>
                         {deviceLoginState?.status === 'error' && (
                             <div className="mt-2 text-xs text-accent-alert bg-accent-alert/10 p-2 rounded space-y-2">
                                 <div>{deviceLoginState.message}</div>
@@ -76,7 +76,7 @@ export const CodexAuthSection: React.FC<CodexAuthSectionProps> = ({
                         )}
                     </div>
                     <Button onClick={onLogin} className="w-full bg-[#10a37f] hover:bg-[#0e906f] text-white flex items-center justify-center gap-2 shadow-md h-10 transition-colors">
-                        Autenticar en OpenAI
+                        Autenticar con OpenAI (Codex)
                     </Button>
                     <div className="text-[10px] text-text-secondary flex justify-center mt-1">
                         Soporte nativo mediante OpenAI Codex CLI

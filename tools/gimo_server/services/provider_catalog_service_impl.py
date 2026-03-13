@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json as _json
 import shutil
+import subprocess
 import time
 import os
 import sys
@@ -35,10 +37,10 @@ _OLLAMA_RECOMMENDED = [
 ]
 
 _DEFAULT_PROVIDER_MODELS: Dict[str, List[Dict[str, str]]] = {
-    "openai": [{"id": "gpt-4o", "label": "GPT-4o"}, {"id": "gpt-4.1", "label": "GPT-4.1"}, {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"}],
-    "codex": [{"id": "gpt-5-codex", "label": "GPT-5 Codex"}, {"id": "gpt-4.1", "label": "GPT-4.1"}],
-    "anthropic": [{"id": "claude-3-7-sonnet-latest", "label": "Claude 3.7 Sonnet"}, {"id": "claude-3-5-haiku-latest", "label": "Claude 3.5 Haiku"}],
-    "claude": [{"id": "claude-3-7-sonnet-latest", "label": "Claude 3.7 Sonnet"}, {"id": "claude-3-5-haiku-latest", "label": "Claude 3.5 Haiku"}],
+    "openai": [{"id": "gpt-4o", "label": "GPT-4o"}, {"id": "gpt-4.1", "label": "GPT-4.1"}, {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"}, {"id": "o3", "label": "o3"}, {"id": "o4-mini", "label": "o4-mini"}],
+    "codex": [{"id": "o4-mini", "label": "o4-mini (default)"}, {"id": "o3", "label": "o3"}, {"id": "gpt-4.1", "label": "GPT-4.1"}, {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"}, {"id": "codex-mini-latest", "label": "Codex Mini"}],
+    "anthropic": [{"id": "claude-opus-4-5", "label": "Claude Opus 4.5"}, {"id": "claude-sonnet-4-5", "label": "Claude Sonnet 4.5"}, {"id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5"}, {"id": "claude-3-7-sonnet-latest", "label": "Claude 3.7 Sonnet"}, {"id": "claude-3-5-haiku-latest", "label": "Claude 3.5 Haiku"}],
+    "claude": [{"id": "claude-opus-4-5", "label": "Claude Opus 4.5"}, {"id": "claude-sonnet-4-5", "label": "Claude Sonnet 4.5"}, {"id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5"}, {"id": "claude-3-7-sonnet-latest", "label": "Claude 3.7 Sonnet"}, {"id": "claude-3-5-haiku-latest", "label": "Claude 3.5 Haiku"}],
     "google": [{"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash"}, {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"}],
     "mistral": [{"id": "mistral-large-latest", "label": "Mistral Large"}, {"id": "mistral-small-latest", "label": "Mistral Small"}],
     "cohere": [{"id": "command-r-plus", "label": "Command R+"}, {"id": "command-r", "label": "Command R"}],
@@ -83,6 +85,64 @@ def _mock_mode_enabled(payload: ProviderValidateRequest | None = None) -> bool:
     if payload and (_is_mock_token(payload.api_key) or _is_mock_token(payload.account)):
         return True
     return False
+
+
+def _run_sync(args: list[str], timeout: float = 10.0) -> tuple[int, str]:
+    """Run a CLI command synchronously; uses shell=True on Windows for .cmd shim compat."""
+    try:
+        cmd = " ".join(args) if sys.platform == "win32" else args
+        clean_env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE")}
+        proc = subprocess.Popen(
+            cmd, shell=(sys.platform == "win32"),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            env=clean_env,  # remove nested-session guard so claude/codex CLIs work
+        )
+        out, _ = proc.communicate(timeout=timeout)
+        return proc.returncode, (out or b"").decode("utf-8", errors="replace").strip()
+    except Exception as exc:
+        return -1, str(exc)
+
+
+async def _fetch_claude_cli_models() -> List[NormalizedModelInfo]:
+    """Discover Claude models dynamically via `claude api get /v1/models`.
+
+    Runs from the server process (no CLAUDECODE guard) using run_in_executor
+    so it doesn't block the event loop.
+    """
+    loop = asyncio.get_event_loop()
+    try:
+        rc, output = await asyncio.wait_for(
+            loop.run_in_executor(None, _run_sync, ["claude", "api", "get", "/v1/models"]),
+            timeout=12.0,
+        )
+    except (asyncio.TimeoutError, TimeoutError):
+        return []
+    except Exception:
+        return []
+
+    if rc != 0 or not output:
+        return []
+
+    try:
+        data = _json.loads(output)
+        items = data.get("data", []) if isinstance(data, dict) else []
+        models: List[NormalizedModelInfo] = []
+        for item in items:
+            model_id = str(item.get("id") or "").strip()
+            if not model_id:
+                continue
+            display_name = str(item.get("display_name") or item.get("name") or model_id)
+            context_window = item.get("context_window") or None
+            models.append(NormalizedModelInfo(
+                id=model_id,
+                label=display_name,
+                context_window=context_window,
+                installed=False,
+                downloadable=False,
+            ))
+        return models
+    except Exception:
+        return []
 
 
 def _fallback_models_for(provider_type: str) -> List[NormalizedModelInfo]:
@@ -358,8 +418,21 @@ class ProviderCatalogService:
                 ) for m in _OLLAMA_RECOMMENDED
             ], warnings
 
-        if canonical in {"replicate", "anthropic", "claude", "google", "mistral", "cohere"}:
+        # Claude account mode: try dynamic discovery via `claude api get /v1/models`.
+        # Falls back to curated defaults if the CLI is unavailable or not authenticated.
+        if canonical == "claude" and not (payload and payload.api_key):
+            if shutil.which("claude"):
+                live = await _fetch_claude_cli_models()
+                if live:
+                    return live, warnings
+            return _fallback_models_for(canonical), warnings
+
+        if canonical in {"replicate", "anthropic", "google", "mistral", "cohere"}:
             warnings.append("This provider may not expose a universal /models endpoint. Showing curated defaults.")
+            return _fallback_models_for(canonical), warnings
+
+        # Codex uses CLI account sessions — remote /models is not reachable via account token.
+        if canonical == "codex" and not (payload and payload.api_key):
             return _fallback_models_for(canonical), warnings
 
         if canonical in {"vllm", "llama-cpp", "tgi", "azure-openai", "aws-bedrock", "vertex-ai"}:
@@ -663,11 +736,12 @@ class ProviderCatalogService:
     async def _validate_cli_account_provider(cls, canonical: str) -> ProviderValidateResponse:
         """Validate CLI-native account mode providers (Codex/Claude).
 
-        Account-mode for these providers is backed by local authenticated CLI sessions,
-        not API keys or remote /models probing.
+        Uses the auth services (run_in_executor + subprocess.Popen) to avoid
+        asyncio.create_subprocess_* which is unsupported on Windows SelectorEventLoop.
         """
-        binary = "codex" if canonical == "codex" else "claude"
         install_hint = "npm install -g @openai/codex" if canonical == "codex" else "npm install -g @anthropic-ai/claude-code"
+        binary = "codex" if canonical == "codex" else "claude"
+
         if shutil.which(binary) is None:
             return ProviderValidateResponse(
                 valid=False,
@@ -676,40 +750,38 @@ class ProviderCatalogService:
                 error_actionable=f"Install {binary} CLI and retry: {install_hint}",
             )
 
+        # Use auth services — they use run_in_executor + Popen which works on Windows.
         try:
-            cmd = [binary, "--version"]
-            if sys.platform == "win32":
-                proc = await asyncio.create_subprocess_shell(
-                    f"{binary} --version",
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
+            if canonical == "codex":
+                from .codex_auth_service import CodexAuthService
+                status = await CodexAuthService.get_auth_status()
             else:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-            await asyncio.wait_for(proc.communicate(), timeout=8)
-            if proc.returncode != 0:
-                return ProviderValidateResponse(
-                    valid=False,
-                    health="degraded",
-                    warnings=[f"{binary} CLI is installed but not healthy."],
-                    error_actionable=f"Re-authenticate with '{binary} login' and retry.",
-                )
-        except Exception:
-            return ProviderValidateResponse(
-                valid=False,
-                health="degraded",
-                warnings=[f"Unable to run '{binary} --version'."],
-                error_actionable=f"Verify local {binary} CLI install and session with '{binary} login'.",
-            )
+                from .claude_auth_service import ClaudeAuthService
+                status = await ClaudeAuthService.get_auth_status()
+        except Exception as exc:
+            logger.warning("_validate_cli_account_provider auth status error: %s", exc)
+            status = {"authenticated": False, "detail": str(exc)}
 
         recommended = _fallback_models_for(canonical)
         effective_model = recommended[0].id if recommended else None
+
+        if status.get("authenticated"):
+            method = status.get("method") or "account"
+            return ProviderValidateResponse(
+                valid=True,
+                health="ok",
+                effective_model=effective_model,
+                warnings=[f"Validated via local {binary} CLI session ({method})."],
+            )
+
+        # CLI is installed but auth status unknown/false — still mark as degraded not down
+        detail = status.get("detail") or ""
         return ProviderValidateResponse(
-            valid=True,
-            health="ok",
-            effective_model=effective_model,
-            warnings=[f"Validated via local {binary} CLI account session."],
+            valid=False,
+            health="degraded",
+            effective_model=None,
+            warnings=[f"{binary} CLI found but session not authenticated. {detail}".strip()],
+            error_actionable=f"Run '{binary} login' to authenticate.",
         )
 
     @classmethod

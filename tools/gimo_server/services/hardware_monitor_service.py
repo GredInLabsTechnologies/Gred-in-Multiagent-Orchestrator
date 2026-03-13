@@ -42,6 +42,11 @@ class HardwareSnapshot:
     total_ram_gb: float = 0.0
     wsl2_available: bool = False
     installed_providers: list[str] = field(default_factory=list)
+    npu_vendor: str = "none"
+    npu_name: str = "none"
+    npu_tops: float = 0.0
+    unified_memory: bool = False       # True for APU/SoC with high-bandwidth unified memory
+    cpu_inference_capable: bool = False  # True if RAM+CPU can handle CPU-offload inference
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -107,6 +112,46 @@ def _detect_gpu() -> dict:
 
     return info
 
+def _detect_npu() -> dict:
+    """Detect AMD XDNA / Intel NPU presence via WMI on Windows."""
+    info: dict = {"vendor": "none", "name": "none", "tops": 0.0}
+    try:
+        result = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores | ConvertTo-Json",
+            ],
+            capture_output=True, text=True, timeout=3,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            data = json.loads(result.stdout)
+            if isinstance(data, list):
+                data = data[0]
+            cpu_name = str(data.get("Name", "")).lower()
+            # AMD Ryzen AI / Z-series with XDNA NPU
+            if any(k in cpu_name for k in ("ryzen ai", "z1", "z2", "strix", "hawk point", "phoenix", "rembrandt r")):
+                info["vendor"] = "amd_xdna"
+                info["name"] = data.get("Name", "AMD Ryzen AI")
+                # Z1 Extreme = 16 TOPS, Phoenix = 16 TOPS, Strix Halo = 50 TOPS
+                if "z1 extreme" in cpu_name or "phoenix" in cpu_name:
+                    info["tops"] = 16.0
+                    info["unified_memory"] = True   # APU: shared high-bandwidth LPDDR5X
+                elif "strix" in cpu_name or "halo" in cpu_name:
+                    info["tops"] = 50.0
+                    info["unified_memory"] = True
+                else:
+                    info["tops"] = 10.0
+                    info["unified_memory"] = True
+            # Intel Core Ultra NPU
+            elif "core ultra" in cpu_name or "meteor lake" in cpu_name or "lunar lake" in cpu_name:
+                info["vendor"] = "intel_npu"
+                info["name"] = data.get("Name", "Intel Core Ultra")
+                info["tops"] = 11.0
+    except Exception:
+        pass
+    return info
+
+
 def _get_installed_providers() -> list[str]:
     try:
         from .provider_service import ProviderService
@@ -152,7 +197,12 @@ class HardwareMonitorService:
     def get_snapshot(self) -> HardwareSnapshot:
         mem = psutil.virtual_memory()
         gpu_info = _detect_gpu()
-        
+        npu_info = _detect_npu()
+        total_ram_gb = round(mem.total / (1024 ** 3), 2)
+        unified = bool(npu_info.get("unified_memory", False))
+        # CPU inference capable: ≥16GB RAM + ≥4 cores (can run 7B Q4 at acceptable speed)
+        cpu_infer = total_ram_gb >= 16.0 and (psutil.cpu_count(logical=False) or 0) >= 4
+
         return HardwareSnapshot(
             cpu_percent=psutil.cpu_percent(interval=0.1),
             ram_percent=mem.percent,
@@ -163,9 +213,14 @@ class HardwareMonitorService:
             gpu_vram_gb=gpu_info["vram"],
             gpu_vram_free_gb=gpu_info["vram_free"],
             gpu_temp=gpu_info.get("gpu_temp", 0.0),
-            total_ram_gb=round(mem.total / (1024 ** 3), 2),
+            total_ram_gb=total_ram_gb,
             wsl2_available=_detect_wsl2(),
-            installed_providers=_get_installed_providers()
+            installed_providers=_get_installed_providers(),
+            npu_vendor=npu_info["vendor"],
+            npu_name=npu_info["name"],
+            npu_tops=npu_info["tops"],
+            unified_memory=unified,
+            cpu_inference_capable=cpu_infer,
         )
 
     def get_load_level(self, snapshot: Optional[HardwareSnapshot] = None) -> LoadLevel:
