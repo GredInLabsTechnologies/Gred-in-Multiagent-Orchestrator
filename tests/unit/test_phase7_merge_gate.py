@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from tools.gimo_server.ops_models import OpsApproved, OpsDraft
 from tools.gimo_server.services.merge_gate_service import MergeGateService
 from tools.gimo_server.services.ops_service import OpsService
@@ -45,15 +47,70 @@ def _seed_draft_and_approved(*, draft_id: str = "d1", approved_id: str = "a1", r
     return draft, approved
 
 
-def test_phase7_create_run_is_idempotent_by_draft_and_commit_base(tmp_path):
+def test_phase7_create_run_conflicts_when_active_run_exists(tmp_path):
     _setup_ops_dirs(tmp_path)
     _, approved = _seed_draft_and_approved(draft_id="d1", approved_id="a1")
 
     run1 = OpsService.create_run(approved.id)
+
+    with pytest.raises(RuntimeError) as exc:
+        OpsService.create_run(approved.id)
+
+    assert str(exc.value).startswith("RUN_ALREADY_ACTIVE")
+    assert run1.run_key is not None
+
+
+def test_phase7_create_run_creates_new_instance_after_terminal(tmp_path):
+    _setup_ops_dirs(tmp_path)
+    _, approved = _seed_draft_and_approved(draft_id="d1t", approved_id="a1t")
+
+    run1 = OpsService.create_run(approved.id)
+    OpsService.update_run_status(run1.id, "done", msg="completed")
+
     run2 = OpsService.create_run(approved.id)
 
-    assert run1.id == run2.id
+    assert run1.id != run2.id
     assert run1.run_key == run2.run_key
+
+
+def test_phase7_approve_draft_is_idempotent(tmp_path):
+    _setup_ops_dirs(tmp_path)
+    draft = OpsDraft(id="d_appr", prompt="p", context={}, status="draft")
+    OpsService._draft_path(draft.id).write_text(draft.model_dump_json(indent=2), encoding="utf-8")
+
+    appr1 = OpsService.approve_draft(draft.id, approved_by="op")
+    appr2 = OpsService.approve_draft(draft.id, approved_by="op")
+
+    assert appr1.id == appr2.id
+    assert appr1.draft_id == draft.id
+    assert len([a for a in OpsService.list_approved() if a.draft_id == draft.id]) == 1
+
+
+def test_phase7_rerun_creates_new_instance_with_parent_link(tmp_path):
+    _setup_ops_dirs(tmp_path)
+    _, approved = _seed_draft_and_approved(draft_id="d_rerun", approved_id="a_rerun")
+
+    run1 = OpsService.create_run(approved.id)
+    OpsService.update_run_status(run1.id, "done", msg="completed")
+
+    run2 = OpsService.rerun(run1.id)
+
+    assert run2.id != run1.id
+    assert run2.rerun_of == run1.id
+    assert run2.run_key == run1.run_key
+    assert run2.attempt == run1.attempt + 1
+
+
+def test_phase7_rerun_conflicts_when_source_key_has_active_instance(tmp_path):
+    _setup_ops_dirs(tmp_path)
+    _, approved = _seed_draft_and_approved(draft_id="d_rerun_active", approved_id="a_rerun_active")
+
+    run1 = OpsService.create_run(approved.id)
+
+    with pytest.raises(RuntimeError) as exc:
+        OpsService.rerun(run1.id)
+
+    assert str(exc.value).startswith("RUN_ALREADY_ACTIVE")
 
 
 def test_phase7_merge_lock_ttl_heartbeat_and_recovery(tmp_path):

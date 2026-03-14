@@ -127,7 +127,7 @@ async def approve_draft(
                 audit_log("OPS", "/ops/runs", run.id, operation="WRITE_AUTO", actor=actor)
                 asyncio.create_task(EngineService.execute_run(run.id, composition="custom_plan"))
                 audit_log("OPS", f"/ops/custom-plans/{custom_plan_id}/execute", custom_plan_id, operation="WRITE_AUTO", actor=actor)
-            except (PermissionError, ValueError):
+            except (PermissionError, ValueError, RuntimeError):
                 pass
         else:
             # Execute via EngineService (unified pipeline)
@@ -135,7 +135,7 @@ async def approve_draft(
                 run = OpsService.create_run(approved.id)
                 audit_log("OPS", "/ops/runs", run.id, operation="WRITE_AUTO", actor=actor)
                 asyncio.create_task(EngineService.execute_run(run.id))
-            except (PermissionError, ValueError):
+            except (PermissionError, ValueError, RuntimeError):
                 pass
     return OpsApproveResponse(approved=approved, run=run)
 
@@ -188,6 +188,11 @@ async def create_run(
         raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        detail = str(exc)
+        if detail.startswith("RUN_ALREADY_ACTIVE"):
+            raise HTTPException(status_code=409, detail=detail)
+        raise HTTPException(status_code=500, detail="RUN_CREATE_FAILED")
 
     # Deterministic immediate start from any channel (UI/MCP) when run is pending.
     # We intentionally start merge-gate directly and set status to running to avoid
@@ -265,6 +270,49 @@ async def replay_run(
         "artifacts": output.artifacts,
         "error": output.error,
     }
+
+
+@router.post(
+    "/runs/{run_id}/rerun",
+    response_model=OpsRun,
+    status_code=201,
+    responses={
+        404: {"description": RUN_NOT_FOUND},
+        409: {"description": "Active run conflict"},
+    },
+)
+async def rerun(
+    request: Request,
+    run_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    OpsService.set_gics(getattr(request.app.state, "gics", None))
+    try:
+        run = OpsService.rerun(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        detail = str(exc)
+        if detail.startswith("RUN_ALREADY_ACTIVE"):
+            raise HTTPException(status_code=409, detail=detail)
+        raise HTTPException(status_code=500, detail="RUN_RERUN_FAILED")
+
+    if run.status == "pending":
+        try:
+            run = OpsService.update_run_status(run.id, "running", msg="Execution started via /ops/runs/{run_id}/rerun")
+            asyncio.create_task(EngineService.execute_run(run.id))
+        except Exception:
+            try:
+                worker = getattr(request.app.state, "run_worker", None)
+                if worker is not None:
+                    worker.notify()
+            except Exception:
+                pass
+
+    audit_log("OPS", f"/ops/runs/{run_id}/rerun", run.id, operation="WRITE", actor=_actor_label(auth))
+    return run
 
 
 @router.get("/runs/{run_id}/preview", responses={404: {"description": RUN_NOT_FOUND}})

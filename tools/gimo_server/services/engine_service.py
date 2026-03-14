@@ -41,6 +41,13 @@ class EngineService:
             "tools.gimo_server.engine.stages.llm_execute:LlmExecute",
             "tools.gimo_server.engine.stages.qa_gate:QaGate",
         ],
+        "multi_agent": [
+            "tools.gimo_server.engine.stages.policy_gate:PolicyGate",
+            "tools.gimo_server.engine.stages.risk_gate:RiskGate",
+            "tools.gimo_server.engine.stages.plan_stage:PlanStage",
+            "tools.gimo_server.engine.stages.llm_execute:LlmExecute",
+            "tools.gimo_server.engine.stages.subagent_gate:SubagentGate",
+        ],
     }
 
     @staticmethod
@@ -84,6 +91,15 @@ class EngineService:
         if not composition:
             if context.get("custom_plan_id"):
                 composition = "custom_plan"
+            elif (
+                bool(context.get("multi_agent"))
+                or bool(context.get("wake_on_demand"))
+                or str(context.get("child_run_mode") or "").lower() == "parent"
+                or bool(getattr(run, "child_run_ids", []))
+                or int(getattr(run, "awaiting_count", 0) or 0) > 0
+            ):
+                # Explicit parent/child orchestration mode for wake-on-demand flows.
+                composition = "multi_agent"
             elif context.get("structured"):
                 composition = "structured_plan"
             elif context.get("intent_effective") in {"MERGE_REQUEST", "CORE_RUNTIME_CHANGE", "SECURITY_CHANGE"}:

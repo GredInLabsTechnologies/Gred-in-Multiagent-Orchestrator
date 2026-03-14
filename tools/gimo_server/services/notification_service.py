@@ -92,6 +92,7 @@ class NotificationService:
 
         is_critical = payload.get("critical", False) or event_type in (
             "system_degraded", "action_requires_approval", "security_alert",
+            "child_run_completed", "all_children_completed",
         )
 
         if is_critical:

@@ -31,41 +31,179 @@ from .provider_metadata import OPENAI_COMPAT_CATALOG_TYPES, REMOTE_MODELS_BASE_U
 from ..security import audit_log
 
 
+# Recommended Ollama models for local agentic code workloads.
+# Sorted by: coding capability > tool-use support > VRAM requirements.
 _OLLAMA_RECOMMENDED = [
-    {"id": "qwen2.5-coder:7b", "label": "Qwen 2.5 Coder 7B", "quality_tier": "balanced"},
-    {"id": "llama3.1:8b", "label": "Llama 3.1 8B", "quality_tier": "balanced"},
+    # ── Top coding models ─────────────────────────────────────────────────────
+    {"id": "qwen2.5-coder:32b",       "label": "Qwen 2.5 Coder 32B",      "quality_tier": "premium"},
+    {"id": "qwen2.5-coder:14b",       "label": "Qwen 2.5 Coder 14B",      "quality_tier": "balanced"},
+    {"id": "qwen2.5-coder:7b",        "label": "Qwen 2.5 Coder 7B",       "quality_tier": "balanced"},
+    {"id": "qwen2.5-coder:1.5b",      "label": "Qwen 2.5 Coder 1.5B",     "quality_tier": "fast"},
+    {"id": "devstral:24b",            "label": "Devstral 24B",             "quality_tier": "premium"},
+    {"id": "deepseek-coder-v2:16b",   "label": "DeepSeek Coder V2 16B",   "quality_tier": "balanced"},
+    # ── General models with strong tool-calling ────────────────────────────────
+    {"id": "llama3.1:70b",            "label": "Llama 3.1 70B",           "quality_tier": "premium"},
+    {"id": "llama3.1:8b",             "label": "Llama 3.1 8B",            "quality_tier": "balanced"},
+    {"id": "llama3.2:3b",             "label": "Llama 3.2 3B",            "quality_tier": "fast"},
+    {"id": "granite3.1-dense:8b",     "label": "Granite 3.1 8B",          "quality_tier": "balanced"},
+    {"id": "granite3.1-dense:2b",     "label": "Granite 3.1 2B",          "quality_tier": "fast"},
+    {"id": "phi4:14b",                "label": "Phi-4 14B",               "quality_tier": "balanced"},
+    {"id": "mistral-nemo:12b",        "label": "Mistral Nemo 12B",        "quality_tier": "balanced"},
+    {"id": "mistral:7b-instruct",     "label": "Mistral 7B Instruct",     "quality_tier": "balanced"},
 ]
 
+# Default curated model fallback lists — used when the provider API is unreachable
+# or credentials are not yet configured. Ordered by: coding quality desc.
 _DEFAULT_PROVIDER_MODELS: Dict[str, List[Dict[str, str]]] = {
-    "openai": [{"id": "gpt-4o", "label": "GPT-4o"}, {"id": "gpt-4.1", "label": "GPT-4.1"}, {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"}, {"id": "o3", "label": "o3"}, {"id": "o4-mini", "label": "o4-mini"}],
-    "codex": [{"id": "o4-mini", "label": "o4-mini (default)"}, {"id": "o3", "label": "o3"}, {"id": "gpt-4.1", "label": "GPT-4.1"}, {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini"}, {"id": "codex-mini-latest", "label": "Codex Mini"}],
-    "anthropic": [{"id": "claude-opus-4-5", "label": "Claude Opus 4.5"}, {"id": "claude-sonnet-4-5", "label": "Claude Sonnet 4.5"}, {"id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5"}, {"id": "claude-3-7-sonnet-latest", "label": "Claude 3.7 Sonnet"}, {"id": "claude-3-5-haiku-latest", "label": "Claude 3.5 Haiku"}],
-    "claude": [{"id": "claude-opus-4-5", "label": "Claude Opus 4.5"}, {"id": "claude-sonnet-4-5", "label": "Claude Sonnet 4.5"}, {"id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5"}, {"id": "claude-3-7-sonnet-latest", "label": "Claude 3.7 Sonnet"}, {"id": "claude-3-5-haiku-latest", "label": "Claude 3.5 Haiku"}],
-    "google": [{"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash"}, {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"}],
-    "mistral": [{"id": "mistral-large-latest", "label": "Mistral Large"}, {"id": "mistral-small-latest", "label": "Mistral Small"}],
-    "cohere": [{"id": "command-r-plus", "label": "Command R+"}, {"id": "command-r", "label": "Command R"}],
-    "deepseek": [{"id": "deepseek-chat", "label": "DeepSeek Chat"}, {"id": "deepseek-reasoner", "label": "DeepSeek Reasoner"}],
-    "qwen": [{"id": "qwen-plus", "label": "Qwen Plus"}, {"id": "qwen-max", "label": "Qwen Max"}],
-    "moonshot": [{"id": "moonshot-v1-8k", "label": "Moonshot v1 8k"}, {"id": "moonshot-v1-32k", "label": "Moonshot v1 32k"}],
-    "zai": [{"id": "glm-4.6", "label": "GLM-4.6"}],
-    "minimax": [{"id": "minimax-m1", "label": "MiniMax M1"}],
-    "baidu": [{"id": "ernie-4.0", "label": "ERNIE 4.0"}],
-    "tencent": [{"id": "hunyuan-turbo", "label": "Hunyuan Turbo"}],
-    "bytedance": [{"id": "doubao-1-5-pro", "label": "Doubao 1.5 Pro"}],
-    "iflytek": [{"id": "spark-max", "label": "Spark Max"}],
-    "01-ai": [{"id": "yi-large", "label": "Yi Large"}],
-    "openrouter": [{"id": "openrouter/auto", "label": "OpenRouter Auto"}],
-    "groq": [{"id": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B"}],
-    "together": [{"id": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", "label": "Llama 3.1 70B Turbo"}],
-    "fireworks": [{"id": "accounts/fireworks/models/llama-v3p1-70b-instruct", "label": "Llama 3.1 70B"}],
-    "replicate": [{"id": "meta/meta-llama-3-70b-instruct", "label": "Llama 3 70B (Replicate)"}],
-    "huggingface": [{"id": "meta-llama/Llama-3.1-70B-Instruct", "label": "Llama 3.1 70B"}],
-    "azure-openai": [{"id": "gpt-4o", "label": "GPT-4o (deployment)"}],
-    "aws-bedrock": [{"id": "anthropic.claude-3-7-sonnet", "label": "Claude 3.7 Sonnet (Bedrock)"}],
-    "vertex-ai": [{"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash (Vertex)"}],
-    "vllm": [{"id": "meta-llama/Llama-3.1-8B-Instruct", "label": "Llama 3.1 8B Instruct"}],
-    "llama-cpp": [{"id": "llama-3.1-8b-instruct-q4_k_m", "label": "Llama 3.1 8B Q4_K_M"}],
-    "tgi": [{"id": "meta-llama/Llama-3.1-8B-Instruct", "label": "Llama 3.1 8B Instruct"}],
+    # ── Paid-only providers ────────────────────────────────────────────────────
+    "openai": [
+        {"id": "gpt-4o",           "label": "GPT-4o"},
+        {"id": "gpt-4o-mini",      "label": "GPT-4o mini"},
+        {"id": "o3",               "label": "o3"},
+        {"id": "o4-mini",          "label": "o4-mini"},
+    ],
+    "codex": [
+        {"id": "o4-mini",          "label": "o4-mini (default)"},
+        {"id": "o3",               "label": "o3"},
+        {"id": "gpt-4o",           "label": "GPT-4o"},
+        {"id": "gpt-4o-mini",      "label": "GPT-4o mini"},
+    ],
+    "anthropic": [
+        {"id": "claude-sonnet-4-5",          "label": "Claude Sonnet 4.5"},
+        {"id": "claude-opus-4-5",            "label": "Claude Opus 4.5"},
+        {"id": "claude-haiku-4-5-20251001",  "label": "Claude Haiku 4.5"},
+        {"id": "claude-3-7-sonnet-latest",   "label": "Claude 3.7 Sonnet"},
+        {"id": "claude-3-5-haiku-latest",    "label": "Claude 3.5 Haiku"},
+    ],
+    "claude": [
+        {"id": "claude-sonnet-4-5",          "label": "Claude Sonnet 4.5"},
+        {"id": "claude-opus-4-5",            "label": "Claude Opus 4.5"},
+        {"id": "claude-haiku-4-5-20251001",  "label": "Claude Haiku 4.5"},
+        {"id": "claude-3-7-sonnet-latest",   "label": "Claude 3.7 Sonnet"},
+        {"id": "claude-3-5-haiku-latest",    "label": "Claude 3.5 Haiku"},
+    ],
+    # ── Free-tier providers (coding-focused) ───────────────────────────────────
+    "google": [
+        # Free tier via Google AI Studio (generous RPM/TPD limits)
+        {"id": "gemini-2.0-flash",       "label": "Gemini 2.0 Flash (free)"},
+        {"id": "gemini-2.0-flash-lite",  "label": "Gemini 2.0 Flash Lite (free)"},
+        {"id": "gemini-1.5-flash",       "label": "Gemini 1.5 Flash (free)"},
+        {"id": "gemini-1.5-flash-8b",    "label": "Gemini 1.5 Flash 8B (free)"},
+        {"id": "gemini-1.5-pro",         "label": "Gemini 1.5 Pro (2 RPM free)"},
+    ],
+    "mistral": [
+        # Free on La Plateforme; codestral is the specialized coder
+        {"id": "codestral-latest",       "label": "Codestral (free, code specialist)"},
+        {"id": "open-codestral-mamba",   "label": "Codestral Mamba (free)"},
+        {"id": "open-mistral-nemo",      "label": "Mistral Nemo (free, 128K)"},
+        {"id": "open-mixtral-8x22b",     "label": "Mixtral 8x22B (free)"},
+        {"id": "open-mixtral-8x7b",      "label": "Mixtral 8x7B (free)"},
+        {"id": "mistral-small-latest",   "label": "Mistral Small"},
+        {"id": "mistral-large-latest",   "label": "Mistral Large"},
+    ],
+    "cohere": [
+        # Trial key: 20 calls/min, 1K calls/month; Command-R has best tool-use
+        {"id": "command-r7b-12-2024",  "label": "Command R7B (free trial)"},
+        {"id": "command-r",            "label": "Command R (free trial)"},
+        {"id": "command-r-plus",       "label": "Command R+"},
+    ],
+    "deepseek": [
+        # Very cheap ($0.14/1M); free credits on signup; V3 supports tool calling
+        {"id": "deepseek-chat",      "label": "DeepSeek V3 (code + tools)"},
+        {"id": "deepseek-reasoner",  "label": "DeepSeek R1 (reasoning, no tools)"},
+    ],
+    "qwen": [
+        # DashScope free monthly quota; coder models are best for GIMO
+        {"id": "qwen2.5-coder-32b-instruct",  "label": "Qwen 2.5 Coder 32B (free quota)"},
+        {"id": "qwen2.5-coder-7b-instruct",   "label": "Qwen 2.5 Coder 7B (free quota)"},
+        {"id": "qwq-32b",                      "label": "QwQ 32B (reasoning)"},
+        {"id": "qwen-turbo",                   "label": "Qwen Turbo (fast, cheap)"},
+        {"id": "qwen-plus",                    "label": "Qwen Plus"},
+        {"id": "qwen-max",                     "label": "Qwen Max"},
+    ],
+    "groq": [
+        # Generous free tier: ~30 RPM, 6K TPM per model; ultra-fast inference
+        {"id": "llama-3.3-70b-versatile",        "label": "Llama 3.3 70B (free)"},
+        {"id": "llama-3.1-70b-versatile",        "label": "Llama 3.1 70B (free)"},
+        {"id": "llama-3.1-8b-instant",           "label": "Llama 3.1 8B Instant (free, fast)"},
+        {"id": "deepseek-r1-distill-llama-70b",  "label": "DeepSeek R1 Distill 70B (free)"},
+        {"id": "mixtral-8x7b-32768",             "label": "Mixtral 8x7B (free)"},
+        {"id": "gemma2-9b-it",                   "label": "Gemma 2 9B (free)"},
+    ],
+    "openrouter": [
+        # Free `:free` routing — no API cost; best free coding models for agentic use
+        {"id": "qwen/qwen-2.5-coder-32b-instruct:free",    "label": "Qwen 2.5 Coder 32B (free)"},
+        {"id": "deepseek/deepseek-v3:free",                "label": "DeepSeek V3 (free)"},
+        {"id": "meta-llama/llama-3.3-70b-instruct:free",   "label": "Llama 3.3 70B (free)"},
+        {"id": "google/gemini-2.0-flash-exp:free",         "label": "Gemini 2.0 Flash Exp (free)"},
+        {"id": "deepseek/deepseek-r1:free",                "label": "DeepSeek R1 (free, reasoning)"},
+        {"id": "mistralai/mistral-nemo:free",              "label": "Mistral Nemo (free)"},
+        {"id": "qwen/qwq-32b:free",                        "label": "QwQ 32B (free, reasoning)"},
+        {"id": "meta-llama/llama-3.1-8b-instruct:free",    "label": "Llama 3.1 8B (free, fast)"},
+        {"id": "openrouter/auto",                          "label": "OpenRouter Auto"},
+    ],
+    "together": [
+        # $5 signup credits; serverless pay-per-use; near-free for light agentic work
+        {"id": "Qwen/Qwen2.5-Coder-32B-Instruct",               "label": "Qwen 2.5 Coder 32B"},
+        {"id": "deepseek-ai/DeepSeek-V3",                        "label": "DeepSeek V3"},
+        {"id": "meta-llama/Meta-Llama-3.3-70B-Instruct-Turbo",  "label": "Llama 3.3 70B Turbo"},
+        {"id": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",  "label": "Llama 3.1 70B Turbo"},
+        {"id": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",   "label": "Llama 3.1 8B Turbo"},
+        {"id": "mistralai/Mixtral-8x22B-Instruct-v0.1",         "label": "Mixtral 8x22B"},
+        {"id": "Qwen/Qwen2.5-72B-Instruct-Turbo",               "label": "Qwen 2.5 72B Turbo"},
+    ],
+    "fireworks": [
+        # $1 signup credit; OpenAI-compat; best for fast agentic coding
+        {"id": "accounts/fireworks/models/qwen2p5-coder-32b-instruct",  "label": "Qwen 2.5 Coder 32B"},
+        {"id": "accounts/fireworks/models/deepseek-v3",                 "label": "DeepSeek V3"},
+        {"id": "accounts/fireworks/models/llama-v3p3-70b-instruct",     "label": "Llama 3.3 70B"},
+        {"id": "accounts/fireworks/models/llama-v3p1-70b-instruct",     "label": "Llama 3.1 70B"},
+        {"id": "accounts/fireworks/models/llama-v3p1-8b-instruct",      "label": "Llama 3.1 8B (fast)"},
+        {"id": "accounts/fireworks/models/mixtral-8x7b-instruct",       "label": "Mixtral 8x7B"},
+    ],
+    "huggingface": [
+        # Free HF_TOKEN (rate-limited); HF Inference Router (OpenAI-compat)
+        {"id": "Qwen/Qwen2.5-Coder-32B-Instruct",      "label": "Qwen 2.5 Coder 32B (free)"},
+        {"id": "meta-llama/Llama-3.3-70B-Instruct",    "label": "Llama 3.3 70B (free)"},
+        {"id": "meta-llama/Llama-3.1-70B-Instruct",    "label": "Llama 3.1 70B (free)"},
+        {"id": "meta-llama/Llama-3.1-8B-Instruct",     "label": "Llama 3.1 8B (free, fast)"},
+        {"id": "mistralai/Mistral-Nemo-Instruct-2407",  "label": "Mistral Nemo 12B (free)"},
+        {"id": "microsoft/Phi-3.5-mini-instruct",       "label": "Phi-3.5 Mini (free, fast)"},
+    ],
+    "zai": [
+        # glm-4-flash is truly free (10M tokens/month); codegeex-4 is the coding specialist
+        {"id": "glm-4-flash",   "label": "GLM-4 Flash (free, 128K)"},
+        {"id": "codegeex-4",    "label": "CodeGeeX-4 (free, code specialist)"},
+        {"id": "glm-4-air",     "label": "GLM-4 Air"},
+        {"id": "glm-4.6",       "label": "GLM-4.6"},
+    ],
+    "moonshot": [
+        # Monthly free quota; specialized in long-context code analysis
+        {"id": "moonshot-v1-128k",  "label": "Moonshot v1 128K (long-context code)"},
+        {"id": "moonshot-v1-32k",   "label": "Moonshot v1 32K"},
+        {"id": "moonshot-v1-8k",    "label": "Moonshot v1 8K (fast)"},
+    ],
+    "minimax": [
+        {"id": "minimax-m1",      "label": "MiniMax M1 (1M ctx, reasoning)"},
+        {"id": "abab6.5s-chat",   "label": "ABAB 6.5S (245K ctx, fast)"},
+    ],
+    "01-ai": [
+        {"id": "yi-large",        "label": "Yi Large (32K, tools)"},
+        {"id": "yi-large-turbo",  "label": "Yi Large Turbo (fast)"},
+        {"id": "yi-medium",       "label": "Yi Medium"},
+    ],
+    # ── Infrastructure providers (self-hosted / cloud deployment) ──────────────
+    "baidu":      [{"id": "ernie-4.0",         "label": "ERNIE 4.0"}],
+    "tencent":    [{"id": "hunyuan-turbo",      "label": "Hunyuan Turbo"}],
+    "bytedance":  [{"id": "doubao-1-5-pro",     "label": "Doubao 1.5 Pro"}],
+    "iflytek":    [{"id": "spark-max",          "label": "Spark Max"}],
+    "replicate":  [{"id": "meta/meta-llama-3-70b-instruct", "label": "Llama 3 70B (Replicate)"}],
+    "azure-openai": [{"id": "gpt-4o",           "label": "GPT-4o (deployment)"}],
+    "aws-bedrock":  [{"id": "anthropic.claude-3-5-sonnet-20241022-v2:0", "label": "Claude 3.5 Sonnet (Bedrock)"}],
+    "vertex-ai":    [{"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash (Vertex)"}],
+    "vllm":         [{"id": "meta-llama/Llama-3.1-8B-Instruct",  "label": "Llama 3.1 8B Instruct"}],
+    "llama-cpp":    [{"id": "qwen2.5-coder-7b-instruct-q4_k_m",  "label": "Qwen 2.5 Coder 7B Q4_K_M"}],
+    "tgi":          [{"id": "meta-llama/Llama-3.1-8B-Instruct",  "label": "Llama 3.1 8B Instruct"}],
 }
 
 

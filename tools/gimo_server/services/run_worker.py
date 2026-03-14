@@ -20,6 +20,7 @@ from typing import Optional
 from ..ops_models import ExecutorReport
 from .ops_service import OpsService
 from .provider_service import ProviderService
+from .notification_service import NotificationService
 from .merge_gate_service import MergeGateService
 from .critic_service import CriticService
 
@@ -111,7 +112,7 @@ class RunWorker:
 
     def _is_still_active(self, run_id: str) -> bool:
         run = OpsService.get_run(run_id)
-        return run is not None and run.status in ("pending", "running")
+        return run is not None and run.status in ("pending", "running", "awaiting_subagents")
 
     @staticmethod
     def _extract_target_path(text: str) -> Optional[str]:
@@ -440,6 +441,37 @@ class RunWorker:
         except Exception as exc:
             OpsService.update_run_status(run_id, "error", msg=f"Provider error: {str(exc)[:200]}")
 
+    async def _handle_child_completion(self, child_run_id: str) -> None:
+        """Called when a child run finishes. Decrements parent counter and wakes if zero."""
+        child_run = OpsService.get_run(child_run_id)
+        if not child_run or not child_run.parent_run_id:
+            return
+
+        parent_run = OpsService.get_run(child_run.parent_run_id)
+        if not parent_run:
+            return
+
+        await NotificationService.publish("child_run_completed", {
+            "parent_run_id": parent_run.id,
+            "child_run_id": child_run_id,
+            "child_status": child_run.status,
+            "critical": True,
+        })
+
+        parent_run.awaiting_count = max(0, parent_run.awaiting_count - 1)
+        OpsService.append_log(
+            parent_run.id, level="INFO",
+            msg=f"Child {child_run_id} completed ({child_run.status}). Remaining: {parent_run.awaiting_count}"
+        )
+
+        if parent_run.awaiting_count == 0:
+            OpsService.update_run_status(parent_run.id, "running", msg="All child runs completed. Resuming.")
+            await NotificationService.publish("all_children_completed", {
+                "parent_run_id": parent_run.id,
+                "critical": True,
+            })
+            self.notify()
+
     async def _execute_run(self, run_id: str) -> None:
         try:
             from .engine_service import EngineService
@@ -452,3 +484,6 @@ class RunWorker:
                 pass
         finally:
             self._running_ids.discard(run_id)
+            run = OpsService.get_run(run_id)
+            if run and run.parent_run_id and run.status in ("done", "error"):
+                await self._handle_child_completion(run_id)

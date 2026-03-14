@@ -13,6 +13,7 @@ OpsRunStatus = Literal[
     "done",
     "error",
     "cancelled",
+    "awaiting_subagents",
     "MERGE_LOCKED",
     "MERGE_CONFLICT",
     "VALIDATION_FAILED_TESTS",
@@ -28,6 +29,13 @@ OpsRunStatus = Literal[
 
 class OpsCreateRunRequest(BaseModel):
     approved_id: str
+
+
+class ChildRunRequest(BaseModel):
+    parent_run_id: str
+    prompt: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+    agent_profile: Optional[str] = None
 
 class OpsTask(BaseModel):
     id: str
@@ -88,6 +96,11 @@ class OpsRun(BaseModel):
     log: List[Dict[str, Any]] = Field(default_factory=list)
     started_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    parent_run_id: Optional[str] = None
+    child_run_ids: List[str] = Field(default_factory=list)
+    awaiting_count: int = 0
+    attempt: int = 1
+    rerun_of: Optional[str] = None
 
 class ExecutorReport(BaseModel):
     run_id: str
@@ -179,3 +192,22 @@ class RunLogEntry(BaseModel):
     ts: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     level: str
     msg: str
+
+
+class StatusResponse(BaseModel):
+    version: str
+    uptime_seconds: float
+
+
+class UiStatusResponse(BaseModel):
+    version: str
+    uptime_seconds: float
+    allowlist_count: int
+    last_audit_line: Optional[str] = None
+    service_status: str
+
+
+class VitaminizeResponse(BaseModel):
+    status: str
+    created_files: List[str] = Field(default_factory=list)
+    active_repo: str

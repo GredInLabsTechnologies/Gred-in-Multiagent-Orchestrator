@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
 
 import pytest
 
@@ -30,6 +31,25 @@ async def test_engine_service_routes_known_compositions() -> None:
 async def test_engine_service_rejects_unknown_composition() -> None:
     with pytest.raises(ValueError, match="Unknown composition"):
         await EngineService.run_composition("not_valid", "test_run", {})
+
+
+@pytest.mark.asyncio
+async def test_execute_run_infers_multi_agent_composition_for_parent_flows() -> None:
+    """execute_run should route wake-on-demand parent flows to multi_agent."""
+    fake_run = SimpleNamespace(id="r_parent", approved_id="a1", child_run_ids=[], awaiting_count=1)
+    fake_approved = SimpleNamespace(draft_id="d1")
+    fake_draft = SimpleNamespace(context={"wake_on_demand": True})
+
+    with patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=fake_run), patch(
+        "tools.gimo_server.services.ops_service.OpsService.get_approved", return_value=fake_approved
+    ), patch("tools.gimo_server.services.ops_service.OpsService.get_draft", return_value=fake_draft), patch(
+        "tools.gimo_server.services.engine_service.EngineService.run_composition",
+        new_callable=AsyncMock,
+    ) as mock_run_composition:
+        mock_run_composition.return_value = []
+        await EngineService.execute_run("r_parent")
+
+    mock_run_composition.assert_awaited_once_with("multi_agent", "r_parent", fake_draft.context)
 
 
 @pytest.mark.asyncio

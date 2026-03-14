@@ -372,4 +372,30 @@ def register_native_tools(mcp: FastMCP):
             return "\\n".join(lines)
         except Exception as e: return str(e)
 
+    @mcp.tool()
+    async def gimo_web_search(query: str, providers: str = "duckduckgo", max_results: int = 10) -> str:
+        """Search the web using GIMO's parallel multi-provider search engine.
+        providers: comma-separated list from: duckduckgo,tavily,jina,brave,exa"""
+        try:
+            from tools.gimo_server.models.web_search import WebSearchQuery
+            from tools.gimo_server.services.web_search_service import WebSearchService
+            provider_list = [p.strip() for p in providers.split(",") if p.strip()]
+            q = WebSearchQuery(query=query, providers=provider_list, max_results=max_results, include_content=True)
+            response = await WebSearchService.search(q)
+            if response.results:
+                from tools.gimo_server.services.web_search_content_extractor import extract_content_for_results
+                response.results = await extract_content_for_results(response.results[:5])
+            lines = [f"Search: {response.query} ({response.fusion_time_ms:.0f}ms, {len(response.providers_used)} providers)"]
+            for r in response.results[:max_results]:
+                lines.append(f"\n--- {r.title} ---\nURL: {r.url}\nScore: {r.relevance_score:.2f} ({r.provider})")
+                if r.content:
+                    lines.append(r.content[:1000])
+                elif r.snippet:
+                    lines.append(r.snippet)
+            if response.providers_failed:
+                lines.append(f"\nFailed: {', '.join(response.providers_failed)}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Search error: {e}"
+
     logger.info("Registered Native Tools")

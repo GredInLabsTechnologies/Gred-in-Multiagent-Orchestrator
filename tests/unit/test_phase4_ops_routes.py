@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from tools.gimo_server.main import app
-from tools.gimo_server.ops_models import OpsApproved, OpsDraft, PolicyDecision
+from tools.gimo_server.ops_models import OpsApproved, OpsDraft, OpsRun, PolicyDecision
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 
@@ -125,5 +125,54 @@ def test_phase4_prompt_mode_requires_intent_class_in_context():
         with TestClient(app) as client:
             res = client.post("/ops/drafts", json=body)
             assert res.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_phase4_create_run_returns_409_when_active_run_exists(monkeypatch):
+    app.dependency_overrides[verify_token] = _override_auth
+
+    from tools.gimo_server.routers.ops import run_router
+
+    monkeypatch.setattr(
+        run_router.OpsService,
+        "create_run",
+        lambda _approved_id: (_ for _ in ()).throw(RuntimeError("RUN_ALREADY_ACTIVE:r_active_1")),
+    )
+
+    try:
+        with TestClient(app) as client:
+            res = client.post("/ops/runs", json={"approved_id": "a_phase4"})
+            assert res.status_code == 409
+            assert res.json()["detail"].startswith("RUN_ALREADY_ACTIVE")
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_phase4_rerun_returns_201_and_links_source(monkeypatch):
+    app.dependency_overrides[verify_token] = _override_auth
+
+    from tools.gimo_server.routers.ops import run_router
+
+    rerun = OpsRun(
+        id="r_new_1",
+        approved_id="a_phase4",
+        status="pending",
+        run_key="r_key_1",
+        rerun_of="r_old_1",
+        attempt=2,
+    )
+
+    monkeypatch.setattr(run_router.OpsService, "rerun", lambda _run_id: rerun)
+    monkeypatch.setattr(run_router.OpsService, "update_run_status", lambda *_a, **_k: rerun)
+
+    try:
+        with TestClient(app) as client:
+            res = client.post("/ops/runs/r_old_1/rerun")
+            assert res.status_code == 201
+            body = res.json()
+            assert body["id"] == "r_new_1"
+            assert body["rerun_of"] == "r_old_1"
+            assert body["attempt"] == 2
     finally:
         app.dependency_overrides.clear()

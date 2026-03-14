@@ -17,6 +17,8 @@ from . import (
     tools_router,
     policy_router,
     dependencies_router,
+    web_search_router,
+    child_run_router,
 )
 
 __all__ = [
@@ -36,4 +38,6 @@ __all__ = [
     "tools_router",
     "policy_router",
     "dependencies_router",
+    "web_search_router",
+    "child_run_router",
 ]

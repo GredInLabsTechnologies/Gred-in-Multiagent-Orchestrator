@@ -148,9 +148,15 @@ All endpoints require `Authorization: Bearer <TOKEN>` unless explicitly public.
 **Runs**
 
 - `POST /ops/runs` (operator+) — create run from `approved_id`
+  - creates a **new run instance** (`run_id`) per attempt
+  - keeps a logical `run_key` for intent correlation (`draft_id + commit_base`)
+  - returns `409 RUN_ALREADY_ACTIVE:*` if an active run exists for the same `run_key`
 - `GET  /ops/runs` (actions+) — list
 - `GET  /ops/runs/{run_id}` (actions+) — read
 - `POST /ops/runs/{run_id}/cancel` (operator+) — cancel (second cancel returns 409)
+- `POST /ops/runs/{run_id}/rerun` (operator+) — create a new run instance from an existing run
+  - links lineage through `rerun_of`
+  - increments `attempt`
 
 **Provider + generation**
 

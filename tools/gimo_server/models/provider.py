@@ -84,3 +84,59 @@ class ProviderConfig(BaseModel):
     worker_provider: Optional[str] = None
     orchestrator_model: Optional[str] = None
     worker_model: Optional[str] = None
+
+
+class ProviderValidateRequest(BaseModel):
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    org: Optional[str] = None
+    account: Optional[str] = None
+
+
+class ProviderValidateResponse(BaseModel):
+    valid: bool
+    health: Literal["ok", "degraded", "down"] = "down"
+    effective_model: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
+    error_actionable: Optional[str] = None
+
+
+class ProviderModelInstallRequest(BaseModel):
+    model_id: str
+
+
+class ProviderModelInstallResponse(BaseModel):
+    status: Literal["queued", "running", "done", "error"]
+    message: str
+    progress: Optional[float] = None
+    job_id: Optional[str] = None
+
+
+class ToolEntry(BaseModel):
+    """Tool registry entry for the allowlist (fail-closed on unknown tools)."""
+    name: str
+    description: str = ""
+    risk: Literal["read", "write", "destructive"] = "read"
+    inputs: Dict[str, Any] = Field(default_factory=dict)
+    outputs: Dict[str, Any] = Field(default_factory=dict)
+    estimated_cost: float = 0.0
+    requires_hitl: bool = True
+    allowed_roles: List[str] = Field(default_factory=lambda: ["admin"])
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    discovered: bool = False
+
+
+CliDependencyStatus = Literal["pending", "running", "done", "error"]
+
+
+class CliDependencyInstallRequest(BaseModel):
+    dependency_id: str
+
+
+class CliDependencyInstallResponse(BaseModel):
+    dependency_id: str
+    job_id: str
+    status: CliDependencyStatus
+    message: str
+    progress: Optional[float] = None
+    logs: List[str] = Field(default_factory=list)

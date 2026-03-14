@@ -3,6 +3,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
+
+class QualityRating(BaseModel):
+    score: int
+    alerts: List[str] = Field(default_factory=list)
+    heuristics: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ProviderBudget(BaseModel):
     provider: str
     max_cost_usd: Optional[float] = None
@@ -87,6 +94,11 @@ class UserEconomyConfig(BaseModel):
         if v < 0:
             raise ValueError("cache_ttl_hours must be >= 0")
         return v
+
+
+class PlanAutonomyUpdateRequest(BaseModel):
+    level: Literal["manual", "advisory", "guided", "autonomous"]
+    node_ids: List[str] = Field(default_factory=list)
 
 class CostEvent(BaseModel):
     id: str

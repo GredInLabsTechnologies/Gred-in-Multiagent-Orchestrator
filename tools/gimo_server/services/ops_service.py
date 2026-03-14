@@ -51,6 +51,7 @@ class OpsService:
     _DRAFT_GLOB = "d_*.json"
     _APPROVED_GLOB = "a_*.json"
     _RUN_LOG_TAIL = 200
+    _ACTIVE_RUN_STATUSES = {"pending", "running", "awaiting_subagents"}
     
     _gics: Optional[GicsService] = None
     _telemetry: Optional[AgentTelemetryService] = None
@@ -296,6 +297,36 @@ class OpsService:
         digest = hashlib.sha256(key.encode("utf-8", errors="ignore")).hexdigest()[:24]
         return f"r_{digest}"
 
+    @classmethod
+    def _new_run_id(cls) -> str:
+        return f"r_{int(time.time() * 1000)}_{os.urandom(3).hex()}"
+
+    @classmethod
+    def _find_latest_approved_for_draft(cls, draft_id: str) -> Optional[OpsApproved]:
+        matches = [item for item in cls.list_approved() if item.draft_id == draft_id]
+        if not matches:
+            return None
+        return max(matches, key=lambda item: item.approved_at)
+
+    @classmethod
+    def _find_runs_by_run_key(cls, run_key: str) -> List[OpsRun]:
+        if not cls.RUNS_DIR.exists():
+            return []
+        out: List[OpsRun] = []
+        for f in cls.RUNS_DIR.glob(cls._RUN_GLOB):
+            try:
+                run = OpsRun.model_validate_json(f.read_text(encoding="utf-8"))
+                run = cls._materialize_run(run)
+                if str(run.run_key or "") == run_key:
+                    out.append(run)
+            except Exception:
+                continue
+        return sorted(out, key=lambda r: r.created_at, reverse=True)
+
+    @classmethod
+    def _is_run_active(cls, run: OpsRun) -> bool:
+        return str(run.status or "") in cls._ACTIVE_RUN_STATUSES
+
     # -----------------
     # Plan
     # -----------------
@@ -467,6 +498,12 @@ class OpsService:
             if draft.status == "rejected":
                 raise ValueError("Cannot approve a rejected draft")
 
+            # Idempotent contract: if already approved, return existing approved record.
+            if draft.status == "approved":
+                existing = cls._find_latest_approved_for_draft(draft.id)
+                if existing:
+                    return existing
+
             approved_id = f"a_{int(time.time() * 1000)}_{os.urandom(3).hex()}"
             approved = OpsApproved(
                 id=approved_id,
@@ -566,11 +603,17 @@ class OpsService:
             repo_context = dict(context.get("repo_context") or {})
             repo_id = str(repo_context.get("repo_id") or repo_context.get("target_branch") or "default")
             commit_base = str(context.get("commit_base") or "HEAD")
-            run_id = cls._deterministic_run_id(approved.draft_id, commit_base)
+            run_key = cls._deterministic_run_id(approved.draft_id, commit_base)
+            run_id = cls._new_run_id()
 
-            existing = cls.get_run(run_id)
-            if existing:
-                return existing
+            runs_for_key = cls._find_runs_by_run_key(run_key)
+            active = next((item for item in runs_for_key if cls._is_run_active(item)), None)
+            if active:
+                raise RuntimeError(f"RUN_ALREADY_ACTIVE:{active.id}")
+
+            attempt = 1
+            if runs_for_key:
+                attempt = max(int(item.attempt or 1) for item in runs_for_key) + 1
 
             run = OpsRun(
                 id=run_id,
@@ -579,12 +622,13 @@ class OpsService:
                 repo_id=repo_id,
                 draft_id=approved.draft_id,
                 commit_base=commit_base,
-                run_key=run_id,
+                run_key=run_key,
                 risk_score=float(context.get("risk_score") or 0.0),
                 policy_decision_id=str(context.get("policy_decision_id") or ""),
                 log=[],
                 started_at=None,
                 created_at=_utcnow(),
+                attempt=attempt,
             )
             entry = cls._append_run_log_entry(run.id, level="INFO", msg="Run created")
             run.log = [entry]
@@ -603,6 +647,17 @@ class OpsService:
             except Exception:
                 pass
             return run
+
+    @classmethod
+    def rerun(cls, run_id: str) -> OpsRun:
+        source = cls.get_run(run_id)
+        if not source:
+            raise ValueError(f"Run {run_id} not found")
+
+        rerun = cls.create_run(source.approved_id)
+        rerun.rerun_of = source.id
+        cls._persist_run(rerun)
+        return rerun
 
     @classmethod
     def append_log(cls, run_id: str, *, level: str, msg: str) -> OpsRun:

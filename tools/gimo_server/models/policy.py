@@ -2,6 +2,15 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
+
+class CircuitBreakerConfigModel(BaseModel):
+    """API-facing model for circuit breaker configuration (mirrors internal CircuitBreakerConfig)."""
+    window: int = 20
+    failure_threshold: int = 5
+    recovery_probes: int = 3
+    cooldown_seconds: int = 300
+
+
 PHASE4_INTENT_CLASSES = {
     "DOC_UPDATE", "TEST_ADD", "SAFE_REFACTOR", "FEATURE_ADD_LOW_RISK",
     "ARCH_CHANGE", "SECURITY_CHANGE", "CORE_RUNTIME_CHANGE",
