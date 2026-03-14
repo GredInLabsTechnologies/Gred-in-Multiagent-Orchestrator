@@ -278,6 +278,7 @@ async def lifespan(app: FastAPI):
 
     run_worker = RunWorker()
     await run_worker.start()
+    app.state.run_worker = run_worker
 
     # Start Hardware Monitor
     from tools.gimo_server.services.hardware_monitor_service import HardwareMonitorService
@@ -309,6 +310,8 @@ async def lifespan(app: FastAPI):
     try:
         tasks = [cleanup_task, threat_cleanup_task, ops_cleanup_task, mcp_sampling_task, integrity_task]
         await _shutdown_services(logger, app, hw_monitor, run_worker, tasks)
+        if hasattr(app.state, "run_worker"):
+            delattr(app.state, "run_worker")
         try:
             from tools.gimo_server.services.authority import ExecutionAuthority
             ExecutionAuthority.reset()

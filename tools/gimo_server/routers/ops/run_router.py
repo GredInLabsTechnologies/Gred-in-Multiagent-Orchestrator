@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional, Annotated
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
@@ -176,6 +177,24 @@ async def create_run(
         raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+    # Deterministic immediate start from any channel (UI/MCP) when run is pending.
+    # We intentionally start merge-gate directly and set status to running to avoid
+    # pending limbo and worker race on the same run.
+    if run.status == "pending":
+        try:
+            run = OpsService.update_run_status(run.id, "running", msg="Execution started via /ops/runs")
+            from tools.gimo_server.services.merge_gate_service import MergeGateService
+            asyncio.create_task(MergeGateService.execute_run(run.id))
+        except Exception:
+            # Fallback to worker wake-up if direct launch fails for any reason.
+            try:
+                worker = getattr(request.app.state, "run_worker", None)
+                if worker is not None:
+                    worker.notify()
+            except Exception:
+                pass
+
     audit_log("OPS", "/ops/runs", run.id, operation="WRITE", actor=_actor_label(auth))
     return run
 

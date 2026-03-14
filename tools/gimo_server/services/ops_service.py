@@ -697,6 +697,86 @@ class OpsService:
             run.log = cls._read_run_logs(run_id, tail=cls._RUN_LOG_TAIL)
             return run
 
+    # -----------------
+    # Merge Locks
+    # -----------------
+
+    @classmethod
+    def recover_stale_lock(cls, repo_id: str) -> None:
+        """Remove a merge lock that is past its TTL."""
+        lock_path = cls._merge_lock_path(repo_id)
+        if not lock_path.exists():
+            return
+        try:
+            data = json.loads(lock_path.read_text(encoding="utf-8"))
+            expires_str = str(data.get("expires_at") or "")
+            if expires_str:
+                expires = datetime.fromisoformat(expires_str)
+                if _utcnow() > expires:
+                    lock_path.unlink(missing_ok=True)
+                    logger.info("Recovered stale merge lock for repo=%s", repo_id)
+        except Exception as exc:
+            logger.warning("recover_stale_lock error for repo=%s: %s", repo_id, exc)
+
+    @classmethod
+    def acquire_merge_lock(cls, repo_id: str, run_id: str, *, ttl_seconds: int = 120) -> Dict[str, Any]:
+        """Acquire a file-based merge lock. Raises RuntimeError if already locked."""
+        lock_path = cls._merge_lock_path(repo_id)
+        expires_at = _utcnow() + timedelta(seconds=ttl_seconds)
+        with cls._lock():
+            if lock_path.exists():
+                try:
+                    data = json.loads(lock_path.read_text(encoding="utf-8"))
+                    expires_str = str(data.get("expires_at") or "")
+                    if expires_str:
+                        expires = datetime.fromisoformat(expires_str)
+                        if _utcnow() <= expires:
+                            raise RuntimeError(
+                                f"Merge lock held by run={data.get('run_id')} until {expires_str}"
+                            )
+                except RuntimeError:
+                    raise
+                except Exception:
+                    pass  # Corrupt lock file — overwrite it
+            lock_id = f"lock_{os.urandom(4).hex()}"
+            payload: Dict[str, Any] = {
+                "lock_id": lock_id,
+                "run_id": run_id,
+                "repo_id": repo_id,
+                "expires_at": expires_at.isoformat(),
+            }
+            lock_path.write_text(_json_dump(payload), encoding="utf-8")
+        return payload
+
+    @classmethod
+    def release_merge_lock(cls, repo_id: str, run_id: str) -> None:
+        """Release the merge lock if it is held by this run."""
+        lock_path = cls._merge_lock_path(repo_id)
+        if not lock_path.exists():
+            return
+        try:
+            with cls._lock():
+                data = json.loads(lock_path.read_text(encoding="utf-8"))
+                if data.get("run_id") == run_id:
+                    lock_path.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.warning("release_merge_lock error for repo=%s: %s", repo_id, exc)
+
+    @classmethod
+    def heartbeat_merge_lock(cls, repo_id: str, run_id: str, *, ttl_seconds: int = 120) -> None:
+        """Extend the TTL of the merge lock held by this run."""
+        lock_path = cls._merge_lock_path(repo_id)
+        if not lock_path.exists():
+            raise RuntimeError(f"No merge lock found for repo={repo_id}")
+        with cls._lock():
+            data = json.loads(lock_path.read_text(encoding="utf-8"))
+            if data.get("run_id") != run_id:
+                raise RuntimeError(
+                    f"Merge lock held by run={data.get('run_id')}, not {run_id}"
+                )
+            data["expires_at"] = (_utcnow() + timedelta(seconds=ttl_seconds)).isoformat()
+            lock_path.write_text(_json_dump(data), encoding="utf-8")
+
     @classmethod
     def cleanup_old_drafts(cls) -> int:
         """Remove rejected/error drafts older than config.draft_cleanup_ttl_days."""
@@ -716,6 +796,33 @@ class OpsService:
             except Exception:
                 continue
         return cleaned
+
+    @classmethod
+    def get_run_preview(
+        cls,
+        run_id: str,
+        *,
+        request_id: str = "",
+        trace_id: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        """Return a lightweight preview payload for a run (used by observability UI)."""
+        run = cls.get_run(run_id)
+        if not run:
+            return None
+        return {
+            "run_id": run.id,
+            "status": run.status,
+            "final_status": run.status,
+            "stage": run.stage,
+            "intent_effective": run.draft_id or "",
+            "repo_id": run.repo_id,
+            "baseline_version": run.commit_base or "",
+            "model_attempted": "",
+            "final_model_used": "",
+            "request_id": request_id,
+            "trace_id": trace_id,
+            "log_tail": cls._read_run_logs(run_id, tail=20),
+        }
 
     @classmethod
     def cleanup_old_runs(cls, *, ttl_seconds: int | None = None) -> int:

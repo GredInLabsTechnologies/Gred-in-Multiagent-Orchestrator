@@ -115,26 +115,51 @@ class RunWorker:
 
     @staticmethod
     def _extract_target_path(text: str) -> Optional[str]:
-        """Extract a full target file path (TARGET_FILE: ...) or a filename."""
+        """Extract a full target file path (TARGET_FILE: ...) or a filename.
+
+        Handles:
+        - Explicit TARGET_FILE directive (highest priority)
+        - Windows absolute paths  (C:/... or C:\\...)
+        - Relative paths with directory components (docs/DISEÑO_CALCULADORA.md)
+        - Unicode filenames (e.g. names with Ñ, accents, etc.)
+        - Quoted or bare filenames as fallback
+        """
         import re
-        # Priority 1: Explicit TARGET_FILE directive with full path
+
+        # Priority 1: Explicit TARGET_FILE directive
         m = re.search(r"TARGET_FILE:\s*(\S+)", text)
         if m:
             return m.group(1).strip()
-        # Priority 2: Full absolute/relative paths
+
+        # Priority 2: Windows absolute path
         m = re.search(r"([A-Za-z]:[/\\][^\s\"']+\.\w{1,5})", text)
         if m:
             return m.group(1).strip()
-        # Priority 3: Simple filenames
-        patterns = [
-            r"['\"]([a-zA-Z0-9_\-]+\.\w{1,5})['\"]",
-            r"(?:file|named?|llamado|archivo)\s+['\"]?([a-zA-Z0-9_\-]+\.\w{1,5})",
-            r"(?:create|crear|write|escribir)\s+['\"]?([a-zA-Z0-9_\-]+\.\w{1,5})",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match.group(1)
+
+        # Priority 3: Relative path with at least one directory component
+        # Matches e.g. "docs/DISEÑO_CALCULADORA.md" or "src/foo/bar.py"
+        # Uses \S to allow Unicode characters in the path.
+        m = re.search(r"(\S+/[^\s\"']+\.\w{1,5})", text)
+        if m:
+            candidate = m.group(1).strip().strip("'\",")
+            if "." in candidate.split("/")[-1]:  # last segment has extension
+                return candidate
+
+        # Priority 4: Quoted filename (with Unicode support via \S)
+        m = re.search(r"['\"]([^\s\"']+\.\w{1,5})['\"]", text)
+        if m:
+            return m.group(1)
+
+        # Priority 5: Bare filename after action keyword (Unicode-aware)
+        m = re.search(
+            r"(?:create|crear|write|escribir|generar|generate|file|archivo|llamado|named?)"
+            r"\s+['\"]?(\S+\.\w{1,5})",
+            text,
+            re.IGNORECASE,
+        )
+        if m:
+            return m.group(1).strip("'\",")
+
         return None
 
     async def _execute_file_task(
@@ -252,7 +277,7 @@ class RunWorker:
             OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Orchestrator role — delegation noted.")
             return
 
-        if any(kw in combined for kw in ["escribir", "write", "crear", "create", "generar", "generate", ".bat", ".txt", ".py", ".sh"]):
+        if any(kw in combined for kw in ["escribir", "write", "crear", "create", "generar", "generate", ".bat", ".txt", ".py", ".sh", ".md", ".yaml", ".json", "docs/", "doc/"]):
             base_path = None
             if agent.get("id"):
                 from .sub_agent_manager import SubAgentManager
@@ -452,6 +477,36 @@ class RunWorker:
                     return
             except Exception:
                 pass
+
+            # For doc/file-creation intents without a structured plan (e.g. drafts
+            # created via /ops/drafts that carry only a prompt), try to extract a
+            # target path directly from the prompt and generate the file via LLM.
+            # This bridges the gap when the user describes a file in plain language.
+            _FILE_INTENTS = {"DOC_UPDATE", "DOC_WRITE", "DOC_CREATE", "DOCUMENTATION",
+                             "DOCS", "FILE_WRITE", "FILE_CREATE"}
+            if intent_effective.upper() in _FILE_INTENTS or not intent_effective:
+                _combined = f"{approved.prompt} {approved.content or ''}"
+                _target = self._extract_target_path(_combined)
+                if _target:
+                    OpsService.append_log(
+                        run_id, level="INFO",
+                        msg=f"Direct file-task: intent={intent_effective} target={_target}",
+                    )
+                    _system_prompt = (
+                        f"TARGET_FILE: {_target}\n\n"
+                        f"Generate the complete content for '{_target}' based on this request:\n"
+                        f"{approved.prompt}"
+                    )
+                    file_ok = await self._execute_file_task(
+                        run_id, "direct_file_task",
+                        approved.prompt[:120], approved.prompt,
+                        _system_prompt, "qwen2.5-coder:3b",
+                        intent_effective=intent_effective,
+                        path_scope=path_scope,
+                    )
+                    if file_ok:
+                        OpsService.update_run_status(run_id, "done", msg="File created via direct file task")
+                        return
 
             await self._handle_legacy_execution(run_id, prompt, intent_effective, path_scope)
         except Exception:

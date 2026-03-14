@@ -95,7 +95,7 @@ async def ops_event_stream(request: Request):
                 # Comprobar si el cliente se desconectó
                 if await request.is_disconnected():
                     break
-                
+
                 # Esperamos mensajes (usamos timeout corto para chequear is_disconnected)
                 try:
                     message = await asyncio.wait_for(queue.get(), timeout=1.0)
@@ -103,9 +103,15 @@ async def ops_event_stream(request: Request):
                 except asyncio.TimeoutError:
                     # Keep-alive opcional, o simplemente pasamos
                     yield ": keep-alive\n\n"
-                    
+
         finally:
             # Limpiamos cuando el stream se cae
             NotificationService.unsubscribe(queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/notifications/stream")
+async def ops_notifications_event_stream(request: Request):
+    """Backward-compatible SSE endpoint alias for legacy UI clients."""
+    return await ops_event_stream(request)
