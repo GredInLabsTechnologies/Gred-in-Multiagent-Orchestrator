@@ -7,7 +7,7 @@ from tools.gimo_server.security.auth import AuthContext
 from .routers.ops import (
     plan_router, run_router, eval_router, trust_router, config_router, observability_router, mastery_router, skills_router, custom_plan_router, conversation_router, hitl_router,
     provider_auth_router, catalog_router, tools_router, policy_router, dependencies_router,
-    web_search_router, child_run_router, capability_router,
+    web_search_router, child_run_router, capability_router, inference_router,
 )
 
 router = APIRouter(prefix="/ops", tags=["ops"])
@@ -32,6 +32,7 @@ router.include_router(hitl_router.router)
 router.include_router(web_search_router.router)
 router.include_router(child_run_router.router)
 router.include_router(capability_router.router)
+router.include_router(inference_router.router)
 
 # Phase 9 — Actions-Safe public contract (strict allowlist)
 _ACTIONS_SAFE_PUBLIC_ENDPOINTS: tuple[tuple[str, str], ...] = (

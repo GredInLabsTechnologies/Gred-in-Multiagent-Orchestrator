@@ -47,6 +47,8 @@ class HardwareSnapshot:
     npu_tops: float = 0.0
     unified_memory: bool = False       # True for APU/SoC with high-bandwidth unified memory
     cpu_inference_capable: bool = False  # True if RAM+CPU can handle CPU-offload inference
+    # GIE deep device capabilities (populated lazily by DeviceDetector)
+    devices: list = field(default_factory=list)  # list[DeviceCapability]
 
     def to_dict(self) -> dict:
         return asdict(self)

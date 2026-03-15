@@ -89,6 +89,12 @@ class Settings:
     integrity_public_key_pem: str
     runtime_guard_enabled: bool
     runtime_guard_block_debugger: bool
+    # GIMO Inference Engine (GIE) settings
+    gimo_inference_enabled: bool
+    gimo_model_cache_dir: Path
+    gimo_model_cache_max_gb: float
+    gimo_npu_enabled: bool
+    gimo_max_oversized_ratio: float
 
 
 def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_TOKEN") -> str:
@@ -254,6 +260,15 @@ def _build_settings() -> Settings:
         in ("true", "1", "yes"),
         runtime_guard_block_debugger=os.environ.get("ORCH_BLOCK_DEBUGGER", "false").lower()
         in ("true", "1", "yes"),
+        gimo_inference_enabled=os.environ.get("GIMO_INFERENCE_ENABLED", "true").lower()
+        in ("true", "1", "yes"),
+        gimo_model_cache_dir=Path(
+            os.environ.get("GIMO_MODEL_CACHE_DIR", str(Path.home() / ".gimo" / "models"))
+        ),
+        gimo_model_cache_max_gb=float(os.environ.get("GIMO_MODEL_CACHE_MAX_GB", "50.0")),
+        gimo_npu_enabled=os.environ.get("GIMO_NPU_ENABLED", "true").lower()
+        in ("true", "1", "yes"),
+        gimo_max_oversized_ratio=float(os.environ.get("GIMO_MAX_OVERSIZED_RATIO", "3.0")),
     )
 
 
@@ -324,3 +339,8 @@ DEBUG = _SETTINGS.debug
 LOG_LEVEL = _SETTINGS.log_level
 GIMO_WEB_URL = _SETTINGS.gimo_web_url
 GIMO_INTERNAL_KEY = _SETTINGS.gimo_internal_key
+GIMO_INFERENCE_ENABLED = _SETTINGS.gimo_inference_enabled
+GIMO_MODEL_CACHE_DIR = _SETTINGS.gimo_model_cache_dir
+GIMO_MODEL_CACHE_MAX_GB = _SETTINGS.gimo_model_cache_max_gb
+GIMO_NPU_ENABLED = _SETTINGS.gimo_npu_enabled
+GIMO_MAX_OVERSIZED_RATIO = _SETTINGS.gimo_max_oversized_ratio

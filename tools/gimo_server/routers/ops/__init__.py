@@ -20,6 +20,7 @@ from . import (
     web_search_router,
     child_run_router,
     capability_router,
+    inference_router,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "web_search_router",
     "child_run_router",
     "capability_router",
+    "inference_router",
 ]
