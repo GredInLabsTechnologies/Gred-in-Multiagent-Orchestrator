@@ -32,7 +32,11 @@ class ResourceGovernor:
         "ram_max": 90.0,
         "vram_free_min_gb": 1.0,
         "gpu_temp_max": 85,
+        # NPU-specific gates (GIE): NPU pipeline is sequential → 1 concurrent slot
+        "npu_queue_max": 1,
     }
+    # Track NPU concurrent usage (shared state — module-level for simplicity).
+    _npu_active: int = 0
 
     def __init__(self, hw_monitor: "HardwareMonitorService") -> None:
         self._hw = hw_monitor
@@ -67,6 +71,31 @@ class ResourceGovernor:
                 return AdmissionDecision.DEFER
 
         return AdmissionDecision.ALLOW
+
+    def evaluate_npu(self) -> AdmissionDecision:
+        """Gate specifically for NPU inference requests.
+
+        NPU pipelines are sequential; reject if one is already running.
+        """
+        if ResourceGovernor._npu_active >= self._thresholds["npu_queue_max"]:
+            logger.info(
+                "NPU busy (%d active) — deferring NPU inference request",
+                ResourceGovernor._npu_active,
+            )
+            return AdmissionDecision.DEFER
+        return AdmissionDecision.ALLOW
+
+    def acquire_npu(self) -> bool:
+        """Reserve a NPU slot.  Returns False if NPU is busy."""
+        if ResourceGovernor._npu_active >= self._thresholds["npu_queue_max"]:
+            return False
+        ResourceGovernor._npu_active += 1
+        return True
+
+    def release_npu(self) -> None:
+        """Release the NPU slot after inference completes."""
+        if ResourceGovernor._npu_active > 0:
+            ResourceGovernor._npu_active -= 1
 
     def should_defer(self, weight: TaskWeight = TaskWeight.MEDIUM) -> bool:
         return self.evaluate(weight) != AdmissionDecision.ALLOW
