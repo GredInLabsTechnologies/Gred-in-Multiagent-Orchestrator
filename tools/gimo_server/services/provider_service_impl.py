@@ -561,7 +561,8 @@ class ProviderService:
         if not cfg:
             raise ValueError("Provider config missing")
             
-        economy = OpsService.get_config().economy
+        from ..models.economy import UserEconomyConfig
+        economy = OpsService.get_config().economy or UserEconomyConfig()
         task_type = context.get("task_type", "default")
         
         effective_provider, requested_model = cls._resolve_effective_provider_and_model(cfg, context, task_type)

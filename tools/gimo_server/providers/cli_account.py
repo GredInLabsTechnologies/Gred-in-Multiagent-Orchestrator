@@ -23,8 +23,10 @@ async def _create_process(cmd: List[str], **kwargs) -> asyncio.subprocess.Proces
 def _parse_codex_jsonl(raw: str) -> str:
     """Extract assistant message content from Codex JSONL (--json) output.
 
-    Each line is a JSON object. We look for message events with role=assistant
-    and concatenate their text content.
+    Handles both the legacy format and the current Codex CLI event format:
+    - {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
+    - {"type":"message","role":"assistant","content":[{"type":"output_text","text":"..."}]}
+    - {"type":"output_text","text":"..."}
     """
     parts: list[str] = []
     for line in raw.splitlines():
@@ -35,16 +37,29 @@ def _parse_codex_jsonl(raw: str) -> str:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
-        # Codex JSONL emits various event types. Extract text from message events.
-        if isinstance(event, dict):
-            # Format: {"type": "message", "role": "assistant", "content": [{"type":"output_text","text":"..."}]}
-            if event.get("role") == "assistant":
-                for part in event.get("content", []):
-                    if isinstance(part, dict) and part.get("type") == "output_text":
-                        parts.append(part.get("text", ""))
-            # Also handle direct text events
-            elif event.get("type") == "output_text":
-                parts.append(event.get("text", ""))
+        if not isinstance(event, dict):
+            continue
+
+        # Current Codex CLI format: item.completed with agent_message
+        if event.get("type") in ("item.completed", "item.started"):
+            item = event.get("item") or {}
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                text = item.get("text", "")
+                if text:
+                    parts.append(text)
+            continue
+
+        # Legacy format: {"role":"assistant","content":[{"type":"output_text","text":"..."}]}
+        if event.get("role") == "assistant":
+            for part in event.get("content", []):
+                if isinstance(part, dict) and part.get("type") == "output_text":
+                    parts.append(part.get("text", ""))
+            continue
+
+        # Direct text event
+        if event.get("type") == "output_text":
+            parts.append(event.get("text", ""))
+
     return "\n".join(parts).strip() if parts else raw
 
 
@@ -92,8 +107,9 @@ class CliAccountAdapter(ProviderAdapter):
         logger.info("[cli-account] running: %s", " ".join(cmd))
 
         if sys.platform == "win32":
+            import subprocess as _subprocess
             proc = await asyncio.create_subprocess_shell(
-                " ".join(cmd), stdout=PIPE, stderr=PIPE, env=env
+                _subprocess.list2cmdline(cmd), stdout=PIPE, stderr=PIPE, env=env
             )
         else:
             proc = await asyncio.create_subprocess_exec(

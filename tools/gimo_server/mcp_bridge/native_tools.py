@@ -172,9 +172,10 @@ def register_native_tools(mcp: FastMCP):
         from tools.gimo_server.mcp_bridge import server
         
         steps = []
-        if server._active_run_worker is not None:
+        current_worker = getattr(server, "_active_run_worker", None)
+        if current_worker is not None:
             try:
-                await server._active_run_worker.stop()
+                await current_worker.stop()
                 steps.append("✅ Old RunWorker stopped")
             except Exception as e:
                 steps.append(f"⚠ Could not stop old worker cleanly: {e}")

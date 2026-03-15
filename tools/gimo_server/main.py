@@ -85,7 +85,7 @@ async def _ops_runs_cleanup_loop():
             logger.warning("OPS run cleanup loop error: %s", exc)
 
 async def _notify_sessions_for_run(run, sessions, logger, ops_service):
-    ops_service.update_run_status(run.id, "notifying_handover")
+    ops_service.append_log(run.id, level="INFO", msg="MCP handover notification sent")
     for session in sessions:
         try:
             msg = f"⚠ GIMO Orchestrator requires Intervention for Run {run.id}.\nObjective: {run.objective}\nPlease use gimo_resolve_handover to resolve this."
@@ -96,7 +96,7 @@ async def _notify_sessions_for_run(run, sessions, logger, ops_service):
             logger.info(f"Pushed Handover Sampling request for {run.id} to client via MCP")
         except Exception as e:
             logger.error(f"Failed to push Sampling to MCP client: {e}")
-            ops_service.update_run_status(run.id, "blocked_handover")
+            ops_service.append_log(run.id, level="WARN", msg="MCP handover blocked: no session available")
 
 async def _mcp_sampling_loop():
     """
@@ -268,6 +268,19 @@ async def lifespan(app: FastAPI):
         await SubAgentManager.startup_reconcile()
     except Exception as exc:
         logger.warning("SubAgent startup reconcile warning: %s", exc)
+    try:
+        merge_wt_dir = settings.ops_data_dir / "worktrees"
+        if merge_wt_dir.exists():
+            import shutil
+            from tools.gimo_server.services.ops_service import OpsService as _OpsServiceWt
+            active_run_ids = {r.id for r in _OpsServiceWt.list_runs()
+                              if r.status not in _OpsServiceWt._TERMINAL_RUN_STATUSES}
+            for wt in merge_wt_dir.iterdir():
+                if wt.is_dir() and wt.name not in active_run_ids:
+                    shutil.rmtree(wt, ignore_errors=True)
+                    logger.info("Cleaned orphan merge worktree: %s", wt.name)
+    except Exception as exc:
+        logger.warning("Merge worktree reconcile warning: %s", exc)
     try:
         LogRotationService.run_rotation()
     except Exception as exc:

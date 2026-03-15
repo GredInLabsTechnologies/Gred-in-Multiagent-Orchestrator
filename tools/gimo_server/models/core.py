@@ -3,9 +3,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional, TYPE_CHECKING
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
+# Runtime imports needed by Pydantic model fields (must not be TYPE_CHECKING-only)
+from .agent import AgentProfile
+from .economy import UserEconomyConfig
+
 if TYPE_CHECKING:
-    from .agent import AgentProfile
-    from .economy import UserEconomyConfig
+    pass
 
 OpsRunStatus = Literal[
     "pending",

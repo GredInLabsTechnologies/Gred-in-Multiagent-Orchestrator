@@ -21,6 +21,7 @@ class EngineService:
         "file_task": [
             "tools.gimo_server.engine.stages.policy_gate:PolicyGate",
             "tools.gimo_server.engine.stages.risk_gate:RiskGate",
+            "tools.gimo_server.engine.stages.llm_execute:LlmExecute",
             "tools.gimo_server.engine.stages.file_write:FileWrite",
         ],
         "legacy_run": [
@@ -87,6 +88,10 @@ class EngineService:
         draft = OpsService.get_draft(approved.draft_id) if approved else None
         context = dict((draft.context if draft else {}) or {})
 
+        # Inject draft prompt into context so LLM stages have access to it
+        if draft and getattr(draft, "prompt", None) and "prompt" not in context:
+            context["prompt"] = draft.prompt
+
         # Infer composition if not provided
         if not composition:
             if context.get("custom_plan_id"):
@@ -109,5 +114,36 @@ class EngineService:
             else:
                 composition = "legacy_run"
 
+        # For file_task, override prompt to ask for raw file content only
+        if composition == "file_task" and context.get("prompt"):
+            target = context.get("target_path") or context.get("target_file", "file.md")
+            import os as _os
+            filename = _os.path.basename(str(target))
+            context["prompt"] = (
+                f"Generate ONLY the raw file content for '{filename}'. "
+                f"Do not include any explanation, preamble, or markdown code fences — "
+                f"output exactly what should be written to the file.\n\n"
+                f"Task: {context['prompt']}"
+            )
+
         # Start pipeline
-        return await cls.run_composition(composition, run_id, context)
+        try:
+            results = await cls.run_composition(composition, run_id, context)
+        except Exception as exc:
+            OpsService.update_run_status(run_id, "error", msg=f"Pipeline error: {str(exc)[:200]}")
+            raise
+
+        # Update run status based on pipeline outcome
+        final_status = "done"
+        final_msg = "Pipeline completed successfully"
+        for stage_output in results:
+            if stage_output.status == "fail":
+                final_status = "error"
+                final_msg = stage_output.artifacts.get("error", "Stage failed")
+                break
+            if stage_output.status == "halt":
+                # Already halted (e.g. HUMAN_APPROVAL_REQUIRED) — leave status as-is
+                return results
+
+        OpsService.update_run_status(run_id, final_status, msg=final_msg)
+        return results

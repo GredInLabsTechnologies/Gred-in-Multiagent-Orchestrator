@@ -29,6 +29,23 @@ logger = logging.getLogger("orchestrator.run_worker")
 # How often to poll for pending runs (seconds).
 POLL_INTERVAL = 5
 
+
+def _task_weight_for_run(run) -> "TaskWeight":
+    """Infer ResourceGovernor TaskWeight from the run's approved/draft context."""
+    from .resource_governor import TaskWeight
+    try:
+        approved = OpsService.get_approved(run.approved_id) if getattr(run, "approved_id", None) else None
+        draft = OpsService.get_draft(approved.draft_id) if approved and getattr(approved, "draft_id", None) else None
+        ctx = dict((draft.context if draft and draft.context else {}) or {})
+        intent = str(ctx.get("intent_effective") or "").upper()
+        if intent in {"MERGE_REQUEST", "CORE_RUNTIME_CHANGE", "SECURITY_CHANGE"}:
+            return TaskWeight.HEAVY
+        if ctx.get("target_path") or ctx.get("target_file"):
+            return TaskWeight.LIGHT
+    except Exception:
+        pass
+    return TaskWeight.MEDIUM
+
 # Default per-run timeout if nothing else configured.
 DEFAULT_RUN_TIMEOUT = 300  # 5 min
 
@@ -97,7 +114,9 @@ class RunWorker:
             from .authority import ExecutionAuthority
             authority = ExecutionAuthority.get()
             from .resource_governor import AdmissionDecision, TaskWeight
-            decision = authority.resource_governor.evaluate(TaskWeight.MEDIUM)
+            pending_preview = OpsService.list_pending_runs()
+            weight = _task_weight_for_run(pending_preview[0]) if pending_preview else TaskWeight.MEDIUM
+            decision = authority.resource_governor.evaluate(weight)
             if decision != AdmissionDecision.ALLOW:
                 logger.info("ResourceGovernor deferred runs (decision=%s)", decision.value)
                 return
@@ -447,27 +466,30 @@ class RunWorker:
         if not child_run or not child_run.parent_run_id:
             return
 
-        parent_run = OpsService.get_run(child_run.parent_run_id)
-        if not parent_run:
-            return
-
+        # Publish event before acquiring lock
         await NotificationService.publish("child_run_completed", {
-            "parent_run_id": parent_run.id,
+            "parent_run_id": child_run.parent_run_id,
             "child_run_id": child_run_id,
             "child_status": child_run.status,
             "critical": True,
         })
 
-        parent_run.awaiting_count = max(0, parent_run.awaiting_count - 1)
-        OpsService.append_log(
-            parent_run.id, level="INFO",
-            msg=f"Child {child_run_id} completed ({child_run.status}). Remaining: {parent_run.awaiting_count}"
-        )
+        # Reload from disk, decrement, and persist under lock to avoid lost-update
+        with OpsService._lock():
+            fresh = OpsService._load_run_metadata(child_run.parent_run_id)
+            if not fresh:
+                return
+            fresh.awaiting_count = max(0, fresh.awaiting_count - 1)
+            OpsService._persist_run(fresh)
+            remaining = fresh.awaiting_count
 
-        if parent_run.awaiting_count == 0:
-            OpsService.update_run_status(parent_run.id, "running", msg="All child runs completed. Resuming.")
+        OpsService.append_log(fresh.id, level="INFO",
+            msg=f"Child {child_run_id} completed ({child_run.status}). Remaining: {remaining}")
+
+        if remaining == 0:
+            OpsService.update_run_status(fresh.id, "running", msg="All child runs completed. Resuming.")
             await NotificationService.publish("all_children_completed", {
-                "parent_run_id": parent_run.id,
+                "parent_run_id": fresh.id,
                 "critical": True,
             })
             self.notify()

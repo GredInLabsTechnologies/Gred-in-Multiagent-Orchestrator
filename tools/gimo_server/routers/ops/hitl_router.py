@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.hitl_gate_service import HitlGateService
+from .common import _require_role
 
 logger = logging.getLogger("orchestrator.routers.hitl")
 
@@ -51,6 +52,7 @@ async def approve_action_draft(
     auth: Annotated[AuthContext, Depends(verify_token)],
     body: Optional[ReasonBody] = None,
 ):
+    _require_role(auth, "operator")
     try:
         draft = await HitlGateService.approve(
             draft_id, reason=body.reason if body else None,
@@ -80,6 +82,7 @@ async def batch_approve(
     body: BatchApproveRequest,
     auth: Annotated[AuthContext, Depends(verify_token)],
 ):
+    _require_role(auth, "operator")
     results = []
     for did in body.draft_ids:
         try:

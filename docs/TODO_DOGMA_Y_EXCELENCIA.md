@@ -1,5 +1,24 @@
 # Plan de Implementación: Dogma del Agente y Ejecución de Excelencia
 
+---
+
+## ⚠️ Inconsistencias Conocidas — Backlog Técnico
+
+### [TRACK-001] Model metadata inconsistente para providers en modo `account`
+
+**Problema:** El campo `model` en la config de GIMO para providers en modo `account` (e.g. `codex-account`) refleja el valor configurado en sesiones anteriores (`o4-mini`), pero el modelo real que ejecuta el CLI es el que tiene configurado el propio CLI (GPT-5 según `codex exec`). Además, `effective_state.effective_model` muestra `claude-opus-4-5` y `warnings` dice "Validated via local claude CLI session" — ambos incorrectos para el provider activo `codex-account`.
+
+**Impacto:** Falta de trazabilidad — los logs y auditorías muestran `o4-mini` como modelo cuando en realidad se usa GPT-5. Viola el principio de tener registro de qué modelo hizo qué.
+
+**Fix propuesto:**
+- Al cambiar el provider activo vía `PUT /ops/provider`, revalidar y actualizar `effective_state` con el CLI activo.
+- Para providers en `account` mode, añadir un campo `cli_reported_model` que se resuelva ejecutando `codex --version` o el equivalente del CLI activo.
+- Asegurar que los logs de runs incluyan el modelo real obtenido del CLI response (ya existe `model` en la respuesta del `CliAccountAdapter`).
+
+**Archivos afectados:** `provider_service_impl.py`, `cli_account.py`, `provider_service_adapter_registry.py`
+
+---
+
 Este documento detalla la hoja de ruta arquitectónica para integrar el **Dogma del Agente** (Regla de Oro #0) y el mandato de **Evaluación de Excelencia** dentro del núcleo del orquestador (GIMO).
 
 ## 🟢 FASE 1: Seguridad y Aprobación (Human-in-the-loop)
