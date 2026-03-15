@@ -47,7 +47,7 @@ class OpsService:
     CONFIG_FILE = OPS_DIR / "config.json"
     LOCK_FILE = OPS_DIR / ".ops.lock"
 
-    _RUN_GLOB = "r_*.json"
+    _RUN_GLOB = "*.json"  # matches both r_* and legacy run_* ids
     _DRAFT_GLOB = "d_*.json"
     _APPROVED_GLOB = "a_*.json"
     _RUN_LOG_TAIL = 200
@@ -58,19 +58,24 @@ class OpsService:
         # NOTE: keep compatibility with legacy worker paths that may finalize directly from
         # pending when execution starts and completes (or fails) in a single service hop.
         "pending": {
-            "running", "cancelled", "error", "awaiting_subagents", "MERGE_LOCKED",
-            "MERGE_CONFLICT", "VALIDATION_FAILED_TESTS", "VALIDATION_FAILED_LINT",
-            "RISK_SCORE_TOO_HIGH", "BASELINE_TAMPER_DETECTED", "PIPELINE_TIMEOUT",
-            "WORKTREE_CORRUPTED", "ROLLBACK_EXECUTED", "WORKER_CRASHED_RECOVERABLE",
-            "HUMAN_APPROVAL_REQUIRED", "done"
+            "running", "cancelled", "error", "awaiting_subagents", "awaiting_review",
+            "MERGE_LOCKED", "MERGE_CONFLICT", "VALIDATION_FAILED_TESTS",
+            "VALIDATION_FAILED_LINT", "RISK_SCORE_TOO_HIGH", "BASELINE_TAMPER_DETECTED",
+            "PIPELINE_TIMEOUT", "WORKTREE_CORRUPTED", "ROLLBACK_EXECUTED",
+            "WORKER_CRASHED_RECOVERABLE", "HUMAN_APPROVAL_REQUIRED", "done"
         },
         "running": {
-            "done", "error", "cancelled", "awaiting_subagents", "MERGE_LOCKED", 
-            "MERGE_CONFLICT", "VALIDATION_FAILED_TESTS", "VALIDATION_FAILED_LINT",
-            "RISK_SCORE_TOO_HIGH", "BASELINE_TAMPER_DETECTED", "PIPELINE_TIMEOUT",
-            "WORKTREE_CORRUPTED", "ROLLBACK_EXECUTED", "WORKER_CRASHED_RECOVERABLE",
-            "HUMAN_APPROVAL_REQUIRED"
+            "done", "error", "cancelled", "awaiting_subagents", "awaiting_review",
+            "MERGE_LOCKED", "MERGE_CONFLICT", "VALIDATION_FAILED_TESTS",
+            "VALIDATION_FAILED_LINT", "RISK_SCORE_TOO_HIGH", "BASELINE_TAMPER_DETECTED",
+            "PIPELINE_TIMEOUT", "WORKTREE_CORRUPTED", "ROLLBACK_EXECUTED",
+            "WORKER_CRASHED_RECOVERABLE", "HUMAN_APPROVAL_REQUIRED"
         },
+        # awaiting_review: ReviewGate is waiting for orchestrator GO/NO-GO.
+        # GO  → running (pipeline continues to done)
+        # NO-GO → pending (re-queue with feedback for retry)
+        # timeout/error → error
+        "awaiting_review": {"running", "pending", "error", "cancelled"},
         "awaiting_subagents": {"running", "error", "cancelled"},
         "MERGE_LOCKED": {"running", "error", "cancelled", "MERGE_CONFLICT"},
         "MERGE_CONFLICT": {"pending", "error", "cancelled"},
@@ -733,8 +738,12 @@ class OpsService:
             if not run:
                 raise ValueError(f"Run {run_id} not found")
 
-            # FSM Guard
-            current_status = str(run.status or "pending")
+            # FSM Guard — materialize events to get the ACTUAL current state.
+            # The base JSON may still show the initial status because non-terminal
+            # transitions are stored as events and only compacted after ≥50 events.
+            # Reading only the base metadata would give stale status for the guard.
+            run_materialized = cls._materialize_run(cls._load_run_metadata(run_id))
+            current_status = str(run_materialized.status or "pending")
             if current_status == status:
                 return run  # Idempotent
 

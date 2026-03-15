@@ -1,0 +1,49 @@
+{
+  "prompt": "Genera el codigo fuente completo de una calculadora web en React+TypeScript.",
+  "context": {
+    "intent_class": "DOC_UPDATE",
+    "wake_on_demand": true,
+    "child_tasks": [
+      {
+        "id": "engine_dev",
+        "prompt": "Escribe el motor de calculo puro para una calculadora web en TypeScript. Empieza tu respuesta con TARGET_FILE: C:/Users/shilo/Documents/GitHub/CALCULADORA PRUEBA/src/calculator/engine.ts en la primera linea, luego el codigo TypeScript completo sin ningun otro texto.\n\nEl archivo debe exportar: Operator, EngineMode, CalcState, CalcAction, EngineResult, createInitialState(), reduce(state, action), evaluateBinary(left, op, right), evaluateUnary(op, value). Maneja errores DIVIDE_BY_ZERO, NEGATIVE_SQRT. NO usar eval().",
+        "context": {
+          "intent_class": "DOC_UPDATE",
+          "role": "engine_developer",
+          "task_type": "code_implementation"
+        },
+        "depends_on": []
+      },
+      {
+        "id": "ui_dev",
+        "prompt": "Escribe el componente React Calculator.tsx para una calculadora web. Empieza tu respuesta con TARGET_FILE: C:/Users/shilo/Documents/GitHub/CALCULADORA PRUEBA/src/components/Calculator.tsx en la primera linea, luego el codigo completo sin ningun otro texto.\n\nImporta: React, useReducer, styles desde './Calculator.module.css', { createInitialState, reduce, CalcAction } desde '../calculator/engine'. Grid de botones estandar (4 columnas). Exporta default.",
+        "context": {
+          "intent_class": "DOC_UPDATE",
+          "role": "ui_developer",
+          "task_type": "code_implementation"
+        },
+        "depends_on": ["engine_dev"]
+      },
+      {
+        "id": "test_writer",
+        "prompt": "Escribe tests con Vitest para el motor de calculo engine.ts. Empieza tu respuesta con TARGET_FILE: C:/Users/shilo/Documents/GitHub/CALCULADORA PRUEBA/src/calculator/engine.test.ts en la primera linea, luego el codigo completo sin ningun otro texto.\n\nImporta { describe, it, expect } from 'vitest' y { createInitialState, reduce } from './engine'. Cubre: operaciones basicas, division por cero, encadenamiento, decimales, clear, backspace, memoria.",
+        "context": {
+          "intent_class": "DOC_UPDATE",
+          "role": "test_writer",
+          "task_type": "code_implementation"
+        },
+        "depends_on": ["engine_dev"]
+      },
+      {
+        "id": "style_dev",
+        "prompt": "Escribe el CSS Module para la calculadora. Empieza tu respuesta con TARGET_FILE: C:/Users/shilo/Documents/GitHub/CALCULADORA PRUEBA/src/components/Calculator.module.css en la primera linea, luego el CSS completo sin ningun otro texto.\n\nClases requeridas: .calculator (320px, fondo oscuro #1c1c1e, border-radius 20px), .display, .expression, .value (48px monospace), .keypad (grid 4 col), .btn (68x68px circular), .btn-digit (#333), .btn-operator (#f09a0a), .btn-utility (#a5a5a5), .btn-equals (#f09a0a), .btn-zero (ancho doble). Incluye hover y active.",
+        "context": {
+          "intent_class": "DOC_UPDATE",
+          "role": "style_developer",
+          "task_type": "code_implementation"
+        },
+        "depends_on": ["ui_dev"]
+      }
+    ]
+  }
+}

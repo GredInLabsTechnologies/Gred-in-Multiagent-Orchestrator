@@ -45,9 +45,18 @@ class EngineService:
         "multi_agent": [
             "tools.gimo_server.engine.stages.policy_gate:PolicyGate",
             "tools.gimo_server.engine.stages.risk_gate:RiskGate",
-            "tools.gimo_server.engine.stages.plan_stage:PlanStage",
-            "tools.gimo_server.engine.stages.llm_execute:LlmExecute",
+            "tools.gimo_server.engine.stages.spawn_agents:SpawnAgentsStage",
             "tools.gimo_server.engine.stages.subagent_gate:SubagentGate",
+        ],
+        # Child agent task: ACE self-assesses, then execute + review
+        "agent_task": [
+            "tools.gimo_server.engine.stages.policy_gate:PolicyGate",
+            "tools.gimo_server.engine.stages.risk_gate:RiskGate",
+            "tools.gimo_server.engine.stages.cognitive_assessment:CognitiveAssessmentStage",
+            "tools.gimo_server.engine.stages.llm_execute:LlmExecute",
+            "tools.gimo_server.engine.stages.subdivide_router:SubdivideRouter",
+            "tools.gimo_server.engine.stages.file_write:FileWrite",
+            "tools.gimo_server.engine.stages.review_gate:ReviewGate",
         ],
     }
 
@@ -84,6 +93,16 @@ class EngineService:
         if not run:
             return []
 
+        # Ensure the run is in 'running' state before executing.
+        # When the worker picks up a 'pending' run directly (e.g. child runs
+        # or re-queued runs from SubdivideRouter), the HTTP router has NOT
+        # set the status yet — so we do it here to satisfy ChildRunService's
+        # spawnable-state check and to have accurate status tracking.
+        if run.status == "pending":
+            OpsService.update_run_status(
+                run_id, "running", msg="Execution started via RunWorker"
+            )
+
         approved = OpsService.get_approved(run.approved_id)
         draft = OpsService.get_draft(approved.draft_id) if approved else None
         context = dict((draft.context if draft else {}) or {})
@@ -91,6 +110,23 @@ class EngineService:
         # Inject draft prompt into context so LLM stages have access to it
         if draft and getattr(draft, "prompt", None) and "prompt" not in context:
             context["prompt"] = draft.prompt
+
+        # Child-specific context overrides parent draft context (Gap 3)
+        if getattr(run, "child_context", None):
+            context.update(run.child_context)
+        if getattr(run, "child_prompt", None):
+            context["prompt"] = run.child_prompt
+
+        # For child runs, strip parent-orchestration keys inherited from the
+        # draft context.  A child should never see wake_on_demand or the
+        # parent's child_tasks list — only its OWN child_context determines
+        # whether it spawns further sub-agents (fractal).
+        if getattr(run, "parent_run_id", None):
+            own_child_tasks = (run.child_context or {}).get("child_tasks")
+            context.pop("wake_on_demand", None)
+            context.pop("multi_agent", None)
+            if not own_child_tasks:
+                context.pop("child_tasks", None)
 
         # Infer composition if not provided
         if not composition:
@@ -105,6 +141,13 @@ class EngineService:
             ):
                 # Explicit parent/child orchestration mode for wake-on-demand flows.
                 composition = "multi_agent"
+            elif getattr(run, "parent_run_id", None):
+                if context.get("child_tasks"):
+                    # Fractal: this child decided to decompose further into sub-agents
+                    composition = "multi_agent"
+                else:
+                    # Standard child: execute task + request orchestrator review
+                    composition = "agent_task"
             elif context.get("structured"):
                 composition = "structured_plan"
             elif context.get("intent_effective") in {"MERGE_REQUEST", "CORE_RUNTIME_CHANGE", "SECURITY_CHANGE"}:

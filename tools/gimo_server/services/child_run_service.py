@@ -26,7 +26,19 @@ class ChildRunService:
         if parent.status not in ("running", "awaiting_subagents"):
             raise ValueError(f"Parent run {parent_run_id} not in spawnable state: {parent.status}")
 
-        child_id = f"run_{uuid.uuid4().hex[:12]}"
+        child_id = f"r_{uuid.uuid4().hex[:12]}"
+        child_ctx = dict(context or {})
+        # Inherit or resolve model tier for the child
+        child_tier = child_ctx.get("model_tier") or parent.model_tier
+        if child_tier is None:
+            try:
+                from .model_inventory_service import ModelInventoryService
+                model_id = child_ctx.get("model") or ""
+                entry = ModelInventoryService.find_model(model_id) if model_id else None
+                child_tier = entry.quality_tier if entry else None
+            except Exception:
+                child_tier = None
+
         child = OpsRun(
             id=child_id,
             approved_id=parent.approved_id,
@@ -34,6 +46,10 @@ class ChildRunService:
             parent_run_id=parent_run_id,
             repo_id=parent.repo_id,
             draft_id=parent.draft_id,
+            child_prompt=prompt,
+            child_context=child_ctx,
+            spawn_depth=parent.spawn_depth + 1,
+            model_tier=child_tier,
         )
 
         # OpsService is file-backed — use its internal persistence API under the file lock

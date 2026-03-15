@@ -131,7 +131,7 @@ class RunWorker:
 
     def _is_still_active(self, run_id: str) -> bool:
         run = OpsService.get_run(run_id)
-        return run is not None and run.status in ("pending", "running", "awaiting_subagents")
+        return run is not None and run.status in ("pending", "running", "awaiting_subagents", "awaiting_review")
 
     @staticmethod
     def _extract_target_path(text: str) -> Optional[str]:
@@ -466,6 +466,24 @@ class RunWorker:
         if not child_run or not child_run.parent_run_id:
             return
 
+        # Record outcome in CapabilityProfile (ACE learning loop)
+        try:
+            from .capability_profile_service import CapabilityProfileService
+            child_ctx = child_run.child_context or {}
+            task_type = child_ctx.get("role") or child_ctx.get("task_type") or "general"
+            model_id = child_ctx.get("model") or ""
+            provider_type = child_ctx.get("provider_type") or "unknown"
+            if model_id:
+                CapabilityProfileService.record_task_outcome(
+                    provider_type=provider_type,
+                    model_id=model_id,
+                    task_type=task_type,
+                    success=(child_run.status == "done"),
+                    failure_reason="" if child_run.status == "done" else f"Run ended with status: {child_run.status}",
+                )
+        except Exception:
+            pass  # Non-critical: don't block completion flow
+
         # Publish event before acquiring lock
         await NotificationService.publish("child_run_completed", {
             "parent_run_id": child_run.parent_run_id,
@@ -492,7 +510,8 @@ class RunWorker:
                 "parent_run_id": fresh.id,
                 "critical": True,
             })
-            self.notify()
+            self._running_ids.add(fresh.id)
+            asyncio.create_task(self._execute_run(fresh.id))
 
     async def _execute_run(self, run_id: str) -> None:
         try:

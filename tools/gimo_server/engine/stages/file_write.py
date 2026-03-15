@@ -1,10 +1,13 @@
 from __future__ import annotations
 import json
+import logging
 import re
 from typing import Any, Dict
 from ..contracts import StageInput, StageOutput, ExecutionStage
 from ..tools.executor import ToolExecutor
 from ...services.runtime_policy_service import RuntimePolicyService
+
+logger = logging.getLogger(__name__)
 
 class FileWrite(ExecutionStage):
     @property
@@ -19,7 +22,7 @@ class FileWrite(ExecutionStage):
                 return val.strip()
 
         regexes = [
-            r"TARGET_FILE:\s*(\S+)",
+            r"TARGET_FILE:\s*(.+?)(?:\s*\n|$)",
             r"([A-Za-z]:[/\\][^\s\"']+\.\w{1,8})",
             r"(\S+/[^\s\"']+\.\w{1,8})",
             r"['\"]([^\s\"']+\.\w{1,8})['\"]",
@@ -76,17 +79,22 @@ class FileWrite(ExecutionStage):
         else:
             # Fallback path if no tool calls found
             target_path = self._extract_fallback_path(llm_content, input.context)
+            logger.info("[FileWrite] target_path extracted: %r (content[:80]=%r)", target_path, llm_content[:80])
             if not target_path:
                 status = "fail"
                 artifacts_out["error"] = "No tool calls and no target file path detected"
             else:
                 fallback_content = llm_content.strip()
+                # Strip any TARGET_FILE directive line that the agent may have emitted
+                fallback_content = re.sub(r"(?m)^TARGET_FILE:[^\n]*\n?", "", fallback_content).strip()
                 if fallback_content.startswith("```"):
                     fallback_content = re.sub(r"```\w*\n?", "", fallback_content).strip()
+                logger.info("[FileWrite] writing %d chars to %r", len(fallback_content), target_path)
                 res = await executor.execute_tool_call(
                     "write_file",
                     {"path": target_path, "content": fallback_content},
                 )
+                logger.info("[FileWrite] result: %s", res)
                 results.append(res)
                 if res.get("status") == "error":
                     status = "fail"

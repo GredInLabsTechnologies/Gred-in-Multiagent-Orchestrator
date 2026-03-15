@@ -1,0 +1,53 @@
+{
+  "prompt": "Construye la especificacion completa de una calculadora web multi-agente: arquitectura, UI, logica y tests.",
+  "context": {
+    "intent_class": "DOC_UPDATE",
+    "wake_on_demand": true,
+    "child_tasks": [
+      {
+        "id": "architect",
+        "prompt": "Eres arquitecto de software senior. Define la arquitectura completa de una calculadora web: componentes, flujo de datos, decisiones de diseno, y tecnologias recomendadas. Output: documento markdown estructurado.",
+        "context": {
+          "intent_class": "DOC_UPDATE",
+          "target_path": "C:/Users/shilo/Documents/GitHub/CALCULADORA PRUEBA/ARQUITECTURA.md",
+          "role": "architect",
+          "task_type": "architecture_design"
+        },
+        "depends_on": []
+      },
+      {
+        "id": "ui_dev",
+        "prompt": "Eres desarrollador frontend especialista en UX. Basandote en la arquitectura definida, especifica todos los componentes UI de la calculadora: layout, botones, display, estados visuales, responsividad.",
+        "context": {
+          "intent_class": "DOC_UPDATE",
+          "target_path": "C:/Users/shilo/Documents/GitHub/CALCULADORA PRUEBA/src/ui/UI_SPEC.md",
+          "role": "ui_developer",
+          "task_type": "ui_specification"
+        },
+        "depends_on": ["architect"]
+      },
+      {
+        "id": "logic_dev",
+        "prompt": "Eres desarrollador de logica de negocio. Basandote en la arquitectura definida, especifica el motor de calculo: operaciones soportadas, manejo de estado, casos edge, y API interna.",
+        "context": {
+          "intent_class": "DOC_UPDATE",
+          "target_path": "C:/Users/shilo/Documents/GitHub/CALCULADORA PRUEBA/src/logic/LOGIC_SPEC.md",
+          "role": "logic_developer",
+          "task_type": "logic_specification"
+        },
+        "depends_on": ["architect"]
+      },
+      {
+        "id": "test_writer",
+        "prompt": "Eres QA engineer. Basandote en las especificaciones de UI y logica, define el plan de tests completo: unitarios, integracion, E2E, casos happy path y edge cases.",
+        "context": {
+          "intent_class": "TEST_ADD",
+          "target_path": "C:/Users/shilo/Documents/GitHub/CALCULADORA PRUEBA/tests/TEST_PLAN.md",
+          "role": "qa_engineer",
+          "task_type": "test_planning"
+        },
+        "depends_on": ["ui_dev", "logic_dev"]
+      }
+    ]
+  }
+}

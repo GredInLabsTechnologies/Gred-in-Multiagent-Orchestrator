@@ -4,6 +4,25 @@
 
 ## ⚠️ Inconsistencias Conocidas — Backlog Técnico
 
+### [TRACK-002] ORCH_TOKEN — Modelo de seguridad insuficiente para uso multi-agente
+
+**Problema:** El `ORCH_TOKEN` es una API key estática almacenada en `.env`. Se transmite en texto plano en `Authorization: Bearer` y el mismo token otorga acceso completo (lectura, escritura, aprobaciones de runs). No tiene expiración, no hay rotación automática, y no existen scopes diferenciados por operación.
+
+**Impacto:**
+- Si un proceso malicioso (o log) captura el token, tiene control total de GIMO indefinidamente.
+- En escenarios multi-agente donde el token se inyecta en los contextos de los hijos, el blast radius de una fuga es total.
+- No hay distinción entre `read-only` (Claude inspeccionando runs) y `execute` (lanzar runs) ni `approve` (aprobar action drafts).
+
+**Fix propuesto:**
+- Scopes por token: `read`, `execute`, `approve`, `admin`.
+- Tokens de sesión con TTL (expiración en X horas, renovable vía refresh).
+- Para agentes hijos: tokens derivados con scope restringido al run_id de su tarea.
+- Rotación automática: generar nuevo token en cada arranque del servidor, notificar por logs al operador.
+
+**Archivos afectados:** `security/auth.py`, `main.py` (lifespan), `config.py`
+
+---
+
 ### [TRACK-001] Model metadata inconsistente para providers en modo `account`
 
 **Problema:** El campo `model` en la config de GIMO para providers en modo `account` (e.g. `codex-account`) refleja el valor configurado en sesiones anteriores (`o4-mini`), pero el modelo real que ejecuta el CLI es el que tiene configurado el propio CLI (GPT-5 según `codex exec`). Además, `effective_state.effective_model` muestra `claude-opus-4-5` y `warnings` dice "Validated via local claude CLI session" — ambos incorrectos para el provider activo `codex-account`.

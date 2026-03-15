@@ -24,6 +24,10 @@ class HitlGateService:
         "core_write_file",
         "shell_exec",
         "file_write",
+        # Multi-agent review gate
+        "review_agent_output",
+        # Fractal complexity escalation
+        "complexity_escalation",
     }
 
     _runtime_dir: ClassVar[Path] = OPS_DATA_DIR / "runtime"

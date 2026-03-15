@@ -286,6 +286,49 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Log rotation startup warning: %s", exc)
 
+    # ── STARTUP RUN RECONCILE ─────────────────────────────────────────
+    # Pass 1: Runs in non-terminal active states that survived a restart
+    # are zombies — mark them error so the operator can retry.
+    # Pass 2: Child runs still pending whose parent is now terminal
+    # (orphaned children) are also marked error to prevent them from
+    # executing without a valid parent context.
+    try:
+        from tools.gimo_server.services.ops_service import OpsService as _OpsServiceReconcile
+        _ZOMBIE_ACTIVE = {"running", "awaiting_subagents", "awaiting_review"}
+        _TERMINAL = _OpsServiceReconcile._TERMINAL_RUN_STATUSES
+        _all_runs = _OpsServiceReconcile.list_runs()
+        _run_status = {_r.id: _r.status for _r in _all_runs}
+
+        _zombie_count = 0
+        for _r in _all_runs:
+            if _r.status in _ZOMBIE_ACTIVE:
+                _OpsServiceReconcile.update_run_status(
+                    _r.id, "error",
+                    msg="Interrupted by server restart (startup reconcile)"
+                )
+                _zombie_count += 1
+            elif _r.status == "pending" and _r.parent_run_id:
+                # Orphaned child: parent is terminal
+                _parent_status = _run_status.get(_r.parent_run_id, "")
+                if _parent_status in _TERMINAL:
+                    _OpsServiceReconcile.update_run_status(
+                        _r.id, "error",
+                        msg=(
+                            f"Orphaned child (parent {_r.parent_run_id} is "
+                            f"'{_parent_status}') — startup reconcile"
+                        )
+                    )
+                    _zombie_count += 1
+
+        if _zombie_count:
+            logger.warning(
+                "Startup reconcile: marked %d zombie/orphan run(s) as error.",
+                _zombie_count,
+            )
+    except Exception as exc:
+        logger.warning("Startup run reconcile warning: %s", exc)
+    # ─────────────────────────────────────────────────────────────────
+
     # Start the Run Worker (processes pending runs in background)
     from tools.gimo_server.services.run_worker import RunWorker
 

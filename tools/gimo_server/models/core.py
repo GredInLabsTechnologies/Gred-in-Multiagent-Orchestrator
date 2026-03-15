@@ -17,6 +17,7 @@ OpsRunStatus = Literal[
     "error",
     "cancelled",
     "awaiting_subagents",
+    "awaiting_review",
     "MERGE_LOCKED",
     "MERGE_CONFLICT",
     "VALIDATION_FAILED_TESTS",
@@ -104,6 +105,10 @@ class OpsRun(BaseModel):
     awaiting_count: int = 0
     attempt: int = 1
     rerun_of: Optional[str] = None
+    child_prompt: Optional[str] = None
+    child_context: Optional[Dict[str, Any]] = None
+    spawn_depth: int = 0          # Fractal depth (0 = root orchestrator)
+    model_tier: Optional[int] = None  # quality_tier of the model assigned to this run
 
 class ExecutorReport(BaseModel):
     run_id: str
