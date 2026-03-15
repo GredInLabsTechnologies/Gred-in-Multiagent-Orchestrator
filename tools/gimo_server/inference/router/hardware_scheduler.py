@@ -138,21 +138,6 @@ class DeviceQueue:
         }
 
 
-class _SemaphoreWithTimeout(asyncio.Semaphore):
-    """Semaphore with a non-blocking acquire attempt."""
-
-    async def acquire_timeout(self, timeout: float = 0.0) -> bool:
-        """Return True immediately if a slot is available, else False."""
-        try:
-            return await asyncio.wait_for(super().acquire(), timeout=max(timeout, 0.01))
-        except asyncio.TimeoutError:
-            return False
-
-
-# Monkey-patch DeviceQueue to use our extended semaphore.
-DeviceQueue.__init__.__code__ = DeviceQueue.__init__.__code__
-
-
 class HardwareScheduler:
     """Multi-device priority scheduler.
 
@@ -240,7 +225,7 @@ class _AsyncDeviceQueue(DeviceQueue):
                 if not self._pending:
                     return
                 # Peek without blocking.
-                if self._sem._value == 0:  # type: ignore[attr-defined]
+                if self._sem.locked():
                     return  # No slot available right now.
                 await self._sem.acquire()
                 entry = self._pending.pop(0)
@@ -259,4 +244,4 @@ class _AsyncDeviceQueue(DeviceQueue):
     def release(self, ticket: ExecutionTicket) -> None:
         self._active.pop(ticket.ticket_id, None)
         self._sem.release()
-        asyncio.get_event_loop().create_task(self._try_dispatch())
+        asyncio.get_running_loop().create_task(self._try_dispatch())

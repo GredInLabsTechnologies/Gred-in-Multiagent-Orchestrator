@@ -104,6 +104,9 @@ class InferenceEngineService:
         self._metrics = InferenceMetrics()
         self._initialized = False
         self._lock = asyncio.Lock()
+        # In-memory model registry: model_id → ModelSpec.
+        # Populated via register_model() or a future ModelInventoryService integration.
+        self._registry: Dict[str, ModelSpec] = {}
 
     # ------------------------------------------------------------------
     # Singleton
@@ -337,14 +340,34 @@ class InferenceEngineService:
         return m
 
     # ------------------------------------------------------------------
+    # Model registry
+    # ------------------------------------------------------------------
+
+    def register_model(self, spec: ModelSpec) -> None:
+        """Register a model spec so it can be used for inference.
+
+        Call this during application startup for each locally available model.
+        When ModelInventoryService is integrated this will be replaced by a
+        live lookup, but the registered specs will remain as a fallback.
+        """
+        self._registry[spec.model_id] = spec
+        logger.info("Model registered: %s (%s, %.1fB params)", spec.model_id, spec.format.value, spec.param_count_b)
+
+    def unregister_model(self, model_id: str) -> None:
+        """Remove a model from the in-memory registry."""
+        self._registry.pop(model_id, None)
+
+    def list_registered_models(self) -> List[ModelSpec]:
+        return list(self._registry.values())
+
+    # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
     def _resolve_model(self, model_id: str) -> Optional[ModelSpec]:
-        """Look up a model spec.
+        """Look up a model spec in the registry.
 
-        In a full deployment this queries ModelInventoryService.
-        Here we return None for unknown IDs — callers handle the error.
+        Returns the registered ModelSpec or None if unknown.
+        Future: query ModelInventoryService as primary, fall back to registry.
         """
-        # TODO (Phase 6 integration): query ModelInventoryService.
-        return None
+        return self._registry.get(model_id)

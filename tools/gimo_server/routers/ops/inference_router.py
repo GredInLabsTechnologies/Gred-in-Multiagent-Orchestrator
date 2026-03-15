@@ -33,6 +33,16 @@ router = APIRouter()
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
+class RegisterModelRequest(BaseModel):
+    model_id: str
+    path: str
+    format: str = "onnx"        # ModelFormat value
+    size_bytes: int = 0
+    param_count_b: float = 0.0
+    quantization: str = "none"  # QuantizationType value
+    supported_tasks: List[str] = Field(default_factory=list)
+
+
 class LoadModelRequest(BaseModel):
     model_id: str
     target: str = "auto"  # "cpu", "gpu", "npu", "auto"
@@ -81,6 +91,56 @@ def _parse_task(task_str: str):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+@router.post("/inference/register")
+async def register_model(
+    body: RegisterModelRequest,
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
+) -> Dict[str, Any]:
+    """Register a model spec so it can be loaded and used for inference.
+
+    This must be called (e.g. at startup) before any /inference/load or
+    /inference/run request for this model_id will succeed.
+    """
+    _require_role(auth, "operator")
+    audit_log("OPS", "/ops/inference/register", body.model_id, operation="WRITE", actor=_actor_label(auth))
+
+    from pathlib import Path as _Path
+    from tools.gimo_server.inference.contracts import (
+        ModelFormat, ModelSpec, QuantizationType, TaskSemantic,
+    )
+
+    try:
+        fmt = ModelFormat(body.format.lower())
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Unknown model format: {body.format}")
+
+    try:
+        quant = QuantizationType(body.quantization.lower())
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Unknown quantization: {body.quantization}")
+
+    tasks = []
+    for t in body.supported_tasks:
+        try:
+            tasks.append(TaskSemantic(t.lower()))
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Unknown task semantic: {t}")
+
+    spec = ModelSpec(
+        model_id=body.model_id,
+        path=_Path(body.path),
+        format=fmt,
+        size_bytes=body.size_bytes,
+        param_count_b=body.param_count_b,
+        quantization=quant,
+        supported_tasks=tasks,
+    )
+    _get_engine().register_model(spec)
+    return {"registered": True, "model_id": body.model_id, "format": fmt.value}
+
 
 @router.get("/inference/status")
 async def get_inference_status(
