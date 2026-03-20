@@ -19,6 +19,8 @@ requests==2.32.4
 anthropic==0.79.0
 python-dotenv==1.2.1
 rich==14.3.2
+typer>=0.12.5
+PyYAML>=6.0.2
 
 # Observability (OpenTelemetry)
 opentelemetry-api==1.27.0

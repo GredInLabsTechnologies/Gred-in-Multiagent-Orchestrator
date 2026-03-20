@@ -66,3 +66,43 @@ def test_codex_login_connectors_endpoint_keeps_current_contract(monkeypatch):
         assert body["poll_id"] == "poll-1"
     finally:
         app.dependency_overrides.clear()
+
+
+def test_generic_provider_auth_status_dispatches(monkeypatch):
+    app.dependency_overrides[verify_token] = _override_auth
+
+    from tools.gimo_server.services.codex_auth_service import CodexAuthService
+
+    async def _fake_status():
+        await asyncio.sleep(0)
+        return {"authenticated": True, "provider": "codex"}
+
+    monkeypatch.setattr(CodexAuthService, "get_auth_status", _fake_status)
+
+    try:
+        client = TestClient(app)
+        res = client.get("/ops/connectors/codex/auth-status")
+        assert res.status_code == 200
+        assert res.json()["authenticated"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_generic_provider_logout_dispatches(monkeypatch):
+    app.dependency_overrides[verify_token] = _override_auth
+
+    from tools.gimo_server.services.claude_auth_service import ClaudeAuthService
+
+    async def _fake_logout():
+        await asyncio.sleep(0)
+        return {"status": "logged_out", "provider": "claude"}
+
+    monkeypatch.setattr(ClaudeAuthService, "logout", _fake_logout)
+
+    try:
+        client = TestClient(app)
+        res = client.post("/ops/connectors/claude/logout")
+        assert res.status_code == 200
+        assert res.json()["status"] == "logged_out"
+    finally:
+        app.dependency_overrides.clear()

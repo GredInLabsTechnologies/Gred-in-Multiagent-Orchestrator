@@ -172,6 +172,13 @@ class SkillsService:
     """File-backed service for canonical visual Skills."""
 
     @classmethod
+    def _lock_path(cls) -> Path:
+        candidate = Path(SKILLS_LOCK)
+        if candidate.parent == OPS_DATA_DIR:
+            return SKILLS_DIR.parent / "skills.lock"
+        return candidate
+
+    @classmethod
     def _ensure_dir(cls) -> None:
         SKILLS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -272,32 +279,52 @@ class SkillsService:
         return f"{base}-{int(time.time() * 1000)}-{os.urandom(2).hex()}"
 
     @classmethod
-    def list_skills(cls) -> List[SkillDefinition]:
+    def list_skills(cls, use_lock: bool = True) -> List[SkillDefinition]:
         cls._ensure_dir()
         out: List[SkillDefinition] = []
-        with FileLock(SKILLS_LOCK):
+        def _load() -> None:
             for f in SKILLS_DIR.glob("*.json"):
                 try:
                     out.append(SkillDefinition.model_validate_json(f.read_text(encoding="utf-8")))
                 except Exception as exc:
                     logger.warning("Failed to parse skill '%s': %s", f.name, exc)
+
+        if use_lock:
+            with FileLock(str(cls._lock_path())):
+                _load()
+        else:
+            _load()
         return sorted(out, key=lambda s: s.updated_at, reverse=True)
 
     @classmethod
-    def get_skill(cls, skill_id: str) -> Optional[SkillDefinition]:
+    def get_skill(cls, skill_id: str, use_lock: bool = True) -> Optional[SkillDefinition]:
         cls._ensure_dir()
         try:
             path = cls._skill_path(skill_id)
         except ValueError:
             return None
-        with FileLock(SKILLS_LOCK):
+        if use_lock:
+            lock = FileLock(str(cls._lock_path()))
+        else:
+            lock = None
+        if lock is not None:
+            lock.acquire()
+        try:
             if not path.exists():
                 return None
             return SkillDefinition.model_validate_json(path.read_text(encoding="utf-8"))
+        finally:
+            if lock is not None:
+                lock.release()
 
     @classmethod
-    def _assert_command_unique(cls, command: str, exclude_id: Optional[str] = None) -> None:
-        for skill in cls.list_skills():
+    def _assert_command_unique(
+        cls,
+        command: str,
+        exclude_id: Optional[str] = None,
+        use_lock: bool = True,
+    ) -> None:
+        for skill in cls.list_skills(use_lock=use_lock):
             if skill.command == command and skill.id != exclude_id:
                 raise DuplicateCommandError(f"command '{command}' already exists")
 
@@ -308,7 +335,7 @@ class SkillsService:
         cls._validate_graph(req.nodes, req.edges)
 
         def _do_create():
-            cls._assert_command_unique(req.command)
+            cls._assert_command_unique(req.command, use_lock=False)
             skill = SkillDefinition(
                 id=cls._slugify_id(req.name),
                 name=req.name,
@@ -325,7 +352,7 @@ class SkillsService:
             return skill
 
         if use_lock:
-            with FileLock(SKILLS_LOCK):
+            with FileLock(str(cls._lock_path())):
                 skill = _do_create()
         else:
             skill = _do_create()
@@ -347,7 +374,7 @@ class SkillsService:
             return True
 
         if use_lock:
-            with FileLock(SKILLS_LOCK):
+            with FileLock(str(cls._lock_path())):
                 res = _do_delete()
         else:
             res = _do_delete()
@@ -504,8 +531,8 @@ class SkillsService:
     def update_skill(cls, skill_id: str, req: SkillUpdateRequest) -> Optional[SkillDefinition]:
         """Update a skill, creating a new version and archiving the previous one."""
         cls._ensure_dir()
-        with FileLock(SKILLS_LOCK):
-            skill = cls.get_skill(skill_id)
+        with FileLock(str(cls._lock_path())):
+            skill = cls.get_skill(skill_id, use_lock=False)
             if not skill:
                 return None
 
@@ -669,7 +696,7 @@ class SkillsService:
         mp_path = MARKETPLACE_DIR / f"{skill.id}.json"
         cls._atomic_write(mp_path, skill.model_dump_json(indent=2))
         # Update original
-        with FileLock(SKILLS_LOCK):
+        with FileLock(str(cls._lock_path())):
             cls._atomic_write(cls._skill_path(skill_id), skill.model_dump_json(indent=2))
         logger.info("Skill published to marketplace: %s", skill.name)
         return skill

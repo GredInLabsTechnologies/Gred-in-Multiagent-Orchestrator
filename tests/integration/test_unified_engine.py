@@ -36,13 +36,22 @@ async def test_engine_service_rejects_unknown_composition() -> None:
 @pytest.mark.asyncio
 async def test_execute_run_infers_multi_agent_composition_for_parent_flows() -> None:
     """execute_run should route wake-on-demand parent flows to multi_agent."""
-    fake_run = SimpleNamespace(id="r_parent", approved_id="a1", child_run_ids=[], awaiting_count=1)
+    fake_run = SimpleNamespace(
+        id="r_parent",
+        approved_id="a1",
+        status="running",
+        child_run_ids=[],
+        awaiting_count=1,
+    )
     fake_approved = SimpleNamespace(draft_id="d1")
     fake_draft = SimpleNamespace(context={"wake_on_demand": True})
 
     with patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=fake_run), patch(
         "tools.gimo_server.services.ops_service.OpsService.get_approved", return_value=fake_approved
     ), patch("tools.gimo_server.services.ops_service.OpsService.get_draft", return_value=fake_draft), patch(
+        "tools.gimo_server.services.ops_service.OpsService.update_run_status",
+        return_value=fake_run,
+    ), patch(
         "tools.gimo_server.services.engine_service.EngineService.run_composition",
         new_callable=AsyncMock,
     ) as mock_run_composition:

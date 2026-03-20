@@ -12,11 +12,20 @@ from .common import _require_role, _actor_label
 router = APIRouter()
 
 
+def _resolve_cli_auth_provider(provider: str):
+    normalized = str(provider or "").strip().lower()
+    if normalized == "codex":
+        return CodexAuthService
+    if normalized == "claude":
+        return ClaudeAuthService
+    raise HTTPException(status_code=404, detail="Unsupported provider")
+
+
 @router.post("/connectors/codex/login")
 async def codex_device_login(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     import logging, traceback
     _log = logging.getLogger("orchestrator.codex_login")
@@ -27,7 +36,7 @@ async def codex_device_login(
         _log.info(">>> codex_device_login result: %s", data)
         audit_log("OPS", "/ops/connectors/codex/login", "auth_flow_started", operation="READ", actor=_actor_label(auth))
         return data
-    except Exception as exc:
+    except Exception:
         _log.error(">>> codex_device_login EXCEPTION:\n%s", traceback.format_exc())
         raise
 
@@ -36,7 +45,7 @@ async def codex_device_login(
 async def codex_device_login_legacy(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Backward-compatible alias for legacy clients.
 
@@ -59,7 +68,7 @@ async def codex_device_login_legacy(
 async def codex_auth_status(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     data = await CodexAuthService.get_auth_status()
@@ -70,7 +79,7 @@ async def codex_auth_status(
 async def codex_logout(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     data = await CodexAuthService.logout()
@@ -82,18 +91,30 @@ async def codex_logout(
 async def claude_auth_status(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     data = await ClaudeAuthService.get_auth_status()
     return data
 
 
+@router.get("/connectors/{provider}/auth-status")
+async def provider_auth_status(
+    provider: str,
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    service = _resolve_cli_auth_provider(provider)
+    return await service.get_auth_status()
+
+
 @router.post("/connectors/claude/logout")
 async def claude_logout(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     data = await ClaudeAuthService.logout()
@@ -101,11 +122,25 @@ async def claude_logout(
     return data
 
 
+@router.post("/connectors/{provider}/logout")
+async def provider_logout(
+    provider: str,
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    service = _resolve_cli_auth_provider(provider)
+    data = await service.logout()
+    audit_log("OPS", f"/ops/connectors/{provider}/logout", "logout", operation="WRITE", actor=_actor_label(auth))
+    return data
+
+
 @router.post("/connectors/claude/login")
 async def claude_login_start(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     data = await ClaudeAuthService.start_login_flow()
@@ -118,7 +153,7 @@ async def account_login_start(
     request: Request,
     body: dict,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Phase 6.5: start account-mode device flow and persist flow state."""
     _require_role(auth, "operator")
@@ -171,7 +206,7 @@ async def account_login_status(
     request: Request,
     flow_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     try:
@@ -186,7 +221,7 @@ async def account_refresh(
     request: Request,
     body: dict,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Phase 6.5: refresh account session and keep auth_ref in secure env indirection."""
     _require_role(auth, "operator")
@@ -218,7 +253,7 @@ async def account_logout(
     request: Request,
     body: dict,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     provider_id = str(body.get("provider_id") or "").strip()

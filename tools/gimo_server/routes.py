@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Optional, Annotated
@@ -16,19 +17,18 @@ from tools.gimo_server.security import (
     get_active_repo_dir,
     get_allowed_paths,
     load_repo_registry,
-    load_security_db,
     save_repo_registry,
-    save_security_db,
     serialize_allowlist,
     validate_path,
     verify_token,
 )
-from tools.gimo_server.security.auth import AuthContext
+from tools.gimo_server.security.auth import AuthContext, SESSION_COOKIE_NAME, session_store
 from tools.gimo_server.services.file_service import FileService
 from tools.gimo_server.services.repo_service import RepoService
 from tools.gimo_server.services.repo_override_service import RepoOverrideService
 from tools.gimo_server.services.system_service import SystemService
 from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.provider_service import ProviderService
 from tools.gimo_server.services.plan_graph_builder import build_graph_from_ops_plan
 from tools.gimo_server.routers.ops.common import _WORKFLOW_ENGINES
 from tools.gimo_server.version import __version__
@@ -136,6 +136,39 @@ def get_status_handler(
     return {"version": __version__, "uptime_seconds": time.time() - request.app.state.start_time}
 
 
+async def get_health_deep_handler(
+    request: Request,
+    auth: AuthContext = Depends(require_read_only_access),
+    rl: None = Depends(check_rate_limit),
+):
+    uptime_seconds = time.time() - request.app.state.start_time
+    ops_dir = OpsService.OPS_DIR
+    try:
+        disk_total_bytes, _disk_used_bytes, disk_free_bytes = shutil.disk_usage(ops_dir)
+    except Exception:
+        disk_free_bytes = None
+        disk_total_bytes = None
+
+    provider_ok = await ProviderService.health_check()
+
+    return {
+        "status": "ok" if provider_ok else "degraded",
+        "version": __version__,
+        "uptime_seconds": uptime_seconds,
+        "checks": {
+            "ops_dir_exists": ops_dir.exists(),
+            "provider_health": provider_ok,
+            "gics_attached": bool(getattr(request.app.state, "gics", None)),
+            "run_worker_attached": bool(getattr(request.app.state, "run_worker", None)),
+        },
+        "storage": {
+            "ops_dir": str(ops_dir),
+            "disk_free_bytes": disk_free_bytes,
+            "disk_total_bytes": disk_total_bytes,
+        },
+    }
+
+
 def get_ui_status_handler(
     request: Request,
     auth: AuthContext = Depends(require_read_only_access),
@@ -157,6 +190,40 @@ def get_ui_status_handler(
         "allowlist_count": len(allowed_paths),
         "last_audit_line": audit_lines[-1] if audit_lines else None,
         "service_status": f"{status_str} ({agent_label})",
+    }
+
+
+def get_ui_hardware_handler(
+    request: Request,
+    auth: AuthContext = Depends(require_read_only_access),
+    rl: None = Depends(check_rate_limit),
+):
+    from tools.gimo_server.services.hardware_monitor_service import HardwareMonitorService
+    from tools.gimo_server.services.model_inventory_service import ModelInventoryService
+
+    hw = HardwareMonitorService.get_instance()
+    state = hw.get_current_state()
+    models = ModelInventoryService.get_available_models()
+    state["available_models"] = len(models)
+    state["local_models"] = len([m for m in models if getattr(m, "is_local", False)])
+    state["remote_models"] = len([m for m in models if not getattr(m, "is_local", False)])
+    state["local_safe"] = hw.is_local_safe()
+    return state
+
+
+def get_me_handler(request: Request):
+    cookie_value = request.cookies.get(SESSION_COOKIE_NAME)
+    if not cookie_value:
+        raise HTTPException(status_code=401, detail="Session missing")
+    session = session_store.validate(cookie_value)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired")
+    return {
+        "email": session.email,
+        "displayName": session.display_name,
+        "plan": session.plan,
+        "firebaseUser": bool(session.firebase_user),
+        "role": session.role,
     }
 
 
@@ -826,7 +893,7 @@ def get_diff_handler(
 async def create_plan_handler(
     request: Request,
     auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Creates a structured plan from UI and returns it as a draft."""
     if auth.role not in ("operator", "admin"):
@@ -938,7 +1005,7 @@ async def create_plan_handler(
 def reject_draft_handler(
     draft_id: str,
     auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Rejects a draft plan."""
     if auth.role not in ("operator", "admin"):
@@ -955,7 +1022,7 @@ def reject_draft_handler(
 
 def list_ui_providers_bridge(
     auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Bridge endpoint for legacy UI. Source of truth is OPS provider config."""
     from tools.gimo_server.services.provider_service import ProviderService
@@ -989,7 +1056,7 @@ def list_ui_providers_bridge(
 def add_ui_provider_bridge(
     body: dict,
     auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     from tools.gimo_server.ops_models import ProviderEntry, ProviderConfig
     from tools.gimo_server.services.provider_service import ProviderService
@@ -1032,7 +1099,7 @@ def add_ui_provider_bridge(
 def remove_ui_provider_bridge(
     provider_id: str,
     auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     from tools.gimo_server.ops_models import ProviderConfig
     from tools.gimo_server.services.provider_service import ProviderService
@@ -1059,7 +1126,7 @@ def remove_ui_provider_bridge(
 async def test_ui_provider_bridge(
     provider_id: str,
     auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     from tools.gimo_server.services.provider_service import ProviderService
 
@@ -1077,7 +1144,7 @@ async def test_ui_provider_bridge(
 
 def list_ui_nodes_bridge(
     auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Bridge endpoint kept for legacy UI compatibility."""
     return {}
@@ -1097,7 +1164,10 @@ def compare_costs(
 
 def register_routes(app: FastAPI):
     app.get("/status", response_model=StatusResponse)(get_status_handler)
+    app.get("/health/deep")(get_health_deep_handler)
+    app.get("/me")(get_me_handler)
     app.get("/ui/status", response_model=UiStatusResponse)(get_ui_status_handler)
+    app.get("/ui/hardware")(get_ui_hardware_handler)
     app.get("/ui/audit")(get_ui_audit_handler)
     app.get("/ui/allowlist")(get_ui_allowlist_handler)
     app.get("/ui/repos")(list_repos_handler)

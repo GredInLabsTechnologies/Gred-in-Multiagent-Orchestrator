@@ -31,6 +31,17 @@ def test_get_status(client):
     assert "version" in response.json()
 
 
+def test_get_health_deep(client, tmp_path):
+    with patch("tools.gimo_server.routes.ProviderService.health_check", return_value=True):
+        with patch("tools.gimo_server.routes.OpsService.OPS_DIR", tmp_path):
+            response = client.get("/health/deep")
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["status"] == "ok"
+            assert payload["checks"]["provider_health"] is True
+            assert payload["checks"]["ops_dir_exists"] is True
+
+
 def test_cold_room_access_success(client):
     with patch("tools.gimo_server.routers.auth_router._cold_room_enabled", return_value=True):
         manager = MagicMock()
@@ -87,6 +98,43 @@ def test_get_ui_status(client):
             response = client.get("/ui/status")
             assert response.status_code == 200
             assert response.json()["last_audit_line"] == "audit line"
+
+
+def test_get_ui_hardware(client):
+    fake_hw = MagicMock()
+    fake_hw.get_current_state.return_value = {"cpu_percent": 12.5}
+    fake_hw.is_local_safe.return_value = True
+    fake_models = [
+        MagicMock(is_local=True),
+        MagicMock(is_local=False),
+    ]
+    with patch("tools.gimo_server.services.hardware_monitor_service.HardwareMonitorService.get_instance", return_value=fake_hw):
+        with patch("tools.gimo_server.services.model_inventory_service.ModelInventoryService.get_available_models", return_value=fake_models):
+            response = client.get("/ui/hardware")
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["cpu_percent"] == 12.5
+            assert payload["available_models"] == 2
+            assert payload["local_models"] == 1
+            assert payload["remote_models"] == 1
+            assert payload["local_safe"] is True
+
+
+def test_get_me_uses_cookie_session(client):
+    fake_session = MagicMock(
+        email="user@example.com",
+        display_name="Test User",
+        plan="pro",
+        firebase_user=True,
+        role="admin",
+    )
+    with patch("tools.gimo_server.routes.session_store.validate", return_value=fake_session):
+        response = client.get("/me", cookies={"gimo_session": "session-token"})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["email"] == "user@example.com"
+        assert payload["plan"] == "pro"
+        assert payload["firebaseUser"] is True
 
 
 def test_get_ui_audit(client):

@@ -1,6 +1,5 @@
 import logging
 import keyword
-from pydantic import create_model
 from mcp.server.fastmcp import FastMCP
 from tools.gimo_server.mcp_bridge.manifest import MANIFEST
 from tools.gimo_server.mcp_bridge.bridge import proxy_to_api
@@ -95,5 +94,48 @@ async def {name}({signature_str}) -> str:
             
         except Exception as e:
             logger.error(f"Failed to register tool {t_def.get('name')}: {e}")
-            
+
+    async def plan_create(
+        objective: str,
+        acceptance_criteria: list,
+        intent_class: str,
+        prompt: str | None = None,
+    ) -> str:
+        """Create a structured execution draft from objective + acceptance criteria."""
+        body = {
+            "objective": objective,
+            "acceptance_criteria": acceptance_criteria,
+            "execution": {"intent_class": intent_class},
+        }
+        if prompt is not None:
+            body["prompt"] = prompt
+        return await proxy_to_api("POST", "/ops/drafts", __body=body)
+
+    async def plan_execute(draft_id: str, auto_run: bool = True) -> str:
+        """Approve a draft and optionally trigger auto-run."""
+        return await proxy_to_api(
+            "POST",
+            "/ops/drafts/{draft_id}/approve",
+            __path_params={"draft_id": draft_id},
+            __query={"auto_run": auto_run},
+        )
+
+    async def cost_estimate(nodes: list | None = None, initial_state: dict | None = None) -> str:
+        """Estimate workflow cost using the mastery predictor endpoint."""
+        return await proxy_to_api(
+            "POST",
+            "/ops/mastery/predict",
+            __body={
+                "nodes": nodes or [],
+                "initial_state": initial_state or {},
+            },
+        )
+
+    for alias in (plan_create, plan_execute, cost_estimate):
+        try:
+            mcp.add_tool(alias)
+            count += 1
+        except Exception as e:
+            logger.error(f"Failed to register MCP alias {alias.__name__}: {e}")
+
     logger.info(f"Successfully registered {count} dynamic tools from manifest.")
