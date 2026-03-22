@@ -21,8 +21,8 @@ def override_auth():
     yield
 
 
-@patch('tools.gimo_server.routes.REPO_ROOT_DIR', new=Path("/mock/repos"))
-@patch('tools.gimo_server.routes.audit_log')
+@patch('tools.gimo_server.routers.ops.repo_router.REPO_ROOT_DIR', new=Path("/mock/repos"))
+@patch('tools.gimo_server.routers.ops.repo_router.audit_log')
 @patch('subprocess.Popen')
 def test_api_open_repo_decoupled(mock_popen, mock_audit, test_client):
     """
@@ -36,7 +36,7 @@ def test_api_open_repo_decoupled(mock_popen, mock_audit, test_client):
     # Mock pathlib.Path.exists and resolve directly
     with patch('pathlib.Path.exists', return_value=True):
         with patch('pathlib.Path.resolve', return_value=Path(repo_path_str)):
-            response = test_client.post(f"/ui/repos/open?path={repo_path_str}")
+            response = test_client.post(f"/ops/repos/open?path={repo_path_str}")
 
             assert response.status_code == 200
             data = response.json()

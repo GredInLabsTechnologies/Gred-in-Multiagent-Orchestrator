@@ -8,7 +8,6 @@ appended to its child_context.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from ..contracts import StageInput, StageOutput

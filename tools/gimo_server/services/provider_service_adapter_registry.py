@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Dict
+from typing import Callable
 
 from ..ops_models import ProviderEntry
 from ..providers.base import ProviderAdapter

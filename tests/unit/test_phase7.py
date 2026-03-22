@@ -1,13 +1,32 @@
+"""Phase 7 consolidated tests.
+
+Merged from:
+- test_phase7_hardening.py (3 tests)
+- test_phase7_merge_gate.py (18 tests)
+"""
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
 
+from tools.gimo_server.main import app
 from tools.gimo_server.ops_models import OpsApproved, OpsDraft
+from tools.gimo_server.security import verify_token
+from tools.gimo_server.security.auth import AuthContext
+from tools.gimo_server.services import skills_service, notification_service, custom_plan_service
 from tools.gimo_server.services.merge_gate_service import MergeGateService
 from tools.gimo_server.services.ops_service import OpsService
+
+
+def _override_auth() -> AuthContext:
+    return AuthContext(token="test-token", role="admin")
+
+
+# ── Shared helpers ──────────────────────────────────────────
 
 
 def _setup_ops_dirs(tmp_path):
@@ -45,6 +64,99 @@ def _seed_draft_and_approved(*, draft_id: str = "d1", approved_id: str = "a1", r
     OpsService._draft_path(draft.id).write_text(draft.model_dump_json(indent=2), encoding="utf-8")
     OpsService._approved_path(approved.id).write_text(approved.model_dump_json(indent=2), encoding="utf-8")
     return draft, approved
+
+
+def _valid_skill_payload(command: str = "/hardened") -> dict:
+    return {
+        "name": "Hardened Skill",
+        "description": "Verification skill",
+        "command": command,
+        "replace_graph": False,
+        "nodes": [
+            {"id": "orch", "type": "orchestrator"},
+            {"id": "worker_1", "type": "worker", "data": {"label": "Worker 1", "prompt": "Test"}},
+        ],
+        "edges": [
+            {"source": "orch", "target": "worker_1"},
+        ],
+    }
+
+
+# ── Hardening tests (from test_phase7_hardening.py) ─────────
+
+
+@pytest.fixture
+def client():
+    app.dependency_overrides[verify_token] = _override_auth
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_skill_execution_sse_events(tmp_path, monkeypatch, client):
+    """Verify that executing a skill triggers NotificationService.publish."""
+    monkeypatch.setattr(skills_service, "SKILLS_DIR", tmp_path / "skills")
+
+    mock_publish = AsyncMock()
+    monkeypatch.setattr(notification_service.NotificationService, "publish", mock_publish)
+
+    mock_plan = custom_plan_service.CustomPlan(
+        id="test_plan",
+        name="Test Plan",
+        status="done",
+        nodes=[],
+        edges=[]
+    )
+    monkeypatch.setattr(custom_plan_service.CustomPlanService, "execute_plan", AsyncMock(return_value=mock_plan))
+
+    create_res = client.post("/ops/skills", json=_valid_skill_payload())
+    assert create_res.status_code == 201
+    skill_id = create_res.json()["id"]
+
+    exec_res = client.post(f"/ops/skills/{skill_id}/execute", json={"replace_graph": False})
+    assert exec_res.status_code == 201
+
+    await asyncio.sleep(0.5)
+
+    event_types = [call.args[0] for call in mock_publish.call_args_list]
+    assert "skill_execution_started" in event_types
+    assert "skill_execution_finished" in event_types
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_skill_execution_error_propagation(tmp_path, monkeypatch, client):
+    """Verify that an error in execution emits a finished event with error status."""
+    monkeypatch.setattr(skills_service, "SKILLS_DIR", tmp_path / "skills")
+
+    mock_publish = AsyncMock()
+    monkeypatch.setattr(notification_service.NotificationService, "publish", mock_publish)
+
+    monkeypatch.setattr(custom_plan_service.CustomPlanService, "execute_plan", AsyncMock(side_effect=Exception("Simulated Failure")))
+
+    create_res = client.post("/ops/skills", json=_valid_skill_payload("/fail"))
+    assert create_res.status_code == 201
+    skill_id = create_res.json()["id"]
+
+    client.post(f"/ops/skills/{skill_id}/execute", json={"replace_graph": False})
+    await asyncio.sleep(0.5)
+
+    finished_call = next((c for c in mock_publish.call_args_list if c.args[0] == "skill_execution_finished"), None)
+    assert finished_call is not None
+    assert finished_call.args[1]["status"] == "error"
+    assert "Simulated Failure" in finished_call.args[1]["message"]
+
+
+def test_slugify_uniqueness_under_load():
+    """Fast check that slugify generates unique IDs even when called rapidly."""
+    ids = set()
+    for _ in range(1000):
+        ids.add(skills_service.SkillsService._slugify_id("Test Name"))
+    assert len(ids) == 1000
+
+
+# ── Merge gate tests (from test_phase7_merge_gate.py) ───────
 
 
 def test_phase7_create_run_conflicts_when_active_run_exists(tmp_path):
@@ -139,7 +251,6 @@ def test_phase7_merge_lock_ttl_heartbeat_and_recovery(tmp_path):
     lock2 = OpsService.heartbeat_merge_lock("repoA", run.id, ttl_seconds=2)
     assert lock2["run_id"] == run.id
 
-    # Force stale lock
     lock_file = OpsService._merge_lock_path("repoA")
     payload = __import__("json").loads(lock_file.read_text(encoding="utf-8"))
     payload["expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()

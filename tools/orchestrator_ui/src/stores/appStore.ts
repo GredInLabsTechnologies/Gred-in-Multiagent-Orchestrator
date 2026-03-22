@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { API_BASE, SkillRun } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 /* ── Types ─────────────────────────────────────────────── */
 
@@ -162,7 +163,7 @@ export const useAppStore = create<AppState & AppActions>()((set) => ({
         const store = useAppStore.getState();
         if (store.authenticated === false) return;
         try {
-            const resp = await fetch(`${API_BASE}/me`, { credentials: 'include' });
+            const resp = await fetchWithRetry(`${API_BASE}/me`, { credentials: 'include' });
             if (resp.ok) {
                 const user = await resp.json();
                 store.login(user);
@@ -178,7 +179,7 @@ export const useAppStore = create<AppState & AppActions>()((set) => ({
         const store = useAppStore.getState();
         if (store.authenticated === false) return;
         try {
-            const resp = await fetch(`${API_BASE}/me`, { credentials: 'include' });
+            const resp = await fetchWithRetry(`${API_BASE}/me`, { credentials: 'include' });
             if (resp.ok) {
                 const user = await resp.json();
                 store.login(user);

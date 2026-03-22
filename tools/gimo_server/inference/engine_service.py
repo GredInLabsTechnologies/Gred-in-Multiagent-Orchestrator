@@ -26,12 +26,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .compiler.model_cache import ModelCache
-from .compiler.pipeline import CompilationPipeline
 from .contracts import (
     DeviceCapability,
     HardwareTarget,
@@ -39,7 +37,6 @@ from .contracts import (
     InferenceResult,
     ModelSpec,
     ShardStrategy,
-    TaskSemantic,
 )
 from .hardware.device_detector import get_devices
 from .memory_manager import MemoryManager

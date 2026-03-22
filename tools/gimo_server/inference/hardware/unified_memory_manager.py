@@ -11,13 +11,12 @@ copying — dramatically reducing memory overhead versus discrete GPU setups.
 from __future__ import annotations
 
 import logging
-import platform
 from dataclasses import dataclass
 from typing import List, Optional
 
 import psutil
 
-from ..contracts import DeviceCapability, HardwareTarget
+from ..contracts import DeviceCapability
 
 logger = logging.getLogger("gie.hardware.unified_memory")
 

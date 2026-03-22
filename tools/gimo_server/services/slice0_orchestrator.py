@@ -1,8 +1,7 @@
 import logging
-import asyncio
-from typing import Dict, Any, Optional
+from typing import Optional
 
-from tools.gimo_server.ops_models import OpsDraft, RepoContext
+from tools.gimo_server.ops_models import OpsDraft
 from tools.gimo_server.services.sandbox_service import SandboxService
 from tools.gimo_server.services.context_indexer import ContextIndexer
 from tools.gimo_server.services.router_pm import RouterPM
@@ -82,7 +81,6 @@ class Slice0Orchestrator:
                     # 5. QA Gate
                     logger.info(f"Step 5: QA Gate (Iteration {correction_iteration + 1})")
                     import asyncio
-                    import shlex
                     
                     qa_commands = [cmd for cmd in repo_context.commands if "test" in cmd.lower() or "lint" in cmd.lower()]
                     if not qa_commands:

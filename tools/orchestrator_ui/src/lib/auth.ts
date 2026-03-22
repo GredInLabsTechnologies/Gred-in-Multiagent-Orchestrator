@@ -1,4 +1,5 @@
 import { API_BASE } from '../types';
+import { fetchWithRetry } from './fetchWithRetry';
 import { useAppStore } from '../stores/appStore';
 
 /**
@@ -11,7 +12,7 @@ export async function checkSession(): Promise<void> {
     store.setBootError(null);
 
     try {
-        const response = await fetch(`${API_BASE}/auth/check`, {
+        const response = await fetchWithRetry(`${API_BASE}/auth/check`, {
             credentials: 'include',
         });
 
@@ -43,7 +44,7 @@ export async function checkSession(): Promise<void> {
  */
 export async function logout(): Promise<void> {
     try {
-        await fetch(`${API_BASE}/auth/logout`, {
+        await fetchWithRetry(`${API_BASE}/auth/logout`, {
             method: 'POST',
             credentials: 'include',
         });

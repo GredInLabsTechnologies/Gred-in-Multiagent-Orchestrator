@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Literal
 
-from ..security import audit_log
 
 
 logger = logging.getLogger("orchestrator.trust")

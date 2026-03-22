@@ -7,6 +7,7 @@ import { ChatTerminalLayout } from '../components/ChatTerminalLayout';
 import { WelcomeScreen } from '../components/WelcomeScreen';
 import { useAppStore } from '../stores/appStore';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 interface GraphViewProps {
     providerHealth: { connected: boolean; providerName?: string; model?: string };
@@ -57,9 +58,9 @@ export default function GraphView({
         const loadOnboardingState = async () => {
             try {
                 const [repoRes, draftsRes, runsRes] = await Promise.all([
-                    fetch(`${API_BASE}/ui/repos/active`, { credentials: 'include' }),
-                    fetch(`${API_BASE}/ops/drafts`, { credentials: 'include' }),
-                    fetch(`${API_BASE}/ops/runs`, { credentials: 'include' }),
+                    fetchWithRetry(`${API_BASE}/ops/repos/active`, { credentials: 'include' }),
+                    fetchWithRetry(`${API_BASE}/ops/drafts`, { credentials: 'include' }),
+                    fetchWithRetry(`${API_BASE}/ops/runs`, { credentials: 'include' }),
                 ]);
 
                 if (cancelled) return;

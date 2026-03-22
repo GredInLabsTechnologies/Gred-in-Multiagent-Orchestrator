@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from ..ops_models import BudgetForecast, UserEconomyConfig
@@ -78,9 +77,9 @@ class BudgetForecastService:
 
             # If no burn rate but budget exceeded, 0.0 days remaining
             if burn_rate_daily <= 0:
-                days_remaining = 0.0 if remaining <= 0 else 999.0
+                pass
             else:
-                days_remaining = remaining / burn_rate_daily
+                remaining / burn_rate_daily
             
             # Determine alert level
             # percentage_remaining: if budget is 0, any spend (current_spend > 0) means 0% left.

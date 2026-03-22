@@ -22,11 +22,9 @@ from __future__ import annotations
 import logging
 import mmap
 import os
-import struct
 import sys
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Optional
 
 logger = logging.getLogger("gie.mmap_engine")
 
@@ -161,7 +159,7 @@ class MmapEngine:
                 # madvise via ctypes on Linux.
                 import ctypes
                 libc = ctypes.CDLL("libc.so.6", use_errno=True)
-                mm_addr = ctypes.c_char_p(bytes(self._mm))
+                ctypes.c_char_p(bytes(self._mm))
                 libc.madvise(
                     ctypes.c_void_p(id(self._mm) + offset),  # approximate; works for hint
                     ctypes.c_size_t(size),

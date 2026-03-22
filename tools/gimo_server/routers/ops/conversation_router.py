@@ -2,6 +2,7 @@ from typing import List, Optional, Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from ...ops_models import GimoThread, GimoTurn, GimoItem, GimoItemType
 from ...services.conversation_service import ConversationService
+from ...services.agentic_loop_service import AgenticLoopService
 from ...security import verify_token
 from ...security.auth import AuthContext
 from .common import _require_role
@@ -107,8 +108,42 @@ async def post_message(
     turn = ConversationService.add_turn(thread_id, agent_id="User")
     if not turn:
         raise HTTPException(status_code=404, detail="Thread not found")
-        
+
     item = GimoItem(type="text", content=content, status="completed")
     ConversationService.append_item(thread_id, turn.id, item)
-    
+
     return {"status": "ok", "turn_id": turn.id}
+
+@router.post("/{thread_id}/chat", responses={404: {"description": "Thread not found"}})
+async def chat_message(
+    thread_id: str,
+    content: str,
+    auth: Annotated[AuthContext, Depends(verify_token)]
+):
+    """
+    Send a message and get an agentic response with tool execution.
+
+    This is the main endpoint for GIMO CLI interactive chat.
+    """
+    _require_role(auth, "operator")
+
+    thread = ConversationService.get_thread(thread_id)
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    # Run agentic loop
+    token = auth.actor or "CLI"
+    result = await AgenticLoopService.run(
+        thread_id=thread_id,
+        user_message=content,
+        workspace_root=thread.workspace_root,
+        token=token
+    )
+
+    return {
+        "status": "ok",
+        "response": result.response,
+        "tool_calls": result.tool_calls_log,
+        "usage": result.usage,
+        "finish_reason": result.finish_reason
+    }

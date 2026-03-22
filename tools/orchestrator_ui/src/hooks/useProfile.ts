@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API_BASE, UserProfile } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 interface UseProfileState {
     profile: UserProfile | null;
@@ -28,7 +29,7 @@ export function useProfile(enabled = true): UseProfileState {
         setError(null);
 
         try {
-            const res = await fetch(`${API_BASE}/auth/profile`, {
+            const res = await fetchWithRetry(`${API_BASE}/auth/profile`, {
                 credentials: 'include',
             });
 

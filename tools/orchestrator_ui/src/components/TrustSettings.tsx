@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Settings, Shield, Activity, Lock } from 'lucide-react';
 import { TrustLevel, API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { TrustBadge } from './TrustBadge';
 import { useSecurityService } from '../hooks/useSecurityService';
 import { ThreatLevelIndicator } from './security/ThreatLevelIndicator';
@@ -59,7 +60,7 @@ export const TrustSettings: React.FC<TrustSettingsProps> = ({ agents: initialAge
             );
 
             // Persist to backend via policy config
-            const res = await fetch(`${API_BASE}/ops/policy`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/policy`, {
                 method: 'PUT',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },

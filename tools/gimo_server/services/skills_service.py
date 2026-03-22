@@ -276,7 +276,7 @@ class SkillsService:
     @classmethod
     def _slugify_id(cls, name: str) -> str:
         base = re.sub(r"[^a-zA-Z0-9_-]+", "-", name.strip()).strip("-").lower() or "skill"
-        return f"{base}-{int(time.time() * 1000)}-{os.urandom(2).hex()}"
+        return f"{base}-{int(time.time() * 1000)}-{os.urandom(4).hex()}"
 
     @classmethod
     def list_skills(cls, use_lock: bool = True) -> List[SkillDefinition]:

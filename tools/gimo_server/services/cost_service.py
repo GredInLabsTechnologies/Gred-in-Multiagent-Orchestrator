@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Optional
+from typing import Dict
 
 logger = logging.getLogger("orchestrator.services.cost")
 
@@ -92,12 +92,15 @@ class CostService:
         """Infers provider from model name."""
         m = str(model_name).lower()
         
-        # Check mapping for aliases (fuzzy match like get_pricing)
+        # Check mapping for aliases — prefer exact match, then substring
         canonical = m
-        for key, value in cls.MODEL_MAPPING.items():
-            if key == m or key in m:
-                canonical = value.lower()
-                break
+        if m in cls.MODEL_MAPPING:
+            canonical = cls.MODEL_MAPPING[m].lower()
+        else:
+            for key, value in cls.MODEL_MAPPING.items():
+                if key in m:
+                    canonical = value.lower()
+                    break
         
         # Provider inference logic
         if "claude" in canonical or "anthropic" in canonical:

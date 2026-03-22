@@ -63,30 +63,30 @@ export const AnalyticsView: React.FC = () => {
 
     const heroCards: HeroCard[] = [
         {
-            label: 'Costo Total',
+            label: 'Total Cost',
             value: `$${totalCost.toFixed(4)}`,
-            sub: 'USD acumulado',
+            sub: 'accumulated USD',
             icon: <DollarSign size={18} />,
             color: 'text-emerald-400',
         },
         {
             label: 'Workflows',
             value: String(runCount),
-            sub: 'ejecuciones totales',
+            sub: 'total executions',
             icon: <Zap size={18} />,
             color: 'text-blue-400',
         },
         {
-            label: 'Tasa de Error',
+            label: 'Error Rate',
             value: `${errorRate.toFixed(1)}%`,
-            sub: 'de runs fallidos',
+            sub: 'of failed runs',
             icon: <AlertTriangle size={18} />,
             color: errorRate > 20 ? 'text-red-400' : 'text-amber-400',
         },
         {
-            label: 'Ahorro',
+            label: 'Savings',
             value: `$${(data?.total_savings ?? 0).toFixed(4)}`,
-            sub: 'por eco-mode + cache',
+            sub: 'via eco-mode + cache',
             icon: <TrendingUp size={18} />,
             color: 'text-purple-400',
         },
@@ -178,7 +178,7 @@ export const AnalyticsView: React.FC = () => {
                                     })}
                                 </div>
                             ) : (
-                                <div className="text-sm text-white/30 py-8 text-center">Sin datos de costos</div>
+                                <div className="text-sm text-white/30 py-8 text-center">No cost data</div>
                             )}
                         </div>
                     )}
@@ -231,7 +231,7 @@ interface Column {
 
 function TableView({ items, columns }: { items: any[]; columns: Column[] }) {
     if (!items.length) {
-        return <div className="text-sm text-white/30 py-8 text-center">Sin datos</div>;
+        return <div className="text-sm text-white/30 py-8 text-center">No data</div>;
     }
 
     return (

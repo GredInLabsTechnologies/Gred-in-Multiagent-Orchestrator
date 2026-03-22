@@ -11,7 +11,6 @@ Results are cached for 30 s because hardware doesn't change in runtime.
 from __future__ import annotations
 
 import logging
-import os
 import platform
 import subprocess
 import time
@@ -73,7 +72,7 @@ def _detect_cpu() -> DeviceCapability:
     mem = psutil.virtual_memory()
     total_gb = mem.total / 1024**3
     free_gb = mem.available / 1024**3
-    physical_cores = psutil.cpu_count(logical=False) or 1
+    psutil.cpu_count(logical=False) or 1
 
     # RAM bandwidth estimation by DDR type (conservative defaults):
     # DDR4-3200: ~51 GB/s,  DDR5-4800: ~76 GB/s,  LPDDR5X-6400: ~102 GB/s

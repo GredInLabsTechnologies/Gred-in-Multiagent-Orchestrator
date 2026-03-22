@@ -54,15 +54,17 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --strict-markers -m 'not adversarial and not slow_integration'"
+addopts = "-v --strict-markers -m 'not adversarial and not slow_integration and not ollama' --timeout=30"
 markers = [
     "asyncio: marks legacy async tests executed via conftest async bridge",
-    "slow: marks tests as slow",
+    "slow: marks tests as slow (>1s real wait, excluded with -m 'not slow')",
     "integration: marks tests as integration tests",
     "security: marks tests as security tests",
     "adversarial: marks adversarial/pentest tests that need LLM running (excluded by default)",
     "slow_integration: marks slow integration tests excluded from default suite",
+    "ollama: tests requiring a running Ollama instance (deselect with '-m not ollama')",
 ]
+timeout_method = "thread"
 
 [tool.coverage.run]
 source = ["tools"]

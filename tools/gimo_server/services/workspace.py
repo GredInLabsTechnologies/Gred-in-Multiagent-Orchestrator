@@ -3,13 +3,11 @@ import hashlib
 import os
 import shutil
 import subprocess
-import importlib.util
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
-from datetime import datetime, timezone
+from typing import List, Optional, Tuple
 
 from ..config import (
-    BASE_DIR, REPO_ROOT_DIR, VITAMINIZE_PACKAGE, ALLOWED_EXTENSIONS, 
+    BASE_DIR, REPO_ROOT_DIR, ALLOWED_EXTENSIONS, 
     SEARCH_EXCLUDE_DIRS, AUDIT_LOG_PATH, MAX_BYTES, MAX_LINES, SUBPROCESS_TIMEOUT
 )
 from ..security import audit_log, redact_sensitive_data

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Terminal } from 'lucide-react';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 export const LiveLogs = () => {
     const [logs, setLogs] = useState<string[]>([]);
@@ -9,7 +10,7 @@ export const LiveLogs = () => {
     useEffect(() => {
         const fetchLogs = async () => {
             try {
-                const response = await fetch(`${API_BASE}/ui/audit?limit=50`, {
+                const response = await fetchWithRetry(`${API_BASE}/ui/audit?limit=50`, {
                     credentials: 'include'
                 });
                 const data = await response.json();

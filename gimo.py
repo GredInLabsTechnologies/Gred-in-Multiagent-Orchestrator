@@ -46,6 +46,7 @@ app = typer.Typer(
     name="gimo",
     help="GIMO: Generalized Intelligent Multi-agent Orchestrator",
     add_completion=True,
+    invoke_without_command=True,
 )
 console = Console()
 
@@ -329,6 +330,161 @@ def _maybe_merge_mainline(commit_hash: str, mainline: int | None) -> int | None:
     if len(tokens) > 2:
         return 1
     return mainline
+
+
+def _preflight_check(config: dict[str, Any]) -> tuple[bool, str]:
+    """Check server health and orchestrator configuration.
+
+    Returns (ok, error_message).
+    """
+    try:
+        status_code, _ = _api_request(config, "GET", "/health")
+        if status_code != 200:
+            return False, f"Server returned HTTP {status_code}. Is GIMO running?"
+    except Exception as exc:
+        return False, f"Cannot reach GIMO server: {exc}\nStart it with: GIMO_LAUNCHER.cmd"
+
+    try:
+        status_code, payload = _api_request(config, "GET", "/ops/providers")
+        if status_code != 200:
+            return False, "Cannot fetch provider config."
+        if isinstance(payload, dict):
+            orch_provider = payload.get("orchestrator_provider") or payload.get("active")
+            if not orch_provider:
+                return False, "No orchestrator provider configured.\nConfigure one in the UI: Settings > Providers"
+    except Exception as exc:
+        return False, f"Provider check failed: {exc}"
+
+    return True, ""
+
+
+def _interactive_chat(config: dict[str, Any]) -> None:
+    """Run the interactive agentic chat session."""
+    from gimo_cli_renderer import ChatRenderer
+
+    renderer = ChatRenderer(console)
+    workspace_root = str(_project_root())
+
+    # Preflight
+    ok, err = _preflight_check(config)
+    if not ok:
+        renderer.render_preflight_error(err, hint="Run 'gimo status' for diagnostics.")
+        raise typer.Exit(1)
+
+    # Fetch provider info for header
+    _, providers_payload = _api_request(config, "GET", "/ops/providers")
+    provider_id = "unknown"
+    model = "unknown"
+    if isinstance(providers_payload, dict):
+        provider_id = str(providers_payload.get("orchestrator_provider") or providers_payload.get("active") or "unknown")
+        model = str(providers_payload.get("orchestrator_model") or providers_payload.get("model_id") or "unknown")
+
+    # Create thread
+    with console.status("[dim]Creating session...[/dim]"):
+        status_code, thread_payload = _api_request(
+            config,
+            "POST",
+            "/ops/threads",
+            params={"workspace_root": workspace_root, "title": "CLI Agentic Session"},
+        )
+    if status_code != 201 or not isinstance(thread_payload, dict):
+        renderer.render_error(f"Failed to create thread ({status_code}): {thread_payload}")
+        raise typer.Exit(1)
+
+    thread_id = str(thread_payload.get("id") or "")
+    if not thread_id:
+        renderer.render_error("No thread id returned.")
+        raise typer.Exit(1)
+
+    # Session header
+    renderer.render_session_header(
+        provider_id=provider_id,
+        model=model,
+        workspace=workspace_root,
+        thread_id=thread_id,
+    )
+
+    # History file
+    history_path = _history_dir() / f"{thread_id}.log"
+    _ensure_project_dirs()
+
+    # Main loop
+    while True:
+        user_input = renderer.get_user_input()
+        if not user_input:
+            continue
+        if user_input.lower() in {"/exit", "/quit"}:
+            console.print("[dim]Session ended.[/dim]")
+            break
+
+        # Save to history
+        with history_path.open("a", encoding="utf-8") as f:
+            f.write(f"> {user_input}\n")
+
+        # Call chat endpoint
+        with renderer.render_thinking():
+            try:
+                base_url, timeout_seconds = _api_settings(config)
+                token = _resolve_token()
+                headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+                with httpx.Client(timeout=max(timeout_seconds, 300.0)) as client:
+                    response = client.post(
+                        f"{base_url}/ops/threads/{thread_id}/chat",
+                        params={"content": user_input},
+                        headers=headers,
+                    )
+
+                if response.status_code != 200:
+                    renderer.render_error(f"HTTP {response.status_code}: {response.text[:200]}")
+                    continue
+
+                payload = response.json()
+            except httpx.TimeoutException:
+                renderer.render_error("Request timed out. The LLM may need more time.")
+                continue
+            except Exception as exc:
+                renderer.render_error(f"Request failed: {exc}")
+                continue
+
+        # Render tool calls
+        tool_calls = payload.get("tool_calls", [])
+        if tool_calls:
+            renderer.render_tool_calls(tool_calls)
+
+        # Render response
+        chat_response = payload.get("response", "")
+        renderer.render_response(chat_response)
+
+        # Render footer
+        usage = payload.get("usage", {})
+        renderer.render_footer(usage)
+
+        # Save to history
+        with history_path.open("a", encoding="utf-8") as f:
+            f.write(f"{chat_response}\n---\n")
+
+
+@app.callback()
+def main(ctx: typer.Context) -> None:
+    """GIMO: Generalized Intelligent Multi-agent Orchestrator.
+
+    Run without a subcommand to start an interactive agentic chat session.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # No subcommand -> interactive chat
+    try:
+        config = _load_config()
+    except typer.Exit:
+        # Not initialized: auto-init
+        _ensure_project_dirs()
+        if not _config_path().exists():
+            _save_config(_default_config())
+        config = _load_config()
+
+    _interactive_chat(config)
 
 
 @app.command()
@@ -750,7 +906,7 @@ def diff(
     status_code, payload = _api_request(
         config,
         "GET",
-        "/diff",
+        "/ops/files/diff",
         params={"base": base, "head": head},
     )
     if status_code != 200:
@@ -953,6 +1109,163 @@ def watch(
 
     if json_output:
         _emit_output(events, json_output=True)
+
+
+@app.command()
+def chat(
+    workspace: str = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace root directory (defaults to current directory)"
+    ),
+):
+    """
+    Interactive chat mode with GIMO orchestrator.
+
+    This is the main interface for chatting with GIMO.
+    When invoked without subcommands, starts an interactive session.
+    """
+    from gimo_cli_renderer import GimoChatRenderer
+
+    workspace_root = workspace or str(_project_root())
+
+    # Preflight checks
+    renderer = GimoChatRenderer()
+
+    # 1. Check if backend is running
+    try:
+        config = _load_config()
+    except typer.Exit:
+        renderer.show_error(
+            "Project not initialized.\n"
+            "Run 'gimo init' first to set up the workspace."
+        )
+        raise typer.Exit(1)
+
+    try:
+        base_url, timeout = _api_settings(config)
+        token = _resolve_token()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+        with httpx.Client(timeout=timeout) as client:
+            health_resp = client.get(f"{base_url}/health", headers=headers)
+            if health_resp.status_code != 200:
+                raise Exception(f"Health check failed: HTTP {health_resp.status_code}")
+    except Exception as e:
+        renderer.show_error(
+            f"Backend server is not running.\n"
+            f"Error: {str(e)}\n\n"
+            f"Start the server with: GIMO_LAUNCHER.cmd"
+        )
+        raise typer.Exit(1)
+
+    # 2. Check if orchestrator is configured
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            providers_resp = client.get(f"{base_url}/ops/providers", headers=headers)
+            if providers_resp.status_code != 200:
+                raise Exception(f"HTTP {providers_resp.status_code}")
+
+            providers_data = providers_resp.json()
+            roles = providers_data.get("roles", {})
+            orch_binding = roles.get("orchestrator")
+
+            if not orch_binding:
+                renderer.show_error(
+                    "No orchestrator configured.\n\n"
+                    "Configure a provider:\n"
+                    "  1. Visit http://localhost:5173 (GIMO UI)\n"
+                    "  2. Go to Settings > Providers\n"
+                    "  3. Add a provider and assign it to 'orchestrator' role"
+                )
+                raise typer.Exit(1)
+
+            orchestrator_info = f"{orch_binding.get('model', 'unknown')} ({orch_binding.get('provider_id', 'unknown')})"
+    except Exception as e:
+        renderer.show_error(f"Failed to check orchestrator config: {str(e)}")
+        raise typer.Exit(1)
+
+    # 3. Create or get thread
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            # List existing threads for this workspace
+            threads_resp = client.get(
+                f"{base_url}/ops/threads",
+                params={"workspace_root": workspace_root},
+                headers=headers
+            )
+
+            if threads_resp.status_code == 200:
+                threads = threads_resp.json()
+                # Use most recent active thread
+                active_threads = [t for t in threads if t.get("status") == "active"]
+                if active_threads:
+                    thread = active_threads[0]
+                    thread_id = thread["id"]
+                else:
+                    # Create new thread
+                    create_resp = client.post(
+                        f"{base_url}/ops/threads",
+                        params={"workspace_root": workspace_root, "title": "CLI Chat Session"},
+                        headers=headers
+                    )
+                    create_resp.raise_for_status()
+                    thread = create_resp.json()
+                    thread_id = thread["id"]
+            else:
+                raise Exception(f"Failed to list threads: HTTP {threads_resp.status_code}")
+    except Exception as e:
+        renderer.show_error(f"Failed to create chat thread: {str(e)}")
+        raise typer.Exit(1)
+
+    # Show session header
+    renderer.show_header(orchestrator_info, workspace_root, thread_id)
+
+    # Interactive loop
+    while True:
+        try:
+            user_input = renderer.show_user_prompt()
+
+            if not user_input.strip():
+                continue
+
+            # Exit commands
+            if user_input.strip().lower() in {"/exit", "/quit", "exit", "quit"}:
+                renderer.show_info("Goodbye!")
+                break
+
+            # Send message to backend
+            with renderer.show_thinking_spinner():
+                with httpx.Client(timeout=120.0) as client:  # Longer timeout for chat
+                    chat_resp = client.post(
+                        f"{base_url}/ops/threads/{thread_id}/chat",
+                        params={"content": user_input},
+                        headers=headers
+                    )
+
+                    if chat_resp.status_code != 200:
+                        renderer.show_error(f"Chat request failed: HTTP {chat_resp.status_code}\n{chat_resp.text}")
+                        continue
+
+                    response_data = chat_resp.json()
+
+            # Render response
+            from gimo_cli_renderer import render_chat_session
+            render_chat_session(
+                orchestrator_info=orchestrator_info,
+                workspace=workspace_root,
+                thread_id=thread_id,
+                user_message=user_input,
+                response_data=response_data
+            )
+
+        except KeyboardInterrupt:
+            console.print("\n[dim]Use /exit to quit[/dim]")
+            continue
+        except Exception as e:
+            renderer.show_error(f"Error: {str(e)}")
+            continue
 
 
 if __name__ == "__main__":

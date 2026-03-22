@@ -134,7 +134,7 @@ export const GraphToolbar = memo(({
                         <button
                             onClick={onExitEdit}
                             className="flex items-center justify-center w-8 h-8 hover:bg-accent-alert/10 text-text-secondary hover:text-accent-alert rounded-xl transition-colors"
-                            title="Cancelar edicion"
+                            title="Cancel edit"
                         >
                             <X size={14} />
                         </button>

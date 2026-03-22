@@ -402,6 +402,7 @@ async def test_graph_engine_node_retries_eventually_succeeds():
     assert state.data["ok"] is True
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_graph_engine_node_timeout_fails():
     nodes = [WorkflowNode(id="A", type="transform", timeout=1)]
@@ -419,6 +420,7 @@ async def test_graph_engine_node_timeout_fails():
     assert "timed out" in state.data["step_logs"][-1]["output"]["error"].lower()
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_graph_engine_workflow_timeout_exceeded():
     nodes = [
@@ -742,7 +744,7 @@ async def test_project_confidence_handles_failed_llm_gracefully():
 @pytest.mark.asyncio
 async def test_llm_call_execution_unit():
     """Directly test _execute_node for LLM calls."""
-    with patch("tools.gimo_server.services.graph_engine.ProviderService") as MockProvider:
+    with patch("tools.gimo_server.services.graph.engine.ProviderService") as MockProvider:
         mock_instance = MockProvider.return_value
         mock_instance.generate = AsyncMock(return_value={
             "provider": "mock_provider", "model": "gpt-4", "content": "Hello", "tokens_used": 10, "cost_usd": 0.01

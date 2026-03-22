@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Plan, PlanCreateRequest, API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { useSocketSubscription } from './useRealtimeChannel';
 
 export function usePlanEngine() {
@@ -18,7 +19,7 @@ export function usePlanEngine() {
         setLoading(true);
         setError(null);
         try {
-            const response = await fetch(`${API_BASE}/ui/plan/create`, {
+            const response = await fetchWithRetry(`${API_BASE}/ui/plan/create`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -42,7 +43,7 @@ export function usePlanEngine() {
         setLoading(true);
         setError(null);
         try {
-            const response = await fetch(`${API_BASE}/ops/drafts/${planId}`, {
+            const response = await fetchWithRetry(`${API_BASE}/ops/drafts/${planId}`, {
                 credentials: 'include',
             });
             if (!response.ok) throw new Error('Failed to fetch plan');
@@ -61,7 +62,7 @@ export function usePlanEngine() {
         setLoading(true);
         setError(null);
         try {
-            const response = await fetch(`${API_BASE}/ops/drafts/${planId}/approve`, {
+            const response = await fetchWithRetry(`${API_BASE}/ops/drafts/${planId}/approve`, {
                 method: 'POST',
                 credentials: 'include',
             });
@@ -80,7 +81,7 @@ export function usePlanEngine() {
         setLoading(true);
         setError(null);
         try {
-            const response = await fetch(`${API_BASE}/ops/drafts/${planId}`, {
+            const response = await fetchWithRetry(`${API_BASE}/ops/drafts/${planId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',

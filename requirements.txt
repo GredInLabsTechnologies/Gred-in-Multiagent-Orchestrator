@@ -16,7 +16,6 @@ pydantic==2.11.2
 
 # HTTP Client
 requests==2.32.4
-anthropic==0.79.0
 python-dotenv==1.2.1
 rich==14.3.2
 typer>=0.12.5
@@ -37,9 +36,13 @@ urllib3>=2.6.3  # Security fixes CVE-2025-66418, CVE-2025-66471, CVE-2026-21441
 # File Lock Utilities
 filelock>=3.20.3  # Security fixes CVE-2025-68146, CVE-2026-22701
 
+# Test Performance
+pytest-timeout>=2.3.1     # Global per-test timeout to catch hangs
+pytest-xdist>=3.5.0       # Parallel test execution with -n auto
+
 # Hardware Monitoring
 psutil>=6.0.0  # CPU/RAM monitoring for intelligent model routing
-pynvml>=11.5.0 # NVIDIA GPU memory monitoring
+nvidia-ml-py>=12.0.0 # NVIDIA GPU memory monitoring (replaces deprecated pynvml)
 
 # ASN.1 Support (dependency of cryptography)
 pyasn1>=0.6.2  # Security fix CVE-2026-23490

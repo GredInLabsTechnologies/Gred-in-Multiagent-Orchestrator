@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 
 from tools.gimo_server.security import audit_log
 
-from .storage_service import StorageService
 
 
 @dataclass

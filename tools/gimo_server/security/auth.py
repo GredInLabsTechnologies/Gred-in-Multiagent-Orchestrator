@@ -184,7 +184,9 @@ def verify_token(
     if credentials and credentials.credentials:
         token = credentials.credentials.strip()
         if token and len(token) >= 16 and token in TOKENS:
-            return AuthContext(token=token, role=_resolve_role(token))
+            ctx = AuthContext(token=token, role=_resolve_role(token))
+            request.state.auth_role = ctx.role
+            return ctx
         if token:
             _report_auth_failure(request, token)
             raise HTTPException(status_code=401, detail=INVALID_TOKEN_ERROR)
@@ -194,6 +196,7 @@ def verify_token(
     if cookie_value:
         session = session_store.validate(cookie_value)
         if session:
+            request.state.auth_role = session.role
             return AuthContext(token="session", role=session.role)
         # Invalid/expired cookie — don't escalate threat, just reject
         raise HTTPException(status_code=401, detail="Session expired")

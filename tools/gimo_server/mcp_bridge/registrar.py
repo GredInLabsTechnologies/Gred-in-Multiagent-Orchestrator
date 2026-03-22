@@ -84,7 +84,7 @@ async def {name}({signature_str}) -> str:
                 "proxy_to_api": proxy_to_api,
                 "__tool_def": t_def
             }
-            exec(func_code, local_scope)
+            exec(func_code, local_scope)  # nosec B102 — generated from trusted OpenAPI spec, not user input
             
             # The function is now in local_scope[name]
             generated_func = local_scope[name]

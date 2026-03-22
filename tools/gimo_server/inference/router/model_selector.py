@@ -49,7 +49,7 @@ class ModelSelector:
         fits_fn: Optional[Callable[[ModelSpec, List[DeviceCapability]], bool]] = None,
     ) -> None:
         self._is_loaded = is_loaded_fn or (lambda mid, dev: False)
-        self._fits = fits_fn or (lambda m, devs: True)
+        self._fits = fits_fn or (lambda m, _devs: True)
 
     def select(
         self,

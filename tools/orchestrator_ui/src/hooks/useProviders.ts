@@ -7,6 +7,7 @@ import {
     ProviderValidateResult,
     SaveActiveProviderPayload,
 } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { useProviderAuth } from './useProviderAuth';
 import { useProviderCatalog } from './useProviderCatalog';
 
@@ -55,7 +56,7 @@ export const useProviders = () => {
     const loadProviders = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE}/ops/provider`, getRequestInit());
+            const res = await fetchWithRetry(`${API_BASE}/ops/provider`, getRequestInit());
             if (res.ok) {
                 const data = await res.json();
                 setProviders(mapOpsConfigToProviders(data));
@@ -72,7 +73,7 @@ export const useProviders = () => {
                     }
                     : null;
                 setRoles(data?.roles || fallbackRoles);
-                const capsRes = await fetch(`${API_BASE}/ops/provider/capabilities`, getRequestInit());
+                const capsRes = await fetchWithRetry(`${API_BASE}/ops/provider/capabilities`, getRequestInit());
                 if (capsRes.ok) {
                     const caps = await capsRes.json();
                     const normalizedCaps = Object.fromEntries(
@@ -85,7 +86,7 @@ export const useProviders = () => {
                 }
             } else {
                 // legacy bridge fallback
-                const legacyRes = await fetch(`${API_BASE}/ui/providers`, getRequestInit());
+                const legacyRes = await fetchWithRetry(`${API_BASE}/ui/providers`, getRequestInit());
                 if (legacyRes.ok) {
                     const legacyData = await legacyRes.json();
                     setProviders(Array.isArray(legacyData) ? legacyData : (legacyData.providers ?? []));
@@ -94,7 +95,7 @@ export const useProviders = () => {
                 setRoles(null);
             }
 
-            const nodeRes = await fetch(`${API_BASE}/ui/nodes`, getRequestInit());
+            const nodeRes = await fetchWithRetry(`${API_BASE}/ui/nodes`, getRequestInit());
             if (nodeRes.ok) {
                 const nodeData = await nodeRes.json();
                 setNodes(nodeData);
@@ -120,7 +121,7 @@ export const useProviders = () => {
     const { startCodexDeviceLogin, startClaudeLogin, fetchCliAuthStatus, cliLogout } = useProviderAuth();
 
     const validateProvider = useCallback(async (providerType: string, payload: ProviderValidatePayload) => {
-        const res = await fetch(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/validate`, {
+        const res = await fetchWithRetry(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/validate`, {
             method: 'POST',
             ...getRequestInit(true),
             body: JSON.stringify(payload || {}),
@@ -132,7 +133,7 @@ export const useProviders = () => {
     }, [loadProviders]);
 
     const saveActiveProvider = useCallback(async (payload: SaveActiveProviderPayload) => {
-        const currentRes = await fetch(`${API_BASE}/ops/provider`, getRequestInit());
+        const currentRes = await fetchWithRetry(`${API_BASE}/ops/provider`, getRequestInit());
         if (!currentRes.ok) throw new Error('Failed to read provider config');
         const current = await currentRes.json();
 
@@ -205,7 +206,7 @@ export const useProviders = () => {
             },
         };
 
-        const res = await fetch(`${API_BASE}/ops/provider`, {
+        const res = await fetchWithRetry(`${API_BASE}/ops/provider`, {
             method: 'PUT',
             ...getRequestInit(true),
             body: JSON.stringify(next),
@@ -216,7 +217,7 @@ export const useProviders = () => {
     }, [loadProviders, providerCapabilities]);
 
     const addProvider = async (config: any) => {
-        const currentRes = await fetch(`${API_BASE}/ops/provider`, getRequestInit());
+        const currentRes = await fetchWithRetry(`${API_BASE}/ops/provider`, getRequestInit());
         if (!currentRes.ok) throw new Error("Failed to read provider config");
         const current = await currentRes.json();
 
@@ -240,7 +241,7 @@ export const useProviders = () => {
             active: current.active || providerId,
         };
 
-        const res = await fetch(`${API_BASE}/ops/provider`, {
+        const res = await fetchWithRetry(`${API_BASE}/ops/provider`, {
             method: "PUT",
             ...getRequestInit(true),
             body: JSON.stringify(next)
@@ -250,7 +251,7 @@ export const useProviders = () => {
     };
 
     const removeProvider = async (id: string) => {
-        const currentRes = await fetch(`${API_BASE}/ops/provider`, getRequestInit());
+        const currentRes = await fetchWithRetry(`${API_BASE}/ops/provider`, getRequestInit());
         if (!currentRes.ok) throw new Error("Failed to read provider config");
         const current = await currentRes.json();
         const nextProviders = { ...(current.providers || {}) };
@@ -264,7 +265,7 @@ export const useProviders = () => {
             active: current.active === id ? nextKeys[0] : current.active,
         };
 
-        const res = await fetch(`${API_BASE}/ops/provider`, {
+        const res = await fetchWithRetry(`${API_BASE}/ops/provider`, {
             method: "PUT",
             ...getRequestInit(true),
             body: JSON.stringify(next),
@@ -288,7 +289,7 @@ export const useProviders = () => {
         }
 
         try {
-            const res = await fetch(`${API_BASE}/ops/connectors/${encodeURIComponent(provider.type)}/validate`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/connectors/${encodeURIComponent(provider.type)}/validate`, {
                 method: 'POST',
                 ...getRequestInit(true),
                 body: JSON.stringify(payload),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
-from typing import Any, Dict, Literal, Optional, Protocol, Union
+from typing import Any, Dict, Literal, Optional, Protocol
 from pydantic import BaseModel, Field
 
 class StageInput(BaseModel):

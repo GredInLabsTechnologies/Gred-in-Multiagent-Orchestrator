@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 
 class ProviderAdapter(ABC):
@@ -15,6 +15,29 @@ class ProviderAdapter(ABC):
         - "content": str (the generated text)
         - "usage": dict (optional tokens usage info)
         """
+
+    async def chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.0,
+    ) -> Dict[str, Any]:
+        """Call chat completions with tool_calls support.
+
+        Args:
+            messages: List of message dicts with "role" and "content"
+            tools: Optional list of tool definitions in OpenAI format
+            temperature: Sampling temperature
+
+        Returns:
+            {
+                "content": str | None,
+                "tool_calls": List[{"id": str, "function": {"name": str, "arguments": str}}],
+                "usage": dict,
+                "finish_reason": str,
+            }
+        """
+        raise NotImplementedError("chat_with_tools not implemented for this adapter")
 
     @abstractmethod
     async def health_check(self) -> bool:

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Cpu } from 'lucide-react';
+import { Zap, Cpu, WifiOff } from 'lucide-react';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import type { ProviderHealth } from '../hooks/useProviderHealth';
 
 interface HardwareState {
@@ -19,6 +20,7 @@ interface StatusBarProps {
     providerHealth: ProviderHealth;
     version?: string;
     serviceStatus?: string;
+    networkConnected?: boolean;
     onNavigateToSettings: () => void;
     onNavigateToMastery: () => void;
 }
@@ -27,6 +29,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
     providerHealth,
     version,
     serviceStatus,
+    networkConnected = true,
     onNavigateToSettings,
     onNavigateToMastery,
 }) => {
@@ -36,9 +39,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         let active = true;
         const poll = async () => {
             try {
-                const res = await fetch(`${API_BASE}/ops/mastery/hardware`, { credentials: 'include' });
+                const res = await fetchWithRetry(`${API_BASE}/ops/mastery/hardware`, { credentials: 'include' });
                 if (res.ok && active) setHw(await res.json());
-            } catch { /* ignore */ }
+            } catch (err) { console.warn('Hardware poll failed:', err); }
         };
         poll();
         const id = setInterval(poll, 15_000);
@@ -111,6 +114,12 @@ export const StatusBar: React.FC<StatusBarProps> = ({
                         <span>{hw.cpu_percent.toFixed(0)}%</span>
                         <span className="text-text-tertiary/50">|</span>
                         <span>{hw.ram_percent.toFixed(0)}%</span>
+                    </span>
+                )}
+                {!networkConnected && (
+                    <span className="flex items-center gap-1 text-red-400" title="Backend unreachable">
+                        <WifiOff size={10} />
+                        <span>offline</span>
                     </span>
                 )}
                 <span className="flex items-center gap-1">

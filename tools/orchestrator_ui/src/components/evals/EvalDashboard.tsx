@@ -54,8 +54,8 @@ export const EvalDashboard: React.FC = () => {
             <div className="p-6 border-b border-surface-2 shrink-0">
                 <div className="flex items-center justify-between mb-4">
                     <div>
-                        <h1 className="text-2xl font-bold text-text-primary">Evaluaciones</h1>
-                        <p className="text-text-secondary mt-1">Valida flujos con casos de prueba antes de desplegar cambios.</p>
+                        <h1 className="text-2xl font-bold text-text-primary">Evaluations</h1>
+                        <p className="text-text-secondary mt-1">Validate flows with test cases before deploying changes.</p>
                     </div>
                     <button
                         onClick={handleCreateDataset}
@@ -87,7 +87,7 @@ export const EvalDashboard: React.FC = () => {
                         )}
 
                         {!isLoading && safeDatasets.length === 0 && (
-                            <div className="text-center text-text-secondary py-8 text-sm">Sin datasets</div>
+                            <div className="text-center text-text-secondary py-8 text-sm">No datasets</div>
                         )}
 
                         {!isLoading && safeDatasets.map((d: EvalDataset) => (
@@ -125,7 +125,7 @@ export const EvalDashboard: React.FC = () => {
                                 <tr className="text-[10px] uppercase text-text-secondary font-bold border-b border-border-primary">
                                     <th className="pb-3 pl-4">Estado</th>
                                     <th className="pb-3">Dataset</th>
-                                    <th className="pb-3">Tasa de éxito</th>
+                                    <th className="pb-3">Success rate</th>
                                     <th className="pb-3">Fecha</th>
                                     <th className="pb-3 pr-4 text-right">Acción</th>
                                 </tr>
@@ -165,7 +165,7 @@ export const EvalDashboard: React.FC = () => {
                                 ))}
                                 {!isLoading && safeRuns.length === 0 && (
                                     <tr>
-                                        <td colSpan={5} className="py-8 text-center text-text-secondary text-sm">Sin ejecuciones registradas</td>
+                                        <td colSpan={5} className="py-8 text-center text-text-secondary text-sm">No recorded runs</td>
                                     </tr>
                                 )}
                             </tbody>

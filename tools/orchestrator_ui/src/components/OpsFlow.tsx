@@ -110,10 +110,10 @@ export const OpsFlow: React.FC<OpsFlowProps> = ({ agentId }) => {
                 <div className="flex items-center gap-3">
                     <h3 className="text-[10px] uppercase tracking-widest font-bold text-text-secondary flex items-center gap-2">
                         <Activity size={12} />
-                        Histórico de Acciones
+                        Action History
                     </h3>
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-3 text-text-tertiary border border-white/5">
-                        {events.length} eventos
+                        {events.length} events
                     </span>
                 </div>
                 <button
@@ -196,7 +196,7 @@ export const OpsFlow: React.FC<OpsFlowProps> = ({ agentId }) => {
                 </div>
                 <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-[9px] font-bold text-emerald-500/80 uppercase">Vivo</span>
+                    <span className="text-[9px] font-bold text-emerald-500/80 uppercase">Live</span>
                 </div>
             </div>
         </section>

@@ -5,6 +5,7 @@ import {
     Paintbrush, Shield, GraduationCap, Minus, BarChart3, History, Globe, Sparkles
 } from 'lucide-react';
 import { API_BASE, Skill, SkillExecuteResponse, AgentMood, SkillAnalytics } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { useToast } from './Toast';
 import { SkillAutoGenModal } from './SkillAutoGenModal';
 
@@ -62,7 +63,7 @@ const SkillCard: React.FC<SkillCardProps> = ({
 
     useEffect(() => {
         if (!isMarketplace) {
-            fetch(`${API_BASE}/ops/skills/${skill.id}/analytics`, { credentials: 'include' })
+            fetchWithRetry(`${API_BASE}/ops/skills/${skill.id}/analytics`, { credentials: 'include' })
                 .then(res => res.json())
                 .then(setAnalytics)
                 .catch(() => { });
@@ -201,7 +202,7 @@ export const SkillsContent: React.FC<SkillsContentProps> = ({ compact }) => {
     const fetchSkills = useCallback(async () => {
         try {
             const endpoint = tab === 'my-skills' ? '/ops/skills' : '/ops/skills/marketplace';
-            const res = await fetch(`${API_BASE}${endpoint}`, { credentials: 'include' });
+            const res = await fetchWithRetry(`${API_BASE}${endpoint}`, { credentials: 'include' });
             if (res.ok) {
                 const data = await res.json();
                 if (tab === 'my-skills') setSkills(data);
@@ -219,7 +220,7 @@ export const SkillsContent: React.FC<SkillsContentProps> = ({ compact }) => {
     const handleExecute = async (skillId: string, replaceGraph: boolean) => {
         setExecutingId(skillId);
         try {
-            const res = await fetch(`${API_BASE}/ops/skills/${skillId}/execute`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/skills/${skillId}/execute`, {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
@@ -240,7 +241,7 @@ export const SkillsContent: React.FC<SkillsContentProps> = ({ compact }) => {
         if (!globalThis.confirm('¿Seguro de que quieres eliminar esta skill?')) return;
         setDeletingId(skillId);
         try {
-            const res = await fetch(`${API_BASE}/ops/skills/${skillId}`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/skills/${skillId}`, {
                 method: 'DELETE',
                 credentials: 'include',
             });
@@ -257,7 +258,7 @@ export const SkillsContent: React.FC<SkillsContentProps> = ({ compact }) => {
 
     const handlePublish = async (skillId: string) => {
         try {
-            const res = await fetch(`${API_BASE}/ops/skills/${skillId}/publish`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/skills/${skillId}/publish`, {
                 method: 'POST',
                 credentials: 'include',
             });
@@ -272,7 +273,7 @@ export const SkillsContent: React.FC<SkillsContentProps> = ({ compact }) => {
 
     const handleInstall = async (skill: Skill) => {
         try {
-            const res = await fetch(`${API_BASE}/ops/skills/marketplace/${skill.id}/install`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/skills/marketplace/${skill.id}/install`, {
                 method: 'POST',
                 credentials: 'include',
             });

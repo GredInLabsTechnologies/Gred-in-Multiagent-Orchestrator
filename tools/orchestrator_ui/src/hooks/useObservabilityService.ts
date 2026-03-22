@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { API_BASE, Trace, ObservabilityMetrics } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 interface UseObservabilityService {
     loading: boolean;
@@ -17,7 +18,7 @@ export const useObservabilityService = (): UseObservabilityService => {
         setLoading(true);
         setError(null);
         try {
-            const response = await fetch(`${API_BASE}/ops/observability/metrics`, {
+            const response = await fetchWithRetry(`${API_BASE}/ops/observability/metrics`, {
                 credentials: 'include',
             });
             if (!response.ok) throw new Error('Failed to fetch metrics');
@@ -34,7 +35,7 @@ export const useObservabilityService = (): UseObservabilityService => {
         setLoading(true);
         setError(null);
         try {
-            const response = await fetch(`${API_BASE}/ops/observability/traces?limit=${limit}&offset=${offset}`, {
+            const response = await fetchWithRetry(`${API_BASE}/ops/observability/traces?limit=${limit}&offset=${offset}`, {
                 credentials: 'include',
             });
             if (!response.ok) throw new Error('Failed to fetch traces');
@@ -58,7 +59,7 @@ export const useObservabilityService = (): UseObservabilityService => {
         setLoading(true);
         setError(null);
         try {
-            const response = await fetch(`${API_BASE}/ops/observability/traces/${traceId}`, {
+            const response = await fetchWithRetry(`${API_BASE}/ops/observability/traces/${traceId}`, {
                 credentials: 'include',
             });
             if (!response.ok) throw new Error('Failed to fetch trace details');

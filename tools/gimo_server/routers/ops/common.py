@@ -1,9 +1,27 @@
 from __future__ import annotations
 import hashlib
-from typing import Literal, Dict, Any
-from fastapi import HTTPException
+from typing import Literal
+from fastapi import Depends, HTTPException
+from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.graph_engine import GraphEngine
+
+
+def require_read(auth: AuthContext = Depends(verify_token)) -> AuthContext:
+    """Dependency: any authenticated user can read."""
+    return auth
+
+
+def require_operator(auth: AuthContext = Depends(verify_token)) -> AuthContext:
+    """Dependency: operator or admin required."""
+    _require_role(auth, "operator")
+    return auth
+
+
+def require_admin(auth: AuthContext = Depends(verify_token)) -> AuthContext:
+    """Dependency: admin required."""
+    _require_role(auth, "admin")
+    return auth
 
 # Shared state for workflow engines
 _WORKFLOW_ENGINES: dict[str, GraphEngine] = {}

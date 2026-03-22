@@ -15,7 +15,7 @@ router = APIRouter()
 async def get_provider(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     cfg = ProviderService.get_public_config()
@@ -28,7 +28,7 @@ async def get_provider(
 async def get_provider_capabilities(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     matrix = ProviderService.get_capability_matrix()
@@ -41,7 +41,7 @@ async def set_provider(
     request: Request,
     config: ProviderConfig,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     cfg = ProviderService.set_config(config)
@@ -53,7 +53,7 @@ async def set_provider(
 async def provider_recommendation(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     from tools.gimo_server.services.recommendation_service import RecommendationService
@@ -67,7 +67,7 @@ async def provider_recommendation(
 async def list_connectors(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     data = ProviderService.list_connectors()
@@ -80,7 +80,7 @@ async def connector_health(
     request: Request,
     connector_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     provider_id: str | None = None,
 ):
     _require_role(auth, "operator")
@@ -96,7 +96,7 @@ async def connector_health(
 async def get_config(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
@@ -108,7 +108,7 @@ async def set_config(
     request: Request,
     config: OpsConfig,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     OpsService.set_gics(getattr(request.app.state, "gics", None))

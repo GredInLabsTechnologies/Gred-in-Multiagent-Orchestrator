@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 export interface RepoInfo {
     name: string;
@@ -16,7 +17,7 @@ export const useRepoService = (_token?: string) => {
         try {
             const headers: HeadersInit = {};
 
-            const res = await fetch(`${API_BASE}/ui/repos`, { headers, credentials: 'include' });
+            const res = await fetchWithRetry(`${API_BASE}/ops/repos`, { headers, credentials: 'include' });
             if (!res.ok) throw new Error('Failed to fetch repositories');
             const data = await res.json();
             setRepos(data.repos || []);
@@ -32,8 +33,8 @@ export const useRepoService = (_token?: string) => {
         try {
             const headers: HeadersInit = {};
 
-            const MODERN_BOOTSTRAP_ENDPOINT = `${API_BASE}/ui/repos/vitaminize?path=${encodeURIComponent(path)}`;
-            const res = await fetch(MODERN_BOOTSTRAP_ENDPOINT, {
+            const MODERN_BOOTSTRAP_ENDPOINT = `${API_BASE}/ops/repos/vitaminize?path=${encodeURIComponent(path)}`;
+            const res = await fetchWithRetry(MODERN_BOOTSTRAP_ENDPOINT, {
                 method: 'POST',
                 headers,
                 credentials: 'include',
@@ -54,7 +55,7 @@ export const useRepoService = (_token?: string) => {
         try {
             const headers: HeadersInit = {};
 
-            const res = await fetch(`${API_BASE}/ui/repos/select?path=${encodeURIComponent(path)}`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/repos/select?path=${encodeURIComponent(path)}`, {
                 method: 'POST',
                 headers,
                 credentials: 'include',
@@ -73,7 +74,7 @@ export const useRepoService = (_token?: string) => {
         setIsLoading(true);
         try {
             const headers: HeadersInit = {};
-            const res = await fetch(`${API_BASE}/ui/repos/register?path=${encodeURIComponent(path)}`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/repos/register?path=${encodeURIComponent(path)}`, {
                 method: 'POST',
                 headers,
                 credentials: 'include',

@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 export const useAuditLog = (token?: string, limit: number = 200) => {
     const [logs, setLogs] = useState<string[]>([]);
@@ -11,7 +12,7 @@ export const useAuditLog = (token?: string, limit: number = 200) => {
         try {
             const requestInit: RequestInit = { credentials: 'include' };
 
-            const res = await fetch(`${API_BASE}/ui/audit?limit=${limit}`, requestInit);
+            const res = await fetchWithRetry(`${API_BASE}/ui/audit?limit=${limit}`, requestInit);
             if (!res.ok) throw new Error('Failed to fetch audit logs');
             const data = await res.json();
             setLogs(data.lines || []);

@@ -40,9 +40,9 @@ _ACTIONS_SAFE_PUBLIC_ENDPOINTS: tuple[tuple[str, str], ...] = (
     ("post", "/ops/drafts/{draft_id}/approve"),
     ("get", "/ops/runs/{run_id}"),
     ("get", "/ops/runs/{run_id}/preview"),
-    ("get", "/ui/repos"),
-    ("get", "/ui/repos/active"),
-    ("post", "/ui/repos/select"),
+    ("get", "/ops/repos"),
+    ("get", "/ops/repos/active"),
+    ("post", "/ops/repos/select"),
 )
 
 @router.get("/openapi.json", responses={404: {"description": "Not found"}})

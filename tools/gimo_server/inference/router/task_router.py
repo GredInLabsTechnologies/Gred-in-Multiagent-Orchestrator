@@ -15,10 +15,8 @@ Decision factors (in priority order):
 from __future__ import annotations
 
 import logging
-import time
-from dataclasses import dataclass, field
-from statistics import mean
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 from ..contracts import (
     DeviceCapability,

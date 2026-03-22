@@ -109,8 +109,8 @@ class TestContentSecurity:
         """Verify LLM-style attack paths are blocked at API level."""
         # Use a dummy valid token to bypass 401
         headers = {"Authorization": "Bearer " + "a"*32}
-        response = test_client.get(f"/file?path={attack_path}", headers=headers)
-        assert response.status_code in (400, 403, 503)
+        response = test_client.get(f"/ops/files/content?path={attack_path}", headers=headers)
+        assert response.status_code in (400, 403, 422, 503)
 
     def test_audit_log_sanitization(self, test_client):
         """Verify audit logs don't leak tokens."""

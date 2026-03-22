@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, Plus, ChevronLeft, GitFork, Archive, MoreVertical, Send } from 'lucide-react';
 import { TurnItem, GimoTurn, GimoItem } from './TurnItem';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { useToast } from './Toast';
 
 interface GimoThread {
@@ -56,7 +57,7 @@ export const ThreadView: React.FC = () => {
 
     const fetchThreads = async () => {
         try {
-            const resp = await fetch(`${API_BASE}/ops/threads`, { credentials: 'include' });
+            const resp = await fetchWithRetry(`${API_BASE}/ops/threads`, { credentials: 'include' });
             const data = await resp.json();
             setThreads(data);
             if (data.length > 0 && !selectedThread) {
@@ -72,7 +73,7 @@ export const ThreadView: React.FC = () => {
 
     const fetchThreadDetail = async (id: string) => {
         try {
-            const resp = await fetch(`${API_BASE}/ops/threads/${id}`, { credentials: 'include' });
+            const resp = await fetchWithRetry(`${API_BASE}/ops/threads/${id}`, { credentials: 'include' });
             const data = await resp.json();
             setSelectedThread(data);
         } catch (err) {
@@ -83,7 +84,7 @@ export const ThreadView: React.FC = () => {
 
     const createNewThread = async () => {
         try {
-            const resp = await fetch(`${API_BASE}/ops/threads?workspace_root=.`, { method: 'POST', credentials: 'include' });
+            const resp = await fetchWithRetry(`${API_BASE}/ops/threads?workspace_root=.`, { method: 'POST', credentials: 'include' });
             const data = await resp.json();
             setThreads([data, ...threads]);
             setSelectedThread(data);
@@ -111,7 +112,7 @@ export const ThreadView: React.FC = () => {
             setSelectedThread(prev => prev ? { ...prev, turns: [...prev.turns, userTurn] } : prev);
 
             // Generate Draft directly from the Chat
-            const generateResponse = await fetch(`${API_BASE}/ops/generate?prompt=${encodeURIComponent(text)}`, {
+            const generateResponse = await fetchWithRetry(`${API_BASE}/ops/generate?prompt=${encodeURIComponent(text)}`, {
                 method: 'POST',
                 credentials: 'include'
             });
@@ -150,7 +151,7 @@ export const ThreadView: React.FC = () => {
 
     const handleApproveDraft = async (draftId: string, turnId: string) => {
         try {
-            const res = await fetch(`${API_BASE}/ops/drafts/${draftId}/approve`, { method: 'POST', credentials: 'include' });
+            const res = await fetchWithRetry(`${API_BASE}/ops/drafts/${draftId}/approve`, { method: 'POST', credentials: 'include' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const approvalData: OpsApproveResponse = await res.json();
 
@@ -161,7 +162,7 @@ export const ThreadView: React.FC = () => {
             });
 
             if (approvalData.approved?.id && !approvalData.run?.id) {
-                await fetch(`${API_BASE}/ops/runs`, {
+                await fetchWithRetry(`${API_BASE}/ops/runs`, {
                     method: 'POST',
                     credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
@@ -176,7 +177,7 @@ export const ThreadView: React.FC = () => {
 
     const handleRejectDraft = async (draftId: string, turnId: string) => {
         try {
-            const res = await fetch(`${API_BASE}/ops/drafts/${draftId}/reject`, { method: 'POST', credentials: 'include' });
+            const res = await fetchWithRetry(`${API_BASE}/ops/drafts/${draftId}/reject`, { method: 'POST', credentials: 'include' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             setPendingDrafts(prev => { const updated = { ...prev }; delete updated[draftId]; return updated; });
             setSelectedThread(prev => {

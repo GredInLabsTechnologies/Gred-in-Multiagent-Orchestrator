@@ -259,7 +259,7 @@ class ProviderConnectorService:
         dep_id = str(dependency_id or "").strip().lower()
         if dep_id not in cls._DEPENDENCIES:
             raise ValueError(f"Unknown dependency: {dependency_id}")
-        job_id = hashlib.sha1(f"{dep_id}".encode("utf-8")).hexdigest()[:12]
+        job_id = hashlib.sha1(f"{dep_id}".encode("utf-8"), usedforsecurity=False).hexdigest()[:12]  # nosec B324
         job = cls._set_dependency_job(
             dependency_id=dep_id,
             job_id=job_id,

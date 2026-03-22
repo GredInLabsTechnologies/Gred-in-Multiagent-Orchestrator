@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import asyncio
 
 from tools.gimo_server.ops_models import OpsConfig, PlanEconomySnapshot
+from tools.gimo_server.models.economy import UserEconomyConfig
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.custom_plan_service import CustomPlan, PlanEdge, PlanNode
 from tools.gimo_server.ops_models import PlanAutonomyUpdateRequest
@@ -39,8 +40,7 @@ def test_get_plan_economy_snapshot_ok(monkeypatch):
     from tools.gimo_server.services.storage_service import StorageService
 
     plan = _build_plan()
-    cfg = OpsConfig()
-    cfg.economy.autonomy_level = "guided"
+    cfg = OpsConfig(economy=UserEconomyConfig(autonomy_level="guided"))
 
     monkeypatch.setattr(CustomPlanService, "get_plan", lambda _pid: plan)
     monkeypatch.setattr(OpsService, "get_config", lambda: cfg)
@@ -80,8 +80,7 @@ def test_update_plan_autonomy_updates_selected_nodes(monkeypatch):
     from tools.gimo_server.services.storage_service import StorageService
 
     plan = _build_plan()
-    cfg = OpsConfig()
-    cfg.economy.autonomy_level = "manual"
+    cfg = OpsConfig(economy=UserEconomyConfig(autonomy_level="manual"))
     saved = {"called": False}
 
     monkeypatch.setattr(CustomPlanService, "get_plan", lambda _pid: plan)

@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Loader2, Send, Sparkles, X, RefreshCw, AlertTriangle, ChevronDown, Activity, Bot, User } from 'lucide-react';
 import { API_BASE, ChatExecutionStep, ChatExecutionStepStatus, OpsApproveResponse, OpsDraft, Skill, SkillExecuteResponse } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { useToast } from './Toast';
 import { AgentActionApproval, ActionDraftUi } from './AgentActionApproval';
 
@@ -122,6 +124,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     onViewInFlow,
     inboundTerminalSummary,
 }) => {
+    const { t } = useTranslation();
     const [messages, setMessages] = useState<ChatMessage[]>([
         {
             id: 'm-welcome',
@@ -272,7 +275,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     const fetchDrafts = useCallback(async () => {
         setIsLoadingDrafts(true);
         try {
-            const response = await fetch(`${API_BASE}/ops/drafts`, { credentials: 'include' });
+            const response = await fetchWithRetry(`${API_BASE}/ops/drafts`, { credentials: 'include' });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data: OpsDraft[] = await response.json();
             setDrafts(data);
@@ -323,7 +326,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
         skillsLoadingRef.current = true;
         setSkillsLoading(true);
         try {
-            const response = await fetch(`${API_BASE}/ops/skills`, { credentials: 'include' });
+            const response = await fetchWithRetry(`${API_BASE}/ops/skills`, { credentials: 'include' });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data: Skill[] = await response.json();
             setSkillsCatalog(data);
@@ -357,7 +360,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
         setApprovingId(draftId);
         try {
             const currentDraft = drafts.find((d) => d.id === draftId);
-            const response = await fetch(`${API_BASE}/ops/drafts/${draftId}/approve`, { method: 'POST', credentials: 'include' });
+            const response = await fetchWithRetry(`${API_BASE}/ops/drafts/${draftId}/approve`, { method: 'POST', credentials: 'include' });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data: OpsApproveResponse = await response.json();
             setDrafts((prev) => prev.map((d) => (d.id === draftId ? { ...d, status: 'approved' } : d)));
@@ -391,7 +394,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
 
     const rejectDraft = async (draftId: string) => {
         try {
-            const response = await fetch(`${API_BASE}/ops/drafts/${draftId}/reject`, { method: 'POST', credentials: 'include' });
+            const response = await fetchWithRetry(`${API_BASE}/ops/drafts/${draftId}/reject`, { method: 'POST', credentials: 'include' });
             if (!response.ok) {
                 if (response.status === 403) {
                     addToast('No autorizado para rechazar draft (requiere operator/admin)', 'error');
@@ -409,7 +412,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
 
     const createRunFromApproved = async (approvedId: string, sourceDraftId?: string) => {
         try {
-            const response = await fetch(`${API_BASE}/ops/runs`, {
+            const response = await fetchWithRetry(`${API_BASE}/ops/runs`, {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
@@ -463,7 +466,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     };
 
     const handleGenerateDraft = async (prompt: string) => {
-        const response = await fetch(`${API_BASE}/ops/generate?prompt=${encodeURIComponent(prompt)}`, { method: 'POST', credentials: 'include' });
+        const response = await fetchWithRetry(`${API_BASE}/ops/generate?prompt=${encodeURIComponent(prompt)}`, { method: 'POST', credentials: 'include' });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const generated: OpsDraft = await response.json();
         upsertDraft(generated);
@@ -487,7 +490,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     };
 
     const handleManualDraft = async (prompt: string) => {
-        const response = await fetch(`${API_BASE}/ops/drafts`, {
+        const response = await fetchWithRetry(`${API_BASE}/ops/drafts`, {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
@@ -537,7 +540,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
             globalThis.dispatchEvent(new CustomEvent('ops:load_skill_to_graph', { detail: skill }));
         }
 
-        const response = await fetch(`${API_BASE}/ops/skills/${skill.id}/execute`, {
+        const response = await fetchWithRetry(`${API_BASE}/ops/skills/${skill.id}/execute`, {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
@@ -906,7 +909,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                         className="h-10 px-3 rounded-xl bg-accent-primary hover:bg-accent-primary/85 disabled:opacity-40 disabled:cursor-not-allowed text-white inline-flex items-center gap-2 active:scale-[0.97] transition-all"
                     >
                         {isSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                        <span className="text-xs font-medium">Enviar</span>
+                        <span className="text-xs font-medium">{t('common.send')}</span>
                     </button>
                 </div>
             </div>

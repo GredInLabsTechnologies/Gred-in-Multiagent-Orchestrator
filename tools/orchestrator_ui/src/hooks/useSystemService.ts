@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 export type ServiceStatus = 'RUNNING' | 'STOPPED' | 'STARTING' | 'STOPPING' | 'UNKNOWN';
 
@@ -10,7 +11,7 @@ export const useSystemService = (_token?: string) => {
 
     const fetchStatus = useCallback(async () => {
         try {
-            const res = await fetch(`${API_BASE}/ui/service/status`, { credentials: 'include' });
+            const res = await fetchWithRetry(`${API_BASE}/ops/service/status`, { credentials: 'include' });
             if (!res.ok) throw new Error('Failed to fetch service status');
             const data = await res.json();
             setStatus(data.status);
@@ -24,7 +25,7 @@ export const useSystemService = (_token?: string) => {
         setIsLoading(true);
         setError(null);
         try {
-            const res = await fetch(`${API_BASE}/ui/service/${action}`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/service/${action}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',

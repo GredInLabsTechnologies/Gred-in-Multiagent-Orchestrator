@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 const getRequestInit = (includeJson: boolean = false): RequestInit => ({
     credentials: 'include',
@@ -10,7 +11,7 @@ const getRequestInit = (includeJson: boolean = false): RequestInit => ({
 
 export const useProviderAuth = () => {
     const startCodexDeviceLogin = useCallback(async () => {
-        const res = await fetch(`${API_BASE}/ops/connectors/codex/login`, {
+        const res = await fetchWithRetry(`${API_BASE}/ops/connectors/codex/login`, {
             method: 'POST',
             ...getRequestInit(true),
         });
@@ -30,7 +31,7 @@ export const useProviderAuth = () => {
     }, []);
 
     const startClaudeLogin = useCallback(async () => {
-        const res = await fetch(`${API_BASE}/ops/connectors/claude/login`, {
+        const res = await fetchWithRetry(`${API_BASE}/ops/connectors/claude/login`, {
             method: 'POST',
             ...getRequestInit(true),
         });
@@ -50,13 +51,13 @@ export const useProviderAuth = () => {
     }, []);
 
     const fetchCliAuthStatus = useCallback(async (provider: 'codex' | 'claude') => {
-        const res = await fetch(`${API_BASE}/ops/connectors/${provider}/auth-status`, getRequestInit());
+        const res = await fetchWithRetry(`${API_BASE}/ops/connectors/${provider}/auth-status`, getRequestInit());
         if (!res.ok) return { authenticated: false, method: null, detail: `HTTP ${res.status}` };
         return res.json().catch(() => ({ authenticated: false }));
     }, []);
 
     const cliLogout = useCallback(async (provider: 'codex' | 'claude') => {
-        const res = await fetch(`${API_BASE}/ops/connectors/${provider}/logout`, {
+        const res = await fetchWithRetry(`${API_BASE}/ops/connectors/${provider}/logout`, {
             method: 'POST',
             ...getRequestInit(true),
         });

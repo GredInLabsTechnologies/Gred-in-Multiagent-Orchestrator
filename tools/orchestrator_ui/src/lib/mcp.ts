@@ -1,4 +1,5 @@
 import { API_BASE } from '../types';
+import { fetchWithRetry } from './fetchWithRetry';
 
 interface McpSyncResult {
     success: boolean;
@@ -9,7 +10,7 @@ interface McpSyncResult {
  * Sync MCP tools from the first enabled MCP server.
  */
 export async function syncMcpTools(): Promise<McpSyncResult> {
-    const listRes = await fetch(`${API_BASE}/ops/config/mcp`, {
+    const listRes = await fetchWithRetry(`${API_BASE}/ops/config/mcp`, {
         credentials: 'include',
     });
 
@@ -29,7 +30,7 @@ export async function syncMcpTools(): Promise<McpSyncResult> {
         };
     }
 
-    const syncRes = await fetch(`${API_BASE}/ops/config/mcp/sync`, {
+    const syncRes = await fetchWithRetry(`${API_BASE}/ops/config/mcp/sync`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

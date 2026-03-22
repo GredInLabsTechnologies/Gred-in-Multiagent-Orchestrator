@@ -4,6 +4,7 @@ import { OrchestratorChat } from './OrchestratorChat';
 import { OpsTerminal } from './OpsTerminal';
 import { OpsFlow } from './OpsFlow';
 import { API_BASE, OpsConfig } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 export const ChatTerminalLayout: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'chat' | 'terminal' | 'flow'>('chat');
@@ -14,7 +15,7 @@ export const ChatTerminalLayout: React.FC = () => {
     useEffect(() => {
         const fetchConfig = async () => {
             try {
-                const resp = await fetch(`${API_BASE}/ops/config`, { credentials: 'include' });
+                const resp = await fetchWithRetry(`${API_BASE}/ops/config`, { credentials: 'include' });
                 if (resp.ok) {
                     const data = await resp.json();
                     setConfig(data);

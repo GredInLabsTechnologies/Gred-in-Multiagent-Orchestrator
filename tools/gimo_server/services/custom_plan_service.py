@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
@@ -374,7 +373,6 @@ class CustomPlanService:
         skill_command: Optional[str] = None,
     ) -> Optional[CustomPlan]:
         """Execute a plan layer by layer, respecting dependencies."""
-        from ..services.provider_service import ProviderService
         from ..services.notification_service import NotificationService
 
         plan = cls.get_plan(plan_id)

@@ -18,7 +18,7 @@ from ..contracts import (
     ModelFormat,
     ModelSpec,
 )
-from .base_adapter import EP_PRIORITY, SessionHandle, select_ep_chain
+from .base_adapter import SessionHandle, select_ep_chain
 
 logger = logging.getLogger("gie.runtime.onnx")
 

@@ -11,7 +11,7 @@ import platform
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from ..contracts import DeviceCapability, HardwareTarget
+from ..contracts import DeviceCapability
 
 logger = logging.getLogger("gie.hardware.cpu")
 

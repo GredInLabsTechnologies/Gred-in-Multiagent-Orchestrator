@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import sys
 import types
 from pathlib import Path
@@ -60,10 +61,17 @@ def _make_ort_stub() -> types.ModuleType:
     return ort
 
 
-# Inject stub before importing the adapter.
-if "onnxruntime" not in sys.modules:
-    sys.modules["onnxruntime"] = _make_ort_stub()
+# Inyectar stub y forzar reimportación del módulo para aislar del estado global.
+_ort_stub = _make_ort_stub()
+sys.modules["onnxruntime"] = _ort_stub
 
+_onnx_mod_key = "tools.gimo_server.inference.runtime.onnx_adapter"
+_base_mod_key = "tools.gimo_server.inference.runtime.base_adapter"
+
+# Forzar reimportación de ambos módulos para que recojan el stub fresco
+for _key in [_base_mod_key, _onnx_mod_key]:
+    if _key in sys.modules:
+        importlib.reload(sys.modules[_key])
 
 from tools.gimo_server.inference.contracts import (
     ExecutionProviderType,
@@ -74,6 +82,12 @@ from tools.gimo_server.inference.contracts import (
 )
 from tools.gimo_server.inference.runtime.onnx_adapter import OnnxAdapter
 from tools.gimo_server.inference.runtime.base_adapter import select_ep_chain
+
+
+@pytest.fixture(autouse=True)
+def _ensure_ort_stub():
+    """Garantizar que el stub de onnxruntime esté activo para cada test."""
+    sys.modules["onnxruntime"] = _ort_stub
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ router = APIRouter()
 async def list_mcp_servers(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     cfg = ProviderService.get_config()
@@ -40,7 +40,7 @@ async def sync_mcp_tools(
     request: Request,
     body: dict,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     server_name = body.get("server_name")
@@ -70,7 +70,7 @@ async def sync_mcp_tools(
 async def list_tool_registry(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     items = ToolRegistryService.list_tools()
@@ -83,7 +83,7 @@ async def get_tool_registry_entry(
     request: Request,
     tool_name: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     item = ToolRegistryService.get_tool(tool_name)
@@ -99,7 +99,7 @@ async def upsert_tool_registry_entry(
     tool_name: str,
     body: ToolEntry,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     payload = body.model_copy(update={"name": tool_name})
@@ -113,7 +113,7 @@ async def delete_tool_registry_entry(
     request: Request,
     tool_name: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     deleted = ToolRegistryService.delete_tool(tool_name)

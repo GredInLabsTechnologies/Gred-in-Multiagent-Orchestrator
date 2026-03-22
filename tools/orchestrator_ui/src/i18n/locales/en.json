@@ -1,0 +1,142 @@
+{
+  "common": {
+    "send": "Send",
+    "cancel": "Cancel",
+    "save": "Save",
+    "close": "Close",
+    "delete": "Delete",
+    "approve": "Approve",
+    "reject": "Reject",
+    "status": "Status",
+    "error": "Error",
+    "loading": "Loading...",
+    "noData": "No data",
+    "retry": "Retry",
+    "confirm": "Confirm",
+    "back": "Back",
+    "name": "Name",
+    "description": "Description",
+    "model": "Model",
+    "provider": "Provider",
+    "output": "Output",
+    "live": "Live",
+    "terminal": "Terminal",
+    "settings": "Settings"
+  },
+  "auth": {
+    "error": "Authentication error",
+    "sessionMissing": "Session missing",
+    "sessionExpired": "Session expired",
+    "login": "Log in",
+    "logout": "Log out",
+    "loginTitle": "Log in to GIMO",
+    "email": "Email",
+    "password": "Password",
+    "loggingIn": "Logging in..."
+  },
+  "sidebar": {
+    "graph": "Graph",
+    "chat": "Chat",
+    "plans": "Plans",
+    "analytics": "Analytics",
+    "observability": "Observability",
+    "evals": "Evaluations",
+    "skills": "Skills",
+    "settings": "Settings"
+  },
+  "graph": {
+    "noActiveGraph": "No active graph",
+    "planName": "Plan name",
+    "addNode": "Add node",
+    "cancelEdit": "Cancel edit",
+    "noNodeSelected": "No node selected",
+    "selectNode": "Select a node to inspect"
+  },
+  "inspect": {
+    "close": "Close panel",
+    "models": "Models",
+    "tier": "Tier",
+    "hardware": "Hardware",
+    "cost": "Cost",
+    "promptTokens": "Prompt tokens",
+    "completionTokens": "Completion tokens",
+    "accumulatedSpend": "Accumulated spend",
+    "estimatedSavings": "Estimated savings",
+    "optimizedNodes": "Optimized nodes"
+  },
+  "chat": {
+    "placeholder": "Type a message...",
+    "thinking": "Thinking...",
+    "noMessages": "No messages yet",
+    "agentThinking": "Agent is thinking..."
+  },
+  "plans": {
+    "noActivePlan": "No active plan",
+    "createPlan": "Create plan",
+    "planBuilder": "Plan builder"
+  },
+  "agent": {
+    "actionRequiresApproval": "Action requires approval",
+    "trustLevel": "Trust level",
+    "confidence": "Confidence"
+  },
+  "error": {
+    "appCrash": "Application error",
+    "crashMessage": "Something went wrong. Please reload the page.",
+    "reload": "Reload",
+    "networkError": "Network error",
+    "serverError": "Server error",
+    "offline": "Offline",
+    "online": "Online"
+  },
+  "settings": {
+    "language": "Language",
+    "english": "English",
+    "spanish": "Spanish",
+    "theme": "Theme",
+    "autoRun": "Auto-run",
+    "budget": "Budget",
+    "general": "General",
+    "providers": "Providers",
+    "trust": "Trust",
+    "advanced": "Advanced"
+  },
+  "evals": {
+    "title": "Evaluations",
+    "noDatasets": "No datasets",
+    "noRuns": "No recorded runs",
+    "state": "State",
+    "dataset": "Dataset",
+    "successRate": "Success rate",
+    "date": "Date",
+    "action": "Action",
+    "gate": "Gate",
+    "removeCase": "Remove case"
+  },
+  "observability": {
+    "selectTrace": "Select a trace to see details",
+    "rootSpanNotFound": "Root span not found"
+  },
+  "provider": {
+    "addProvider": "Add provider",
+    "testProvider": "Test provider",
+    "removeProvider": "Remove provider",
+    "providerReachable": "Provider reachable",
+    "providerUnreachable": "Provider unreachable"
+  },
+  "status": {
+    "running": "Running",
+    "pending": "Pending",
+    "done": "Done",
+    "failed": "Failed",
+    "cancelled": "Cancelled"
+  },
+  "welcome": {
+    "title": "Welcome to GIMO",
+    "subtitle": "Multi-Agent Orchestrator"
+  },
+  "skills": {
+    "createSkill": "Create skill",
+    "skillName": "Skill name"
+  }
+}

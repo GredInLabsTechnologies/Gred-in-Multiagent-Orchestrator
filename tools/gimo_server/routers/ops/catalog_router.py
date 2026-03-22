@@ -22,7 +22,7 @@ async def get_provider_models_catalog(
     request: Request,
     provider_type: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     data = await ProviderCatalogService.get_catalog(provider_type)
@@ -34,7 +34,7 @@ async def get_provider_models_catalog(
 async def get_active_provider_models(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     cfg = ProviderService.get_public_config()
@@ -60,7 +60,7 @@ async def install_provider_model(
     provider_type: str,
     body: ProviderModelInstallRequest,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     data = await ProviderCatalogService.install_model(provider_type, body.model_id)
@@ -80,7 +80,7 @@ async def get_provider_model_install_job(
     provider_type: str,
     job_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     data = ProviderCatalogService.get_install_job(provider_type, job_id)
@@ -100,7 +100,7 @@ async def validate_provider_credentials(
     provider_type: str,
     body: ProviderValidateRequest,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     data = await ProviderCatalogService.validate_credentials(provider_type, body)

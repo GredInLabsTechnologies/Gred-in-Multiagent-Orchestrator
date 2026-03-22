@@ -19,7 +19,7 @@ router = APIRouter()
 async def get_plan(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     plan = OpsService.get_plan()
@@ -32,7 +32,7 @@ async def set_plan(
     request: Request,
     plan: OpsPlan,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
@@ -44,7 +44,7 @@ async def set_plan(
 async def list_drafts(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     status: Annotated[str | None, Query(description="Filter by status")] = None,
     limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
     offset: Annotated[int | None, Query(ge=0)] = None,
@@ -101,7 +101,7 @@ async def create_draft(
     request: Request,
     body: OpsCreateDraftRequest,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     if auth.role not in ("actions", "operator", "admin"):
         raise HTTPException(status_code=403, detail="actions/operator/admin role required")
@@ -136,7 +136,7 @@ async def get_draft(
     request: Request,
     draft_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     draft = OpsService.get_draft(draft_id)
@@ -150,7 +150,7 @@ async def update_draft(
     draft_id: str,
     body: OpsUpdateDraftRequest,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
@@ -168,7 +168,7 @@ async def reject_draft(
     request: Request,
     draft_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     if auth.role not in ("admin", "operator"):
         raise HTTPException(status_code=403, detail="admin/operator role required")
@@ -184,7 +184,7 @@ async def reject_draft(
 async def run_slice0_pipeline(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     prompt: Annotated[str, Query(..., min_length=1, max_length=8000)],
     repo_path: Annotated[str, Query(..., min_length=1)],
 ):
@@ -209,7 +209,7 @@ async def run_slice0_pipeline(
 async def generate_structured_plan(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     prompt: Annotated[str, Query(..., min_length=1, max_length=8000)],
 ):
     """Generate a structured multi-task plan with Mermaid graph via LLM."""
@@ -322,7 +322,7 @@ def _try_parse_custom_plan(content: str, prompt: str, context_payload: dict) -> 
 async def generate_draft(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     prompt: Annotated[str, Query(..., min_length=1, max_length=8000)],
 ):
     config = OpsService.get_config()

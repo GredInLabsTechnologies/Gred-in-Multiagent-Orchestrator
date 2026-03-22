@@ -30,43 +30,43 @@ def setup_headless():
         del os.environ["ORCH_HEADLESS"]
 
 def test_api_service_status(test_client):
-    with patch('tools.gimo_server.routes.SystemService.get_status') as mock_status:
+    with patch('tools.gimo_server.routers.ops.service_router.SystemService.get_status') as mock_status:
         mock_status.return_value = "RUNNING"
-        response = test_client.get("/ui/service/status")
+        response = test_client.get("/ops/service/status")
         assert response.status_code == 200
         assert response.json() == {"status": "RUNNING"}
 
 def test_api_service_restart(test_client):
-    with patch('tools.gimo_server.routes.SystemService.restart') as mock_restart:
+    with patch('tools.gimo_server.routers.ops.service_router.SystemService.restart') as mock_restart:
         mock_restart.return_value = True
-        response = test_client.post("/ui/service/restart")
+        response = test_client.post("/ops/service/restart")
         assert response.status_code == 200
         assert response.json() == {"status": "restarting"}
         mock_restart.assert_called_once()
 
 def test_api_service_stop(test_client):
-    with patch('tools.gimo_server.routes.SystemService.stop') as mock_stop:
+    with patch('tools.gimo_server.routers.ops.service_router.SystemService.stop') as mock_stop:
         mock_stop.return_value = True
-        response = test_client.post("/ui/service/stop")
+        response = test_client.post("/ops/service/stop")
         assert response.status_code == 200
         assert response.json() == {"status": "stopping"}
         mock_stop.assert_called_once()
 
 def test_api_vitaminize_invalid_path(test_client):
-    response = test_client.post("/ui/repos/vitaminize?path=C:/outside")
+    response = test_client.post("/ops/repos/vitaminize?path=C:/outside")
     # 400 on Windows (invalid path), 404 on Linux (path not found)
     assert response.status_code in (400, 404)
 
 def test_api_vitaminize_success(test_client):
     """Use sequential patching for better control and debugging"""
-    with patch('tools.gimo_server.routes.REPO_ROOT_DIR', new=Path("/mock/repos")):
-        with patch('tools.gimo_server.routes.RepoService.vitaminize_repo') as mock_vit:
+    with patch('tools.gimo_server.routers.ops.repo_router.REPO_ROOT_DIR', new=Path("/mock/repos")):
+        with patch('tools.gimo_server.routers.ops.repo_router.RepoService.vitaminize_repo') as mock_vit:
             mock_vit.return_value = ["file1.txt", "file2.txt"]
             with patch('pathlib.Path.exists', return_value=True):
                 with patch('pathlib.Path.resolve', return_value=MagicMock(__str__=lambda x: "/mock/repos/myrepo")):
-                    with patch('tools.gimo_server.routes.load_repo_registry', return_value={}):
-                        with patch('tools.gimo_server.routes.save_repo_registry'):
-                            response = test_client.post("/ui/repos/vitaminize?path=/mock/repos/myrepo")
+                    with patch('tools.gimo_server.routers.ops.repo_router.load_repo_registry', return_value={}):
+                        with patch('tools.gimo_server.routers.ops.repo_router.save_repo_registry'):
+                            response = test_client.post("/ops/repos/vitaminize?path=/mock/repos/myrepo")
                             assert response.status_code == 200
                             data = response.json()
                             assert data["status"] == "success"

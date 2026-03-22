@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { API_BASE, UserEconomyConfig } from '../types';
-import { Shield, SlidersHorizontal, Coins, Info, ArrowRight, Server, Wrench } from 'lucide-react';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
+import { Shield, SlidersHorizontal, Coins, Info, ArrowRight, Server, Wrench, Globe } from 'lucide-react';
 import { useToast } from './Toast';
 
-type SettingsSection = 'providers' | 'general' | 'economy' | 'security' | 'maintenance' | 'about';
+type SettingsSection = 'providers' | 'general' | 'economy' | 'security' | 'maintenance' | 'about' | 'language';
 
 interface SettingsPanelProps {
     onOpenMastery: () => void;
@@ -16,17 +18,29 @@ interface OpsConfig {
     operator_can_generate: boolean;
 }
 
-const NAV_ITEMS: { key: SettingsSection; label: string; icon: React.ReactNode }[] = [
-    { key: 'providers', label: 'Proveedores', icon: <Server size={14} /> },
-    { key: 'general', label: 'General', icon: <SlidersHorizontal size={14} /> },
-    { key: 'economy', label: 'Economia', icon: <Coins size={14} /> },
-    { key: 'security', label: 'Seguridad', icon: <Shield size={14} /> },
-    { key: 'maintenance', label: 'Mantenimiento', icon: <Wrench size={14} /> },
-    { key: 'about', label: 'About', icon: <Info size={14} /> },
-];
+const NAV_ICONS: Record<SettingsSection, React.ReactNode> = {
+    providers: <Server size={14} />,
+    general: <SlidersHorizontal size={14} />,
+    economy: <Coins size={14} />,
+    security: <Shield size={14} />,
+    maintenance: <Wrench size={14} />,
+    about: <Info size={14} />,
+    language: <Globe size={14} />,
+};
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) => {
+    const { t, i18n } = useTranslation();
     const { addToast } = useToast();
+
+    const NAV_ITEMS: { key: SettingsSection; label: string; icon: React.ReactNode }[] = [
+        { key: 'providers', label: t('settings.providers'), icon: NAV_ICONS.providers },
+        { key: 'general', label: t('settings.general'), icon: NAV_ICONS.general },
+        { key: 'economy', label: t('inspect.cost'), icon: NAV_ICONS.economy },
+        { key: 'security', label: t('settings.trust'), icon: NAV_ICONS.security },
+        { key: 'maintenance', label: t('common.settings'), icon: NAV_ICONS.maintenance },
+        { key: 'language', label: t('settings.language'), icon: NAV_ICONS.language },
+        { key: 'about', label: 'About', icon: NAV_ICONS.about },
+    ];
     const [config, setConfig] = useState<OpsConfig | null>(null);
     const [statusInfo, setStatusInfo] = useState<{ version?: string; uptime_seconds?: number } | null>(null);
     const [economyConfig, setEconomyConfig] = useState<UserEconomyConfig | null>(null);
@@ -40,19 +54,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
         const fetchData = async () => {
             try {
                 const [configRes, statusRes] = await Promise.all([
-                    fetch(`${API_BASE}/ops/config`, { credentials: 'include' }),
-                    fetch(`${API_BASE}/ui/status`, { credentials: 'include' }),
+                    fetchWithRetry(`${API_BASE}/ops/config`, { credentials: 'include' }),
+                    fetchWithRetry(`${API_BASE}/ui/status`, { credentials: 'include' }),
                 ]);
 
                 if (configRes.ok) setConfig(await configRes.json());
                 if (statusRes.ok) setStatusInfo(await statusRes.json());
 
-                const economyRes = await fetch(`${API_BASE}/ops/mastery/config/economy`, { credentials: 'include' });
+                const economyRes = await fetchWithRetry(`${API_BASE}/ops/mastery/config/economy`, { credentials: 'include' });
                 if (economyRes.ok) setEconomyConfig(await economyRes.json());
 
                 const [hwRes, rtRes] = await Promise.all([
-                    fetch(`${API_BASE}/ui/hardware`, { credentials: 'include' }).catch(() => null),
-                    fetch(`${API_BASE}/ops/realtime/metrics`, { credentials: 'include' }).catch(() => null),
+                    fetchWithRetry(`${API_BASE}/ui/hardware`, { credentials: 'include' }).catch(() => null),
+                    fetchWithRetry(`${API_BASE}/ops/realtime/metrics`, { credentials: 'include' }).catch(() => null),
                 ]);
                 if (hwRes?.ok) setHwMetrics(await hwRes.json());
                 if (rtRes?.ok) setRealtimeMetrics(await rtRes.json());
@@ -78,7 +92,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
         const updated = { ...config, [key]: value };
         setConfig(updated);
         try {
-            const res = await fetch(`${API_BASE}/ops/config`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/config`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
@@ -97,7 +111,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
         setEconomySaving(true);
         setEconomyMessage('');
         try {
-            const res = await fetch(`${API_BASE}/ops/mastery/config/economy`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/mastery/config/economy`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
@@ -280,6 +294,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                             <p className="text-[11px] text-text-secondary mt-3">
                                 SSE subscribers = clientes en vivo conectados al stream de eventos. Coalesced = eventos agrupados para reducir ruido.
                             </p>
+                        </section>
+                    )}
+
+                    {activeSection === 'language' && (
+                        <section className="rounded-2xl border border-border-primary bg-surface-2 p-5">
+                            <div className="flex items-center gap-2 mb-4">
+                                <Globe size={16} className="text-accent-trust" />
+                                <h2 className="text-sm font-black uppercase tracking-widest text-text-primary">{t('settings.language')}</h2>
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => i18n.changeLanguage('en')}
+                                    className={`px-4 py-2 rounded-lg text-xs font-medium transition-colors ${i18n.language === 'en' ? 'bg-accent-primary text-white' : 'bg-surface-3 text-text-secondary hover:bg-surface-3/80'}`}
+                                >
+                                    {t('settings.english')}
+                                </button>
+                                <button
+                                    onClick={() => i18n.changeLanguage('es')}
+                                    className={`px-4 py-2 rounded-lg text-xs font-medium transition-colors ${i18n.language === 'es' ? 'bg-accent-primary text-white' : 'bg-surface-3 text-text-secondary hover:bg-surface-3/80'}`}
+                                >
+                                    {t('settings.spanish')}
+                                </button>
+                            </div>
                         </section>
                     )}
 

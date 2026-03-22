@@ -4,6 +4,7 @@ import {
     OpsPlan, OpsDraft, OpsApproved, OpsRun, OpsConfig,
     OpsApproveResponse, ProviderConfig
 } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -27,11 +28,11 @@ export const useOpsService = (_token?: string) => {
         try {
             const h = getHeaders();
             const [pRes, dRes, aRes, rRes, cRes] = await Promise.all([
-                fetch(`${API_BASE}/ops/plan`, { headers: h, credentials: 'include' }),
-                fetch(`${API_BASE}/ops/drafts`, { headers: h, credentials: 'include' }),
-                fetch(`${API_BASE}/ops/approved`, { headers: h, credentials: 'include' }),
-                fetch(`${API_BASE}/ops/runs`, { headers: h, credentials: 'include' }),
-                fetch(`${API_BASE}/ops/config`, { headers: h, credentials: 'include' }),
+                fetchWithRetry(`${API_BASE}/ops/plan`, { headers: h, credentials: 'include' }),
+                fetchWithRetry(`${API_BASE}/ops/drafts`, { headers: h, credentials: 'include' }),
+                fetchWithRetry(`${API_BASE}/ops/approved`, { headers: h, credentials: 'include' }),
+                fetchWithRetry(`${API_BASE}/ops/runs`, { headers: h, credentials: 'include' }),
+                fetchWithRetry(`${API_BASE}/ops/config`, { headers: h, credentials: 'include' }),
             ]);
 
             if (pRes.ok) setPlan(await pRes.json());
@@ -51,9 +52,9 @@ export const useOpsService = (_token?: string) => {
     // Poll runs when there are active (pending/running) runs
     const refreshRuns = useCallback(async () => {
         try {
-            const res = await fetch(`${API_BASE}/ops/runs`, { headers: getHeaders(), credentials: 'include' });
+            const res = await fetchWithRetry(`${API_BASE}/ops/runs`, { headers: getHeaders(), credentials: 'include' });
             if (res.ok) setRuns(await res.json());
-        } catch { /* silent */ }
+        } catch (err) { console.warn('Runs polling failed:', err); }
     }, [getHeaders]);
 
     useEffect(() => {
@@ -71,7 +72,7 @@ export const useOpsService = (_token?: string) => {
 
     const updatePlan = async (newPlan: OpsPlan) => {
         try {
-            const res = await fetch(`${API_BASE}/ops/plan`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/plan`, {
                 method: 'PUT', headers: getHeaders(), credentials: 'include', body: JSON.stringify(newPlan)
             });
             if (!res.ok) throw new Error('Failed to update plan');
@@ -84,7 +85,7 @@ export const useOpsService = (_token?: string) => {
     const generateDraft = async (prompt: string) => {
         setIsLoading(true);
         try {
-            const res = await fetch(`${API_BASE}/ops/generate?prompt=${encodeURIComponent(prompt)}`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/generate?prompt=${encodeURIComponent(prompt)}`, {
                 method: 'POST', headers: getHeaders(), credentials: 'include'
             });
             if (!res.ok) throw new Error('Generation failed');
@@ -101,7 +102,7 @@ export const useOpsService = (_token?: string) => {
     const approveDraft = async (id: string, autoRun?: boolean) => {
         try {
             const params = autoRun !== undefined ? `?auto_run=${autoRun}` : '';
-            const res = await fetch(`${API_BASE}/ops/drafts/${id}/approve${params}`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/drafts/${id}/approve${params}`, {
                 method: 'POST', headers: getHeaders(), credentials: 'include'
             });
             if (!res.ok) throw new Error('Approval failed');
@@ -117,7 +118,7 @@ export const useOpsService = (_token?: string) => {
 
     const rejectDraft = async (id: string) => {
         try {
-            const res = await fetch(`${API_BASE}/ops/drafts/${id}/reject`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/drafts/${id}/reject`, {
                 method: 'POST', headers: getHeaders(), credentials: 'include'
             });
             if (!res.ok) {
@@ -132,7 +133,7 @@ export const useOpsService = (_token?: string) => {
 
     const startRun = async (approvedId: string) => {
         try {
-            const res = await fetch(`${API_BASE}/ops/runs`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/runs`, {
                 method: 'POST', headers: getHeaders(), credentials: 'include',
                 body: JSON.stringify({ approved_id: approvedId })
             });
@@ -147,7 +148,7 @@ export const useOpsService = (_token?: string) => {
 
     const cancelRun = async (runId: string) => {
         try {
-            const res = await fetch(`${API_BASE}/ops/runs/${runId}/cancel`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/runs/${runId}/cancel`, {
                 method: 'POST', headers: getHeaders(), credentials: 'include'
             });
             if (!res.ok) throw new Error('Cancel failed');
@@ -160,7 +161,7 @@ export const useOpsService = (_token?: string) => {
 
     const updateConfig = async (newConfig: OpsConfig) => {
         try {
-            const res = await fetch(`${API_BASE}/ops/config`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/config`, {
                 method: 'PUT', headers: getHeaders(), credentials: 'include',
                 body: JSON.stringify(newConfig)
             });

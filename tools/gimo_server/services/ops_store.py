@@ -4,7 +4,6 @@ import json
 import hashlib
 import logging
 import os
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -12,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from filelock import FileLock
 
 from ..config import OPS_DATA_DIR
-from ..ops_models import OpsApproved, OpsConfig, OpsDraft, OpsPlan, OpsRun, RunEvent, RunLogEntry
+from ..ops_models import OpsConfig, OpsPlan, OpsRun, RunEvent
 
 
 logger = logging.getLogger("orchestrator.ops_store")

@@ -23,18 +23,18 @@ def test_phase9_filtered_openapi_exposes_only_allowed_contract(test_client):
             "/ops/drafts/{draft_id}/approve",
             "/ops/runs/{run_id}",
             "/ops/runs/{run_id}/preview",
-            "/ui/repos",
-            "/ui/repos/active",
-            "/ui/repos/select",
+            "/ops/repos",
+            "/ops/repos/active",
+            "/ops/repos/select",
         }
 
         assert set(paths["/ops/drafts"].keys()) == {"post"}
         assert set(paths["/ops/drafts/{draft_id}/approve"].keys()) == {"post"}
         assert set(paths["/ops/runs/{run_id}"].keys()) == {"get"}
         assert set(paths["/ops/runs/{run_id}/preview"].keys()) == {"get"}
-        assert set(paths["/ui/repos"].keys()) == {"get"}
-        assert set(paths["/ui/repos/active"].keys()) == {"get"}
-        assert set(paths["/ui/repos/select"].keys()) == {"post"}
+        assert set(paths["/ops/repos"].keys()) == {"get"}
+        assert set(paths["/ops/repos/active"].keys()) == {"get"}
+        assert set(paths["/ops/repos/select"].keys()) == {"post"}
     finally:
         app.dependency_overrides.clear()
 
@@ -52,9 +52,9 @@ def test_phase9_filtered_openapi_excludes_internal_and_admin_routes(test_client)
             "/ops/generate",
             "/ops/provider",
             "/ops/runs",
-            "/ui/repos/open",
-            "/ui/repos/vitaminize",
-            "/ui/service/restart",
+            "/ops/repos/open",
+            "/ops/repos/vitaminize",
+            "/ops/service/restart",
             "/ops/workflows/execute",
         }
         for path in forbidden_examples:
@@ -103,10 +103,10 @@ def test_phase9_actions_rate_limit_applies_to_public_contract(test_client, monke
     rate_limit_module.rate_limit_store.clear()
     monkeypatch.setattr(rate_limit_module, "RATE_LIMIT_PER_MIN", 1)
     try:
-        first = test_client.get("/ui/repos", headers={"Authorization": "Bearer test-token"})
+        first = test_client.get("/ops/repos", headers={"Authorization": "Bearer test-token"})
         assert first.status_code == 200
 
-        second = test_client.get("/ui/repos", headers={"Authorization": "Bearer test-token"})
+        second = test_client.get("/ops/repos", headers={"Authorization": "Bearer test-token"})
         assert second.status_code == 429
         assert second.json().get("detail") == "Too many requests"
     finally:

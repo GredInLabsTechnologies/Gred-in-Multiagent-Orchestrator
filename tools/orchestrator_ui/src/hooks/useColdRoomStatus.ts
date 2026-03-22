@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 export interface ColdRoomStatus {
     enabled: boolean;
@@ -23,7 +24,7 @@ export function useColdRoomStatus(active = true) {
         if (!active) return;
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE}/auth/cold-room/status`, { credentials: 'include' });
+            const res = await fetchWithRetry(`${API_BASE}/auth/cold-room/status`, { credentials: 'include' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json() as ColdRoomStatus;
             setStatus(data);

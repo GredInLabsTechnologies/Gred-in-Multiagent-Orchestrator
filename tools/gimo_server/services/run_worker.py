@@ -21,7 +21,6 @@ from ..ops_models import ExecutorReport
 from .ops_service import OpsService
 from .provider_service import ProviderService
 from .notification_service import NotificationService
-from .merge_gate_service import MergeGateService
 from .critic_service import CriticService
 
 logger = logging.getLogger("orchestrator.run_worker")

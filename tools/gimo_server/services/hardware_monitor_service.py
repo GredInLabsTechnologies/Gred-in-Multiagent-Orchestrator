@@ -8,7 +8,6 @@ import time
 import subprocess
 from collections import deque
 from dataclasses import dataclass, asdict, field
-from pathlib import Path
 from typing import Literal, Optional
 
 import psutil

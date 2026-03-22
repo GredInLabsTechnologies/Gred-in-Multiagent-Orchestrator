@@ -25,9 +25,7 @@ import platform
 import re
 import socket
 import subprocess
-import sys
 import uuid
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

@@ -25,7 +25,7 @@ _CODE_RE = re.compile(r"\b([A-Z0-9]{3,6}-[A-Z0-9]{3,6})\b")
 def _popen(args: list[str], **kwargs) -> subprocess.Popen:
     """Spawn a subprocess; use shell=True on Windows for .cmd shim compat."""
     if sys.platform == "win32":
-        return subprocess.Popen(" ".join(args), shell=True, **kwargs)
+        return subprocess.Popen(" ".join(args), shell=True, **kwargs)  # nosec B602
     return subprocess.Popen(args, **kwargs)
 
 

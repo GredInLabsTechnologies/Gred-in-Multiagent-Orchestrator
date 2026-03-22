@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Sparkles, Loader2, Brain, Zap, Shield, MessageCircle, Paintbrush, GraduationCap, Minus } from 'lucide-react';
 import { API_BASE, AgentMood, Skill } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 interface SkillAutoGenModalProps {
     isOpen: boolean;
@@ -31,7 +32,7 @@ export const SkillAutoGenModal: React.FC<SkillAutoGenModalProps> = ({ isOpen, on
         setLoading(true);
         setError('');
         try {
-            const res = await fetch(`${API_BASE}/ops/skills/generate-from-prompt`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/skills/generate-from-prompt`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',

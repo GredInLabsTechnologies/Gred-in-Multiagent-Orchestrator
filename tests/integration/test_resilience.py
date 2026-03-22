@@ -54,7 +54,8 @@ class TestSystemE2E:
             graph = WorkflowGraph(id="e2e", nodes=[node], edges=[])
             engine = GraphEngine(graph)
             # Mock observability to stay clean
-            with patch("tools.gimo_server.services.graph_engine.ObservabilityService"):
+            with patch("tools.gimo_server.services.graph.engine.ObservabilityService"), \
+                 patch("tools.gimo_server.services.graph.agent_patterns.ObservabilityService"):
                 state = await engine.execute()
                 return state
         
@@ -68,9 +69,12 @@ class TestChaosResilience:
     def test_panic_recovery_logic(self, test_client):
         """Verify resolution logic for panic mode (logic check)."""
         auth = {"Authorization": f"Bearer {VALID_TOKEN}"}
+        from tools.gimo_server.security.threat_level import ThreatLevel
         with patch("tools.gimo_server.security.threat_engine") as mock_engine, \
              patch("tools.gimo_server.security.save_security_db"):
-            res = test_client.post("/ui/security/resolve?action=clear_all", headers=auth)
+            mock_engine.level = ThreatLevel.NOMINAL
+            mock_engine.level_label = "NOMINAL"
+            res = test_client.post("/ops/security/resolve?action=clear_all", headers=auth)
             assert res.status_code == 200
             mock_engine.clear_all.assert_called()
 
@@ -89,11 +93,11 @@ class TestChaosResilience:
 
 def test_snapshot_creation_sanity(test_client):
     """Verify snapshot directory interaction (from verify_snapshots)."""
-    with patch("tools.gimo_server.routes.get_active_repo_dir", return_value=Path(".")), \
-         patch("tools.gimo_server.routes.validate_path", return_value=Path("tools/gimo_server/config.py")), \
+    with patch("tools.gimo_server.routers.ops.file_router.get_active_repo_dir", return_value=Path(".")), \
+         patch("tools.gimo_server.routers.ops.file_router.validate_path", return_value=Path("tools/gimo_server/config.py")), \
          patch("tools.gimo_server.services.file_service.FileService.get_file_content", return_value=("ok", "h")):
-        
+
         # Trigger read
-        test_client.get("/file?path=tools/gimo_server/config.py", headers={"Authorization": f"Bearer {VALID_TOKEN}"})
+        test_client.get("/ops/files/content?path=tools/gimo_server/config.py", headers={"Authorization": f"Bearer {VALID_TOKEN}"})
         # Logic check: Verify if snapshots dir exists or is handled
         assert Path(".orch_snapshots").exists() or True # Placeholder for actual logic check

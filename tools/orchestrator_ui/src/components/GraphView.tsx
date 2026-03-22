@@ -12,6 +12,7 @@ import { BridgeNode } from './BridgeNode';
 import { OrchestratorNode } from './OrchestratorNode';
 import { RepoNode } from './RepoNode';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 const nodeTypes = {
     bridge: BridgeNode,
@@ -25,7 +26,7 @@ export const GraphView = () => {
 
     const fetchGraphData = useCallback(async () => {
         try {
-            const response = await fetch(`${API_BASE}/ui/graph`, {
+            const response = await fetchWithRetry(`${API_BASE}/ops/graph`, {
                 credentials: 'include',
             });
             if (!response.ok) return;

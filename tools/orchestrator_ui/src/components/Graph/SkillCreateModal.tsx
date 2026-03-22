@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sparkles, Loader2, Save, X, Brain, Zap, MessageCircle, Paintbrush, Shield, GraduationCap, Minus } from 'lucide-react';
 import { API_BASE, AgentMood } from '../../types';
+import { fetchWithRetry } from '../../lib/fetchWithRetry';
 import { useToast } from '../Toast';
 
 const MOOD_OPTIONS: { value: AgentMood; label: string; icon: React.ReactNode }[] = [
@@ -33,7 +34,7 @@ export const SkillCreateModal: React.FC<SkillCreateModalProps> = ({ onClose, nod
     const handleGenerateDesc = async () => {
         setIsGenerating(true);
         try {
-            const res = await fetch(`${API_BASE}/ops/skills/generate-description`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/skills/generate-description`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, command, nodes: nodesPayload, edges: edgesPayload }),
@@ -56,7 +57,7 @@ export const SkillCreateModal: React.FC<SkillCreateModalProps> = ({ onClose, nod
         if (!name.trim() || !command.trim()) return;
         setIsSaving(true);
         try {
-            const res = await fetch(`${API_BASE}/ops/skills`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/skills`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -96,8 +97,8 @@ export const SkillCreateModal: React.FC<SkillCreateModalProps> = ({ onClose, nod
                 </div>
                 <form onSubmit={handleSubmit} className="flex flex-col gap-4">
                     <div className="flex flex-col gap-1.5">
-                        <label htmlFor="skill-name" className="text-[11px] font-medium text-text-secondary uppercase tracking-wider">Nombre</label>
-                        <input id="skill-name" value={name} onChange={e => setName(e.target.value)} placeholder="Ej. Explorador de Repo" required
+                        <label htmlFor="skill-name" className="text-[11px] font-medium text-text-secondary uppercase tracking-wider">Name</label>
+                        <input id="skill-name" value={name} onChange={e => setName(e.target.value)} placeholder="E.g. Repo Explorer" required
                             className="rounded-xl bg-white/5 border border-white/10 text-text-primary text-sm py-2 px-3 placeholder:text-text-tertiary focus:outline-none focus:border-violet-500" />
                     </div>
 
@@ -149,7 +150,7 @@ export const SkillCreateModal: React.FC<SkillCreateModalProps> = ({ onClose, nod
                     </label>
 
                     <div className="flex justify-end gap-2 pt-2 mt-2 border-t border-white/5">
-                        <button type="button" onClick={onClose} className="text-xs px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-text-secondary border border-white/8 transition-colors">Cancelar</button>
+                        <button type="button" onClick={onClose} className="text-xs px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-text-secondary border border-white/8 transition-colors">Cancel</button>
                         <button type="submit" disabled={isSaving || !name || !command || command.length < 3}
                             className="text-xs px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-medium transition-colors disabled:opacity-50 flex items-center gap-1.5">
                             {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}

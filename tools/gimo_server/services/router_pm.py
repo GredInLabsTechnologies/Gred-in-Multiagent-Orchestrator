@@ -1,7 +1,6 @@
 import json
 import logging
 import re
-from typing import Optional
 
 from tools.gimo_server.ops_models import StrictContract, RepoContext
 from tools.gimo_server.services.provider_service import ProviderService

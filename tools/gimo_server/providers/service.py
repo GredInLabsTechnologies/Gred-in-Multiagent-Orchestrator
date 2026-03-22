@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from .inventory import ModelInventory, ModelEntry
 from ..ops_models import ProviderConfig
 
 

@@ -34,6 +34,7 @@ import {
     ROLE_TEMPLATES,
 } from './Graph/useGraphStore';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { useToast } from './Toast';
 import { useAvailableModels } from '../hooks/useAvailableModels';
 import { useMasteryService } from '../hooks/useMasteryService';
@@ -126,7 +127,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     /* ── Fetch graph data ── */
     const fetchGraphData = useCallback(async () => {
         try {
-            const response = await fetch(`${API_BASE}/ui/graph`, { credentials: 'include' });
+            const response = await fetchWithRetry(`${API_BASE}/ops/graph`, { credentials: 'include' });
             if (response.status === 401 || response.status === 403) {
                 onNodeCountChangeRef.current?.(-1);
                 return;
@@ -160,7 +161,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
             setNodesRef.current(nodesWithLiveState);
             setEdgesRef.current(formattedEdges);
-        } catch {
+        } catch (err) {
             addToastRef.current('Error al cargar datos del grafo', 'error');
             onNodeCountChangeRef.current?.(0);
         }
@@ -211,7 +212,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         if (!activePlanIdFromChat) return;
         const loadPlan = async () => {
             try {
-                const res = await fetch(`${API_BASE}/ops/custom-plans/${activePlanIdFromChat}`, {
+                const res = await fetchWithRetry(`${API_BASE}/ops/custom-plans/${activePlanIdFromChat}`, {
                     credentials: 'include',
                 });
                 if (!res.ok) return;
@@ -252,7 +253,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 useGraphStore.getState().setEditMode(true);
                 hasFitViewRef.current = false;
                 addToast('Plan cargado desde IA — edita y ejecuta.', 'success');
-            } catch {
+            } catch (err) {
                 addToast('No se pudo cargar el plan generado.', 'error');
             }
         };
@@ -388,8 +389,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                         data.status === 'done' ? 'success' : 'error',
                     );
                 }
-            } catch {
-                /* ignore malformed events */
+            } catch (err) {
+                /* malformed SSE event — non-critical */
             }
         };
         return () => eventSource.close();
@@ -426,8 +427,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                     savingsUsd: snap.estimated_savings_usd,
                     nodesOptimized: snap.nodes_optimized,
                 });
-            } catch {
-                /* ignore */
+            } catch (err) {
+                console.warn('Economy refresh failed:', err);
             }
         };
         refresh();
@@ -456,8 +457,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 },
             };
             await saveConfig(nextCfg as any);
-        } catch {
+        } catch (err) {
             useGraphStore.getState().setEcoModeQuickEnabled(!next);
+            addToast('Error toggling eco mode', 'error');
         }
     }, [fetchConfig, saveConfig]);
 
@@ -737,7 +739,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 ? `${API_BASE}/ops/custom-plans/${activePlanId}`
                 : `${API_BASE}/ops/custom-plans`;
             const method = activePlanId ? 'PUT' : 'POST';
-            const response = await fetch(url, {
+            const response = await fetchWithRetry(url, {
                 method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
@@ -768,7 +770,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         }
         useGraphStore.getState().setIsExecuting(true);
         try {
-            const res = await fetch(`${API_BASE}/ops/custom-plans/${activePlanId}/execute`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/custom-plans/${activePlanId}/execute`, {
                 method: 'POST',
                 credentials: 'include',
             });
@@ -875,13 +877,13 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                             value={planName}
                             onChange={(e) => useGraphStore.getState().setPlanName(e.target.value)}
                             className="input-field mb-1"
-                            placeholder="Nombre del plan"
+                            placeholder="Plan name"
                         />
                         <input
                             value={planDescription}
                             onChange={(e) => useGraphStore.getState().setPlanDescription(e.target.value)}
                             className="input-field text-[11px]"
-                            placeholder="Descripcion"
+                            placeholder="Description"
                         />
                     </Panel>
                 )}
@@ -892,7 +894,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                         <button
                             onClick={createManualNode}
                             className="w-10 h-10 rounded-full bg-accent-primary text-white flex items-center justify-center shadow-lg shadow-accent-primary/30 hover:scale-110 active:scale-95 transition-all"
-                            title="Anadir nodo"
+                            title="Add node"
                         >
                             <Plus size={20} />
                         </button>

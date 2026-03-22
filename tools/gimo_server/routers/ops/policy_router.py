@@ -14,7 +14,7 @@ router = APIRouter()
 async def get_policy_config(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     cfg = PolicyService.get_config()
@@ -27,7 +27,7 @@ async def set_policy_config(
     request: Request,
     body: PolicyConfig,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     cfg = PolicyService.set_config(body)
@@ -40,7 +40,7 @@ async def policy_decide(
     request: Request,
     body: dict,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     tool = str(body.get("tool", "")).strip()
@@ -62,7 +62,7 @@ async def model_recommend(
     request: Request,
     body: dict,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     node_id = body.get("node_id", "unknown")

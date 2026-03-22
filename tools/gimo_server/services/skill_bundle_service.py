@@ -5,7 +5,6 @@ import logging
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 from .skills_service import SKILLS_LOCK, SkillCreateRequest, SkillDefinition, SkillsService
 from filelock import FileLock

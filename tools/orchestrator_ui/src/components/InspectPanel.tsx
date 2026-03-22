@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Activity, Terminal, Settings, ListChecks, Cpu, AlertTriangle, Coins } from 'lucide-react';
 import { AgentPlanPanel } from './AgentPlanPanel';
@@ -8,6 +9,7 @@ import AgentChat from './AgentChat';
 import { SubAgentCluster } from './SubAgentCluster';
 import { useNodes } from 'reactflow';
 import { GraphNode, API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { SystemPromptEditor } from './SystemPromptEditor';
 import { useAvailableModels } from '../hooks/useAvailableModels';
 import { useToast } from './Toast';
@@ -49,6 +51,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
     selectedNodeId,
     onClose,
 }) => {
+    const { t } = useTranslation();
     const nodes = useNodes();
     const selectedNode = useMemo(
         () => nodes.find((n) => n.id === selectedNodeId) as GraphNode | undefined,
@@ -74,8 +77,8 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
             try {
                 const snap = await fetchPlanEconomy(activePlanId, 30);
                 if (mounted) setPlanEconomy(snap);
-            } catch {
-                /* ignore */
+            } catch (err) {
+                addToast('Error refreshing plan economy', 'error');
             }
         };
         refresh();
@@ -107,9 +110,9 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
         let active = true;
         const poll = async () => {
             try {
-                const res = await fetch(`${API_BASE}/ops/mastery/hardware`, { credentials: 'include' });
+                const res = await fetchWithRetry(`${API_BASE}/ops/mastery/hardware`, { credentials: 'include' });
                 if (res.ok && active) setHwInfo(await res.json());
-            } catch { /* ignore */ }
+            } catch (err) { addToast('Error polling hardware state', 'error'); }
         };
         poll();
         const id = setInterval(poll, 15_000);
@@ -128,7 +131,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
         if (!selectedNodeId || !selectedNode?.data?.plan?.draft_id) return;
         const draftId = selectedNode.data.plan.draft_id;
         try {
-            const resp = await fetch(`${API_BASE}/ops/drafts/${draftId}`, { credentials: 'include' });
+            const resp = await fetchWithRetry(`${API_BASE}/ops/drafts/${draftId}`, { credentials: 'include' });
             if (!resp.ok) throw new Error('Failed to fetch draft');
             const draft = await resp.json();
             let plan: any;
@@ -141,7 +144,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
             if (!plan?.tasks) return;
             const task = plan.tasks.find((t: any) => t.id === selectedNodeId);
             if (task?.agent_assignee) task.agent_assignee.system_prompt = newPrompt;
-            const saveResp = await fetch(`${API_BASE}/ops/drafts/${draftId}`, {
+            const saveResp = await fetchWithRetry(`${API_BASE}/ops/drafts/${draftId}`, {
                 method: 'PUT',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
@@ -158,7 +161,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
         if (!selectedNodeId || !selectedNode?.data?.plan?.draft_id) return;
         const draftId = selectedNode.data.plan.draft_id;
         try {
-            const resp = await fetch(`${API_BASE}/ops/drafts/${draftId}`, { credentials: 'include' });
+            const resp = await fetchWithRetry(`${API_BASE}/ops/drafts/${draftId}`, { credentials: 'include' });
             const draft = await resp.json();
             let plan: any;
             try {
@@ -170,7 +173,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
             if (!plan?.tasks) return;
             const task = plan.tasks.find((t: any) => t.id === selectedNodeId);
             if (task?.agent_assignee) task.agent_assignee.model = newModel;
-            await fetch(`${API_BASE}/ops/drafts/${draftId}`, {
+            await fetchWithRetry(`${API_BASE}/ops/drafts/${draftId}`, {
                 method: 'PUT',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
@@ -215,7 +218,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                 <button
                     onClick={onClose}
                     className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-white/[0.06] transition-all"
-                    aria-label="Cerrar panel"
+                    aria-label={t('inspect.close')}
                 >
                     <X size={14} />
                 </button>
@@ -350,7 +353,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                                                         </span>
                                                     </div>
                                                     <div className="flex items-center gap-1.5">
-                                                        <span className="text-text-secondary">Modelos</span>
+                                                        <span className="text-text-secondary">{t('inspect.models')}</span>
                                                         <span className="font-mono text-text-primary">{hwInfo.available_models}</span>
                                                     </div>
                                                 </div>
@@ -384,7 +387,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                                             </div>
                                             <div className="space-y-2 text-xs">
                                                 <div className="flex justify-between">
-                                                    <span className="text-text-secondary">Modelo</span>
+                                                    <span className="text-text-secondary">{t('common.model')}</span>
                                                     <span className="font-mono text-accent-primary">{routingInfo.selected_model}</span>
                                                 </div>
                                                 <div className="flex justify-between">
@@ -454,7 +457,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                                             Economía del Nodo
                                         </div>
                                         <div className="flex justify-between text-xs">
-                                            <span className="text-text-secondary">Coste</span>
+                                            <span className="text-text-secondary">{t('inspect.cost')}</span>
                                             <span className="font-mono text-emerald-300">${Number(selectedNodeEconomy?.cost_usd || selectedNode?.data?.cost_usd || 0).toFixed(4)}</span>
                                         </div>
                                         <div className="flex justify-between text-xs">
@@ -480,15 +483,15 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                                             Sesión
                                         </div>
                                         <div className="flex justify-between text-xs">
-                                            <span className="text-text-secondary">Gasto acumulado</span>
+                                            <span className="text-text-secondary">{t('inspect.accumulatedSpend')}</span>
                                             <span className="font-mono text-emerald-300">${Number(planEconomy?.total_cost_usd || 0).toFixed(4)}</span>
                                         </div>
                                         <div className="flex justify-between text-xs">
-                                            <span className="text-text-secondary">Ahorro estimado</span>
+                                            <span className="text-text-secondary">{t('inspect.estimatedSavings')}</span>
                                             <span className="font-mono text-lime-300">${Number(planEconomy?.estimated_savings_usd || 0).toFixed(4)}</span>
                                         </div>
                                         <div className="flex justify-between text-xs">
-                                            <span className="text-text-secondary">Nodos optimizados</span>
+                                            <span className="text-text-secondary">{t('inspect.optimizedNodes')}</span>
                                             <span className="font-mono text-text-primary">{planEconomy?.nodes_optimized ?? 0}</span>
                                         </div>
                                     </div>
@@ -515,7 +518,7 @@ export const InspectPanel: React.FC<InspectPanelProps> = ({
                     ) : (
                         <div className="flex flex-col items-center justify-center py-20 text-text-tertiary text-center px-6">
                             <Activity size={32} className="mb-4 opacity-10" />
-                            <p className="text-sm font-medium text-text-secondary">Ningun nodo seleccionado</p>
+                            <p className="text-sm font-medium text-text-secondary">{t('graph.noNodeSelected')}</p>
                             <p className="text-[10px] mt-1 text-text-tertiary">
                                 Selecciona un agente o componente para inspeccionar su estado
                             </p>

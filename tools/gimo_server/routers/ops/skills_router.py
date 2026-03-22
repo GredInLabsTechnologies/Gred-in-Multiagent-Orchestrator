@@ -30,7 +30,7 @@ _SKILL_NOT_FOUND = "Skill not found"
 @router.get("/skills", response_model=List[SkillDefinition])
 async def list_skills(
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """List all available skill templates."""
     return SkillsService.list_skills()
@@ -44,7 +44,7 @@ async def list_skills(
 async def get_skill(
     skill_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Get a single skill template by ID."""
     skill = SkillsService.get_skill(skill_id)
@@ -65,7 +65,7 @@ async def get_skill(
 async def create_skill(
     body: SkillCreateRequest,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Create a new skill template."""
     _require_role(auth, "operator")
@@ -91,7 +91,7 @@ async def update_skill(
     skill_id: str,
     body: SkillUpdateRequest,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Update a skill, creating a new version (previous version is archived)."""
     _require_role(auth, "operator")
@@ -113,7 +113,7 @@ async def update_skill(
 async def delete_skill(
     skill_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Delete a skill template."""
     _require_role(auth, "admin")
@@ -130,7 +130,7 @@ async def delete_skill(
 async def generate_description(
     body: SkillDescriptionRequest,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Generate a baseline description for a visual Skill payload."""
     _require_role(auth, "operator")
@@ -150,7 +150,7 @@ async def generate_description(
 async def generate_skill_from_prompt(
     body: SkillAutoGenRequest,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Auto-generate a complete skill from a natural language description."""
     _require_role(auth, "operator")
@@ -180,7 +180,7 @@ async def execute_skill(
     skill_id: str,
     body: SkillExecuteRequest,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Execute a skill."""
     _require_role(auth, "operator")
@@ -201,7 +201,7 @@ async def execute_skill(
 async def list_skill_versions(
     skill_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """List all archived versions of a skill."""
     return SkillsService.list_skill_versions(skill_id)
@@ -214,7 +214,7 @@ async def list_skill_versions(
 async def get_skill_analytics(
     skill_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Get execution analytics for a skill."""
     return SkillsService.get_skill_analytics(skill_id)
@@ -226,7 +226,7 @@ async def get_skill_analytics(
 @router.get("/skills/marketplace", response_model=List[SkillDefinition])
 async def list_marketplace(
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """List all published skills in the marketplace."""
     return SkillsService.list_published_skills()
@@ -240,7 +240,7 @@ async def list_marketplace(
 async def publish_skill(
     skill_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Publish a skill to the marketplace."""
     _require_role(auth, "admin")
@@ -264,7 +264,7 @@ async def publish_skill(
 async def install_from_marketplace(
     skill_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Install a skill from the marketplace into local skills."""
     _require_role(auth, "operator")
@@ -284,7 +284,7 @@ async def install_from_marketplace(
 @router.get("/skills/moods", response_model=Dict[str, str])
 async def list_moods(
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """List all available agent moods with their system prompt descriptions."""
     return SkillsService.list_available_moods()

@@ -120,14 +120,17 @@ class TestRateLimiting:
         from tools.gimo_server.security import rate_limit
         from datetime import datetime
         
-        # Populate real store for multiple common test keys to trigger 429
-        # TestClient can identify as 'testclient', '127.0.0.1', or 'unknown'
+        # Populate real store for all possible key combinations to trigger 429
+        # Keys are ip:role format; we cover all IPs and roles including "unknown"
+        # (when verify_token is overridden, auth_role may not be set on request.state)
+        over_limit = max(rate_limit.RATE_LIMIT_PER_MIN, *rate_limit.ROLE_RATE_LIMITS.values()) + 1
         data = {
-            "count": rate_limit.RATE_LIMIT_PER_MIN + 1,
+            "count": over_limit,
             "start_time": datetime.now()
         }
         for ip in ["127.0.0.1", "testclient", "unknown"]:
-            rate_limit.rate_limit_store[ip] = data.copy()
+            for role in ["admin", "operator", "actions", "unknown"]:
+                rate_limit.rate_limit_store[f"{ip}:{role}"] = data.copy()
         
         try:
             res = test_client.get("/status", headers=headers)

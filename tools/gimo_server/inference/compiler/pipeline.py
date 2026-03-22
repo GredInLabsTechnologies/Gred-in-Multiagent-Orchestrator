@@ -13,12 +13,11 @@ production-ready, hardware-optimised model.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Optional
 
 from ..contracts import (
     CompiledModelInfo,

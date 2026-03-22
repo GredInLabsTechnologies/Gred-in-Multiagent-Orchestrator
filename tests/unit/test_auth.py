@@ -77,7 +77,7 @@ class TestRBAC:
     @pytest.mark.parametrize("endpoint,method", [
         ("/ops/provider", "get"),
         ("/ops/policy", "get"),
-        ("/ui/service/restart", "post"),
+        ("/ops/service/restart", "post"),
         ("/ops/trust/reset", "post"),
         ("/ops/config", "get"), # Actions cannot read config in some versions, check rbac
         ("/ui/audit", "get"),
@@ -117,7 +117,7 @@ class TestRBAC:
 
     def test_admin_role_full_access(self, test_client):
         """Verify admin role has full access."""
-        endpoints = ["/ops/config", "/status", "/ops/provider", "/ui/repos"]
+        endpoints = ["/ops/config", "/status", "/ops/provider", "/ops/repos"]
         for ep in endpoints:
             response = test_client.get(ep, headers=_admin_headers())
             assert response.status_code in (200, 404)
@@ -162,7 +162,7 @@ class TestThreatResponse:
         threat_engine.level = ThreatLevel.LOCKDOWN
         
         response = test_client.post(
-            "/ui/security/resolve?action=clear_all",
+            "/ops/security/resolve?action=clear_all",
             headers=_admin_headers()
         )
         assert response.status_code == 200

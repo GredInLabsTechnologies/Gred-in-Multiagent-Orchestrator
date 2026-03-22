@@ -7,9 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from .base import (
     AgentAdapter, 
-    AgentResult, 
     AgentSession, 
-    AgentStatus, 
     ProposedAction
 )
 from .generic_cli import GenericCLISession

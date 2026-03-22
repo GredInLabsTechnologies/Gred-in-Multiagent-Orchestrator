@@ -28,6 +28,50 @@ os.environ.setdefault("ORCH_AUDIT_LOG_MAX_BYTES", str(50 * 1024 * 1024))
 from tools.gimo_server.main import app  # noqa: E402
 
 
+def _inject_fake_model_inventory(cls):
+    """Inject a minimal fake model inventory so tests never make HTTP calls to Ollama."""
+    import time
+    from dataclasses import field as _field
+    from tools.gimo_server.services.model_inventory_service import ModelEntry
+
+    if cls._cache:
+        return  # already populated
+
+    cls._cache = [
+        ModelEntry(
+            model_id="fake-small",
+            provider_id="test-provider",
+            provider_type="openai",
+            is_local=False,
+            quality_tier=2,
+            capabilities={"chat", "code"},
+            cost_input=0.5,
+            cost_output=1.5,
+        ),
+        ModelEntry(
+            model_id="fake-large",
+            provider_id="test-provider",
+            provider_type="openai",
+            is_local=False,
+            quality_tier=4,
+            capabilities={"chat", "code", "reasoning"},
+            cost_input=5.0,
+            cost_output=15.0,
+        ),
+        ModelEntry(
+            model_id="fake-local",
+            provider_id="ollama",
+            provider_type="ollama",
+            is_local=True,
+            quality_tier=1,
+            capabilities={"chat"},
+            cost_input=0.0,
+            cost_output=0.0,
+        ),
+    ]
+    cls._cache_ts = time.time()
+
+
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
     """Ignore non-test diagnostic artifacts stored in the repo root."""
     if collection_path.name in IGonRED_COLLECTION_FILES:
@@ -69,7 +113,7 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool | None:
 
 
 @pytest.fixture(scope="session")
-def test_client():
+def test_client(_mock_gics_daemon):
     """Provide a TestClient with properly initialized lifespan context."""
     client = TestClient(app, raise_server_exceptions=False)
     try:
@@ -82,6 +126,17 @@ def test_client():
         if isinstance(exc, asyncio.CancelledError):
             return
         raise
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _mock_gics_daemon():
+    """Prevent GicsService.start_daemon from blocking on GICS subprocess in tests."""
+    from tools.gimo_server.services.gics_service import GicsService
+
+    with patch.object(GicsService, "start_daemon"), \
+         patch.object(GicsService, "start_health_check"), \
+         patch.object(GicsService, "stop_daemon"):
+        yield
 
 
 @pytest.fixture(scope="session")
@@ -124,16 +179,26 @@ def reset_dependency_overrides():
 
 @pytest.fixture(scope="function", autouse=True)
 def reset_test_state():
-    """Reset any global state between tests."""
+    """Reset any global state between tests to prevent order-dependent failures."""
     from tools.gimo_server.security import (
         load_security_db,
         rate_limit_store,
         save_security_db,
         threat_engine
     )
+    from tools.gimo_server.services.hardware_monitor_service import HardwareMonitorService
+    from tools.gimo_server.services.model_inventory_service import ModelInventoryService
 
     rate_limit_store.clear()
     threat_engine.clear_all()
+
+    # Reset singletons to prevent cross-test contamination
+    HardwareMonitorService.reset_instance()
+    ModelInventoryService._cache = []
+    ModelInventoryService._cache_ts = 0.0
+
+    # Inject fake inventory so tests never hit real Ollama/HTTP
+    _inject_fake_model_inventory(ModelInventoryService)
 
     # Reset panic mode AND recent_events in DB to prevent state leakage
     try:
@@ -150,6 +215,19 @@ def reset_test_state():
         logging.getLogger("orchestrator.tests").warning("Failed to reset security state: %s", exc)
 
     yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _mock_model_inventory_refresh():
+    """Prevent ModelInventoryService.refresh_inventory from making real HTTP calls."""
+    from tools.gimo_server.services.model_inventory_service import ModelInventoryService
+
+    async def _fake_refresh(cls=None):
+        _inject_fake_model_inventory(ModelInventoryService)
+        return ModelInventoryService._cache
+
+    with patch.object(ModelInventoryService, "refresh_inventory", new=_fake_refresh):
+        yield
 
 
 @pytest.fixture(scope="session", autouse=True)

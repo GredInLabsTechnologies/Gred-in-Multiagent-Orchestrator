@@ -20,7 +20,6 @@ from .contracts import (
     HardwareTarget,
     MemoryBudget,
     ModelSpec,
-    ShardStrategy,
 )
 from .shard_planner import ShardPlan, plan as plan_shards, is_rejected
 

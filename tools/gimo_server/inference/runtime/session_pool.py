@@ -17,8 +17,8 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 from ..contracts import HardwareTarget, ModelSpec
 from .base_adapter import RuntimeAdapter, SessionHandle

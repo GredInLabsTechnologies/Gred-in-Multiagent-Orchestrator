@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import Counter, deque
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from ..config import OPS_DATA_DIR
 from ..ops_models import AgentActionEvent, AgentInsight

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import httpx
 
@@ -113,6 +113,83 @@ class OpenAICompatAdapter(ProviderAdapter):
         return {
             "content": content,
             "usage": usage
+        }
+
+    async def chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.0,
+    ) -> Dict[str, Any]:
+        """Call /chat/completions with tool_calls support.
+
+        Returns: {
+            "content": str | None,
+            "tool_calls": [{"id": str, "function": {"name": str, "arguments": str}}],
+            "usage": dict,
+            "finish_reason": str,
+        }
+        """
+        # Mock mode: return text response without tool_calls
+        if self._mock_mode_enabled({}):
+            last_msg = messages[-1] if messages else {"content": ""}
+            content = f"[MOCK:{self.model}] Response to: {str(last_msg.get('content', ''))[:100]}"
+            prompt_tokens = sum(len(str(m.get("content", "")).split()) for m in messages)
+            completion_tokens = max(4, min(64, prompt_tokens // 2 + 4))
+            return {
+                "content": content,
+                "tool_calls": [],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                },
+                "finish_reason": "stop"
+            }
+
+        # Build payload
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+
+        # Add tools if provided
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        client = self._get_client()
+        resp = await client.post(
+            f"{self.base_url}/chat/completions",
+            headers=self._headers(),
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        usage = data.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
+
+        try:
+            choice = data["choices"][0]
+            message = choice["message"]
+            content = message.get("content")
+            tool_calls = message.get("tool_calls", [])
+            finish_reason = choice.get("finish_reason", "stop")
+        except (KeyError, IndexError) as e:
+            # Fallback if response doesn't match schema
+            return {
+                "content": f"Error parsing response: {str(e)}",
+                "tool_calls": [],
+                "usage": usage,
+                "finish_reason": "error"
+            }
+
+        return {
+            "content": content,
+            "tool_calls": tool_calls or [],
+            "usage": usage,
+            "finish_reason": finish_reason
         }
 
     async def health_check(self) -> bool:

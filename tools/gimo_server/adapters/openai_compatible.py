@@ -14,7 +14,6 @@ from .base import (
     AgentStatus, 
     ProposedAction
 )
-from ..services.tool_registry_service import ToolRegistryService
 from ..services.role_profiles import assert_tool_allowed, get_role_profile
 from ..services.hitl_gate_service import HitlGateService
 

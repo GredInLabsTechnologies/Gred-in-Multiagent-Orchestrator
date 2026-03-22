@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 
 import { API_BASE } from '../../types';
+import { fetchWithRetry } from '../../lib/fetchWithRetry';
 
 interface MaintenanceIslandProps {
     token?: string;
@@ -76,7 +77,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
 
         const fetchUiStatus = async () => {
             try {
-                const response = await fetch(`${API_BASE}/ui/status`, {
+                const response = await fetchWithRetry(`${API_BASE}/ui/status`, {
                     credentials: 'include',
                 });
                 if (!response.ok) {

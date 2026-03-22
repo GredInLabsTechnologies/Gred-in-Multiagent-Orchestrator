@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { signInWithPopup } from 'firebase/auth';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { auth, getMissingFirebaseEnvKeys, googleProvider, isFirebaseConfigured } from '../lib/firebase';
 import { useToast } from './Toast';
 import { AuthGraphBackground } from './AuthGraphBackground';
@@ -130,7 +131,7 @@ export function LoginModal({ onAuthenticated }: Props) {
         setVerifyingContext('cold-access');
         setLoginState('verifying');
         try {
-            const response = await fetch(`${API_BASE}/auth/cold-room/access`, {
+            const response = await fetchWithRetry(`${API_BASE}/auth/cold-room/access`, {
                 method: 'POST',
                 credentials: 'include',
             });
@@ -177,7 +178,7 @@ export function LoginModal({ onAuthenticated }: Props) {
             const credentials = await signInWithPopup(auth, googleProvider);
             const idToken = await credentials.user.getIdToken();
 
-            const res = await fetch(`${API_BASE}/auth/firebase-login`, {
+            const res = await fetchWithRetry(`${API_BASE}/auth/firebase-login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
@@ -212,7 +213,7 @@ export function LoginModal({ onAuthenticated }: Props) {
         setLoading(true);
 
         try {
-            const res = await fetch(`${API_BASE}/auth/login`, {
+            const res = await fetchWithRetry(`${API_BASE}/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
@@ -236,7 +237,7 @@ export function LoginModal({ onAuthenticated }: Props) {
     };
 
     const createColdRoomSession = async (): Promise<boolean> => {
-        const res = await fetch(`${API_BASE}/auth/cold-room/access`, {
+        const res = await fetchWithRetry(`${API_BASE}/auth/cold-room/access`, {
             method: 'POST',
             credentials: 'include',
         });
@@ -249,7 +250,7 @@ export function LoginModal({ onAuthenticated }: Props) {
         setVerifyingContext('cold-activate');
         setLoginState('verifying');
         try {
-            const response = await fetch(`${API_BASE}/auth/cold-room/activate`, {
+            const response = await fetchWithRetry(`${API_BASE}/auth/cold-room/activate`, {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
@@ -285,7 +286,7 @@ export function LoginModal({ onAuthenticated }: Props) {
         setVerifyingContext('cold-renew');
         setLoginState('verifying');
         try {
-            const response = await fetch(`${API_BASE}/auth/cold-room/renew`, {
+            const response = await fetchWithRetry(`${API_BASE}/auth/cold-room/renew`, {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },

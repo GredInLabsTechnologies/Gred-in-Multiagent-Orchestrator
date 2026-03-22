@@ -108,17 +108,17 @@ export const MenuBar: React.FC<MenuBarProps> = ({
 
     /* ── Breadcrumb ── */
     const tabLabels: Record<string, string> = {
-        graph: 'Grafo',
-        plans: 'Planes',
-        evals: 'Evaluaciones',
-        metrics: 'Métricas',
-        mastery: 'Economía',
-        security: 'Seguridad',
-        operations: 'Operaciones',
-        settings: 'Ajustes',
+        graph: 'Graph',
+        plans: 'Plans',
+        evals: 'Evaluations',
+        metrics: 'Metrics',
+        mastery: 'Economy',
+        security: 'Security',
+        operations: 'Operations',
+        settings: 'Settings',
     };
 
-    const profileLabel = userDisplayName || userEmail || 'Mi Perfil';
+    const profileLabel = userDisplayName || userEmail || 'Profile';
     const profileInitial = (profileLabel || 'U').trim().charAt(0).toUpperCase();
 
     return (

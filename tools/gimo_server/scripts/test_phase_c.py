@@ -1,4 +1,3 @@
-import asyncio
 import os
 import tempfile
 from pathlib import Path
@@ -58,9 +57,8 @@ def test_context_indexer():
         parent_file = root.parent / "danger.txt"
         try:
             parent_file.write_text("Danger content")
-            created_danger = True
         except PermissionError:
-            created_danger = False # Can't write to parent temp, that's fine
+            pass # Can't write to parent temp, that's fine
 
         # 1. Normal scope
         res1 = ContextIndexer.extract_file_contents(str(root), ["safe.txt"])

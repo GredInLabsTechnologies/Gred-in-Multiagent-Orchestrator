@@ -156,7 +156,7 @@ class ModelRouterService:
         return None
 
     def _adjust_tier_min_for_eco_mode(self, config: Any, tier_min: int, reason_parts: list[str]) -> int:
-        if hasattr(config, "economy") and config.economy.eco_mode.mode != "off":
+        if hasattr(config, "economy") and config.economy is not None and config.economy.eco_mode.mode != "off":
             eco = config.economy.eco_mode
             autonomy = config.economy.autonomy_level
             if autonomy in ("guided", "autonomous") and eco.mode == "binary":
@@ -166,7 +166,7 @@ class ModelRouterService:
         return tier_min
 
     def _adjust_tier_bounds(self, config: Any, tier_min: int, tier_max: int) -> Tuple[int, int]:
-        if hasattr(config, "economy"):
+        if hasattr(config, "economy") and config.economy is not None:
             floor_val = _legacy_to_numeric(config.economy.model_floor)
             ceil_val = _legacy_to_numeric(config.economy.model_ceiling)
             if floor_val:
@@ -212,7 +212,7 @@ class ModelRouterService:
         return candidates
 
     def _apply_eco_mode_selection(self, candidates: list[ModelEntry], config: Any, reason_parts: list[str], hw_state: str) -> Optional[RoutingDecision]:
-        if hasattr(config, "economy") and config.economy.eco_mode.mode != "off":
+        if hasattr(config, "economy") and config.economy is not None and config.economy.eco_mode.mode != "off":
             autonomy = config.economy.autonomy_level
             if autonomy in ("guided", "autonomous"):
                 selected = min(candidates, key=lambda m: m.cost_input + m.cost_output)
@@ -319,7 +319,7 @@ class ModelRouterService:
     def _filter_budget_exhausted(self, candidates: list[ModelEntry], config: Any) -> list[ModelEntry]:
         if not self.storage or not hasattr(self.storage, "cost"):
             return candidates
-        if not hasattr(config, "economy") or not config.economy.provider_budgets:
+        if not hasattr(config, "economy") or config.economy is None or not config.economy.provider_budgets:
             return candidates
 
         result = []
@@ -332,7 +332,7 @@ class ModelRouterService:
     def _apply_roi_preference(self, candidates: list[ModelEntry], task_type: str, config: Any) -> Optional[ModelEntry]:
         if not self.storage or not hasattr(self.storage, "cost") or not task_type:
             return None
-        if not (hasattr(config, "economy") and config.economy.allow_roi_routing):
+        if not (hasattr(config, "economy") and config.economy is not None and config.economy.allow_roi_routing):
             return None
 
         leaderboard = self.storage.cost.get_roi_leaderboard(days=30)
@@ -348,7 +348,7 @@ class ModelRouterService:
     def _is_provider_budget_exhausted(self, provider: str, config: Any) -> bool:
         if not self.storage or not hasattr(self.storage, "cost"):
             return False
-        if not hasattr(config, "economy") or not config.economy.provider_budgets:
+        if not hasattr(config, "economy") or config.economy is None or not config.economy.provider_budgets:
             return False
         budget_cfg = next((b for b in config.economy.provider_budgets if b.provider == provider), None)
         if not budget_cfg or budget_cfg.max_cost_usd is None:

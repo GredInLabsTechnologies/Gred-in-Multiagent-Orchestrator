@@ -20,16 +20,13 @@ import hashlib
 import json
 import logging
 import os
-import time
-from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterator, List, Optional
+from typing import Iterator, Optional
 
 from ..contracts import (
     CompiledModelInfo,
     ExecutionProviderType,
     HardwareTarget,
-    ModelSpec,
     QuantizationType,
 )
 

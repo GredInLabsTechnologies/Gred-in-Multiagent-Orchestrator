@@ -1,8 +1,8 @@
-from .sub_agent import SubAgent, SubAgentConfig
+from .sub_agent import SubAgent as SubAgent, SubAgentConfig as SubAgentConfig
 from .core import (
-    OpsTask, OpsPlan, OpsDraft, OpsApproved, OpsRunStatus, OpsRun,
-    OpsConfig, ExecutorReport, OpsCreateDraftRequest, OpsUpdateDraftRequest,
-    OpsApproveResponse, OpsCreateRunRequest, ChildRunRequest, RepoEntry, RunEvent, RunLogEntry,
+    OpsTask as OpsTask, OpsPlan as OpsPlan, OpsDraft as OpsDraft, OpsApproved as OpsApproved, OpsRunStatus as OpsRunStatus, OpsRun as OpsRun,
+    OpsConfig as OpsConfig, ExecutorReport as ExecutorReport, OpsCreateDraftRequest as OpsCreateDraftRequest, OpsUpdateDraftRequest as OpsUpdateDraftRequest,
+    OpsApproveResponse as OpsApproveResponse, OpsCreateRunRequest as OpsCreateRunRequest, ChildRunRequest as ChildRunRequest, RepoEntry as RepoEntry, RunEvent as RunEvent, RunLogEntry as RunLogEntry,
     StatusResponse, UiStatusResponse, VitaminizeResponse,
 )
 from .conversation import (

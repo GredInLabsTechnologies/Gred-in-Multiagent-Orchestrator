@@ -17,12 +17,11 @@ def override_verify_token():
 @pytest.fixture
 def auth_client():
     app.dependency_overrides[verify_token] = override_verify_token
-    with TestClient(app) as client:
-        yield client
+    yield TestClient(app, raise_server_exceptions=False)
     app.dependency_overrides.clear()
 
 
-def test_panic_catcher_middleware(auth_client):
+def test_panic_catcher_middleware(test_client, valid_token):
     with patch(
         "tools.gimo_server.security.load_security_db", return_value={"panic_mode": False}
     ):
@@ -30,32 +29,29 @@ def test_panic_catcher_middleware(auth_client):
             "tools.gimo_server.routes.get_active_repo_dir",
             side_effect=RuntimeError("critical fail"),
         ):
-            response = auth_client.get("/ui/status")
+            response = test_client.get(
+                "/ui/status", headers={"Authorization": f"Bearer {valid_token}"}
+            )
             assert response.status_code == 500
             data = response.json()
             assert "Internal System Failure" in data["error"]
 
 
-def test_lockdown_check_middleware(auth_client):
-    import os
+def test_lockdown_check_middleware(test_client, valid_token):
     from tools.gimo_server.security import threat_engine
     from tools.gimo_server.security.threat_level import ThreatLevel, AUTH_FAILURE_LOCKDOWN_THRESHOLD
 
-    # Escalate to LOCKDOWN via simulated attacker (must happen AFTER TestClient lifespan)
     for _ in range(AUTH_FAILURE_LOCKDOWN_THRESHOLD):
         threat_engine.record_auth_failure("attacker-1.2.3.4")
     assert threat_engine.level >= ThreatLevel.LOCKDOWN
 
-    # Authenticated request (via real token in header) should pass even in LOCKDOWN
-    token = os.environ.get("ORCH_TOKEN", "test-token-a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0")
-    response = auth_client.get("/status", headers={"Authorization": f"Bearer {token}"})
+    response = test_client.get("/status", headers={"Authorization": f"Bearer {valid_token}"})
     assert response.status_code == 200
     assert response.headers.get("X-Threat-Level") == "LOCKDOWN"
 
 
-def test_allow_options_preflight(auth_client):
-    # Case 1: Origin in CORS_ORIGINS
-    response = auth_client.options(
+def test_allow_options_preflight(test_client, valid_token):
+    response = test_client.options(
         "/ui/status",
         headers={
             "Origin": "http://localhost:5173",
@@ -66,13 +62,14 @@ def test_allow_options_preflight(auth_client):
     assert response.status_code == 204
     assert response.headers.get("Access-Control-Allow-Origin") == "http://localhost:5173"
 
-    # Case 2: No Origin
-    response = auth_client.get("/status")
+    response = test_client.get("/status", headers={"Authorization": f"Bearer {valid_token}"})
     assert response.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_lifespan_events():
+    from unittest.mock import MagicMock
+
     with patch(
         "tools.gimo_server.services.snapshot_service.SnapshotService.ensure_snapshot_dir"
     ) as mock_ensure:
@@ -83,7 +80,13 @@ async def test_lifespan_events():
             except asyncio.CancelledError:
                 return
 
-        with patch("tools.gimo_server.main.snapshot_cleanup_loop", side_effect=dummy_loop):
+        mock_gics = MagicMock()
+        mock_gics.start_daemon = MagicMock()
+        mock_gics.start_health_check = MagicMock()
+        mock_gics.stop_daemon = MagicMock()
+
+        with patch("tools.gimo_server.main.snapshot_cleanup_loop", side_effect=dummy_loop), \
+             patch("tools.gimo_server.main.GicsService", return_value=mock_gics):
             from tools.gimo_server.main import lifespan
 
             async with lifespan(app):
@@ -100,11 +103,10 @@ async def test_lifespan_base_dir_missing():
                 pass  # Execution SHOULD fail before reaching here
 
 
-def test_root_route():
-    with TestClient(app) as client:
-        response = client.get("/")
-        assert response.status_code == 200
-        assert response.headers.get("X-Correlation-ID")
+def test_root_route(test_client):
+    response = test_client.get("/")
+    assert response.status_code == 200
+    assert response.headers.get("X-Correlation-ID")
 
 
 @pytest.mark.asyncio
@@ -122,16 +124,24 @@ async def test_snapshot_cleanup_loop_exit():
 
 @pytest.mark.asyncio
 async def test_lifespan_cleanup_task_cancelled_error_propagates():
+    from unittest.mock import MagicMock
+
     async def dummy_loop():
         try:
             await asyncio.sleep(100)
         except asyncio.CancelledError:
             return
 
+    mock_gics = MagicMock()
+    mock_gics.start_daemon = MagicMock()
+    mock_gics.start_health_check = MagicMock()
+    mock_gics.stop_daemon = MagicMock()
+
     with patch(
         "tools.gimo_server.services.snapshot_service.SnapshotService.ensure_snapshot_dir"
     ):
-        with patch("tools.gimo_server.main.snapshot_cleanup_loop", side_effect=dummy_loop):
+        with patch("tools.gimo_server.main.snapshot_cleanup_loop", side_effect=dummy_loop), \
+             patch("tools.gimo_server.main.GicsService", return_value=mock_gics):
             from tools.gimo_server.main import lifespan
 
             async with lifespan(app):

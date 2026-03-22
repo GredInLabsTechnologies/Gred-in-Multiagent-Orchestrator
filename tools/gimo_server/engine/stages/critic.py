@@ -1,6 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
-from ..contracts import StageInput, StageOutput, ExecutionStage
+from ..contracts import StageInput, StageOutput
 from ...services.critic_service import CriticService
 
 class Critic:

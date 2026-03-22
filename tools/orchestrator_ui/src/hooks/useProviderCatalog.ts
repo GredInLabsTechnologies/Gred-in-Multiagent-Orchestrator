@@ -6,6 +6,7 @@ import {
     ProviderCatalogResponse,
     ProviderInstallResult,
 } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 const getRequestInit = (includeJson: boolean = false): RequestInit => ({
     credentials: 'include',
@@ -27,7 +28,7 @@ export const useProviderCatalog = (loadProviders: () => Promise<void>) => {
         if (!providerType) return null;
         setCatalogLoading(prev => ({ ...prev, [providerType]: true }));
         try {
-            const res = await fetch(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/models`, getRequestInit());
+            const res = await fetchWithRetry(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/models`, getRequestInit());
             if (!res.ok) throw new Error('Failed to load provider catalog');
             const data: ProviderCatalogResponse = await res.json();
             const normalizedAuthModes = Array.from(new Set((data.auth_modes_supported || []).map(normalizeAuthMode)));
@@ -43,7 +44,7 @@ export const useProviderCatalog = (loadProviders: () => Promise<void>) => {
     }, []);
 
     const installModel = useCallback(async (providerType: string, modelId: string) => {
-        const res = await fetch(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/models/install`, {
+        const res = await fetchWithRetry(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/models/install`, {
             method: 'POST',
             ...getRequestInit(true),
             body: JSON.stringify({ model_id: modelId }),
@@ -57,7 +58,7 @@ export const useProviderCatalog = (loadProviders: () => Promise<void>) => {
     }, [loadCatalog]);
 
     const getInstallJob = useCallback(async (providerType: string, jobId: string) => {
-        const res = await fetch(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/models/install/${encodeURIComponent(jobId)}`, getRequestInit());
+        const res = await fetchWithRetry(`${API_BASE}/ops/connectors/${encodeURIComponent(providerType)}/models/install/${encodeURIComponent(jobId)}`, getRequestInit());
         if (!res.ok) throw new Error('Failed to fetch install job status');
         const data = await res.json() as ProviderInstallResult;
         if (data.status === 'done' || data.status === 'error') {
@@ -68,14 +69,14 @@ export const useProviderCatalog = (loadProviders: () => Promise<void>) => {
     }, [loadCatalog, loadProviders]);
 
     const listCliDependencies = useCallback(async () => {
-        const res = await fetch(`${API_BASE}/ops/system/dependencies`, getRequestInit());
+        const res = await fetchWithRetry(`${API_BASE}/ops/system/dependencies`, getRequestInit());
         if (!res.ok) throw new Error('Failed to list CLI dependencies');
         const data = await res.json() as { items: CliDependencyStatus[]; count: number };
         return data;
     }, []);
 
     const installCliDependency = useCallback(async (dependencyId: string) => {
-        const res = await fetch(`${API_BASE}/ops/system/dependencies/install`, {
+        const res = await fetchWithRetry(`${API_BASE}/ops/system/dependencies/install`, {
             method: 'POST',
             ...getRequestInit(true),
             body: JSON.stringify({ dependency_id: dependencyId }),
@@ -88,7 +89,7 @@ export const useProviderCatalog = (loadProviders: () => Promise<void>) => {
     }, []);
 
     const getCliDependencyInstallJob = useCallback(async (dependencyId: string, jobId: string) => {
-        const res = await fetch(`${API_BASE}/ops/system/dependencies/install/${encodeURIComponent(dependencyId)}/${encodeURIComponent(jobId)}`, getRequestInit());
+        const res = await fetchWithRetry(`${API_BASE}/ops/system/dependencies/install/${encodeURIComponent(dependencyId)}/${encodeURIComponent(jobId)}`, getRequestInit());
         if (!res.ok) throw new Error('Failed to fetch dependency install job');
         return await res.json() as CliDependencyInstallResult;
     }, []);

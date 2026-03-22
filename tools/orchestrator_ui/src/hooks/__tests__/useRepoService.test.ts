@@ -79,7 +79,7 @@ describe('useRepoService', () => {
         })
 
         expect(fetch).toHaveBeenCalledWith(
-            expect.stringContaining('/ui/repos/vitaminize?path='),
+            expect.stringContaining('/ops/repos/vitaminize?path='),
             expect.objectContaining({ method: 'POST' })
         )
     })
@@ -120,7 +120,7 @@ describe('useRepoService', () => {
         })
 
         expect(fetch).toHaveBeenCalledWith(
-            expect.stringContaining('/ui/repos/select?path='),
+            expect.stringContaining('/ops/repos/select?path='),
             expect.objectContaining({ method: 'POST' })
         )
     })

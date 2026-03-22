@@ -1,0 +1,142 @@
+{
+  "common": {
+    "send": "Enviar",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "close": "Cerrar",
+    "delete": "Eliminar",
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "status": "Estado",
+    "error": "Error",
+    "loading": "Cargando...",
+    "noData": "Sin datos",
+    "retry": "Reintentar",
+    "confirm": "Confirmar",
+    "back": "Volver",
+    "name": "Nombre",
+    "description": "Descripcion",
+    "model": "Modelo",
+    "provider": "Proveedor",
+    "output": "Salida",
+    "live": "Vivo",
+    "terminal": "Terminal",
+    "settings": "Ajustes"
+  },
+  "auth": {
+    "error": "Error de autenticacion",
+    "sessionMissing": "Sesion no encontrada",
+    "sessionExpired": "Sesion expirada",
+    "login": "Iniciar sesion",
+    "logout": "Cerrar sesion",
+    "loginTitle": "Iniciar sesion en GIMO",
+    "email": "Correo",
+    "password": "Contrasena",
+    "loggingIn": "Iniciando sesion..."
+  },
+  "sidebar": {
+    "graph": "Grafo",
+    "chat": "Chat",
+    "plans": "Planes",
+    "analytics": "Analitica",
+    "observability": "Observabilidad",
+    "evals": "Evaluaciones",
+    "skills": "Habilidades",
+    "settings": "Ajustes"
+  },
+  "graph": {
+    "noActiveGraph": "Sin grafo activo",
+    "planName": "Nombre del plan",
+    "addNode": "Anadir nodo",
+    "cancelEdit": "Cancelar edicion",
+    "noNodeSelected": "Ningun nodo seleccionado",
+    "selectNode": "Selecciona un nodo para inspeccionar"
+  },
+  "inspect": {
+    "close": "Cerrar panel",
+    "models": "Modelos",
+    "tier": "Nivel",
+    "hardware": "Hardware",
+    "cost": "Coste",
+    "promptTokens": "Tokens de prompt",
+    "completionTokens": "Tokens de completado",
+    "accumulatedSpend": "Gasto acumulado",
+    "estimatedSavings": "Ahorro estimado",
+    "optimizedNodes": "Nodos optimizados"
+  },
+  "chat": {
+    "placeholder": "Escribe un mensaje...",
+    "thinking": "Pensando...",
+    "noMessages": "Sin mensajes aun",
+    "agentThinking": "El agente esta pensando..."
+  },
+  "plans": {
+    "noActivePlan": "Sin plan activo",
+    "createPlan": "Crear plan",
+    "planBuilder": "Constructor de planes"
+  },
+  "agent": {
+    "actionRequiresApproval": "Accion requiere aprobacion",
+    "trustLevel": "Nivel de confianza",
+    "confidence": "Confianza"
+  },
+  "error": {
+    "appCrash": "Error en la aplicacion",
+    "crashMessage": "Algo salio mal. Por favor recarga la pagina.",
+    "reload": "Recargar",
+    "networkError": "Error de red",
+    "serverError": "Error del servidor",
+    "offline": "Sin conexion",
+    "online": "En linea"
+  },
+  "settings": {
+    "language": "Idioma",
+    "english": "Ingles",
+    "spanish": "Espanol",
+    "theme": "Tema",
+    "autoRun": "Ejecucion automatica",
+    "budget": "Presupuesto",
+    "general": "General",
+    "providers": "Proveedores",
+    "trust": "Confianza",
+    "advanced": "Avanzado"
+  },
+  "evals": {
+    "title": "Evaluaciones",
+    "noDatasets": "Sin datasets",
+    "noRuns": "Sin ejecuciones registradas",
+    "state": "Estado",
+    "dataset": "Dataset",
+    "successRate": "Tasa de exito",
+    "date": "Fecha",
+    "action": "Accion",
+    "gate": "Puerta",
+    "removeCase": "Eliminar caso"
+  },
+  "observability": {
+    "selectTrace": "Selecciona una traza para ver detalles",
+    "rootSpanNotFound": "Span raiz no encontrado"
+  },
+  "provider": {
+    "addProvider": "Anadir proveedor",
+    "testProvider": "Probar proveedor",
+    "removeProvider": "Eliminar proveedor",
+    "providerReachable": "Proveedor disponible",
+    "providerUnreachable": "Proveedor no disponible"
+  },
+  "status": {
+    "running": "Ejecutando",
+    "pending": "Pendiente",
+    "done": "Completado",
+    "failed": "Fallido",
+    "cancelled": "Cancelado"
+  },
+  "welcome": {
+    "title": "Bienvenido a GIMO",
+    "subtitle": "Orquestador Multi-Agente"
+  },
+  "skills": {
+    "createSkill": "Crear habilidad",
+    "skillName": "Nombre de la habilidad"
+  }
+}

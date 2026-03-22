@@ -96,7 +96,7 @@ export const TraceViewer: React.FC<TraceViewerProps> = () => {
                 ) : (
                     <div className="flex-1 flex items-center justify-center text-text-secondary flex-col gap-2">
                         <ActivityIcon />
-                        <span className="text-xs">Selecciona una traza para ver detalles</span>
+                        <span className="text-xs">Select a trace to view details</span>
                     </div>
                 )}
             </div>
@@ -131,7 +131,7 @@ const SpanTree: React.FC<{ spans: Span[]; rootSpanId: string }> = ({ spans, root
     // If the passed rootSpanId exists in map, start there.
     const root = spanMap.get(rootSpanId);
 
-    if (!root) return <div className="text-red-500">Span raíz no encontrado</div>;
+    if (!root) return <div className="text-red-500">Root span not found</div>;
 
     const renderNode = (span: Span, depth: number) => {
         const children = childrenMap.get(span.span_id) || [];

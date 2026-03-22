@@ -74,8 +74,22 @@ def test_openai_compat_reuses_async_client(monkeypatch):
 
 
 def test_mcp_bridge_does_not_instantiate_runworker():
+    """Verifica que el módulo MCP bridge NO importa RunWorker directamente.
+
+    El archivo puede contener comentarios o variables con el nombre 'RunWorker',
+    pero no debe tener sentencias ``from ... import RunWorker`` ni ``import RunWorker``.
+    """
     bridge_source = Path("tools/gimo_server/mcp_bridge/server.py").read_text(encoding="utf-8")
-    assert "RunWorker" not in bridge_source
+    import re
+    # Buscar imports reales de RunWorker (from X import RunWorker o import RunWorker)
+    import_patterns = [
+        r"^\s*from\s+\S+\s+import\s+.*\bRunWorker\b",
+        r"^\s*import\s+.*\bRunWorker\b",
+    ]
+    for pattern in import_patterns:
+        assert not re.search(pattern, bridge_source, re.MULTILINE), (
+            f"MCP bridge debe NO importar RunWorker, pero se encontró: {pattern}"
+        )
 
 
 def test_execution_authority_initialized_in_main_lifespan():

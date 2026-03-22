@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 export interface ModelItem {
     id: string;
@@ -31,7 +32,7 @@ export const useAvailableModels = () => {
         let mounted = true;
         const fetchModels = async () => {
             try {
-                const res = await fetch(`${API_BASE}/ops/provider/models`, {
+                const res = await fetchWithRetry(`${API_BASE}/ops/provider/models`, {
                     credentials: 'include'
                 });
                 if (!res.ok) throw new Error('Failed to fetch models');

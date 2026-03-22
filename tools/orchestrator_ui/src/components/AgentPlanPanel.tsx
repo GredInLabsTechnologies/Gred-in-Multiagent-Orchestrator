@@ -25,8 +25,8 @@ export const AgentPlanPanel: React.FC<AgentPlanPanelProps> = ({ plan, agentId })
         return (
             <div className="flex flex-col items-center justify-center py-12 text-text-secondary text-center px-6">
                 <ListTodo size={32} className="mb-4 opacity-20" />
-                <p className="text-sm font-medium">Sin plan activo</p>
-                <p className="text-[10px] mt-1">Este agente aún no ha generado una estrategia.</p>
+                <p className="text-sm font-medium">No active plan</p>
+                <p className="text-[10px] mt-1">This agent has not generated a strategy yet.</p>
             </div>
         );
     }

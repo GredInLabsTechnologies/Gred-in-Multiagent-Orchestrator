@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 export interface ProviderHealth {
     connected: boolean;
@@ -20,7 +21,7 @@ export function useProviderHealth(enabled: boolean = true): ProviderHealth {
 
     const fetchHealth = useCallback(async () => {
         try {
-            const res = await fetch(`${API_BASE}/ops/provider`, { credentials: 'include' });
+            const res = await fetchWithRetry(`${API_BASE}/ops/provider`, { credentials: 'include' });
             if (!res.ok) {
                 setState(prev => ({ ...prev, connected: false, health: 'error', loading: false }));
                 return;

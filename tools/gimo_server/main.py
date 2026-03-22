@@ -3,7 +3,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -397,6 +397,11 @@ def _register_core_exception_handlers(app: FastAPI, actions_safe_targets: set):
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 def _register_core_routes(app: FastAPI, settings):
+    @app.get("/health")
+    async def health_route():
+        """Liveness probe for k8s / load balancers."""
+        return JSONResponse({"status": "ok"})
+
     @app.get("/")
     async def root_route():
         """Serve the SPA index when available, otherwise return a basic health payload."""
@@ -487,6 +492,18 @@ def create_app() -> FastAPI:
     register_routes(app)
     app.include_router(auth_router)
     app.include_router(ops_router)
+
+    # Phase 3 migrated routers (direct mount — they carry their own /ops/* prefix)
+    from tools.gimo_server.routers.ops.file_router import router as file_router
+    from tools.gimo_server.routers.ops.repo_router import router as repo_router
+    from tools.gimo_server.routers.ops.graph_router import router as graph_router
+    from tools.gimo_server.routers.ops.ui_security_router import router as sec_router
+    from tools.gimo_server.routers.ops.service_router import router as svc_router
+    app.include_router(file_router)
+    app.include_router(repo_router)
+    app.include_router(graph_router)
+    app.include_router(sec_router)
+    app.include_router(svc_router)
 
     mount_static(app)
 

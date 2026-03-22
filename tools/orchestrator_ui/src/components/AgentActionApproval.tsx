@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 export interface ActionDraftUi {
     id: string;
@@ -52,17 +53,17 @@ export const AgentActionApproval: React.FC<Props> = ({ draft, onResolved }) => {
 
     const decide = async (decision: 'approve' | 'reject') => {
         const url = `${API_BASE}/ops/action-drafts/${draft.id}/${decision}`;
-        const res = await fetch(url, { method: 'POST', credentials: 'include' });
+        const res = await fetchWithRetry(url, { method: 'POST', credentials: 'include' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         onResolved?.(draft.id, decision);
     };
 
     const approveBatch = async () => {
-        const list = await fetch(`${API_BASE}/ops/action-drafts?status=pending`, { credentials: 'include' });
+        const list = await fetchWithRetry(`${API_BASE}/ops/action-drafts?status=pending`, { credentials: 'include' });
         if (!list.ok) throw new Error(`HTTP ${list.status}`);
         const items: ActionDraftUi[] = await list.json();
         await Promise.all(items.map(async (item) => {
-            const r = await fetch(`${API_BASE}/ops/action-drafts/${item.id}/approve`, {
+            const r = await fetchWithRetry(`${API_BASE}/ops/action-drafts/${item.id}/approve`, {
                 method: 'POST',
                 credentials: 'include',
             });
@@ -73,13 +74,13 @@ export const AgentActionApproval: React.FC<Props> = ({ draft, onResolved }) => {
     return (
         <div className="mt-2 rounded-xl border border-white/[0.08] bg-surface-2/70 p-3">
             <div className="flex items-center justify-between gap-2">
-                <div className="text-xs text-text-primary font-semibold">Accion requiere aprobacion</div>
+                <div className="text-xs text-text-primary font-semibold">Action requires approval</div>
                 <span className={`text-[10px] px-2 py-0.5 rounded-full border ${RISK_BADGE[draft.risk_level] || RISK_BADGE.medium}`}>
                     {draft.risk_level}
                 </span>
             </div>
             <div className="mt-2 text-[11px] text-text-secondary">
-                <strong>{draft.agent_id}</strong> quiere ejecutar <strong>{draft.tool}</strong>
+                <strong>{draft.agent_id}</strong> wants to execute <strong>{draft.tool}</strong>
             </div>
             <pre className="mt-2 text-[10px] bg-surface-3/60 border border-white/[0.06] rounded-lg p-2 overflow-auto text-text-tertiary whitespace-pre-wrap">
                 {previewForDraft(draft)}

@@ -16,7 +16,7 @@ async def trust_query(
     request: Request,
     body: dict,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     dimension_key = str(body.get("dimension_key", "")).strip()
@@ -31,7 +31,7 @@ async def trust_query(
 @router.get("/trust/dashboard")
 async def trust_dashboard(
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     request: Request,
     limit: int = Query(100, ge=1, le=500),
 ):
@@ -45,7 +45,7 @@ async def trust_dashboard(
 @router.get("/trust/suggestions")
 async def trust_suggestions(
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     request: Request,
     limit: int = Query(20, ge=1, le=200),
 ):
@@ -61,7 +61,7 @@ async def get_circuit_breaker_config(
     request: Request,
     dimension_key: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     storage = StorageService(gics=getattr(request.app.state, "gics", None))
@@ -85,7 +85,7 @@ async def set_circuit_breaker_config(
     dimension_key: str,
     body: CircuitBreakerConfigModel,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     storage = StorageService(gics=getattr(request.app.state, "gics", None))
@@ -96,7 +96,7 @@ async def set_circuit_breaker_config(
 async def trust_reset(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Alias for resolving security threats (admin level)."""
     _require_role(auth, "admin")
@@ -110,7 +110,7 @@ async def trust_reset(
 @router.get("/trust/ids/events")
 async def get_ids_events(
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     agent_id: Annotated[Optional[str], Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
 ):
@@ -126,7 +126,7 @@ async def get_ids_events(
 @router.get("/trust/ids/insights")
 async def get_ids_insights(
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     agent_id: Annotated[Optional[str], Query()] = None,
 ):
     """Retrieve structural recommendations for agent governance."""

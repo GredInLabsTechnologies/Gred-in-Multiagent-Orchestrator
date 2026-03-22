@@ -7,6 +7,7 @@ import { useProfile } from './hooks/useProfile';
 import { useProviderHealth } from './hooks/useProviderHealth';
 import { checkSession, logout } from './lib/auth';
 import { API_BASE, UiStatusResponse } from './types';
+import { fetchWithRetry } from './lib/fetchWithRetry';
 import { getCommandHandlers } from './lib/commands';
 import { LoginModal } from './components/LoginModal';
 import { MenuBar } from './components/MenuBar';
@@ -16,6 +17,7 @@ import { OverlayDrawer } from './components/OverlayDrawer';
 import { CommandPalette } from './components/Shell/CommandPalette';
 import { ProfilePanel } from './components/ProfilePanel';
 import { useSkillNotifications } from './hooks/useSkillNotifications';
+import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { BackgroundRunner } from './components/BackgroundRunner';
 import { SkillsRail } from './components/SkillsRail';
 /* ── Lazy-loaded views ─────────────────────────────────── */
@@ -77,6 +79,7 @@ export default function App() {
     } = useProfile(Boolean(store.authenticated));
 
     const providerHealth = useProviderHealth(Boolean(store.authenticated));
+    const { connected: networkConnected } = useNetworkStatus();
 
     /* ── Realtime Skill Notifications ── */
     useSkillNotifications();
@@ -92,7 +95,7 @@ export default function App() {
         let toastedOffline = false;
         const fetchStatus = async () => {
             try {
-                const res = await fetch(`${API_BASE}/ui/status`, { credentials: 'include' });
+                const res = await fetchWithRetry(`${API_BASE}/ui/status`, { credentials: 'include' });
                 if (res.status === 401) { setAuthenticated(false); return; }
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
@@ -131,7 +134,7 @@ export default function App() {
         if (!store.authenticated || store.activeTab !== 'graph' || store.graphNodeCount !== 0) return;
         const refresh = async () => {
             try {
-                const res = await fetch(`${API_BASE}/ui/graph`, { credentials: 'include' });
+                const res = await fetchWithRetry(`${API_BASE}/ops/graph`, { credentials: 'include' });
                 if (!res.ok) return;
                 const payload = await res.json();
                 store.setGraphNodeCount(Array.isArray(payload?.nodes) ? payload.nodes.length : 0);
@@ -161,7 +164,7 @@ export default function App() {
     /* ── Graph actions ── */
     const handleApprovePlan = useCallback(async (draftId: string) => {
         try {
-            const res = await fetch(`${API_BASE}/ops/drafts/${draftId}/approve`, { method: 'POST', credentials: 'include' });
+            const res = await fetchWithRetry(`${API_BASE}/ops/drafts/${draftId}/approve`, { method: 'POST', credentials: 'include' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             addToast('Plan aprobado exitosamente', 'success');
             store.setGraphNodeCount(-1);
@@ -170,7 +173,7 @@ export default function App() {
 
     const handleRejectPlan = useCallback(async (draftId: string) => {
         try {
-            const res = await fetch(`${API_BASE}/ops/drafts/${draftId}/reject`, { method: 'POST', credentials: 'include' });
+            const res = await fetchWithRetry(`${API_BASE}/ops/drafts/${draftId}/reject`, { method: 'POST', credentials: 'include' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             addToast('Plan rechazado', 'info');
             store.setGraphNodeCount(0);
@@ -346,6 +349,7 @@ export default function App() {
                 providerHealth={providerHealth}
                 version={status?.version}
                 serviceStatus={status?.service_status}
+                networkConnected={networkConnected}
                 onNavigateToSettings={() => store.openOverlay('settings')}
                 onNavigateToMastery={() => store.openOverlay('mastery')}
             />

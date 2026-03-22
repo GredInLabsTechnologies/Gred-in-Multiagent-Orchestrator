@@ -1,26 +1,38 @@
 import os
 import httpx
 import logging
+from pathlib import Path
 
 logger = logging.getLogger("mcp_bridge")
 
 # Default local backend URL
 BACKEND_URL = "http://127.0.0.1:9325"
 
+# Token cache: avoids reading .orch_token file on every proxy call
+_token_cache: str | None = None
+_token_mtime: float = 0.0
+_TOKEN_FILE = Path(__file__).resolve().parent.parent / ".orch_token"
+
 
 def _get_auth_token() -> str | None:
-    """Read ORCH_TOKEN from env or token file (same logic as config.py)."""
+    """Read ORCH_TOKEN from env or token file with mtime-based caching."""
+    global _token_cache, _token_mtime
+
+    # Env var always wins and doesn't need caching
     token = os.environ.get("ORCH_TOKEN", "").strip()
     if token:
         return token
-    # Fallback: read from .orch_token file next to the server
-    from pathlib import Path
-    token_file = Path(__file__).resolve().parent.parent / ".orch_token"
-    if token_file.exists():
-        try:
-            return token_file.read_text(encoding="utf-8").strip() or None
-        except Exception:
-            pass
+
+    # File-based token with mtime cache
+    try:
+        if _TOKEN_FILE.exists():
+            current_mtime = _TOKEN_FILE.stat().st_mtime
+            if current_mtime != _token_mtime or _token_cache is None:
+                _token_cache = _TOKEN_FILE.read_text(encoding="utf-8").strip() or None
+                _token_mtime = current_mtime
+            return _token_cache
+    except Exception:
+        pass
     return None
 
 
@@ -55,15 +67,14 @@ async def proxy_to_api(method: str, path: str, **kwargs) -> str:
                 headers=headers,
             )
             response = await client.send(request)
-            
-            # Formateamos la respuesta del backend
+
             try:
                 data = response.json()
-                data_str = str(data)
-                # Pretty print if it's a dict or list
                 import json
                 if isinstance(data, (dict, list)):
                     data_str = json.dumps(data, indent=2)
+                else:
+                    data_str = str(data)
             except Exception:
                 data_str = response.text
 
@@ -71,9 +82,9 @@ async def proxy_to_api(method: str, path: str, **kwargs) -> str:
                 result = f"✅ Success ({response.status_code}):\n{data_str}"
             else:
                 result = f"❌ Error ({response.status_code}):\n{data_str}"
-                
+
             return result
-            
+
     except httpx.ConnectError:
         return (
             "❌ Connection Error: The GIMO backend is not reachable.\n"

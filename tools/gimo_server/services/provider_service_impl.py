@@ -4,7 +4,6 @@ import asyncio
 import logging
 import json
 import time
-import shutil
 from typing import Any, Dict, Optional
 
 from ..config import OPS_DATA_DIR

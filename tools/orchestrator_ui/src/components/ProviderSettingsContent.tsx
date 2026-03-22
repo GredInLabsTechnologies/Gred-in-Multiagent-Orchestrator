@@ -6,6 +6,7 @@ import { useProviders } from '../hooks/useProviders';
 import { useProviderSettingsState } from '../hooks/useProviderSettingsState';
 import { useToast } from './Toast';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { Server, Cpu, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { CodexAuthSection } from './provider/CodexAuthSection';
 import { ClaudeAuthSection } from './provider/ClaudeAuthSection';
@@ -183,7 +184,7 @@ export const ProviderSettings: React.FC = () => {
         let mounted = true;
         const fetchRec = async () => {
             try {
-                const res = await fetch(`${API_BASE}/ops/provider/recommendation`, { credentials: 'include' });
+                const res = await fetchWithRetry(`${API_BASE}/ops/provider/recommendation`, { credentials: 'include' });
                 if (res.ok && mounted) {
                     setRecommendation(await res.json());
                 }

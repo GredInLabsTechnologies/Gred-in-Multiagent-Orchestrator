@@ -154,7 +154,7 @@ def test_diff_calls_backend_and_prints_output(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert captured == {
         "method": "GET",
-        "path": "/diff",
+        "path": "/ops/files/diff",
         "params": {"base": "main", "head": "feature/p1"},
     }
     assert "1 file changed" in result.stdout

@@ -17,7 +17,7 @@ All endpoints require operator-level auth (same as other ops routers).
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -97,7 +97,7 @@ async def register_model(
     body: RegisterModelRequest,
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ) -> Dict[str, Any]:
     """Register a model spec so it can be loaded and used for inference.
 
@@ -146,7 +146,7 @@ async def register_model(
 async def get_inference_status(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ) -> Dict[str, Any]:
     """Return overall engine status including device list and session pool."""
     _require_role(auth, "operator")
@@ -161,7 +161,7 @@ async def get_inference_status(
 async def get_inference_devices(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ) -> List[Dict[str, Any]]:
     """Return list of detected compute devices with capabilities."""
     _require_role(auth, "operator")
@@ -191,7 +191,7 @@ async def get_inference_devices(
 async def get_loaded_models(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ) -> List[Dict[str, Any]]:
     """Return currently loaded model sessions in the pool."""
     _require_role(auth, "operator")
@@ -204,7 +204,7 @@ async def load_model(
     body: LoadModelRequest,
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ) -> Dict[str, Any]:
     """Preload a model into the session pool."""
     _require_role(auth, "operator")
@@ -224,7 +224,7 @@ async def unload_model(
     body: UnloadModelRequest,
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ) -> Dict[str, Any]:
     """Evict a model from the session pool."""
     _require_role(auth, "operator")
@@ -238,7 +238,7 @@ async def run_inference(
     body: RunInferenceRequest,
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ) -> Dict[str, Any]:
     """Execute a single inference request."""
     _require_role(auth, "operator")
@@ -285,7 +285,7 @@ async def run_inference(
 async def get_inference_metrics(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ) -> Dict[str, Any]:
     """Return inference telemetry metrics."""
     _require_role(auth, "operator")

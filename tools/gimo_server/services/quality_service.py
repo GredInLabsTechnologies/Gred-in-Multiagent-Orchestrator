@@ -1,6 +1,5 @@
 import json
-import re
-from typing import Any, Dict, List, Optional
+from typing import Optional
 from ..ops_models import QualityRating
 
 class QualityService:
@@ -66,7 +65,6 @@ class QualityService:
         if expected_format == "json" or task_type in ["classification", "extraction", "structured_data"]:
             try:
                 # robust extraction: find first { and last }
-                original_json_str = text
                 if "{" in text and "}" in text:
                     start = text.find("{")
                     end = text.rfind("}") + 1

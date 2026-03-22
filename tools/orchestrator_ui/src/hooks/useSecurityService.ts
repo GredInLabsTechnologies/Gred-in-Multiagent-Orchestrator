@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 export interface SecurityEvent {
     timestamp: number;
@@ -53,7 +54,7 @@ export const useSecurityService = (_token?: string) => {
 
     const fetchStatus = useCallback(async () => {
         try {
-            const response = await fetch(`${API_BASE}/ui/security/events`, getRequestInit());
+            const response = await fetchWithRetry(`${API_BASE}/ops/security/events`, getRequestInit());
 
             if (response.ok) {
                 const data = await response.json();
@@ -81,7 +82,7 @@ export const useSecurityService = (_token?: string) => {
     const fetchTrustDashboard = useCallback(async (limit: number = 100) => {
         setIsLoading(true);
         try {
-            const response = await fetch(`${API_BASE}/ops/trust/dashboard?limit=${limit}`, getRequestInit());
+            const response = await fetchWithRetry(`${API_BASE}/ops/trust/dashboard?limit=${limit}`, getRequestInit());
 
             if (response.ok) {
                 const data = await response.json();
@@ -98,7 +99,7 @@ export const useSecurityService = (_token?: string) => {
 
     const getCircuitBreakerConfig = async (dimensionKey: string): Promise<CircuitBreakerConfig | null> => {
         try {
-            const response = await fetch(`${API_BASE}/ops/trust/circuit-breaker/${encodeURIComponent(dimensionKey)}`, getRequestInit());
+            const response = await fetchWithRetry(`${API_BASE}/ops/trust/circuit-breaker/${encodeURIComponent(dimensionKey)}`, getRequestInit());
             if (response.ok) {
                 return await response.json();
             }
@@ -112,10 +113,10 @@ export const useSecurityService = (_token?: string) => {
     const resolveSecurity = async (action: 'clear_all' | 'downgrade' = 'clear_all') => {
         setIsLoading(true);
         try {
-            const endpoint = action === 'clear_all' ? '/ops/trust/reset' : `/ui/security/resolve?action=${action}`;
+            const endpoint = action === 'clear_all' ? '/ops/trust/reset' : `/ops/security/resolve?action=${action}`;
             const method = 'POST';
 
-            const response = await fetch(`${API_BASE}${endpoint}`, {
+            const response = await fetchWithRetry(`${API_BASE}${endpoint}`, {
                 method,
                 ...getRequestInit(),
             });

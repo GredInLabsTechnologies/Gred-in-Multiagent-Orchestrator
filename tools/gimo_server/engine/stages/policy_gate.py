@@ -1,10 +1,7 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Literal, Optional, TYPE_CHECKING
-from pydantic import BaseModel
 from ..contracts import StageInput, StageOutput, ExecutionStage
 from ...services.runtime_policy_service import RuntimePolicyService
 from ...services.intent_classification_service import IntentClassificationService
-from ...models.policy import PolicyDecision, IntentDecisionAudit
 
 class PolicyGate(ExecutionStage):
     @property

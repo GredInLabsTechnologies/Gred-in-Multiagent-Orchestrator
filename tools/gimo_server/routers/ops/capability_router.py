@@ -9,7 +9,7 @@ Endpoints:
 """
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -26,7 +26,7 @@ async def get_capability_profile(
     provider_type: str,
     model_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ) -> Dict[str, Any]:
     """Return the full capability profile for a model across all observed task types."""
     _require_role(auth, "operator")
@@ -71,7 +71,7 @@ async def recommend_model_for_task(
     model_id: str,
     task_type: Annotated[str, Query(description="Task type to find the best model for")],
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ) -> Dict[str, Any]:
     """Return the best model for a given task_type based on historical performance."""
     _require_role(auth, "operator")

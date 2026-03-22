@@ -1,9 +1,10 @@
 import { useState, useCallback } from 'react';
 import useSWR from 'swr';
 import { API_BASE, EvalDataset, EvalRunRequest, EvalRunReport, EvalRunSummary, EvalRunDetail } from '../types';
+import { fetchWithRetry } from '../lib/fetchWithRetry';
 
 const fetcher = (url: string) => {
-    return fetch(url, {
+    return fetchWithRetry(url, {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
     }).then(async (res) => {
@@ -38,7 +39,7 @@ export const useEvalsService = (_token?: string) => {
         setIsLoading(true);
         try {
             const params = versionTag ? `?version_tag=${encodeURIComponent(versionTag)}` : '';
-            const res = await fetch(`${API_BASE}/ops/evals/datasets${params}`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/evals/datasets${params}`, {
                 method: 'POST',
                 headers: getHeaders(),
                 credentials: 'include',
@@ -60,7 +61,7 @@ export const useEvalsService = (_token?: string) => {
         setIsLoading(true);
         try {
             const params = `?fail_on_gate=${failOnGate}`;
-            const res = await fetch(`${API_BASE}/ops/evals/run${params}`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/evals/run${params}`, {
                 method: 'POST',
                 headers: getHeaders(),
                 credentials: 'include',
@@ -85,7 +86,7 @@ export const useEvalsService = (_token?: string) => {
     const getRunDetail = async (runId: number) => {
         setIsLoading(true);
         try {
-            const res = await fetch(`${API_BASE}/ops/evals/runs/${runId}`, {
+            const res = await fetchWithRetry(`${API_BASE}/ops/evals/runs/${runId}`, {
                 headers: getHeaders(),
                 credentials: 'include',
             });

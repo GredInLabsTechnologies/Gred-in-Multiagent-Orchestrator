@@ -110,7 +110,7 @@ def register_native_tools(mcp: FastMCP):
             try:
                 subprocess.Popen(
                     ["npm", "run", "dev", "--", "--host", "127.0.0.1"],
-                    cwd=str(frontend_dir), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, shell=True,
+                    cwd=str(frontend_dir), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, shell=True,  # nosec B602
                 )
                 report.append("🚀 Frontend: spawned vite on 127.0.0.1:5173")
             except Exception as e:
@@ -156,7 +156,7 @@ def register_native_tools(mcp: FastMCP):
                 if src_file:
                     p = Path(src_file).resolve()
                     disk_mtime = p.stat().st_mtime
-                    disk_hash = hashlib.md5(p.read_bytes()).hexdigest()[:8]
+                    disk_hash = hashlib.md5(p.read_bytes(), usedforsecurity=False).hexdigest()[:8]  # nosec B324
                     mod_mtime = getattr(mod, "_cached_mtime", None)
                     stale = "⚠ STALE" if (mod_mtime and mod_mtime != disk_mtime) else "✅ current"
                     lines.append(f"  {mod_name.split('.')[-1]}: {p}\\n    mtime={int(disk_mtime)} hash={disk_hash} [{stale}]")

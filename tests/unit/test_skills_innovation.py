@@ -147,20 +147,20 @@ class TestAnalytics:
 
 class TestMarketplace:
     def test_publish_skill(self):
-        skill = SkillsService.create_skill(_test_create_req())
+        skill = SkillsService.create_skill(_test_create_req(command="/mp-publish"))
         published = SkillsService.publish_skill(skill.id, author="test-user")
         assert published.published is True
         assert published.author == "test-user"
 
     def test_list_published_skills(self):
-        skill = SkillsService.create_skill(_test_create_req())
+        skill = SkillsService.create_skill(_test_create_req(command="/mp-list"))
         SkillsService.publish_skill(skill.id)
         listed = SkillsService.list_published_skills()
         assert len(listed) == 1
         assert listed[0].id == skill.id
 
     def test_install_from_marketplace(self):
-        skill = SkillsService.create_skill(_test_create_req())
+        skill = SkillsService.create_skill(_test_create_req(command="/mp-install"))
         SkillsService.publish_skill(skill.id)
         # Delete original so we can install
         SkillsService.delete_skill(skill.id)
@@ -169,7 +169,7 @@ class TestMarketplace:
         assert "installed-from-marketplace" in installed.tags
 
     def test_install_duplicate_command_raises(self):
-        skill = SkillsService.create_skill(_test_create_req())
+        skill = SkillsService.create_skill(_test_create_req(command="/mp-dup"))
         SkillsService.publish_skill(skill.id)
         # Try install while original still exists → should raise
         with pytest.raises(DuplicateCommandError):
@@ -244,8 +244,7 @@ class TestAutoGeneration:
                 "edges": [{"id": "e-orch-w1", "source": "orch", "target": "w1"}],
             })
         }
-        with patch("tools.gimo_server.services.skills_service.ProviderService") as mock_prov:
-            mock_prov.static_generate = AsyncMock(return_value=mock_response)
+        with patch("tools.gimo_server.services.provider_service_impl.ProviderService.static_generate", new_callable=AsyncMock, return_value=mock_response):
             req = SkillAutoGenRequest(prompt="Analyze code quality in a repo")
             skill = await SkillsService.generate_skill_from_prompt(req)
             assert skill.name == "Code Analyzer"
@@ -266,8 +265,7 @@ class TestAutoGeneration:
             "edges": [],
         })
         mock_response = {"content": f"```json\n{raw_json}\n```"}
-        with patch("tools.gimo_server.services.skills_service.ProviderService") as mock_prov:
-            mock_prov.static_generate = AsyncMock(return_value=mock_response)
+        with patch("tools.gimo_server.services.provider_service_impl.ProviderService.static_generate", new_callable=AsyncMock, return_value=mock_response):
             req = SkillAutoGenRequest(prompt="A simple test skill")
             skill = await SkillsService.generate_skill_from_prompt(req)
             assert skill.name == "Fenced Skill"
@@ -285,8 +283,7 @@ class TestAutoGeneration:
                 "edges": [],
             })
         }
-        with patch("tools.gimo_server.services.skills_service.ProviderService") as mock_prov:
-            mock_prov.static_generate = AsyncMock(return_value=mock_response)
+        with patch("tools.gimo_server.services.provider_service_impl.ProviderService.static_generate", new_callable=AsyncMock, return_value=mock_response):
             req = SkillAutoGenRequest(prompt="Skill with forensic mood", mood="forensic")
             skill = await SkillsService.generate_skill_from_prompt(req)
             assert skill.mood == "forensic"

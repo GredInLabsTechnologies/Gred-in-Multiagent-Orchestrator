@@ -77,7 +77,7 @@ describe('useSystemService', () => {
         })
 
         expect(fetch).toHaveBeenCalledWith(
-            expect.stringContaining('/ui/service/restart'),
+            expect.stringContaining('/ops/service/restart'),
             expect.objectContaining({ method: 'POST' })
         )
     })
@@ -99,7 +99,7 @@ describe('useSystemService', () => {
         })
 
         expect(fetch).toHaveBeenCalledWith(
-            expect.stringContaining('/ui/service/stop'),
+            expect.stringContaining('/ops/service/stop'),
             expect.objectContaining({ method: 'POST' })
         )
     })

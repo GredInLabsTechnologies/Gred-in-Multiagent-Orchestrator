@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict
 
-from ..contracts import DeviceCapability, ExecutionProviderType, HardwareTarget
+from ..contracts import DeviceCapability, ExecutionProviderType
 
 logger = logging.getLogger("gie.hardware.gpu")
 

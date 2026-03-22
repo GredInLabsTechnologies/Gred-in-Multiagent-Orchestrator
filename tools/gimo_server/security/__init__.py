@@ -31,14 +31,14 @@ def save_security_db(db: dict | None = None):
     SECURITY_DB_PATH.write_text(json.dumps(db, indent=2), encoding="utf-8")
 
 
-from .audit import audit_log, redact_sensitive_data
-from .auth import verify_token
-from .rate_limit import check_rate_limit, rate_limit_store
+from .audit import audit_log as audit_log, redact_sensitive_data as redact_sensitive_data
+from .auth import verify_token as verify_token
+from .rate_limit import check_rate_limit as check_rate_limit, rate_limit_store as rate_limit_store
 from .validation import (
-    get_active_repo_dir,
-    get_allowed_paths,
-    load_repo_registry,
-    save_repo_registry,
-    serialize_allowlist,
-    validate_path,
+    get_active_repo_dir as get_active_repo_dir,
+    get_allowed_paths as get_allowed_paths,
+    load_repo_registry as load_repo_registry,
+    save_repo_registry as save_repo_registry,
+    serialize_allowlist as serialize_allowlist,
+    validate_path as validate_path,
 )

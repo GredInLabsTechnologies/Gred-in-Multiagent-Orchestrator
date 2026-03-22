@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tools.gimo_server.main import app
@@ -12,9 +13,14 @@ def _override_auth() -> AuthContext:
     return AuthContext(token="test-token", role="admin")
 
 
-def test_phase4_create_draft_rejects_when_risk_too_high(monkeypatch):
+@pytest.fixture
+def client():
     app.dependency_overrides[verify_token] = _override_auth
+    yield TestClient(app, raise_server_exceptions=False)
+    app.dependency_overrides.clear()
 
+
+def test_phase4_create_draft_rejects_when_risk_too_high(monkeypatch, client):
     from tools.gimo_server.routers.ops import plan_router
 
     monkeypatch.setattr(
@@ -44,21 +50,15 @@ def test_phase4_create_draft_rejects_when_risk_too_high(monkeypatch):
         },
     }
 
-    try:
-        with TestClient(app) as client:
-            res = client.post("/ops/drafts", json=body)
-            assert res.status_code == 201
-            data = res.json()
-            assert data["status"] == "rejected"
-            assert data["error"] == "RISK_SCORE_TOO_HIGH"
-            assert data["context"]["execution_decision"] == "RISK_SCORE_TOO_HIGH"
-    finally:
-        app.dependency_overrides.clear()
+    res = client.post("/ops/drafts", json=body)
+    assert res.status_code == 201
+    data = res.json()
+    assert data["status"] == "rejected"
+    assert data["error"] == "RISK_SCORE_TOO_HIGH"
+    assert data["context"]["execution_decision"] == "RISK_SCORE_TOO_HIGH"
 
 
-def test_phase4_approve_blocks_when_risk_too_high(monkeypatch):
-    app.dependency_overrides[verify_token] = _override_auth
-
+def test_phase4_approve_blocks_when_risk_too_high(monkeypatch, client):
     from tools.gimo_server.routers.ops import run_router
 
     draft = OpsDraft(
@@ -70,18 +70,12 @@ def test_phase4_approve_blocks_when_risk_too_high(monkeypatch):
 
     monkeypatch.setattr(run_router.OpsService, "get_draft", lambda _id: draft)
 
-    try:
-        with TestClient(app) as client:
-            res = client.post("/ops/drafts/d_phase4/approve")
-            assert res.status_code == 409
-            assert res.json()["detail"] == "RISK_SCORE_TOO_HIGH"
-    finally:
-        app.dependency_overrides.clear()
+    res = client.post("/ops/drafts/d_phase4/approve")
+    assert res.status_code == 409
+    assert res.json()["detail"] == "RISK_SCORE_TOO_HIGH"
 
 
-def test_phase4_approve_disables_auto_run_when_not_eligible(monkeypatch):
-    app.dependency_overrides[verify_token] = _override_auth
-
+def test_phase4_approve_disables_auto_run_when_not_eligible(monkeypatch, client):
     from tools.gimo_server.routers.ops import run_router
 
     draft = OpsDraft(
@@ -102,36 +96,24 @@ def test_phase4_approve_disables_auto_run_when_not_eligible(monkeypatch):
     monkeypatch.setattr(run_router.OpsService, "approve_draft", lambda *_args, **_kwargs: approved)
     monkeypatch.setattr(run_router.OpsService, "create_run", lambda _approved_id: called.__setitem__("create_run", True))
 
-    try:
-        with TestClient(app) as client:
-            res = client.post("/ops/drafts/d_phase4/approve?auto_run=true")
-            assert res.status_code == 200
-            data = res.json()
-            assert data["run"] is None
-            assert called["create_run"] is False
-    finally:
-        app.dependency_overrides.clear()
+    res = client.post("/ops/drafts/d_phase4/approve?auto_run=true")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["run"] is None
+    assert called["create_run"] is False
 
 
-def test_phase4_prompt_mode_allows_missing_intent_class_in_context():
-    app.dependency_overrides[verify_token] = _override_auth
-
+def test_phase4_prompt_mode_allows_missing_intent_class_in_context(client):
     body = {
         "prompt": "haz cambios pequeños",
         "context": {"source": "chat"},
     }
 
-    try:
-        with TestClient(app) as client:
-            res = client.post("/ops/drafts", json=body)
-            assert res.status_code == 201
-    finally:
-        app.dependency_overrides.clear()
+    res = client.post("/ops/drafts", json=body)
+    assert res.status_code == 201
 
 
-def test_phase4_create_run_returns_409_when_active_run_exists(monkeypatch):
-    app.dependency_overrides[verify_token] = _override_auth
-
+def test_phase4_create_run_returns_409_when_active_run_exists(monkeypatch, client):
     from tools.gimo_server.routers.ops import run_router
 
     monkeypatch.setattr(
@@ -140,18 +122,12 @@ def test_phase4_create_run_returns_409_when_active_run_exists(monkeypatch):
         lambda _approved_id: (_ for _ in ()).throw(RuntimeError("RUN_ALREADY_ACTIVE:r_active_1")),
     )
 
-    try:
-        with TestClient(app) as client:
-            res = client.post("/ops/runs", json={"approved_id": "a_phase4"})
-            assert res.status_code == 409
-            assert res.json()["detail"].startswith("RUN_ALREADY_ACTIVE")
-    finally:
-        app.dependency_overrides.clear()
+    res = client.post("/ops/runs", json={"approved_id": "a_phase4"})
+    assert res.status_code == 409
+    assert res.json()["detail"].startswith("RUN_ALREADY_ACTIVE")
 
 
-def test_phase4_rerun_returns_201_and_links_source(monkeypatch):
-    app.dependency_overrides[verify_token] = _override_auth
-
+def test_phase4_rerun_returns_201_and_links_source(monkeypatch, client):
     from tools.gimo_server.routers.ops import run_router
 
     rerun = OpsRun(
@@ -166,21 +142,15 @@ def test_phase4_rerun_returns_201_and_links_source(monkeypatch):
     monkeypatch.setattr(run_router.OpsService, "rerun", lambda _run_id: rerun)
     monkeypatch.setattr(run_router.OpsService, "update_run_status", lambda *_a, **_k: rerun)
 
-    try:
-        with TestClient(app) as client:
-            res = client.post("/ops/runs/r_old_1/rerun")
-            assert res.status_code == 201
-            body = res.json()
-            assert body["id"] == "r_new_1"
-            assert body["rerun_of"] == "r_old_1"
-            assert body["attempt"] == 2
-    finally:
-        app.dependency_overrides.clear()
+    res = client.post("/ops/runs/r_old_1/rerun")
+    assert res.status_code == 201
+    body = res.json()
+    assert body["id"] == "r_new_1"
+    assert body["rerun_of"] == "r_old_1"
+    assert body["attempt"] == 2
 
 
-def test_phase4_rerun_returns_409_when_active_instance_exists(monkeypatch):
-    app.dependency_overrides[verify_token] = _override_auth
-
+def test_phase4_rerun_returns_409_when_active_instance_exists(monkeypatch, client):
     from tools.gimo_server.routers.ops import run_router
 
     def _raise_active(_run_id: str):
@@ -188,18 +158,12 @@ def test_phase4_rerun_returns_409_when_active_instance_exists(monkeypatch):
 
     monkeypatch.setattr(run_router.OpsService, "rerun", _raise_active)
 
-    try:
-        with TestClient(app) as client:
-            res = client.post("/ops/runs/r_old_1/rerun")
-            assert res.status_code == 409
-            assert res.json()["detail"].startswith("RUN_ALREADY_ACTIVE")
-    finally:
-        app.dependency_overrides.clear()
+    res = client.post("/ops/runs/r_old_1/rerun")
+    assert res.status_code == 409
+    assert res.json()["detail"].startswith("RUN_ALREADY_ACTIVE")
 
 
-def test_phase4_rerun_returns_409_when_source_run_is_active(monkeypatch):
-    app.dependency_overrides[verify_token] = _override_auth
-
+def test_phase4_rerun_returns_409_when_source_run_is_active(monkeypatch, client):
     from tools.gimo_server.routers.ops import run_router
 
     def _raise_source_active(_run_id: str):
@@ -207,18 +171,12 @@ def test_phase4_rerun_returns_409_when_source_run_is_active(monkeypatch):
 
     monkeypatch.setattr(run_router.OpsService, "rerun", _raise_source_active)
 
-    try:
-        with TestClient(app) as client:
-            res = client.post("/ops/runs/r_old_1/rerun")
-            assert res.status_code == 409
-            assert res.json()["detail"].startswith("RERUN_SOURCE_ACTIVE")
-    finally:
-        app.dependency_overrides.clear()
+    res = client.post("/ops/runs/r_old_1/rerun")
+    assert res.status_code == 409
+    assert res.json()["detail"].startswith("RERUN_SOURCE_ACTIVE")
 
 
-def test_phase4_create_run_maps_invalid_fsm_to_422(monkeypatch):
-    app.dependency_overrides[verify_token] = _override_auth
-
+def test_phase4_create_run_maps_invalid_fsm_to_422(monkeypatch, client):
     from tools.gimo_server.routers.ops import run_router
 
     def _raise_invalid(_approved_id: str):
@@ -226,10 +184,6 @@ def test_phase4_create_run_maps_invalid_fsm_to_422(monkeypatch):
 
     monkeypatch.setattr(run_router.OpsService, "create_run", _raise_invalid)
 
-    try:
-        with TestClient(app) as client:
-            res = client.post("/ops/runs", json={"approved_id": "a_phase4"})
-            assert res.status_code == 422
-            assert res.json()["detail"].startswith("INVALID_FSM_TRANSITION")
-    finally:
-        app.dependency_overrides.clear()
+    res = client.post("/ops/runs", json={"approved_id": "a_phase4"})
+    assert res.status_code == 422
+    assert res.json()["detail"].startswith("INVALID_FSM_TRANSITION")

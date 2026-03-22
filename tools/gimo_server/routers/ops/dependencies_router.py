@@ -14,7 +14,7 @@ router = APIRouter()
 async def list_system_dependencies(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     data = await ProviderService.list_cli_dependencies()
@@ -27,7 +27,7 @@ async def install_system_dependency(
     request: Request,
     body: CliDependencyInstallRequest,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     try:
@@ -50,7 +50,7 @@ async def get_system_dependency_install_job(
     dependency_id: str,
     job_id: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    rl: Annotated[None, Depends(check_rate_limit)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     data = ProviderService.get_cli_dependency_install_job(dependency_id, job_id)

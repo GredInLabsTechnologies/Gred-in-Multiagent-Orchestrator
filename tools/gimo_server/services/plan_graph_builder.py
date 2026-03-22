@@ -1,7 +1,7 @@
 import logging
 import json
 from typing import Any, Dict, List, Tuple
-from ..ops_models import OpsPlan, OpsTask
+from ..ops_models import OpsPlan
 
 logger = logging.getLogger("orchestrator.plan_graph_builder")
 

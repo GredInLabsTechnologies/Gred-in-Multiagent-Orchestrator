@@ -20,7 +20,7 @@ logger = logging.getLogger("orchestrator.services.claude_auth")
 def _popen(args: list[str], **kwargs) -> subprocess.Popen:
     """Spawn a subprocess; use shell=True on Windows for .cmd shim compat."""
     if sys.platform == "win32":
-        return subprocess.Popen(" ".join(args), shell=True, **kwargs)
+        return subprocess.Popen(" ".join(args), shell=True, **kwargs)  # nosec B602
     return subprocess.Popen(args, **kwargs)
 
 

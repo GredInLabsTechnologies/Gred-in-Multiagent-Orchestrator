@@ -1,0 +1,20 @@
+orchestrator:
+  auto_run_eligible: true
+  budget_limit_usd: 10.0
+  preferred_model: claude-3-5-sonnet-20241022
+  verbose: false
+providers:
+  anthropic:
+    enabled: true
+  openai:
+    enabled: false
+repository:
+  exclude_dirs:
+  - .git
+  - node_modules
+  - .venv
+  - __pycache__
+  - dist
+  - build
+  index_depth: 3
+  name: gred_in_multiagent_orchestrator

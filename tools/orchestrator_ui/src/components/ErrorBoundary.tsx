@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import i18n from '../i18n';
 
 interface Props {
     children: ReactNode;
@@ -28,6 +29,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
     render() {
         if (!this.state.hasError) return this.props.children;
+        const t = i18n.t.bind(i18n);
 
         return (
             <div className="min-h-screen bg-surface-2 flex items-center justify-center p-6">
@@ -36,11 +38,11 @@ export class ErrorBoundary extends Component<Props, State> {
                         <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
                             <span className="text-red-400 text-xl">!</span>
                         </div>
-                        <h1 className="text-xl font-semibold text-white">Error en la aplicacion</h1>
+                        <h1 className="text-xl font-semibold text-white">{t('error.appCrash')}</h1>
                     </div>
 
                     <p className="text-text-secondary text-sm">
-                        Se ha producido un error inesperado. Puedes intentar recargar la pagina o descartar el error.
+                        {t('error.crashMessage')}
                     </p>
 
                     {this.state.error && (
@@ -67,13 +69,13 @@ export class ErrorBoundary extends Component<Props, State> {
                             onClick={this.handleReload}
                             className="px-4 py-2 bg-accent-primary text-white text-sm rounded-lg hover:bg-accent-primary/80 transition-colors"
                         >
-                            Recargar
+                            {t('error.reload')}
                         </button>
                         <button
                             onClick={this.handleDismiss}
                             className="px-4 py-2 bg-surface-3 text-white text-sm rounded-lg hover:bg-[#48484a] transition-colors"
                         >
-                            Descartar
+                            {t('common.close')}
                         </button>
                     </div>
                 </div>
