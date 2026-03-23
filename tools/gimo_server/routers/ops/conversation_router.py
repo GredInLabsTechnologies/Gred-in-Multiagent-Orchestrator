@@ -40,6 +40,17 @@ async def get_thread(
         raise HTTPException(status_code=404, detail="Thread not found")
     return thread
 
+
+@router.get("/{thread_id}/proofs", responses={404: {"description": "Thread not found"}})
+async def get_thread_proofs(
+    thread_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+):
+    thread = ConversationService.get_thread(thread_id)
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return AgenticLoopService.get_thread_proofs(thread_id)
+
 @router.post("/{thread_id}/turns", response_model=GimoTurn, responses={404: {"description": "Thread not found"}})
 async def add_turn(
     thread_id: str,
@@ -242,21 +253,27 @@ async def respond_to_plan(
         raise HTTPException(status_code=404, detail="No proposed plan found in this thread")
 
     if action == "approve":
-        # Mark plan as approved, transition mood to executor
-        thread.mood = "executor"
-        thread.metadata["plan_approved"] = True
-        thread.metadata["plan_approved_at"] = json.dumps({"time": "now"})  # Placeholder
-        ConversationService.save_thread(thread)
-
         # Create the plan for execution using CustomPlanService
         from ...services.custom_plan_service import CustomPlanService
 
         try:
+            proposed_plan = thread.proposed_plan or {}
             plan = CustomPlanService.create_plan_from_llm(
-                plan_data={"tasks": thread.proposed_plan.get("tasks", [])},
-                name=thread.proposed_plan.get("title", "Approved Plan"),
-                description=thread.proposed_plan.get("objective", ""),
+                plan_data={"tasks": proposed_plan.get("tasks", [])},
+                name=proposed_plan.get("title", "Approved Plan"),
+                description=proposed_plan.get("objective", ""),
             )
+
+            updated = ConversationService.mutate_thread(
+                thread_id,
+                lambda current: (
+                    setattr(current, "mood", "executor"),
+                    current.metadata.__setitem__("plan_approved", True),
+                    current.metadata.__setitem__("plan_approved_at", json.dumps({"time": "now"})),
+                ),
+            )
+            if updated is None:
+                raise HTTPException(status_code=404, detail="Thread not found")
 
             # Execute plan in background
             import asyncio
@@ -273,9 +290,13 @@ async def respond_to_plan(
 
     elif action == "reject":
         # Clear proposed plan, add rejection feedback to thread
-        thread.proposed_plan = None
-        thread.mood = "dialoger"  # Back to dialog mode
-        ConversationService.save_thread(thread)
+        ConversationService.mutate_thread(
+            thread_id,
+            lambda current: (
+                setattr(current, "proposed_plan", None),
+                setattr(current, "mood", "dialoger"),
+            ),
+        )
 
         # Add rejection as user message so agent can re-plan
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
@@ -295,8 +316,10 @@ async def respond_to_plan(
             raise HTTPException(status_code=400, detail="modified_plan required for 'modify' action")
 
         # Update proposed plan with user modifications
-        thread.proposed_plan = modified_plan
-        ConversationService.save_thread(thread)
+        ConversationService.mutate_thread(
+            thread_id,
+            lambda current: setattr(current, "proposed_plan", modified_plan),
+        )
 
         return {
             "status": "modified",

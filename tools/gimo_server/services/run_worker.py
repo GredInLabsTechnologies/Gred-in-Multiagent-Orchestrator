@@ -22,6 +22,7 @@ from .ops_service import OpsService
 from .provider_service import ProviderService
 from .notification_service import NotificationService
 from .critic_service import CriticService
+from .quality_service import QualityService
 
 logger = logging.getLogger("orchestrator.run_worker")
 
@@ -351,10 +352,82 @@ class RunWorker:
         base_prompt: str,
         intent_effective: str,
         path_scope: list[str],
+        requested_model: str = "",
+        initial_raw: dict | None = None,
     ) -> tuple[bool, str, dict]:
         """Hidden critic loop with max 2 retries for non-critical verdicts."""
         current_output = output_text
-        current_raw: dict = {"content": output_text}
+        current_raw: dict = dict(initial_raw or {})
+        current_raw.setdefault("content", output_text)
+        gics = getattr(OpsService, "_gics", None)
+        quality = QualityService.analyze_output(output_text)
+        model_name = str(requested_model or "unknown")
+
+        def _fields(record: dict | None) -> dict:
+            if not isinstance(record, dict):
+                return {}
+            nested = record.get("fields")
+            return dict(nested) if isinstance(nested, dict) else dict(record)
+
+        def _stats_key(name: str) -> str:
+            return f"ops:task:run_worker_execution:{name}"
+
+        def _update_stats(*, approved: bool, critic_needed: bool, raw: dict) -> None:
+            if not gics:
+                return
+            resolved_model = str(
+                raw.get("final_model_used")
+                or raw.get("model")
+                or raw.get("model_attempted")
+                or model_name
+                or "unknown"
+            )
+            key = _stats_key(resolved_model)
+            try:
+                fields = _fields(gics.get(key))
+                samples = int(fields.get("samples", 0) or 0) + 1
+                successes = int(fields.get("successes", 0) or 0) + (1 if approved else 0)
+                critic_calls = int(fields.get("critic_calls", 0) or 0) + (1 if critic_needed else 0)
+                critic_skips = int(fields.get("critic_skips", 0) or 0) + (0 if critic_needed else 1)
+                updated = {
+                    **fields,
+                    "samples": samples,
+                    "successes": successes,
+                    "success_rate": successes / max(1, samples),
+                    "critic_calls": critic_calls,
+                    "critic_skips": critic_skips,
+                    "last_used": datetime.now(timezone.utc).timestamp(),
+                }
+                usage = raw.get("usage", {}) if isinstance(raw, dict) else {}
+                completion_tokens = int(usage.get("completion_tokens", 0) or 0)
+                if completion_tokens > 0:
+                    prev_samples = int(fields.get("samples", 0) or 0)
+                    avg_output = float(fields.get("avg_output_tokens", 0) or 0)
+                    updated["avg_output_tokens"] = ((avg_output * prev_samples) + completion_tokens) / max(1, prev_samples + 1)
+                gics.put(key, updated)
+            except Exception:
+                logger.debug("Failed to update critic gate stats for %s", resolved_model, exc_info=True)
+
+        if gics:
+            try:
+                stats = _fields(gics.get(_stats_key(model_name)))
+            except Exception:
+                stats = {}
+        else:
+            stats = {}
+
+        if (
+            quality.score >= 80
+            and int(stats.get("samples", 0) or 0) >= 15
+            and float(stats.get("success_rate", 0) or 0.0) >= 0.90
+        ):
+            OpsService.append_log(
+                run_id,
+                level="INFO",
+                msg=f"Critic skipped: quality={quality.score} samples={stats.get('samples', 0)} success_rate={stats.get('success_rate', 0)}",
+            )
+            _update_stats(approved=True, critic_needed=False, raw=current_raw)
+            return True, current_output, current_raw
 
         for attempt in range(0, 3):
             verdict = await CriticService.evaluate(
@@ -368,9 +441,11 @@ class RunWorker:
             )
 
             if verdict.approved:
+                _update_stats(approved=True, critic_needed=True, raw=current_raw)
                 return True, current_output, current_raw
 
             if verdict.severity == "critical" or attempt >= 2:
+                _update_stats(approved=False, critic_needed=True, raw=current_raw)
                 return False, current_output, current_raw
 
             retry_prompt = (
@@ -385,7 +460,15 @@ class RunWorker:
                 path_scope=path_scope,
             )
             current_output = str(current_raw.get("content") or "")
+            model_name = str(
+                current_raw.get("final_model_used")
+                or current_raw.get("model")
+                or current_raw.get("model_attempted")
+                or model_name
+                or "unknown"
+            )
 
+        _update_stats(approved=False, critic_needed=True, raw=current_raw)
         return False, current_output, current_raw
 
     def _build_executor_report(self, run_id: str, *, output_text: str, run_result: dict) -> ExecutorReport:
@@ -429,6 +512,8 @@ class RunWorker:
                 base_prompt=prompt,
                 intent_effective=intent_effective,
                 path_scope=path_scope,
+                requested_model=str(resp.get("final_model_used") or resp.get("model") or ""),
+                initial_raw=resp,
             )
             if not critic_ok:
                 OpsService.update_run_status(run_id, "error", msg="Critic rejected output")

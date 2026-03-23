@@ -6,13 +6,17 @@ from __future__ import annotations
 import json
 import pytest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from tools.gimo_server.services.agentic_loop_service import (
     AgenticResult,
+    AgenticLoopService,
     _generate_workspace_tree,
     _build_messages_from_thread,
 )
 from tools.gimo_server.models.conversation import GimoThread, GimoTurn, GimoItem
+from tools.gimo_server.services.conversation_service import ConversationService
+from tools.gimo_server.engine.moods import get_mood_profile
 
 
 @pytest.fixture
@@ -133,3 +137,216 @@ class TestAgenticResult:
         assert result.usage["total_tokens"] == 100
         assert result.turns_used == 3
         assert result.finish_reason == "length"
+
+
+class _FakeGics:
+    def __init__(self, seed: dict | None = None):
+        self.seed = seed or {}
+        self.records = {}
+
+    def get(self, key: str):
+        return self.seed.get(key) or self.records.get(key)
+
+    def put(self, key: str, value: dict):
+        self.records[key] = value
+
+    def scan(self, prefix: str = "", include_fields: bool = True):
+        out = []
+        merged = {**self.seed, **self.records}
+        for key, value in merged.items():
+            if key.startswith(prefix):
+                out.append({"key": key, "fields": value})
+        return out
+
+
+@pytest.mark.asyncio
+async def test_run_loop_uses_predictive_max_tokens(tmp_path: Path):
+    gics = _FakeGics(
+        {
+            "ops:task:plan_node:test-model": {
+                "samples": 5,
+                "avg_output_tokens": 10,
+            }
+        }
+    )
+    adapter = AsyncMock()
+    adapter.chat_with_tools = AsyncMock(
+        return_value={
+            "content": "done",
+            "tool_calls": [],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+            "finish_reason": "stop",
+        }
+    )
+
+    with patch.object(AgenticLoopService, "_get_gics", return_value=gics):
+        result = await AgenticLoopService._run_loop(
+            adapter=adapter,
+            provider_id="test-provider",
+            model="test-model",
+            workspace_root=str(tmp_path),
+            token="system",
+            mood="neutral",
+            mood_profile=get_mood_profile("neutral"),
+            messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}],
+            max_turns=1,
+            temperature=0.0,
+            tools=[],
+            task_key="plan_node",
+        )
+
+    assert result.response == "done"
+    assert adapter.chat_with_tools.await_args.kwargs["max_tokens"] == 13
+
+
+@pytest.mark.asyncio
+async def test_run_loop_enforces_turn_budget(tmp_path: Path):
+    adapter = AsyncMock()
+    adapter.chat_with_tools = AsyncMock(
+        return_value={
+            "content": "expensive",
+            "tool_calls": [],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 100, "total_tokens": 200},
+            "finish_reason": "stop",
+        }
+    )
+
+    with patch.object(AgenticLoopService, "_calculate_usage_cost", return_value=999.0):
+        result = await AgenticLoopService._run_loop(
+            adapter=adapter,
+            provider_id="test-provider",
+            model="test-model",
+            workspace_root=str(tmp_path),
+            token="system",
+            mood="neutral",
+            mood_profile=get_mood_profile("neutral"),
+            messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}],
+            max_turns=1,
+            temperature=0.0,
+            tools=[],
+            task_key="agentic_chat",
+        )
+
+    assert result.finish_reason == "turn_budget_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_run_loop_persists_execution_proofs(tmp_path: Path):
+    gics = _FakeGics()
+    adapter = AsyncMock()
+    adapter.chat_with_tools = AsyncMock(
+        side_effect=[
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": json.dumps({"path": "x.txt"})},
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "finish_reason": "tool_calls",
+            },
+            {
+                "content": "done",
+                "tool_calls": [],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "finish_reason": "stop",
+            },
+        ]
+    )
+
+    with patch.object(AgenticLoopService, "_get_gics", return_value=gics), patch(
+        "tools.gimo_server.services.agentic_loop_service.ToolExecutor.execute_tool_call",
+        new=AsyncMock(return_value={"status": "success", "message": "ok", "data": {"content": "x"}}),
+    ):
+        result = await AgenticLoopService._run_loop(
+            adapter=adapter,
+            provider_id="test-provider",
+            model="test-model",
+            workspace_root=str(tmp_path),
+            token="system",
+            mood="neutral",
+            mood_profile=get_mood_profile("neutral"),
+            messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}],
+            max_turns=2,
+            temperature=0.0,
+            tools=[{"type": "function", "function": {"name": "read_file"}}],
+            task_key="agentic_chat",
+            thread_id="thread_proof",
+            persist_conversation=False,
+            allow_hitl=False,
+        )
+
+    assert result.response == "done"
+    proof_keys = [key for key in gics.records if key.startswith("ops:proof:thread_proof:")]
+    assert len(proof_keys) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_loop_plan_proposed_preserves_conversation_turns(tmp_path: Path):
+    original_threads_dir = ConversationService.THREADS_DIR
+    ConversationService.THREADS_DIR = tmp_path / "threads"
+    adapter = AsyncMock()
+    adapter.chat_with_tools = AsyncMock(
+        return_value={
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_plan",
+                    "type": "function",
+                    "function": {"name": "propose_plan", "arguments": json.dumps({"title": "Ship it"})},
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "finish_reason": "tool_calls",
+        }
+    )
+
+    try:
+        thread = ConversationService.create_thread(workspace_root=str(tmp_path), title="plan")
+        stale_thread = ConversationService.get_thread(thread.id)
+        assert stale_thread is not None
+
+        with patch(
+            "tools.gimo_server.services.agentic_loop_service.ToolExecutor.execute_tool_call",
+            new=AsyncMock(
+                return_value={
+                    "status": "plan_proposed",
+                    "message": "Plan proposed",
+                    "data": {"title": "Ship it", "tasks": []},
+                }
+            ),
+        ), patch(
+            "tools.gimo_server.services.notification_service.NotificationService.publish",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await AgenticLoopService._run_loop(
+                adapter=adapter,
+                provider_id="test-provider",
+                model="test-model",
+                workspace_root=str(tmp_path),
+                token="system",
+                mood="neutral",
+                mood_profile=get_mood_profile("neutral"),
+                messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "plan it"}],
+                max_turns=1,
+                temperature=0.0,
+                tools=[{"type": "function", "function": {"name": "propose_plan"}}],
+                task_key="agentic_chat",
+                thread_id=thread.id,
+                thread=stale_thread,
+                persist_conversation=True,
+                allow_hitl=False,
+            )
+
+        stored = ConversationService.get_thread(thread.id)
+        assert result.finish_reason == "plan_proposed"
+        assert stored is not None
+        assert stored.proposed_plan == {"title": "Ship it", "tasks": []}
+        assert len(stored.turns) == 2
+        assert any(item.type == "tool_call" for turn in stored.turns for item in turn.items)
+        assert any(item.content == "Plan proposed. Please review and approve to continue." for turn in stored.turns for item in turn.items)
+    finally:
+        ConversationService.THREADS_DIR = original_threads_dir

@@ -1,38 +1,57 @@
-"""GIMO Mood Engine — Comprehensive behavioral profiles for agent orchestration.
-
-P2 Innovation: Moods are elevated from a Skills-only feature to the core control
-system for the agentic loop. Each mood is a complete operational profile that
-determines personality, temperature, tool access, response style, and auto-transitions.
-"""
+"""GIMO mood engine and policy-enforcement contracts."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Literal, Set
+from typing import Dict, FrozenSet, Literal, Set
 
-__all__ = ["MoodType", "MoodProfile", "MOOD_PROFILES", "get_mood_profile", "MOOD_PROMPTS"]
+__all__ = [
+    "MoodType",
+    "MoodContract",
+    "MoodProfile",
+    "MOOD_PROFILES",
+    "get_mood_profile",
+    "MOOD_PROMPTS",
+]
 
 MoodType = Literal["neutral", "forensic", "executor", "dialoger", "creative", "guardian", "mentor"]
+
+_DOC_ALLOWLIST = frozenset({
+    "developer.mozilla.org",
+    "docs.anthropic.com",
+    "docs.github.com",
+    "docs.pydantic.dev",
+    "docs.python.org",
+    "fastapi.tiangolo.com",
+    "platform.openai.com",
+})
+
+
+@dataclass(frozen=True)
+class MoodContract:
+    fs_mode: Literal["read_only", "workspace_only"]
+    network_mode: Literal["blocked", "allowlist"]
+    allowed_domains: FrozenSet[str] = field(default_factory=frozenset)
+    shell_command_patterns: FrozenSet[str] = field(default_factory=frozenset)
+    max_cost_per_turn_usd: float = 0.2
+    auto_test_on_write: bool = False
+    auto_lint_on_write: bool = False
 
 
 @dataclass(frozen=True)
 class MoodProfile:
-    """Complete behavioral profile for a mood.
+    """Complete behavioral profile for a mood."""
 
-    Each mood defines not just the prompt, but the entire agent's operational parameters.
-    This enables mood-driven flow control without explicit phase state machines.
-    """
     name: str
-    prompt_prefix: str              # Injected into system prompt
-    temperature: float              # 0.0 = deterministic, 0.7 = exploratory
-    max_turns: int                  # Loop iteration limit
-    tool_whitelist: Set[str]        # Tools available (empty = all allowed)
-    tool_blacklist: Set[str]        # Tools prohibited
-    requires_confirmation: Set[str] # Tools that trigger ask_user BEFORE execution
-    response_style: str             # "concise" | "detailed" | "educational"
-    auto_transition_to: str         # Mood suggested after completion ("stay" = no change)
+    prompt_prefix: str
+    temperature: float
+    max_turns: int
+    tool_whitelist: Set[str]
+    tool_blacklist: Set[str]
+    requires_confirmation: Set[str]
+    response_style: str
+    auto_transition_to: str
+    contract: MoodContract
 
-
-# ── Mood Profiles ─────────────────────────────────────────────────────────────
 
 MOOD_PROFILES: Dict[str, MoodProfile] = {
     "neutral": MoodProfile(
@@ -45,8 +64,13 @@ MOOD_PROFILES: Dict[str, MoodProfile] = {
         requires_confirmation=set(),
         response_style="concise",
         auto_transition_to="stay",
+        contract=MoodContract(
+            fs_mode="workspace_only",
+            network_mode="blocked",
+            shell_command_patterns=frozenset({r".*"}),
+            max_cost_per_turn_usd=0.20,
+        ),
     ),
-
     "forensic": MoodProfile(
         name="forensic",
         prompt_prefix=(
@@ -61,8 +85,21 @@ MOOD_PROFILES: Dict[str, MoodProfile] = {
         requires_confirmation={"write_file", "shell_exec", "patch_file", "search_replace"},
         response_style="detailed",
         auto_transition_to="dialoger",
+        contract=MoodContract(
+            fs_mode="read_only",
+            network_mode="allowlist",
+            allowed_domains=_DOC_ALLOWLIST,
+            shell_command_patterns=frozenset({
+                r"^cat\b.*",
+                r"^find\b.*",
+                r"^git\s+log\b.*",
+                r"^grep\b.*",
+                r"^rg\b.*",
+                r"^wc\b.*",
+            }),
+            max_cost_per_turn_usd=0.10,
+        ),
     ),
-
     "executor": MoodProfile(
         name="executor",
         prompt_prefix=(
@@ -72,13 +109,20 @@ MOOD_PROFILES: Dict[str, MoodProfile] = {
         ),
         temperature=0.1,
         max_turns=15,
-        tool_whitelist=set(),  # All tools available
+        tool_whitelist=set(),
         tool_blacklist=set(),
         requires_confirmation=set(),
         response_style="concise",
         auto_transition_to="mentor",
+        contract=MoodContract(
+            fs_mode="workspace_only",
+            network_mode="blocked",
+            shell_command_patterns=frozenset({r".*"}),
+            max_cost_per_turn_usd=0.50,
+            auto_test_on_write=True,
+            auto_lint_on_write=True,
+        ),
     ),
-
     "dialoger": MoodProfile(
         name="dialoger",
         prompt_prefix=(
@@ -92,9 +136,19 @@ MOOD_PROFILES: Dict[str, MoodProfile] = {
         tool_blacklist=set(),
         requires_confirmation={"write_file", "shell_exec", "patch_file", "search_replace", "create_dir"},
         response_style="detailed",
-        auto_transition_to="forensic",  # After dialog, often need to investigate
+        auto_transition_to="forensic",
+        contract=MoodContract(
+            fs_mode="read_only",
+            network_mode="allowlist",
+            allowed_domains=_DOC_ALLOWLIST,
+            shell_command_patterns=frozenset({
+                r"^find\b.*",
+                r"^grep\b.*",
+                r"^rg\b.*",
+            }),
+            max_cost_per_turn_usd=0.05,
+        ),
     ),
-
     "creative": MoodProfile(
         name="creative",
         prompt_prefix=(
@@ -109,8 +163,14 @@ MOOD_PROFILES: Dict[str, MoodProfile] = {
         requires_confirmation=set(),
         response_style="detailed",
         auto_transition_to="executor",
+        contract=MoodContract(
+            fs_mode="workspace_only",
+            network_mode="allowlist",
+            allowed_domains=_DOC_ALLOWLIST,
+            shell_command_patterns=frozenset({r".*"}),
+            max_cost_per_turn_usd=0.30,
+        ),
     ),
-
     "guardian": MoodProfile(
         name="guardian",
         prompt_prefix=(
@@ -120,13 +180,23 @@ MOOD_PROFILES: Dict[str, MoodProfile] = {
         ),
         temperature=0.0,
         max_turns=25,
-        tool_whitelist={"read_file", "list_files", "search_text", "shell_exec"},  # shell_exec for validation only
+        tool_whitelist={"read_file", "list_files", "search_text", "shell_exec"},
         tool_blacklist=set(),
         requires_confirmation={"write_file", "patch_file", "search_replace", "create_dir"},
         response_style="detailed",
         auto_transition_to="dialoger",
+        contract=MoodContract(
+            fs_mode="read_only",
+            network_mode="blocked",
+            shell_command_patterns=frozenset({
+                r"^bandit\b.*",
+                r"^git\s+diff\b.*",
+                r"^ruff\b.*",
+                r"^semgrep\b.*",
+            }),
+            max_cost_per_turn_usd=0.05,
+        ),
     ),
-
     "mentor": MoodProfile(
         name="mentor",
         prompt_prefix=(
@@ -141,24 +211,25 @@ MOOD_PROFILES: Dict[str, MoodProfile] = {
         requires_confirmation=set(),
         response_style="educational",
         auto_transition_to="stay",
+        contract=MoodContract(
+            fs_mode="read_only",
+            network_mode="blocked",
+            shell_command_patterns=frozenset({
+                r"^cat\b.*",
+                r"^find\b.*",
+                r"^grep\b.*",
+                r"^rg\b.*",
+            }),
+            max_cost_per_turn_usd=0.10,
+        ),
     ),
 }
 
-
-# ── Backward Compatibility ────────────────────────────────────────────────────
-
-# Legacy MOOD_PROMPTS dict for skills_service.py (read-only)
 MOOD_PROMPTS: Dict[str, str] = {
     name: profile.prompt_prefix
     for name, profile in MOOD_PROFILES.items()
 }
 
 
-# ── API ───────────────────────────────────────────────────────────────────────
-
 def get_mood_profile(mood: str) -> MoodProfile:
-    """Get the full MoodProfile for a given mood name.
-
-    Raises KeyError if mood is invalid.
-    """
     return MOOD_PROFILES[mood]

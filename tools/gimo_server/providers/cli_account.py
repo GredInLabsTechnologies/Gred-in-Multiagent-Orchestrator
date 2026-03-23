@@ -261,6 +261,8 @@ class CliAccountAdapter(ProviderAdapter):
         messages: List[Dict[str, Any]],
         tools: list | None = None,
         temperature: float = 0.0,
+        max_tokens: int | None = None,
+        response_format: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """Implement tool-calling via CLI binary using prompt engineering.
 
@@ -271,6 +273,10 @@ class CliAccountAdapter(ProviderAdapter):
         # Build flat prompt with tool-calling instructions injected
         parts: list[str] = []
         tool_descriptions = ""
+        if max_tokens is not None:
+            logger.debug("[cli-account] max_tokens=%s ignored by CLI account adapter", max_tokens)
+        if response_format is not None:
+            logger.debug("[cli-account] response_format ignored by CLI account adapter")
 
         for msg in messages:
             role = msg.get("role", "")

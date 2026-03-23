@@ -4,6 +4,7 @@ import logging
 import os
 import time
 import asyncio
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,8 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from ..config import OPS_DATA_DIR
 from ..ops_models import CostEvent
+from .git_service import GitService
+from .sandbox_service import SandboxHandle, SandboxService
 
 logger = logging.getLogger("orchestrator.custom_plans")
 
@@ -201,6 +204,8 @@ def _calculate_layout(tasks: List[Dict[str, Any]], task_ids: set) -> tuple[Dict[
 class CustomPlanService:
     """File-backed service for user-defined execution graphs."""
 
+    _save_lock = threading.Lock()
+
     @classmethod
     def _ensure_dir(cls) -> None:
         PLANS_DIR.mkdir(parents=True, exist_ok=True)
@@ -339,9 +344,11 @@ class CustomPlanService:
 
     @classmethod
     def _save(cls, plan: CustomPlan) -> None:
-        cls._plan_path(plan.id).write_text(
-            plan.model_dump_json(indent=2), encoding="utf-8"
-        )
+        plan_path = cls._plan_path(plan.id)
+        tmp_path = plan_path.with_suffix(".tmp")
+        with cls._save_lock:
+            tmp_path.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+            tmp_path.replace(plan_path)
 
     # ── Execution ──
 
@@ -365,6 +372,53 @@ class CustomPlanService:
         return layers
 
     @classmethod
+    def _repo_root(cls, plan: CustomPlan) -> Path:
+        return Path(plan.context.get("workspace_root", ".")).resolve()
+
+    @classmethod
+    def _base_ref(cls, plan: CustomPlan, repo_root: Path) -> str:
+        candidate = str(plan.context.get("base_ref") or plan.context.get("target_branch") or "HEAD")
+        if candidate == "HEAD":
+            return candidate
+        try:
+            return GitService.get_current_branch(repo_root) if candidate == "CURRENT_BRANCH" else candidate
+        except Exception:
+            return "HEAD"
+
+    @classmethod
+    def _target_branch(cls, plan: CustomPlan, repo_root: Path) -> str | None:
+        candidate = str(plan.context.get("target_branch") or "").strip()
+        if candidate:
+            return candidate
+        try:
+            branch = GitService.get_current_branch(repo_root)
+            return None if branch == "HEAD" else branch
+        except Exception:
+            return None
+
+    @classmethod
+    def _log_plan_event(cls, plan: CustomPlan, level: str, msg: str) -> None:
+        plan.run_log.append(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "level": level,
+                "msg": msg,
+            }
+        )
+
+    @classmethod
+    def _has_failed_dependency(cls, node: PlanNode, node_map: Dict[str, PlanNode]) -> bool:
+        return any(node_map.get(dep) and node_map[dep].status == "error" for dep in node.depends_on)
+
+    @classmethod
+    def _overlapping_files(cls, artifacts: Dict[str, Dict[str, Any]]) -> Dict[str, List[str]]:
+        owners: Dict[str, List[str]] = {}
+        for node_id, artifact in artifacts.items():
+            for changed in artifact.get("changed_files", []):
+                owners.setdefault(changed, []).append(node_id)
+        return {path: node_ids for path, node_ids in owners.items() if len(node_ids) > 1}
+
+    @classmethod
     async def execute_plan(
         cls,
         plan_id: str,
@@ -374,6 +428,7 @@ class CustomPlanService:
     ) -> Optional[CustomPlan]:
         """Execute a plan layer by layer, respecting dependencies."""
         from ..services.notification_service import NotificationService
+        from ..services.ops_service import OpsService
 
         plan = cls.get_plan(plan_id)
         if not plan:
@@ -388,34 +443,141 @@ class CustomPlanService:
 
         node_map = {n.id: n for n in plan.nodes}
         layers = cls.get_execution_order(plan)
+        total_nodes = max(len(plan.nodes), 1)
+        repo_root = cls._repo_root(plan)
+        base_ref = cls._base_ref(plan, repo_root)
+        target_branch = cls._target_branch(plan, repo_root)
+        max_concurrent = max(1, int(OpsService.get_config().max_concurrent_runs))
+        node_artifacts: Dict[str, Dict[str, Any]] = {}
+        execution_id = uuid.uuid4().hex[:8]
 
         for layer_idx, layer in enumerate(layers):
-            plan.run_log.append({
-                "ts": datetime.now(timezone.utc).isoformat(),
-                "level": "info",
-                "msg": f"Starting layer {layer_idx}: {layer}",
-            })
+            cls._log_plan_event(plan, "info", f"Starting layer {layer_idx}: {layer}")
 
-            total_nodes = max(len(plan.nodes), 1)
-            for node_idx, node_id in enumerate(layer):
-                await cls._execute_node(
-                    plan,
-                    node_map,
-                    node_id,
-                    plan_id,
-                    skill_id,
-                    skill_run_id,
-                    skill_command,
-                    node_idx=node_idx,
-                    layer_size=len(layer),
-                    total_nodes=total_nodes,
-                )
+            runnable: List[str] = []
+            for node_id in layer:
+                node = node_map[node_id]
+                if cls._has_failed_dependency(node, node_map):
+                    node.status = "skipped"
+                    node.error = "Skipped because an upstream dependency failed"
+                    await cls._finalize_node_execution(
+                        plan,
+                        plan_id,
+                        node,
+                        skill_id,
+                        skill_run_id,
+                        skill_command,
+                        progress=min(max(sum(1 for n in plan.nodes if n.status in ("done", "error", "skipped")) / total_nodes, 0.0), 1.0),
+                    )
+                    cls._log_plan_event(plan, "warn", f"Skipped node {node_id}: failed dependency")
+                    continue
+                runnable.append(node_id)
 
+            if not runnable:
+                cls._save(plan)
+                continue
+
+            semaphore = asyncio.Semaphore(max(1, min(len(runnable), max_concurrent)))
+
+            async def _run_with_limit(node_id: str, node_idx: int) -> Dict[str, Any] | None:
+                async with semaphore:
+                    try:
+                        from ..services.authority import ExecutionAuthority
+                        from ..services.resource_governor import AdmissionDecision, TaskWeight
+
+                        authority = ExecutionAuthority.get()
+                        while authority.resource_governor.evaluate(TaskWeight.MEDIUM) != AdmissionDecision.ALLOW:
+                            await asyncio.sleep(1.0)
+                    except Exception:
+                        pass
+                    return await cls._execute_node(
+                        plan,
+                        node_map,
+                        node_id,
+                        plan_id,
+                        skill_id,
+                        skill_run_id,
+                        skill_command,
+                        node_idx=node_idx,
+                        layer_size=len(runnable),
+                        total_nodes=total_nodes,
+                        workspace_override=None,
+                        repo_root=repo_root,
+                        base_ref=base_ref,
+                        execution_id=execution_id,
+                    )
+
+            layer_results = await asyncio.gather(
+                *[_run_with_limit(node_id, idx) for idx, node_id in enumerate(runnable)],
+                return_exceptions=False,
+            )
+            for artifact in layer_results:
+                if artifact and artifact.get("status") == "done":
+                    node_artifacts[artifact["node_id"]] = artifact
             cls._save(plan)
 
-        # Final status
-        all_done = all(n.status in ("done", "skipped") for n in plan.nodes)
-        plan.status = "done" if all_done else "error"
+        overlapping = cls._overlapping_files(node_artifacts)
+        if overlapping:
+            conflict_desc = ", ".join(f"{path}: {','.join(nodes)}" for path, nodes in overlapping.items())
+            cls._log_plan_event(plan, "error", f"Merge conflict risk detected; overlapping files: {conflict_desc}")
+            plan.status = "error"
+        elif any(node.status == "error" for node in plan.nodes):
+            plan.status = "error"
+            cls._log_plan_event(plan, "error", "Plan finished with one or more failed nodes; preserving worktrees")
+        else:
+            merge_failed = False
+            if target_branch:
+                integration_branch = f"gimo_merge_{plan.id[-12:]}"
+                try:
+                    if not GitService.is_worktree_clean(repo_root):
+                        raise RuntimeError("Target repository has uncommitted changes")
+                    GitService.create_branch(repo_root, integration_branch, target_branch)
+                    for artifact in node_artifacts.values():
+                        if not artifact.get("commit_sha"):
+                            continue
+                        ok, output = GitService.perform_merge(repo_root, artifact["branch_name"], integration_branch)
+                        if not ok:
+                            merge_failed = True
+                            cls._log_plan_event(
+                                plan,
+                                "error",
+                                f"Merge failed for node {artifact['node_id']} from {artifact['branch_name']}: {output}",
+                            )
+                            break
+                    if not merge_failed:
+                        ok, output = GitService.fast_forward_branch(repo_root, target_branch, integration_branch)
+                        if not ok:
+                            merge_failed = True
+                            cls._log_plan_event(
+                                plan,
+                                "error",
+                                f"Failed to promote integration branch {integration_branch} into {target_branch}: {output}",
+                            )
+                except Exception as exc:
+                    merge_failed = True
+                    cls._log_plan_event(plan, "error", f"Unable to prepare merge integration branch: {exc}")
+                finally:
+                    try:
+                        GitService._run_git(repo_root, ["checkout", target_branch])
+                    except Exception:
+                        pass
+                    try:
+                        GitService.delete_branch(repo_root, integration_branch)
+                    except Exception:
+                        pass
+            else:
+                cls._log_plan_event(plan, "warn", "Target branch unavailable; worktrees preserved for manual review")
+                merge_failed = True
+
+            if merge_failed:
+                plan.status = "error"
+            else:
+                for artifact in node_artifacts.values():
+                    handle = artifact.get("sandbox_handle")
+                    if isinstance(handle, SandboxHandle):
+                        SandboxService.cleanup_worktree(handle)
+                plan.status = "done"
+
         cls._save(plan)
 
         # Notify via custom plan events
@@ -439,17 +601,22 @@ class CustomPlanService:
         node_idx: int = 0,
         layer_size: int = 1,
         total_nodes: int = 1,
-    ) -> None:
+        workspace_override: Optional[str] = None,
+        repo_root: Optional[Path] = None,
+        base_ref: str = "HEAD",
+        execution_id: str = "",
+    ) -> Dict[str, Any] | None:
         from ..services.notification_service import NotificationService
 
         node = node_map[node_id]
         if node.status in ("done", "skipped"):
-            return
+            return None
 
         completed_before = sum(1 for n in plan.nodes if n.status in ("done", "error", "skipped"))
         start_progress = min(max(completed_before / max(total_nodes, 1), 0.0), 1.0)
 
         await cls._update_node_status(
+            plan,
             plan_id,
             node,
             "running",
@@ -472,26 +639,43 @@ class CustomPlanService:
                 skill_command,
                 total_nodes=total_nodes,
             )
-            return
+            return {"node_id": node.id, "status": node.status, "changed_files": [], "diff": "", "commit_sha": "", "branch_name": ""}
 
         final_prompt = cls._build_node_prompt(node, dep_outputs)
+        sandbox_handle: SandboxHandle | None = None
+        execution_workspace = workspace_override
+        repo_root = repo_root or cls._repo_root(plan)
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        cost_usd = 0.0
+        task_type = str(node.node_type or node.role or "worker")
+        model_name = str(node.model or "auto")
+        provider_name = str(node.provider or "auto")
+        storage_service_cls = None
+        ops_service_cls = None
 
         # P2: Use AgenticLoopService.run_node() for tool-enabled execution
         try:
             from ..services.agentic_loop_service import AgenticLoopService
             from ..services.storage_service import StorageService
             from ..services.ops_service import OpsService
+            storage_service_cls = StorageService
+            ops_service_cls = OpsService
 
             # Determine mood from node config or role
             node_mood = node.config.get("mood", "executor")  # Default to executor for plan nodes
-            workspace = plan.context.get("workspace_root", ".")
+            if not execution_workspace:
+                sandbox_run_id = f"{plan.id}_{execution_id or 'run'}_{node.id}"
+                sandbox_handle = SandboxService.create_worktree_handle(sandbox_run_id, str(repo_root), base_ref=base_ref)
+                execution_workspace = str(sandbox_handle.worktree_path)
 
             logger.info(f"[plan-node] Executing {node.id} with mood={node_mood}")
 
             # Execute node with agentic loop
             result = await asyncio.wait_for(
                 AgenticLoopService.run_node(
-                    workspace_root=workspace,
+                    workspace_root=execution_workspace,
                     node_prompt=final_prompt,
                     mood=node_mood,
                     max_turns=10,  # Shorter than main loop
@@ -503,7 +687,6 @@ class CustomPlanService:
             )
 
             node.output = result.response.strip()
-            node.status = "done"
             node.error = None
 
             # Extract usage from agentic result
@@ -512,59 +695,82 @@ class CustomPlanService:
             completion_tokens = usage.get("completion_tokens", 0)
             total_tokens = usage.get("total_tokens", 0)
             cost_usd = usage.get("cost_usd", 0.0)
-            quality_score = 85.0 if node.status == "done" else 40.0
-            cascade_level = 0  # No cascade in node execution (simplified)
-
-            try:
-                storage = StorageService(OpsService._gics)
-                storage.cost.save_cost_event(CostEvent(
-                    id=f"ce_{uuid.uuid4().hex[:12]}",
-                    workflow_id=plan_id,
-                    node_id=node.id,
-                    model=str(node.model or "auto"),
-                    provider=str(node.provider or "auto"),
-                    task_type=str(node.node_type or node.role or "worker"),
-                    input_tokens=prompt_tokens,
-                    output_tokens=completion_tokens,
-                    total_tokens=total_tokens,
-                    cost_usd=cost_usd,
-                    quality_score=quality_score,
-                    cascade_level=cascade_level,
-                    cache_hit=False,
-                ))
-                cfg = OpsService.get_config()
-                snap = storage.cost.get_plan_snapshot(
-                    plan_id=plan_id,
-                    status=plan.status,
-                    autonomy_level=cfg.economy.autonomy_level,
-                    days=30,
-                )
-                await NotificationService.publish("custom_node_economy", {
-                    "plan_id": plan_id,
-                    "node_id": node.id,
-                    "cost_usd": cost_usd,
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
-                    "roi_score": next((n.roi_score for n in snap.nodes if n.node_id == node.id), 0.0),
-                    "roi_band": next((n.roi_band for n in snap.nodes if n.node_id == node.id), 1),
-                    "yield_optimized": bool(cascade_level > 0),
-                })
-                await NotificationService.publish("custom_session_economy", {
-                    "plan_id": plan_id,
-                    "spend_usd": snap.total_cost_usd,
-                    "savings_usd": snap.estimated_savings_usd,
-                    "nodes_optimized": snap.nodes_optimized,
-                })
-            except Exception:
-                pass
         except Exception as exc:
             node.status = "error"
             node.error = str(exc)[:500]
 
+        changed_files: List[str] = []
+        diff_text = ""
+        commit_sha = ""
+        branch_name = sandbox_handle.branch_name if sandbox_handle else ""
+        if node.error is None and sandbox_handle:
+            try:
+                changed_files = GitService.get_changed_files(sandbox_handle.worktree_path, base="HEAD")
+                diff_text = GitService.get_diff_text(sandbox_handle.worktree_path, base="HEAD")
+                if changed_files:
+                    commit_sha = GitService.commit_all(sandbox_handle.worktree_path, f"Plan node {node.id} completed")
+            except Exception as exc:
+                node.status = "error"
+                node.error = str(exc)[:500]
+                changed_files = []
+                diff_text = ""
+                commit_sha = ""
+
+        if node.error is None:
+            node.status = "done"
+
+        quality_score = 85.0 if node.status == "done" else 40.0
+        cascade_level = 0  # No cascade in node execution (simplified)
+        try:
+            if storage_service_cls is None or ops_service_cls is None:
+                raise RuntimeError("Plan economy services unavailable")
+            storage = storage_service_cls(ops_service_cls._gics)
+            storage.cost.save_cost_event(CostEvent(
+                id=f"ce_{uuid.uuid4().hex[:12]}",
+                workflow_id=plan_id,
+                node_id=node.id,
+                model=model_name,
+                provider=provider_name,
+                task_type=task_type,
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                cost_usd=cost_usd,
+                quality_score=quality_score,
+                cascade_level=cascade_level,
+                cache_hit=False,
+            ))
+            cfg = ops_service_cls.get_config()
+            snap = storage.cost.get_plan_snapshot(
+                plan_id=plan_id,
+                status=plan.status,
+                autonomy_level=cfg.economy.autonomy_level,
+                days=30,
+            )
+            await NotificationService.publish("custom_node_economy", {
+                "plan_id": plan_id,
+                "node_id": node.id,
+                "cost_usd": cost_usd,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "roi_score": next((n.roi_score for n in snap.nodes if n.node_id == node.id), 0.0),
+                "roi_band": next((n.roi_band for n in snap.nodes if n.node_id == node.id), 1),
+                "yield_optimized": bool(cascade_level > 0),
+            })
+            await NotificationService.publish("custom_session_economy", {
+                "plan_id": plan_id,
+                "spend_usd": snap.total_cost_usd,
+                "savings_usd": snap.estimated_savings_usd,
+                "nodes_optimized": snap.nodes_optimized,
+            })
+        except Exception:
+            pass
+
         completed_after = sum(1 for n in plan.nodes if n.status in ("done", "error", "skipped"))
         finish_progress = min(max(completed_after / max(total_nodes, 1), 0.0), 1.0)
         await cls._finalize_node_execution(
+            plan,
             plan_id,
             node,
             skill_id,
@@ -573,9 +779,20 @@ class CustomPlanService:
             progress=finish_progress,
         )
 
+        return {
+            "node_id": node.id,
+            "status": node.status,
+            "changed_files": changed_files,
+            "diff": diff_text,
+            "commit_sha": commit_sha,
+            "branch_name": branch_name,
+            "sandbox_handle": sandbox_handle,
+        }
+
     @classmethod
     async def _update_node_status(
         cls,
+        plan: CustomPlan,
         plan_id: str,
         node: PlanNode,
         status: str,
@@ -588,6 +805,7 @@ class CustomPlanService:
         node.status = status
         if status == "running":
             node.error = None
+        cls._save(plan)
         
         await NotificationService.publish("custom_node_status", {"plan_id": plan_id, "node_id": node.id, "status": node.status})
         if skill_run_id and skill_id and status == "running":
@@ -616,6 +834,7 @@ class CustomPlanService:
         from ..services.notification_service import NotificationService
         node.output = "Orchestrator ready. Delegation graph validated."
         node.status = "done"
+        cls._save(plan)
         await NotificationService.publish("custom_node_status", {"plan_id": plan_id, "node_id": node.id, "status": node.status, "output": node.output})
         if skill_run_id and skill_id:
             completed_after = sum(1 for n in plan.nodes if n.status in ("done", "error", "skipped"))
@@ -644,6 +863,7 @@ class CustomPlanService:
     @classmethod
     async def _finalize_node_execution(
         cls,
+        plan: CustomPlan,
         plan_id: str,
         node: PlanNode,
         skill_id: str = None,
@@ -652,6 +872,7 @@ class CustomPlanService:
         progress: float = 0.0,
     ) -> None:
         from ..services.notification_service import NotificationService
+        cls._save(plan)
         await NotificationService.publish("custom_node_status", {
             "plan_id": plan_id, "node_id": node.id, "status": node.status, "output": node.output, "error": node.error
         })

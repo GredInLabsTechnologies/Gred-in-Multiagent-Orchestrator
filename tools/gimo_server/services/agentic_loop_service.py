@@ -1,10 +1,4 @@
-"""AgenticLoopService — core motor for GIMO agentic chat.
-
-Orchestrates a multi-turn LLM loop with tool execution and governance.
-
-P2: Enhanced with mood-driven conversational flow, meta-tools (ask_user, propose_plan),
-and pause/resume for human-in-the-loop approval.
-"""
+"""Core agentic loop for GIMO conversations and plan-node execution."""
 from __future__ import annotations
 
 import asyncio
@@ -13,28 +7,28 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
+from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List
 
-from ..engine.moods import get_mood_profile, MoodProfile  # P2
+from ..engine.moods import MoodProfile, get_mood_profile
 from ..engine.tools.chat_tools_schema import CHAT_TOOLS, get_tool_risk_level
-from ..engine.tools.executor import ToolExecutionResult, ToolExecutor
+from ..engine.tools.executor import ToolExecutor
 from ..ops_models import GimoItem, GimoTurn
 from ..providers.base import ProviderAdapter
-from ..services.conversation_service import ConversationService
-from ..services.cost_service import CostService
-from ..services.notification_service import NotificationService
-from ..services.provider_auth_service import ProviderAuthService
-from ..services.provider_service_adapter_registry import build_provider_adapter
-from ..services.provider_service_impl import ProviderService
+from ..security.execution_proof import ExecutionProofChain
+from .conversation_service import ConversationService
+from .cost_service import CostService
+from .notification_service import NotificationService
+from .provider_auth_service import ProviderAuthService
+from .provider_service_adapter_registry import build_provider_adapter
+from .provider_service_impl import ProviderService
 
 logger = logging.getLogger("orchestrator.agentic_loop")
 
-MAX_TURNS = 25  # Default, overridden by mood profile
+MAX_TURNS = 25
 MAX_TOOLS_PER_RESPONSE = 10
 TOOL_TIMEOUT_SECONDS = 30
-HITL_APPROVAL_TIMEOUT = 300  # 5 minutes to approve/deny a HIGH risk tool
+HITL_APPROVAL_TIMEOUT = 300
 
-# P2: Updated system prompt with conversational planning instructions
 SYSTEM_PROMPT_TEMPLATE = """You are GIMO, a governance-aware coding orchestrator.
 You help users with software engineering tasks by reading, writing, and searching code.
 
@@ -44,12 +38,12 @@ Project structure:
 
 Available tools: read_file, write_file, patch_file, search_replace, list_files, search_text, shell_exec, create_dir, ask_user, propose_plan, web_search
 
-## Conversational Planning (P2)
+## Conversational Planning
 
 For COMPLEX tasks (3+ files, new projects, structural refactors):
 1. Ask clarifying questions with ask_user if anything is ambiguous
 2. Investigate the workspace and research if needed (read_file, list_files, web_search)
-3. Propose a plan with propose_plan — explain WHY you chose each mood and model for each task
+3. Propose a plan with propose_plan and explain why you chose each mood and model
 4. Wait for user approval before executing
 
 For SIMPLE tasks (1-2 files, quick fixes):
@@ -64,6 +58,8 @@ Guidelines:
 
 {mood_prefix}
 """
+
+EventEmitter = Callable[[str, Dict[str, Any]], Awaitable[None]]
 
 
 @dataclass
@@ -86,7 +82,6 @@ class AgenticResult:
 
 
 def _generate_workspace_tree(workspace_root: str, max_depth: int = 2, max_entries: int = 100) -> str:
-    """Generate a simple tree representation of the workspace."""
     root = Path(workspace_root)
     if not root.exists():
         return "(workspace not found)"
@@ -121,7 +116,6 @@ def _generate_workspace_tree(workspace_root: str, max_depth: int = 2, max_entrie
 
 
 def _build_messages_from_thread(thread_turns: List[GimoTurn], system_prompt: str) -> List[Dict[str, Any]]:
-    """Convert thread turns into OpenAI-compatible messages list."""
     messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
     for turn in thread_turns:
@@ -130,7 +124,6 @@ def _build_messages_from_thread(thread_turns: List[GimoTurn], system_prompt: str
                 if item.type == "text" and item.content:
                     messages.append({"role": "user", "content": item.content})
         elif turn.agent_id == "orchestrator":
-            # Reconstruct assistant messages with tool_calls
             pending_tool_calls: List[Dict[str, Any]] = []
             for item in turn.items:
                 if item.type == "text" and item.content:
@@ -141,23 +134,26 @@ def _build_messages_from_thread(thread_turns: List[GimoTurn], system_prompt: str
                     messages.append(msg)
                 elif item.type == "tool_call":
                     tc_meta = item.metadata or {}
-                    pending_tool_calls.append({
-                        "id": tc_meta.get("tool_call_id", item.id),
-                        "type": "function",
-                        "function": {
-                            "name": tc_meta.get("tool_name", ""),
-                            "arguments": item.content,
-                        },
-                    })
+                    pending_tool_calls.append(
+                        {
+                            "id": tc_meta.get("tool_call_id", item.id),
+                            "type": "function",
+                            "function": {
+                                "name": tc_meta.get("tool_name", ""),
+                                "arguments": item.content,
+                            },
+                        }
+                    )
                 elif item.type == "tool_result":
                     tc_meta = item.metadata or {}
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc_meta.get("tool_call_id", item.id),
-                        "content": item.content,
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc_meta.get("tool_call_id", item.id),
+                            "content": item.content,
+                        }
+                    )
 
-            # If there were tool_calls without a preceding text message
             if pending_tool_calls:
                 messages.append({"role": "assistant", "content": None, "tool_calls": pending_tool_calls})
 
@@ -165,10 +161,6 @@ def _build_messages_from_thread(thread_turns: List[GimoTurn], system_prompt: str
 
 
 def _resolve_orchestrator_adapter() -> tuple[ProviderAdapter, str, str]:
-    """Resolve the orchestrator provider and build an adapter.
-
-    Returns: (adapter, provider_id, model)
-    """
     cfg = ProviderService.get_config()
     if not cfg:
         raise RuntimeError("Provider config not found. Run gimo init or configure providers.")
@@ -197,13 +189,11 @@ def _resolve_orchestrator_adapter() -> tuple[ProviderAdapter, str, str]:
 class AgenticLoopService:
     """Runs the agentic loop: LLM -> tool_calls -> execute -> repeat."""
 
-    # Pending HITL approvals: {approval_key: asyncio.Event}
     _pending_approvals: Dict[str, asyncio.Event] = {}
-    _approval_results: Dict[str, bool] = {}  # True=approved, False=denied
+    _approval_results: Dict[str, bool] = {}
 
     @classmethod
     def submit_approval(cls, thread_id: str, tool_call_id: str, approved: bool) -> bool:
-        """Submit a HITL approval/denial for a pending tool call."""
         key = f"{thread_id}:{tool_call_id}"
         event = cls._pending_approvals.get(key)
         if not event:
@@ -213,21 +203,24 @@ class AgenticLoopService:
         return True
 
     @classmethod
-    async def _request_approval(cls, thread_id: str, tool_call_id: str, tool_name: str, tool_args: Dict[str, Any]) -> bool:
-        """Request HITL approval for a HIGH risk tool. Returns True if approved."""
+    async def _request_approval(
+        cls, thread_id: str, tool_call_id: str, tool_name: str, tool_args: Dict[str, Any]
+    ) -> bool:
         key = f"{thread_id}:{tool_call_id}"
         event = asyncio.Event()
         cls._pending_approvals[key] = event
 
-        # Broadcast approval request
-        await NotificationService.publish("tool_approval_required", {
-            "thread_id": thread_id,
-            "tool_call_id": tool_call_id,
-            "tool_name": tool_name,
-            "arguments": tool_args,
-            "risk": "HIGH",
-            "critical": True,
-        })
+        await NotificationService.publish(
+            "tool_approval_required",
+            {
+                "thread_id": thread_id,
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "arguments": tool_args,
+                "risk": "HIGH",
+                "critical": True,
+            },
+        )
 
         try:
             await asyncio.wait_for(event.wait(), timeout=HITL_APPROVAL_TIMEOUT)
@@ -240,16 +233,559 @@ class AgenticLoopService:
             cls._approval_results.pop(key, None)
 
     @staticmethod
+    def _get_gics():
+        try:
+            from .ops_service import OpsService
+
+            return getattr(OpsService, "_gics", None)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _gics_fields(record: Any) -> Dict[str, Any]:
+        if not isinstance(record, dict):
+            return {}
+        if isinstance(record.get("fields"), dict):
+            return dict(record["fields"])
+        return dict(record)
+
+    @classmethod
+    def _task_stats_key(cls, task_key: str, model: str) -> str:
+        return f"ops:task:{task_key}:{model}"
+
+    @classmethod
+    def _predict_max_tokens(cls, task_key: str, model: str) -> int | None:
+        gics = cls._get_gics()
+        if not gics:
+            return None
+        try:
+            fields = cls._gics_fields(gics.get(cls._task_stats_key(task_key, model)))
+            samples = int(fields.get("samples", 0) or 0)
+            avg_output = float(fields.get("avg_output_tokens", 0) or 0)
+            if samples >= 5 and avg_output > 0:
+                return max(1, int(avg_output * 1.3))
+        except Exception:
+            logger.debug("Unable to predict max_tokens for task=%s model=%s", task_key, model, exc_info=True)
+        return None
+
+    @classmethod
+    def _record_completion_tokens(cls, task_key: str, model: str, usage: Dict[str, Any]) -> None:
+        completion_tokens = int((usage or {}).get("completion_tokens", 0) or 0)
+        if completion_tokens <= 0:
+            return
+        gics = cls._get_gics()
+        if not gics:
+            return
+        key = cls._task_stats_key(task_key, model)
+        try:
+            fields = cls._gics_fields(gics.get(key))
+            samples = int(fields.get("samples", 0) or 0)
+            avg_output = float(fields.get("avg_output_tokens", 0) or 0)
+            updated_samples = samples + 1
+            rolling_avg = ((avg_output * samples) + completion_tokens) / max(1, updated_samples)
+            gics.put(
+                key,
+                {
+                    **fields,
+                    "samples": updated_samples,
+                    "avg_output_tokens": rolling_avg,
+                    "last_used": time.time(),
+                },
+            )
+        except Exception:
+            logger.debug("Unable to update completion-token stats for task=%s model=%s", task_key, model, exc_info=True)
+
+    @staticmethod
+    def _calculate_usage_cost(model: str, usage: Dict[str, Any]) -> float:
+        if not usage:
+            return 0.0
+        try:
+            return float(
+                CostService.calculate_cost(
+                    model=model,
+                    input_tokens=int(usage.get("prompt_tokens", 0) or 0),
+                    output_tokens=int(usage.get("completion_tokens", 0) or 0),
+                )
+            )
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def _parse_tool_arguments(raw_args: Any) -> Dict[str, Any]:
+        try:
+            parsed = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+    @staticmethod
+    def _build_tool_result_content(message: str, data: Dict[str, Any]) -> str:
+        if not data:
+            return message
+        data_str = json.dumps(data, ensure_ascii=False)
+        if len(data_str) > 8000:
+            data_str = data_str[:8000] + "... (truncated)"
+        return f"{message}\n{data_str}"
+
+    @classmethod
+    def _load_execution_proof_chain(cls, thread_id: str) -> ExecutionProofChain:
+        gics = cls._get_gics()
+        if not gics:
+            return ExecutionProofChain(thread_id)
+        try:
+            rows = gics.scan(prefix=f"ops:proof:{thread_id}:")
+            records: List[Dict[str, Any]] = []
+            for row in rows:
+                fields = cls._gics_fields(row)
+                if fields:
+                    records.append(fields)
+            return ExecutionProofChain.from_records(thread_id, records)
+        except Exception:
+            logger.debug("Unable to load proof chain for thread %s", thread_id, exc_info=True)
+            return ExecutionProofChain(thread_id)
+
+    @classmethod
+    def _persist_execution_proof(
+        cls,
+        *,
+        thread_id: str,
+        chain: ExecutionProofChain,
+        tool_name: str,
+        args: Dict[str, Any],
+        result: Dict[str, Any],
+        mood: str,
+    ) -> None:
+        gics = cls._get_gics()
+        if not gics:
+            return
+        try:
+            proof = chain.append(tool_name=tool_name, args=args, result=result, mood=mood, cost=0.0)
+            gics.put(f"ops:proof:{thread_id}:{proof.proof_id}", proof.to_dict())
+        except Exception:
+            logger.debug("Unable to persist execution proof for thread %s", thread_id, exc_info=True)
+
+    @classmethod
+    def get_thread_proofs(cls, thread_id: str) -> Dict[str, Any]:
+        chain = cls._load_execution_proof_chain(thread_id)
+        proofs = [proof.to_dict() for proof in chain.to_list()]
+        return {"thread_id": thread_id, "verified": chain.verify(), "proofs": proofs}
+
+    @staticmethod
+    async def _noop_emit(_event: str, _data: Dict[str, Any]) -> None:
+        return None
+
+    @staticmethod
+    def _build_system_prompt(workspace_root: str, mood_profile: MoodProfile) -> str:
+        tree = _generate_workspace_tree(workspace_root)
+        return SYSTEM_PROMPT_TEMPLATE.format(
+            workspace_root=workspace_root,
+            tree=tree,
+            mood_prefix=mood_profile.prompt_prefix or "",
+        )
+
+    @classmethod
+    async def _run_loop(
+        cls,
+        *,
+        adapter: ProviderAdapter,
+        provider_id: str,
+        model: str,
+        workspace_root: str,
+        token: str,
+        mood: str,
+        mood_profile: MoodProfile,
+        messages: List[Dict[str, Any]],
+        max_turns: int,
+        temperature: float,
+        tools: List[Dict[str, Any]],
+        task_key: str,
+        thread_id: str | None = None,
+        thread: Any | None = None,
+        emit: EventEmitter | None = None,
+        persist_conversation: bool = False,
+        allow_hitl: bool = False,
+    ) -> AgenticResult:
+        emit_event = emit or cls._noop_emit
+        executor = ToolExecutor(workspace_root=workspace_root, token=token, mood=mood)
+        total_usage: Dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        all_tool_logs: List[Dict[str, Any]] = []
+        final_response = ""
+        finish_reason = "stop"
+        iterations_used = 0
+        total_cost = 0.0
+        total_budget = float(mood_profile.contract.max_cost_per_turn_usd or 0.0) * max(1, max_turns)
+        proof_chain = cls._load_execution_proof_chain(thread_id) if thread_id else None
+        last_content = ""
+
+        await emit_event(
+            "session_start",
+            {
+                "thread_id": thread_id,
+                "provider": provider_id,
+                "model": model,
+                "mood": mood,
+                "temperature": temperature,
+                "max_turns": max_turns,
+            },
+        )
+
+        for iteration in range(max_turns):
+            iterations_used = iteration + 1
+            await emit_event("iteration_start", {"iteration": iterations_used, "mood": mood})
+
+            predicted_max_tokens = cls._predict_max_tokens(task_key, model)
+            try:
+                llm_result = await adapter.chat_with_tools(
+                    messages=messages,
+                    tools=tools,
+                    temperature=temperature,
+                    max_tokens=predicted_max_tokens,
+                )
+            except Exception as exc:
+                logger.error("LLM call failed on iteration %s: %s", iteration, exc)
+                final_response = f"Error communicating with LLM: {exc}"
+                finish_reason = "error"
+                await emit_event("error", {"message": final_response})
+                break
+
+            usage = llm_result.get("usage", {}) or {}
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                total_usage[key] += int(usage.get(key, 0) or 0)
+
+            cls._record_completion_tokens(task_key, model, usage)
+            iteration_cost = cls._calculate_usage_cost(model, usage)
+            total_cost += iteration_cost
+
+            if iteration_cost > float(mood_profile.contract.max_cost_per_turn_usd or 0.0):
+                finish_reason = "turn_budget_exhausted"
+                final_response = f"Turn budget exhausted for mood '{mood}'."
+                break
+            if total_cost > total_budget:
+                finish_reason = "budget_exhausted"
+                final_response = f"Budget exhausted for mood '{mood}'."
+                break
+
+            content = llm_result.get("content")
+            tool_calls = list(llm_result.get("tool_calls", []) or [])
+            finish_reason = llm_result.get("finish_reason", "stop")
+            last_content = content or last_content
+
+            if content:
+                await emit_event("text_delta", {"content": content})
+
+            if not tool_calls:
+                final_response = content or ""
+                break
+
+            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+            orch_turn = None
+            if persist_conversation and thread_id:
+                orch_turn = ConversationService.add_turn(thread_id, agent_id="orchestrator")
+                if not orch_turn:
+                    final_response = f"Thread {thread_id} not found while saving assistant turn"
+                    finish_reason = "error"
+                    await emit_event("error", {"message": final_response})
+                    break
+                if content:
+                    ConversationService.append_item(
+                        thread_id,
+                        orch_turn.id,
+                        GimoItem(type="text", content=content, status="completed"),
+                    )
+
+            stop_loop = False
+            for tc in tool_calls[:MAX_TOOLS_PER_RESPONSE]:
+                func = tc.get("function", {})
+                tool_name = func.get("name", "")
+                tool_call_id = tc.get("id", "")
+                tool_args = cls._parse_tool_arguments(func.get("arguments", "{}"))
+                risk = get_tool_risk_level(tool_name)
+
+                if persist_conversation and thread_id and orch_turn:
+                    ConversationService.append_item(
+                        thread_id,
+                        orch_turn.id,
+                        GimoItem(
+                            type="tool_call",
+                            content=json.dumps(tool_args),
+                            status="started",
+                            metadata={"tool_name": tool_name, "tool_call_id": tool_call_id, "risk": risk},
+                        ),
+                    )
+
+                await emit_event(
+                    "tool_call_start",
+                    {
+                        "tool_call_id": tool_call_id,
+                        "tool_name": tool_name,
+                        "arguments": tool_args,
+                        "risk": risk,
+                    },
+                )
+
+                if allow_hitl and thread_id and risk == "HIGH":
+                    await emit_event(
+                        "tool_approval_required",
+                        {
+                            "thread_id": thread_id,
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "arguments": tool_args,
+                            "risk": "HIGH",
+                        },
+                    )
+                    approved = await cls._request_approval(thread_id, tool_call_id, tool_name, tool_args)
+                    if not approved:
+                        denial_msg = f"Tool '{tool_name}' was denied by user (HITL)."
+                        if persist_conversation and thread_id and orch_turn:
+                            ConversationService.append_item(
+                                thread_id,
+                                orch_turn.id,
+                                GimoItem(
+                                    type="tool_result",
+                                    content=denial_msg,
+                                    status="error",
+                                    metadata={
+                                        "tool_call_id": tool_call_id,
+                                        "tool_name": tool_name,
+                                        "duration": 0.0,
+                                        "hitl": "denied",
+                                    },
+                                ),
+                            )
+                        messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": denial_msg})
+                        all_tool_logs.append(
+                            {
+                                "name": tool_name,
+                                "arguments": tool_args,
+                                "status": "denied",
+                                "message": denial_msg,
+                                "risk": risk,
+                                "duration": 0.0,
+                            }
+                        )
+                        await emit_event(
+                            "tool_call_end",
+                            {
+                                "tool_call_id": tool_call_id,
+                                "tool_name": tool_name,
+                                "status": "denied",
+                                "duration": 0.0,
+                                "risk": risk,
+                            },
+                        )
+                        continue
+
+                start_time = time.monotonic()
+                try:
+                    result = await asyncio.wait_for(
+                        executor.execute_tool_call(tool_name, tool_args),
+                        timeout=TOOL_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    result = {
+                        "status": "error",
+                        "message": f"Tool '{tool_name}' timed out after {TOOL_TIMEOUT_SECONDS}s",
+                    }
+                duration = round(time.monotonic() - start_time, 3)
+
+                result_status = result.get("status", "error")
+                result_message = result.get("message", "")
+                result_data = result.get("data", {}) or {}
+
+                if thread_id and proof_chain and result_status == "success":
+                    cls._persist_execution_proof(
+                        thread_id=thread_id,
+                        chain=proof_chain,
+                        tool_name=tool_name,
+                        args=tool_args,
+                        result=result,
+                        mood=mood,
+                    )
+
+                if thread_id is None and result_status in {"user_question", "plan_proposed", "requires_confirmation"}:
+                    result_status = "error"
+                    result_message = f"[Node context] Tool '{tool_name}' requires interactive mode"
+                    result_data = {}
+
+                if result_status == "user_question":
+                    question = result_data.get("question", result_message)
+                    if persist_conversation and thread_id and orch_turn:
+                        ConversationService.append_item(
+                            thread_id,
+                            orch_turn.id,
+                            GimoItem(
+                                type="text",
+                                content=f"[QUESTION] {question}",
+                                status="completed",
+                                metadata={"awaiting_user_response": True, "question_data": result_data},
+                            ),
+                        )
+                    await emit_event(
+                        "user_question",
+                        {
+                            "question": question,
+                            "options": result_data.get("options", []),
+                            "context": result_data.get("context", ""),
+                        },
+                    )
+                    final_response = f"Waiting for your answer to: {question}"
+                    finish_reason = "user_question"
+                    stop_loop = True
+                    break
+
+                if result_status == "plan_proposed":
+                    if thread_id:
+                        updated = ConversationService.mutate_thread(
+                            thread_id,
+                            lambda current: setattr(current, "proposed_plan", result_data) or True,
+                        )
+                        if updated is None:
+                            final_response = f"Thread {thread_id} not found while saving proposed plan"
+                            finish_reason = "error"
+                            await emit_event("error", {"message": final_response})
+                            stop_loop = True
+                            break
+                        thread = ConversationService.get_thread(thread_id) or thread
+                    if persist_conversation and thread_id and orch_turn:
+                        ConversationService.append_item(
+                            thread_id,
+                            orch_turn.id,
+                            GimoItem(
+                                type="text",
+                                content=f"[PLAN PROPOSED] {result_data.get('title', 'Execution Plan')}",
+                                status="completed",
+                                metadata={"plan": result_data},
+                            ),
+                        )
+                    try:
+                        await NotificationService.publish("plan_proposed", {"thread_id": thread_id, "plan": result_data})
+                    except Exception:
+                        pass
+                    await emit_event("plan_proposed", result_data)
+                    final_response = "Plan proposed. Please review and approve to continue."
+                    finish_reason = "plan_proposed"
+                    stop_loop = True
+                    break
+
+                if result_status == "requires_confirmation":
+                    if persist_conversation and thread_id and orch_turn:
+                        ConversationService.append_item(
+                            thread_id,
+                            orch_turn.id,
+                            GimoItem(
+                                type="text",
+                                content=f"[CONFIRMATION REQUIRED] {result_message}",
+                                status="completed",
+                                metadata={"requires_confirmation": True, "tool_data": result_data},
+                            ),
+                        )
+                    await emit_event(
+                        "confirmation_required",
+                        {
+                            "tool_name": tool_name,
+                            "message": result_message,
+                            "tool_data": result_data,
+                        },
+                    )
+                    final_response = result_message
+                    finish_reason = "requires_confirmation"
+                    stop_loop = True
+                    break
+
+                tool_result_content = cls._build_tool_result_content(result_message, result_data)
+                messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": tool_result_content})
+
+                if persist_conversation and thread_id and orch_turn:
+                    ConversationService.append_item(
+                        thread_id,
+                        orch_turn.id,
+                        GimoItem(
+                            type="tool_result",
+                            content=tool_result_content,
+                            status="completed" if result_status == "success" else "error",
+                            metadata={
+                                "tool_call_id": tool_call_id,
+                                "tool_name": tool_name,
+                                "duration": duration,
+                            },
+                        ),
+                    )
+
+                tool_log = ToolCallLog(
+                    name=tool_name,
+                    arguments=tool_args,
+                    result_status=result_status,
+                    result_message=result_message,
+                    risk_level=risk,
+                    duration_seconds=duration,
+                )
+                all_tool_logs.append(
+                    {
+                        "name": tool_log.name,
+                        "arguments": tool_log.arguments,
+                        "status": tool_log.result_status,
+                        "message": tool_log.result_message,
+                        "risk": tool_log.risk_level,
+                        "duration": tool_log.duration_seconds,
+                    }
+                )
+
+                await emit_event(
+                    "tool_call_end",
+                    {
+                        "tool_call_id": tool_call_id,
+                        "tool_name": tool_name,
+                        "status": result_status,
+                        "message": result_message[:200],
+                        "duration": duration,
+                        "risk": risk,
+                    },
+                )
+
+            if stop_loop:
+                break
+
+        else:
+            final_response = last_content or "(Reached maximum iterations. Stopping.)"
+
+        total_usage["cost_usd"] = total_cost
+        if persist_conversation and thread_id and final_response:
+            final_turn = ConversationService.add_turn(thread_id, agent_id="orchestrator")
+            if final_turn:
+                ConversationService.append_item(
+                    thread_id,
+                    final_turn.id,
+                    GimoItem(type="text", content=final_response, status="completed"),
+                )
+
+        result = AgenticResult(
+            response=final_response,
+            tool_calls_log=all_tool_logs,
+            usage=total_usage,
+            turns_used=iterations_used,
+            finish_reason=finish_reason,
+        )
+        await emit_event(
+            "done",
+            {
+                "response": result.response,
+                "tool_calls": result.tool_calls_log,
+                "usage": result.usage,
+                "turns_used": result.turns_used,
+                "finish_reason": result.finish_reason,
+            },
+        )
+        return result
+
+    @staticmethod
     async def run(
         thread_id: str,
         user_message: str,
         workspace_root: str,
         token: str = "system",
     ) -> AgenticResult:
-        # 1. Resolve orchestrator
         adapter, provider_id, model = _resolve_orchestrator_adapter()
-
-        # 2. Get thread and mood profile (P2)
         thread = ConversationService.get_thread(thread_id)
         if not thread:
             raise RuntimeError(f"Thread {thread_id} not found")
@@ -258,297 +794,42 @@ class AgenticLoopService:
         try:
             mood_profile = get_mood_profile(mood)
         except KeyError:
-            logger.warning(f"Invalid mood '{mood}', using neutral")
-            mood_profile = get_mood_profile("neutral")
+            logger.warning("Invalid mood '%s', using neutral", mood)
             mood = "neutral"
+            mood_profile = get_mood_profile(mood)
 
-        logger.info(f"[agentic-loop] Running with mood={mood}, temperature={mood_profile.temperature}, max_turns={mood_profile.max_turns}")
-
-        # 3. Save user message
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
         if not user_turn:
             raise RuntimeError(f"Thread {thread_id} not found after adding turn")
-        user_item = GimoItem(type="text", content=user_message, status="completed")
-        ConversationService.append_item(thread_id, user_turn.id, user_item)
-
-        # 4. Build system prompt with mood injection (P2)
-        tree = _generate_workspace_tree(workspace_root)
-        mood_prefix = mood_profile.prompt_prefix or ""
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-            workspace_root=workspace_root,
-            tree=tree,
-            mood_prefix=mood_prefix
+        ConversationService.append_item(
+            thread_id,
+            user_turn.id,
+            GimoItem(type="text", content=user_message, status="completed"),
         )
 
-        # 5. Build messages from thread history
+        thread = ConversationService.get_thread(thread_id)
+        if not thread:
+            raise RuntimeError(f"Thread {thread_id} not found after saving user message")
+
+        system_prompt = AgenticLoopService._build_system_prompt(workspace_root, mood_profile)
         messages = _build_messages_from_thread(thread.turns, system_prompt)
-
-        # 6. Setup executor with mood (P2)
-        executor = ToolExecutor(workspace_root=workspace_root, token=token, mood=mood)
-
-        # 7. Agentic loop (P2: mood-driven)
-        total_usage: Dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        all_tool_logs: List[Dict[str, Any]] = []
-        final_response = ""
-        iterations_used = 0
-        finish_reason = "stop"
-        max_turns = mood_profile.max_turns
-
-        for iteration in range(max_turns):
-            iterations_used = iteration + 1
-            # Call LLM with mood temperature (P2)
-            try:
-                llm_result = await adapter.chat_with_tools(
-                    messages=messages,
-                    tools=CHAT_TOOLS,
-                    temperature=mood_profile.temperature,
-                )
-            except Exception as exc:
-                logger.error(f"LLM call failed on iteration {iteration}: {exc}")
-                final_response = f"Error communicating with LLM: {exc}"
-                break
-
-            # Accumulate usage
-            usage = llm_result.get("usage", {})
-            for key in total_usage:
-                total_usage[key] += usage.get(key, 0)
-
-            content = llm_result.get("content")
-            tool_calls = llm_result.get("tool_calls", [])
-            finish_reason = llm_result.get("finish_reason", "stop")
-
-            # No tool_calls -> final response
-            if not tool_calls:
-                final_response = content or ""
-                break
-
-            # Process tool_calls
-            # Build assistant message with tool_calls for history
-            assistant_msg: Dict[str, Any] = {"role": "assistant", "content": content, "tool_calls": tool_calls}
-            messages.append(assistant_msg)
-
-            # Create orchestrator turn for this iteration
-            orch_turn = ConversationService.add_turn(thread_id, agent_id="orchestrator")
-            if not orch_turn:
-                break
-
-            # If there's text content alongside tool_calls, save it
-            if content:
-                text_item = GimoItem(type="text", content=content, status="completed")
-                ConversationService.append_item(thread_id, orch_turn.id, text_item)
-
-            for tc in tool_calls[:MAX_TOOLS_PER_RESPONSE]:
-                func = tc.get("function", {})
-                tool_name = func.get("name", "")
-                tool_call_id = tc.get("id", "")
-
-                # Parse arguments
-                raw_args = func.get("arguments", "{}")
-                try:
-                    tool_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                except json.JSONDecodeError:
-                    tool_args = {}
-
-                # Governance check
-                risk = get_tool_risk_level(tool_name)
-                logger.info(f"Tool call: {tool_name} risk={risk} args={list(tool_args.keys())}")
-
-                # Save tool_call item
-                tc_item = GimoItem(
-                    type="tool_call",
-                    content=json.dumps(tool_args),
-                    status="started",
-                    metadata={"tool_name": tool_name, "tool_call_id": tool_call_id, "risk": risk},
-                )
-                ConversationService.append_item(thread_id, orch_turn.id, tc_item)
-
-                # HITL gate for HIGH risk tools
-                if risk == "HIGH":
-                    approved = await AgenticLoopService._request_approval(
-                        thread_id, tool_call_id, tool_name, tool_args
-                    )
-                    if not approved:
-                        result = {"status": "denied", "message": f"Tool '{tool_name}' was denied by user (HITL)."}
-                        duration = 0.0
-                        # Save denial and skip execution
-                        tr_item = GimoItem(
-                            type="tool_result",
-                            content=result["message"],
-                            status="error",
-                            metadata={"tool_call_id": tool_call_id, "tool_name": tool_name, "duration": 0.0, "hitl": "denied"},
-                        )
-                        ConversationService.append_item(thread_id, orch_turn.id, tr_item)
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": result["message"],
-                        })
-                        all_tool_logs.append({
-                            "name": tool_name, "arguments": tool_args,
-                            "status": "denied", "message": result["message"],
-                            "risk": risk, "duration": 0.0,
-                        })
-                        continue
-
-                # Execute tool with timeout
-                start_time = time.monotonic()
-                try:
-                    result = await asyncio.wait_for(
-                        executor.execute_tool_call(tool_name, tool_args),
-                        timeout=TOOL_TIMEOUT_SECONDS,
-                    )
-                except asyncio.TimeoutError:
-                    result = {"status": "error", "message": f"Tool '{tool_name}' timed out after {TOOL_TIMEOUT_SECONDS}s"}
-                duration = time.monotonic() - start_time
-
-                result_status = result.get("status", "error")
-                result_message = result.get("message", "")
-                result_data = result.get("data", {})
-
-                # P2: Handle special statuses (ask_user, propose_plan, requires_confirmation)
-                if result_status == "user_question":
-                    # Pause loop, save question, wait for user response
-                    logger.info(f"[agentic-loop] User question triggered: {result_data.get('question')}")
-                    # Save as special item
-                    question_item = GimoItem(
-                        type="text",
-                        content=f"[QUESTION] {result_data.get('question', result_message)}",
-                        status="completed",
-                        metadata={"awaiting_user_response": True, "question_data": result_data},
-                    )
-                    ConversationService.append_item(thread_id, orch_turn.id, question_item)
-
-                    # The loop will continue in the next user message
-                    final_response = f"⏸️ Waiting for your answer to: {result_data.get('question', result_message)}"
-                    finish_reason = "user_question"
-                    break
-
-                if result_status == "plan_proposed":
-                    # Pause loop, save plan to thread, wait for approval
-                    logger.info(f"[agentic-loop] Plan proposed: {result_data.get('title')}")
-                    thread.proposed_plan = result_data
-                    ConversationService.save_thread(thread)
-
-                    # Save plan proposal as item
-                    plan_item = GimoItem(
-                        type="text",
-                        content=f"[PLAN PROPOSED] {result_data.get('title', 'Execution Plan')}",
-                        status="completed",
-                        metadata={"plan": result_data},
-                    )
-                    ConversationService.append_item(thread_id, orch_turn.id, plan_item)
-
-                    # Emit SSE event
-                    try:
-                        await NotificationService.publish("plan_proposed", {
-                            "thread_id": thread_id,
-                            "plan": result_data,
-                        })
-                    except Exception:
-                        pass
-
-                    final_response = f"⏸️ Plan proposed. Please review and approve to continue."
-                    finish_reason = "plan_proposed"
-                    break
-
-                if result_status == "requires_confirmation":
-                    # Tool requires user approval (mood constraint)
-                    logger.info(f"[agentic-loop] Tool requires confirmation: {tool_name}")
-                    confirm_item = GimoItem(
-                        type="text",
-                        content=f"[CONFIRMATION REQUIRED] {result_message}",
-                        status="completed",
-                        metadata={"requires_confirmation": True, "tool_data": result_data},
-                    )
-                    ConversationService.append_item(thread_id, orch_turn.id, confirm_item)
-
-                    # Ask user via ask_user flow
-                    final_response = f"⏸️ {result_message}. Approve to continue?"
-                    finish_reason = "requires_confirmation"
-                    break
-
-                # Build tool result content for LLM
-                tool_result_content = result_message
-                if result_data:
-                    # Include relevant data but truncate large content
-                    data_str = json.dumps(result_data, ensure_ascii=False)
-                    if len(data_str) > 8000:
-                        data_str = data_str[:8000] + "... (truncated)"
-                    tool_result_content = f"{result_message}\n{data_str}"
-
-                # Save tool_result item
-                tr_item = GimoItem(
-                    type="tool_result",
-                    content=tool_result_content,
-                    status="completed" if result_status == "success" else "error",
-                    metadata={"tool_call_id": tool_call_id, "tool_name": tool_name, "duration": round(duration, 3)},
-                )
-                ConversationService.append_item(thread_id, orch_turn.id, tr_item)
-
-                # Append tool result to messages for LLM
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": tool_result_content,
-                })
-
-                # Log
-                tool_log = ToolCallLog(
-                    name=tool_name,
-                    arguments=tool_args,
-                    result_status=result_status,
-                    result_message=result_message,
-                    risk_level=risk,
-                    duration_seconds=round(duration, 3),
-                )
-                all_tool_logs.append({
-                    "name": tool_log.name,
-                    "arguments": tool_log.arguments,
-                    "status": tool_log.result_status,
-                    "message": tool_log.result_message,
-                    "risk": tool_log.risk_level,
-                    "duration": tool_log.duration_seconds,
-                })
-
-                # Broadcast SSE
-                try:
-                    await NotificationService.publish("tool_executed", {
-                        "thread_id": thread_id,
-                        "tool_name": tool_name,
-                        "status": result_status,
-                        "risk": risk,
-                        "duration": round(duration, 3),
-                    })
-                except Exception:
-                    pass  # SSE broadcast is best-effort
-
-        else:
-            # Loop exhausted MAX_TURNS
-            final_response = "(Reached maximum iterations. Stopping.)"
-
-        # 7. Save final response
-        final_turn = ConversationService.add_turn(thread_id, agent_id="orchestrator")
-        if final_turn and final_response:
-            final_item = GimoItem(type="text", content=final_response, status="completed")
-            ConversationService.append_item(thread_id, final_turn.id, final_item)
-
-        # 8. Calculate cost
-        try:
-            cost_usd = CostService.calculate_cost(
-                model=model,
-                input_tokens=total_usage.get("prompt_tokens", 0),
-                output_tokens=total_usage.get("completion_tokens", 0),
-            )
-            total_usage["cost_usd"] = cost_usd
-        except Exception:
-            pass  # Cost tracking is best-effort
-
-        return AgenticResult(
-            response=final_response,
-            tool_calls_log=all_tool_logs,
-            usage=total_usage,
-            turns_used=iterations_used,
-            finish_reason=finish_reason,
+        return await AgenticLoopService._run_loop(
+            adapter=adapter,
+            provider_id=provider_id,
+            model=model,
+            workspace_root=workspace_root,
+            token=token,
+            mood=mood,
+            mood_profile=mood_profile,
+            messages=messages,
+            max_turns=mood_profile.max_turns,
+            temperature=mood_profile.temperature,
+            tools=CHAT_TOOLS,
+            task_key="agentic_chat",
+            thread_id=thread_id,
+            thread=thread,
+            persist_conversation=True,
+            allow_hitl=True,
         )
 
     @staticmethod
@@ -558,14 +839,7 @@ class AgenticLoopService:
         workspace_root: str,
         token: str = "system",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Streaming variant of run() that yields SSE events as they happen.
-
-        P2: Enhanced with mood-driven flow and meta-tools support.
-        """
-        # 1. Resolve orchestrator
         adapter, provider_id, model = _resolve_orchestrator_adapter()
-
-        # 2. Get thread and mood profile (P2)
         thread = ConversationService.get_thread(thread_id)
         if not thread:
             yield {"event": "error", "data": {"message": f"Thread {thread_id} not found"}}
@@ -575,293 +849,69 @@ class AgenticLoopService:
         try:
             mood_profile = get_mood_profile(mood)
         except KeyError:
-            logger.warning(f"Invalid mood '{mood}', using neutral")
-            mood_profile = get_mood_profile("neutral")
+            logger.warning("Invalid mood '%s', using neutral", mood)
             mood = "neutral"
+            mood_profile = get_mood_profile(mood)
 
-        yield {"event": "session_start", "data": {
-            "thread_id": thread_id,
-            "provider": provider_id,
-            "model": model,
-            "mood": mood,
-            "temperature": mood_profile.temperature,
-            "max_turns": mood_profile.max_turns,
-        }}
-
-        # 3. Save user message
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
         if not user_turn:
             yield {"event": "error", "data": {"message": f"Thread {thread_id} not found after turn"}}
             return
-        user_item = GimoItem(type="text", content=user_message, status="completed")
-        ConversationService.append_item(thread_id, user_turn.id, user_item)
-
-        # 4. Build system prompt with mood (P2)
-        tree = _generate_workspace_tree(workspace_root)
-        mood_prefix = mood_profile.prompt_prefix or ""
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-            workspace_root=workspace_root,
-            tree=tree,
-            mood_prefix=mood_prefix
+        ConversationService.append_item(
+            thread_id,
+            user_turn.id,
+            GimoItem(type="text", content=user_message, status="completed"),
         )
 
-        # 5. Build messages from thread history
+        thread = ConversationService.get_thread(thread_id)
+        if not thread:
+            yield {"event": "error", "data": {"message": f"Thread {thread_id} not found after saving user message"}}
+            return
+
+        system_prompt = AgenticLoopService._build_system_prompt(workspace_root, mood_profile)
         messages = _build_messages_from_thread(thread.turns, system_prompt)
 
-        # 6. Setup executor with mood (P2)
-        executor = ToolExecutor(workspace_root=workspace_root, token=token, mood=mood)
+        queue: asyncio.Queue[Dict[str, Any] | None] = asyncio.Queue()
 
-        # 7. Agentic loop (P2: mood-driven, streaming)
-        total_usage: Dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        all_tool_logs: List[Dict[str, Any]] = []
-        final_response = ""
-        iterations_used = 0
-        finish_reason = "stop"
-        max_turns = mood_profile.max_turns
+        async def emit(event: str, data: Dict[str, Any]) -> None:
+            await queue.put({"event": event, "data": data})
 
-        for iteration in range(max_turns):
-            iterations_used = iteration + 1
-            yield {"event": "iteration_start", "data": {"iteration": iterations_used, "mood": mood}}
-
-            # Call LLM with mood temperature (P2)
+        async def runner() -> None:
             try:
-                llm_result = await adapter.chat_with_tools(
+                await AgenticLoopService._run_loop(
+                    adapter=adapter,
+                    provider_id=provider_id,
+                    model=model,
+                    workspace_root=workspace_root,
+                    token=token,
+                    mood=mood,
+                    mood_profile=mood_profile,
                     messages=messages,
-                    tools=CHAT_TOOLS,
+                    max_turns=mood_profile.max_turns,
                     temperature=mood_profile.temperature,
+                    tools=CHAT_TOOLS,
+                    task_key="agentic_stream",
+                    thread_id=thread_id,
+                    thread=thread,
+                    emit=emit,
+                    persist_conversation=True,
+                    allow_hitl=True,
                 )
             except Exception as exc:
-                logger.error(f"LLM call failed on iteration {iteration}: {exc}")
-                final_response = f"Error communicating with LLM: {exc}"
-                yield {"event": "error", "data": {"message": final_response}}
-                break
+                logger.exception("Streaming agentic loop failed")
+                await queue.put({"event": "error", "data": {"message": f"Internal streaming error: {exc}"}})
+            finally:
+                await queue.put(None)
 
-            # Accumulate usage
-            usage = llm_result.get("usage", {})
-            for key in total_usage:
-                total_usage[key] += usage.get(key, 0)
-
-            content = llm_result.get("content")
-            tool_calls = llm_result.get("tool_calls", [])
-            finish_reason = llm_result.get("finish_reason", "stop")
-
-            # Emit text content if present
-            if content:
-                yield {"event": "text_delta", "data": {"content": content}}
-
-            # No tool_calls -> final response
-            if not tool_calls:
-                final_response = content or ""
-                break
-
-            assistant_msg: Dict[str, Any] = {"role": "assistant", "content": content, "tool_calls": tool_calls}
-            messages.append(assistant_msg)
-
-            orch_turn = ConversationService.add_turn(thread_id, agent_id="orchestrator")
-            if not orch_turn:
-                break
-
-            if content:
-                text_item = GimoItem(type="text", content=content, status="completed")
-                ConversationService.append_item(thread_id, orch_turn.id, text_item)
-
-            for tc in tool_calls[:MAX_TOOLS_PER_RESPONSE]:
-                func = tc.get("function", {})
-                tool_name = func.get("name", "")
-                tool_call_id = tc.get("id", "")
-
-                raw_args = func.get("arguments", "{}")
-                try:
-                    tool_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                except json.JSONDecodeError:
-                    tool_args = {}
-
-                risk = get_tool_risk_level(tool_name)
-
-                tc_item = GimoItem(
-                    type="tool_call",
-                    content=json.dumps(tool_args),
-                    status="started",
-                    metadata={"tool_name": tool_name, "tool_call_id": tool_call_id, "risk": risk},
-                )
-                ConversationService.append_item(thread_id, orch_turn.id, tc_item)
-
-                # Emit tool_call_start event
-                yield {"event": "tool_call_start", "data": {
-                    "tool_call_id": tool_call_id,
-                    "tool_name": tool_name,
-                    "arguments": tool_args,
-                    "risk": risk,
-                }}
-
-                # HITL gate for HIGH risk tools
-                if risk == "HIGH":
-                    yield {"event": "tool_approval_required", "data": {
-                        "thread_id": thread_id,
-                        "tool_call_id": tool_call_id,
-                        "tool_name": tool_name,
-                        "arguments": tool_args,
-                        "risk": "HIGH",
-                    }}
-
-                    approved = await AgenticLoopService._request_approval(
-                        thread_id, tool_call_id, tool_name, tool_args
-                    )
-                    if not approved:
-                        denial_msg = f"Tool '{tool_name}' was denied by user (HITL)."
-                        tr_item = GimoItem(
-                            type="tool_result", content=denial_msg, status="error",
-                            metadata={"tool_call_id": tool_call_id, "tool_name": tool_name, "duration": 0.0, "hitl": "denied"},
-                        )
-                        ConversationService.append_item(thread_id, orch_turn.id, tr_item)
-                        messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": denial_msg})
-                        all_tool_logs.append({
-                            "name": tool_name, "arguments": tool_args,
-                            "status": "denied", "message": denial_msg, "risk": risk, "duration": 0.0,
-                        })
-                        yield {"event": "tool_call_end", "data": {
-                            "tool_call_id": tool_call_id, "tool_name": tool_name,
-                            "status": "denied", "duration": 0.0, "risk": risk,
-                        }}
-                        continue
-
-                # Execute tool
-                start_time = time.monotonic()
-                try:
-                    result = await asyncio.wait_for(
-                        executor.execute_tool_call(tool_name, tool_args),
-                        timeout=TOOL_TIMEOUT_SECONDS,
-                    )
-                except asyncio.TimeoutError:
-                    result = {"status": "error", "message": f"Tool '{tool_name}' timed out after {TOOL_TIMEOUT_SECONDS}s"}
-                duration = time.monotonic() - start_time
-
-                result_status = result.get("status", "error")
-                result_message = result.get("message", "")
-                result_data = result.get("data", {})
-
-                # P2: Handle special statuses in streaming mode
-                if result_status == "user_question":
-                    logger.info(f"[agentic-loop-stream] User question triggered")
-                    question_item = GimoItem(
-                        type="text",
-                        content=f"[QUESTION] {result_data.get('question', result_message)}",
-                        status="completed",
-                        metadata={"awaiting_user_response": True, "question_data": result_data},
-                    )
-                    ConversationService.append_item(thread_id, orch_turn.id, question_item)
-
-                    yield {"event": "user_question", "data": {
-                        "question": result_data.get("question", result_message),
-                        "options": result_data.get("options", []),
-                        "context": result_data.get("context", ""),
-                    }}
-
-                    final_response = f"⏸️ Waiting for your answer"
-                    finish_reason = "user_question"
-                    break
-
-                if result_status == "plan_proposed":
-                    logger.info(f"[agentic-loop-stream] Plan proposed")
-                    thread.proposed_plan = result_data
-                    ConversationService.save_thread(thread)
-
-                    plan_item = GimoItem(
-                        type="text",
-                        content=f"[PLAN PROPOSED] {result_data.get('title', 'Plan')}",
-                        status="completed",
-                        metadata={"plan": result_data},
-                    )
-                    ConversationService.append_item(thread_id, orch_turn.id, plan_item)
-
-                    yield {"event": "plan_proposed", "data": result_data}
-
-                    final_response = f"⏸️ Plan proposed. Review to continue."
-                    finish_reason = "plan_proposed"
-                    break
-
-                if result_status == "requires_confirmation":
-                    logger.info(f"[agentic-loop-stream] Tool requires confirmation: {tool_name}")
-                    confirm_item = GimoItem(
-                        type="text",
-                        content=f"[CONFIRMATION REQUIRED] {result_message}",
-                        status="completed",
-                        metadata={"requires_confirmation": True, "tool_data": result_data},
-                    )
-                    ConversationService.append_item(thread_id, orch_turn.id, confirm_item)
-
-                    yield {"event": "confirmation_required", "data": {
-                        "tool_name": tool_name,
-                        "message": result_message,
-                        "tool_data": result_data,
-                    }}
-
-                    final_response = f"⏸️ {result_message}"
-                    finish_reason = "requires_confirmation"
-                    break
-
-                tool_result_content = result_message
-                if result_data:
-                    data_str = json.dumps(result_data, ensure_ascii=False)
-                    if len(data_str) > 8000:
-                        data_str = data_str[:8000] + "... (truncated)"
-                    tool_result_content = f"{result_message}\n{data_str}"
-
-                tr_item = GimoItem(
-                    type="tool_result",
-                    content=tool_result_content,
-                    status="completed" if result_status == "success" else "error",
-                    metadata={"tool_call_id": tool_call_id, "tool_name": tool_name, "duration": round(duration, 3)},
-                )
-                ConversationService.append_item(thread_id, orch_turn.id, tr_item)
-
-                messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": tool_result_content})
-
-                tool_log = {
-                    "name": tool_name, "arguments": tool_args,
-                    "status": result_status, "message": result_message,
-                    "risk": risk, "duration": round(duration, 3),
-                }
-                all_tool_logs.append(tool_log)
-
-                yield {"event": "tool_call_end", "data": {
-                    "tool_call_id": tool_call_id,
-                    "tool_name": tool_name,
-                    "status": result_status,
-                    "message": result_message[:200],
-                    "duration": round(duration, 3),
-                    "risk": risk,
-                }}
-
-        else:
-            final_response = "(Reached maximum iterations. Stopping.)"
-
-        # Save final response
-        final_turn = ConversationService.add_turn(thread_id, agent_id="orchestrator")
-        if final_turn and final_response:
-            final_item = GimoItem(type="text", content=final_response, status="completed")
-            ConversationService.append_item(thread_id, final_turn.id, final_item)
-
-        # Calculate cost
+        task = asyncio.create_task(runner())
         try:
-            cost_usd = CostService.calculate_cost(
-                model=model,
-                input_tokens=total_usage.get("prompt_tokens", 0),
-                output_tokens=total_usage.get("completion_tokens", 0),
-            )
-            total_usage["cost_usd"] = cost_usd
-        except Exception:
-            pass
-
-        yield {"event": "done", "data": {
-            "response": final_response,
-            "tool_calls": all_tool_logs,
-            "usage": total_usage,
-            "turns_used": iterations_used,
-            "finish_reason": finish_reason,
-        }}
-
-    # ── P2: Plan-Node Agentic Execution ───────────────────────────────────────
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield event
+        finally:
+            await asyncio.gather(task, return_exceptions=True)
 
     @staticmethod
     async def run_node(
@@ -873,163 +923,33 @@ class AgenticLoopService:
         tools: List[Dict[str, Any]] | None = None,
         token: str = "system",
     ) -> AgenticResult:
-        """Execute a mini agentic loop for a single plan node.
-
-        P2: Unlike run(), this does NOT save to ConversationService. It's a
-        standalone loop for CustomPlan node execution with tool support.
-        """
-        # Resolve orchestrator
         adapter, provider_id, model = _resolve_orchestrator_adapter()
-
-        # Load mood profile
         try:
             mood_profile = get_mood_profile(mood)
         except KeyError:
-            logger.warning(f"Invalid mood '{mood}', using executor")
-            mood_profile = get_mood_profile("executor")
+            logger.warning("Invalid mood '%s', using executor", mood)
             mood = "executor"
+            mood_profile = get_mood_profile(mood)
 
-        # Override temperature if provided
-        if temperature is None:
-            temperature = mood_profile.temperature
-
-        # Use provided tools or default to CHAT_TOOLS
-        if tools is None:
-            tools = CHAT_TOOLS
-
-        logger.info(f"[run_node] mood={mood}, temp={temperature}, max_turns={max_turns}")
-
-        # Build system prompt
-        tree = _generate_workspace_tree(workspace_root)
-        mood_prefix = mood_profile.prompt_prefix or ""
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-            workspace_root=workspace_root,
-            tree=tree,
-            mood_prefix=mood_prefix
-        )
-
+        resolved_temperature = mood_profile.temperature if temperature is None else temperature
+        system_prompt = AgenticLoopService._build_system_prompt(workspace_root, mood_profile)
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": node_prompt},
         ]
-
-        # Setup executor
-        executor = ToolExecutor(workspace_root=workspace_root, token=token, mood=mood)
-
-        # Mini agentic loop
-        total_usage: Dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        all_tool_logs: List[Dict[str, Any]] = []
-        final_response = ""
-        iterations_used = 0
-        finish_reason = "stop"
-
-        for iteration in range(max_turns):
-            iterations_used = iteration + 1
-
-            try:
-                llm_result = await adapter.chat_with_tools(
-                    messages=messages,
-                    tools=tools,
-                    temperature=temperature,
-                )
-            except Exception as exc:
-                logger.error(f"[run_node] LLM call failed: {exc}")
-                final_response = f"Error: {exc}"
-                finish_reason = "error"
-                break
-
-            usage = llm_result.get("usage", {})
-            for key in total_usage:
-                total_usage[key] += usage.get(key, 0)
-
-            content = llm_result.get("content")
-            tool_calls = llm_result.get("tool_calls", [])
-            finish_reason = llm_result.get("finish_reason", "stop")
-
-            if not tool_calls:
-                final_response = content or ""
-                break
-
-            # Process tool calls
-            assistant_msg: Dict[str, Any] = {"role": "assistant", "content": content, "tool_calls": tool_calls}
-            messages.append(assistant_msg)
-
-            for tc in tool_calls[:MAX_TOOLS_PER_RESPONSE]:
-                func = tc.get("function", {})
-                tool_name = func.get("name", "")
-                tool_call_id = tc.get("id", "")
-
-                raw_args = func.get("arguments", "{}")
-                try:
-                    tool_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                except json.JSONDecodeError:
-                    tool_args = {}
-
-                risk = get_tool_risk_level(tool_name)
-
-                # Execute tool
-                start_time = time.monotonic()
-                try:
-                    result = await asyncio.wait_for(
-                        executor.execute_tool_call(tool_name, tool_args),
-                        timeout=TOOL_TIMEOUT_SECONDS,
-                    )
-                except asyncio.TimeoutError:
-                    result = {"status": "error", "message": f"Tool '{tool_name}' timed out"}
-
-                duration = time.monotonic() - start_time
-
-                result_status = result.get("status", "error")
-                result_message = result.get("message", "")
-                result_data = result.get("data", {})
-
-                # P2: Handle meta-tools in node context (simplified — no HITL)
-                if result_status in ("user_question", "plan_proposed", "requires_confirmation"):
-                    logger.warning(f"[run_node] Meta-tool '{tool_name}' called in node context (not supported). Skipping.")
-                    result_message = f"[Node context] Tool '{tool_name}' requires interactive mode"
-                    result_status = "error"
-
-                tool_result_content = result_message
-                if result_data:
-                    data_str = json.dumps(result_data, ensure_ascii=False)
-                    if len(data_str) > 8000:
-                        data_str = data_str[:8000] + "... (truncated)"
-                    tool_result_content = f"{result_message}\n{data_str}"
-
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": tool_result_content,
-                })
-
-                all_tool_logs.append({
-                    "name": tool_name,
-                    "arguments": tool_args,
-                    "status": result_status,
-                    "message": result_message,
-                    "risk": risk,
-                    "duration": round(duration, 3),
-                })
-
-        else:
-            # Loop exhausted
-            final_response = content or "(Node reached max iterations)"
-
-        # Calculate cost
-        try:
-            cost_usd = CostService.calculate_cost(
-                model=model,
-                input_tokens=total_usage.get("prompt_tokens", 0),
-                output_tokens=total_usage.get("completion_tokens", 0),
-            )
-            total_usage["cost_usd"] = cost_usd
-        except Exception:
-            pass
-
-        return AgenticResult(
-            response=final_response,
-            tool_calls_log=all_tool_logs,
-            usage=total_usage,
-            turns_used=iterations_used,
-            finish_reason=finish_reason,
+        return await AgenticLoopService._run_loop(
+            adapter=adapter,
+            provider_id=provider_id,
+            model=model,
+            workspace_root=workspace_root,
+            token=token,
+            mood=mood,
+            mood_profile=mood_profile,
+            messages=messages,
+            max_turns=max_turns,
+            temperature=resolved_temperature,
+            tools=tools or CHAT_TOOLS,
+            task_key="plan_node",
+            persist_conversation=False,
+            allow_hitl=False,
         )

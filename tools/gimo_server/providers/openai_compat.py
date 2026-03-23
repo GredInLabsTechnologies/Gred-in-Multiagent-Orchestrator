@@ -120,6 +120,8 @@ class OpenAICompatAdapter(ProviderAdapter):
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.0,
+        max_tokens: int | None = None,
+        response_format: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """Call /chat/completions with tool_calls support.
 
@@ -153,11 +155,18 @@ class OpenAICompatAdapter(ProviderAdapter):
             "messages": messages,
             "temperature": temperature,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = int(max_tokens)
 
         # Add tools if provided
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+            if response_format is not None:
+                logger = __import__("logging").getLogger(__name__)
+                logger.debug("Ignoring response_format because tool calling is enabled")
+        elif response_format is not None:
+            payload["response_format"] = response_format
 
         client = self._get_client()
         resp = await client.post(

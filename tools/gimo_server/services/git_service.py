@@ -65,12 +65,29 @@ class GitService:
             if branch:
                 cmd.append(_sanitize_git_ref(branch))
             else:
-                # If no branch, we might want --detach or just current HEAD
-                # For isolation, we usually want to work on a specific branch or a detached HEAD
                 cmd.append("--detach")
 
             process = subprocess.Popen(
                 cmd,
+                cwd=base_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            _, stderr = process.communicate(timeout=SUBPROCESS_TIMEOUT)
+            if process.returncode != 0:
+                raise RuntimeError(f"Git worktree add error: {stderr.strip()}")
+        except Exception as e:
+            raise RuntimeError(f"Internal git worktree add error: {str(e)}")
+
+    @staticmethod
+    def create_worktree(base_dir: Path, worktree_path: Path, branch_name: str, base_ref: str = "HEAD") -> None:
+        """Create a new worktree on a fresh branch starting from base_ref."""
+        try:
+            safe_branch = _sanitize_git_ref(branch_name)
+            safe_base = _sanitize_git_ref(base_ref)
+            process = subprocess.Popen(
+                ["git", "worktree", "add", "-b", safe_branch, str(worktree_path), safe_base],
                 cwd=base_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -151,11 +168,95 @@ class GitService:
         return out
 
     @staticmethod
+    def get_current_branch(base_dir: Path) -> str:
+        code, out, err = GitService._run_git(base_dir, ["rev-parse", "--abbrev-ref", "HEAD"])
+        if code != 0:
+            raise RuntimeError(f"Git branch detection error: {err}")
+        return out
+
+    @staticmethod
     def is_worktree_clean(base_dir: Path) -> bool:
         code, out, err = GitService._run_git(base_dir, ["status", "--porcelain"])
         if code != 0:
             raise RuntimeError(f"Git status error: {err}")
         return out == ""
+
+    @staticmethod
+    def commit_all(base_dir: Path, message: str) -> str:
+        code_add, _, err_add = GitService._run_git(base_dir, ["add", "-A"])
+        if code_add != 0:
+            raise RuntimeError(f"Git add error: {err_add}")
+        code_commit, out_commit, err_commit = GitService._run_git(
+            base_dir,
+            [
+                "-c",
+                "user.name=GIMO",
+                "-c",
+                "user.email=gimo@example.invalid",
+                "commit",
+                "-m",
+                message,
+            ],
+        )
+        if code_commit != 0:
+            raise RuntimeError(f"Git commit error: {err_commit or out_commit}")
+        return GitService.get_head_commit(base_dir)
+
+    @staticmethod
+    def get_diff_text(base_dir: Path, base: str = "HEAD") -> str:
+        safe_base = _sanitize_git_ref(base)
+        code, out, err = GitService._run_git(base_dir, ["diff", safe_base])
+        if code != 0:
+            raise RuntimeError(f"Git diff error: {err or out}")
+        code_status, out_status, err_status = GitService._run_git(base_dir, ["status", "--short"])
+        if code_status != 0:
+            raise RuntimeError(f"Git status error: {err_status or out_status}")
+        status_section = f"\n[status]\n{out_status}" if out_status else ""
+        return f"{out}{status_section}".strip()
+
+    @staticmethod
+    def get_changed_files(base_dir: Path, base: str = "HEAD") -> list[str]:
+        code, out, err = GitService._run_git(base_dir, ["status", "--porcelain"])
+        if code != 0:
+            raise RuntimeError(f"Git status --porcelain error: {err or out}")
+
+        changed: list[str] = []
+        for line in out.splitlines():
+            if not line.strip():
+                continue
+            payload = line[3:].strip() if len(line) > 3 else ""
+            if " -> " in payload:
+                payload = payload.split(" -> ", 1)[1].strip()
+            if payload:
+                changed.append(payload)
+        return sorted(set(changed))
+
+    @staticmethod
+    def create_branch(base_dir: Path, branch_name: str, start_point: str) -> None:
+        safe_branch = _sanitize_git_ref(branch_name)
+        safe_start = _sanitize_git_ref(start_point)
+        code, out, err = GitService._run_git(base_dir, ["checkout", "-B", safe_branch, safe_start])
+        if code != 0:
+            raise RuntimeError(f"Git create branch error: {err or out}")
+
+    @staticmethod
+    def fast_forward_branch(base_dir: Path, target_ref: str, source_ref: str) -> tuple[bool, str]:
+        target = _sanitize_git_ref(target_ref)
+        source = _sanitize_git_ref(source_ref)
+        code_co, _, err_co = GitService._run_git(base_dir, ["checkout", target])
+        if code_co != 0:
+            return False, err_co
+        code_merge, out_merge, err_merge = GitService._run_git(base_dir, ["merge", "--ff-only", source])
+        if code_merge != 0:
+            return False, err_merge or out_merge
+        return True, out_merge
+
+    @staticmethod
+    def delete_branch(base_dir: Path, branch_name: str) -> None:
+        safe_branch = _sanitize_git_ref(branch_name)
+        code, out, err = GitService._run_git(base_dir, ["branch", "-D", safe_branch])
+        if code != 0:
+            raise RuntimeError(f"Git delete branch error: {err or out}")
 
     @staticmethod
     def run_tests(base_dir: Path) -> tuple[bool, str]:
@@ -242,6 +343,9 @@ class GitService:
             return False, err_co
         code_m, out_m, err_m = GitService._run_git(base_dir, ["merge", "--no-ff", src])
         if code_m != 0:
+            abort_code, abort_out, abort_err = GitService._run_git(base_dir, ["merge", "--abort"])
+            if abort_code != 0 and "MERGE_HEAD missing" not in (abort_err or abort_out):
+                return False, f"{err_m or out_m}\n[merge-abort failed] {abort_err or abort_out}".strip()
             return False, err_m or out_m
         return True, out_m
 

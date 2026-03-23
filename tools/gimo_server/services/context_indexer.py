@@ -1,3 +1,4 @@
+import ast
 import json
 from pathlib import Path
 from typing import List
@@ -117,9 +118,66 @@ class ContextIndexer:
             if path.is_file():
                 try:
                     text_content = path.read_text(encoding="utf-8")
-                    contents.append(f"--- {path_str} ---\n{text_content}\n")
+                    contents.append(f"--- {path_str} ---\n{ContextIndexer._lean_file_context(path, text_content)}\n")
                 except Exception as e:
                     contents.append(f"--- {path_str} ---\n[Error reading file: {e}]\n")
             else:
                 contents.append(f"--- {path_str} ---\n[File not found]\n")
         return "\n".join(contents)
+
+    @staticmethod
+    def _lean_file_context(path: Path, text_content: str) -> str:
+        first_lines = text_content.splitlines()
+        preview = "\n".join(first_lines[:100])
+        if path.suffix == ".py":
+            signatures = ContextIndexer._extract_python_signatures(text_content)
+            if signatures:
+                signature_block = "\n".join(signatures)
+                if preview:
+                    return f"[Python signatures]\n{signature_block}\n\n[First 100 lines]\n{preview}"
+                return f"[Python signatures]\n{signature_block}"
+        return preview
+
+    @staticmethod
+    def _extract_python_signatures(text_content: str) -> List[str]:
+        try:
+            tree = ast.parse(text_content)
+        except SyntaxError:
+            return []
+
+        signatures: List[str] = []
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                bases = [ContextIndexer._expr_to_str(base) for base in node.bases]
+                suffix = f"({', '.join(filter(None, bases))})" if bases else ""
+                signatures.append(f"class {node.name}{suffix}")
+                for item in node.body:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        signatures.append(f"  {ContextIndexer._function_signature(item)}")
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                signatures.append(ContextIndexer._function_signature(node))
+        return signatures
+
+    @staticmethod
+    def _function_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+        prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+        args = [arg.arg for arg in node.args.args]
+        if node.args.vararg:
+            args.append(f"*{node.args.vararg.arg}")
+        args.extend(arg.arg for arg in node.args.kwonlyargs)
+        if node.args.kwarg:
+            args.append(f"**{node.args.kwarg.arg}")
+        return f"{prefix} {node.name}({', '.join(args)})"
+
+    @staticmethod
+    def _expr_to_str(node: ast.AST) -> str:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            base = ContextIndexer._expr_to_str(node.value)
+            return f"{base}.{node.attr}" if base else node.attr
+        if isinstance(node, ast.Subscript):
+            return ContextIndexer._expr_to_str(node.value)
+        if isinstance(node, ast.Call):
+            return ContextIndexer._expr_to_str(node.func)
+        return ""

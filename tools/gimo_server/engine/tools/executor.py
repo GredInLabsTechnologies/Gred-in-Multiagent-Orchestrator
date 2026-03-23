@@ -1,27 +1,34 @@
 from __future__ import annotations
 
+import asyncio
+import fnmatch
+import importlib.util
+import json
 import logging
 import os
-import fnmatch
-import asyncio
+import re
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+
 from ...services.file_service import FileService
-from ..moods import get_mood_profile, MoodProfile  # P2: Import mood engine
+from ..moods import MoodContract, MoodProfile, get_mood_profile
 
 logger = logging.getLogger(__name__)
+
+_MUTATING_TOOLS = {"write_file", "patch_file", "search_replace", "create_dir"}
+_NETWORK_TOOLS = {"web_search"}
+
 
 class ToolExecutionResult(Dict[str, Any]):
     def __init__(self, status: str, message: str, data: Optional[Dict[str, Any]] = None):
         super().__init__({"status": status, "message": message, "data": data or {}})
 
-class ToolExecutor:
-    """
-    Handles execution of artifact tools with safety checks.
 
-    P2: Enhanced with mood-based tool constraints (whitelist/blacklist/requires_confirmation).
-    """
+class ToolExecutor:
+    """Handles execution of artifact tools with mood policy enforcement."""
+
     def __init__(
         self,
         workspace_root: str,
@@ -29,47 +36,39 @@ class ToolExecutor:
         token: str = "SYSTEM",
         mood: str = "neutral",
     ):
-        self.workspace_root = workspace_root
+        self.workspace_root = os.path.abspath(workspace_root)
         self.policy = policy or {}
         self.token = token
         self.mood = mood
         self._mood_profile: Optional[MoodProfile] = None
-
-        # Load mood profile if valid
         try:
             self._mood_profile = get_mood_profile(mood)
         except KeyError:
-            logger.warning(f"Invalid mood '{mood}', using neutral")
+            logger.warning("Invalid mood '%s', using neutral", mood)
             self._mood_profile = get_mood_profile("neutral")
 
-    def _is_tool_allowed(self, tool_name: str) -> tuple[bool, Optional[str]]:
-        """Check if a tool is allowed by the current mood profile.
+    @property
+    def _contract(self) -> MoodContract:
+        assert self._mood_profile is not None
+        return self._mood_profile.contract
 
-        Returns: (is_allowed, reason_if_denied)
-        """
+    def _is_tool_allowed(self, tool_name: str) -> tuple[bool, Optional[str]]:
         if not self._mood_profile:
             return True, None
-
-        # Check blacklist first
         if tool_name in self._mood_profile.tool_blacklist:
             return False, f"Tool '{tool_name}' is blacklisted in {self.mood} mood"
-
-        # Check whitelist (empty whitelist = all allowed)
-        if self._mood_profile.tool_whitelist:
-            if tool_name not in self._mood_profile.tool_whitelist:
-                allowed_tools = ", ".join(sorted(self._mood_profile.tool_whitelist))
-                return False, f"Tool '{tool_name}' not in {self.mood} mood whitelist. Allowed: {allowed_tools}"
-
+        if self._mood_profile.tool_whitelist and tool_name not in self._mood_profile.tool_whitelist:
+            allowed_tools = ", ".join(sorted(self._mood_profile.tool_whitelist))
+            return False, f"Tool '{tool_name}' not in {self.mood} mood whitelist. Allowed: {allowed_tools}"
         return True, None
 
     def _requires_confirmation(self, tool_name: str) -> bool:
-        """Check if a tool requires user confirmation before execution."""
         if not self._mood_profile:
             return False
         return tool_name in self._mood_profile.requires_confirmation
 
     def _is_path_allowed(self, full_path: str) -> bool:
-        allowed_paths = []
+        allowed_paths: list[str] = []
         if hasattr(self.policy, "allowed_paths"):
             allowed_paths = list(getattr(self.policy, "allowed_paths") or [])
         elif isinstance(self.policy, dict):
@@ -96,25 +95,137 @@ class ToolExecutor:
                 return True
         return False
 
+    def _to_abs_path(self, path: str) -> str:
+        if os.path.isabs(path):
+            return os.path.abspath(path)
+        return os.path.abspath(os.path.join(self.workspace_root, path))
+
+    def _is_within_workspace(self, full_path: str) -> bool:
+        try:
+            common = os.path.commonpath([self.workspace_root, os.path.abspath(full_path)])
+        except ValueError:
+            return False
+        return common == self.workspace_root
+
+    def _validate_mutation_path(self, path: str) -> Optional[ToolExecutionResult]:
+        full_path = self._to_abs_path(path)
+        if self._contract.fs_mode == "read_only":
+            return ToolExecutionResult("error", f"Mood '{self.mood}' is read-only and cannot modify files")
+        if self._contract.fs_mode == "workspace_only" and not self._is_within_workspace(full_path):
+            return ToolExecutionResult("error", f"Path must stay inside workspace for {self.mood} mood: {path}")
+        if not self._is_path_allowed(full_path):
+            return ToolExecutionResult("error", f"Path not allowed by runtime policy: {path}")
+        return None
+
+    def _filter_web_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if self._contract.network_mode != "allowlist" or not self._contract.allowed_domains:
+            return results
+        filtered: list[dict[str, Any]] = []
+        for result in results:
+            url = str(result.get("url") or "")
+            host = urlparse(url).netloc.lower().split(":")[0]
+            if any(host == domain or host.endswith(f".{domain}") for domain in self._contract.allowed_domains):
+                filtered.append(result)
+        return filtered
+
+    def _build_check_result(self, *, kind: str, command: list[str], cwd: str) -> dict[str, Any]:
+        cmd_text = " ".join(command)
+        try:
+            proc = subprocess.run(
+                command,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            output = "\n".join(part for part in [proc.stdout.strip(), proc.stderr.strip()] if part).strip()
+            return {
+                "kind": kind,
+                "status": "success" if proc.returncode == 0 else "error",
+                "command": cmd_text,
+                "output": output,
+                "returncode": proc.returncode,
+            }
+        except Exception as exc:
+            return {
+                "kind": kind,
+                "status": "error",
+                "command": cmd_text,
+                "output": str(exc),
+                "returncode": -1,
+            }
+
+    def _find_related_test(self, full_path: str) -> Optional[Path]:
+        path = Path(full_path)
+        if path.name.startswith("test_") and path.suffix == ".py":
+            return path
+        test_path = Path(self.workspace_root) / "tests" / f"test_{path.stem}.py"
+        if test_path.exists():
+            return test_path
+        return None
+
+    def _post_write_checks(self, full_path: str) -> list[dict[str, Any]]:
+        checks: list[dict[str, Any]] = []
+        if self._contract.auto_lint_on_write:
+            if importlib.util.find_spec("ruff") is None:
+                checks.append({
+                    "kind": "lint",
+                    "status": "skipped",
+                    "command": "python -m ruff check <path>",
+                    "output": "ruff not installed",
+                })
+            else:
+                checks.append(
+                    self._build_check_result(
+                        kind="lint",
+                        command=["python", "-m", "ruff", "check", full_path],
+                        cwd=self.workspace_root,
+                    )
+                )
+        if self._contract.auto_test_on_write:
+            test_file = self._find_related_test(full_path)
+            if not test_file:
+                checks.append({
+                    "kind": "test",
+                    "status": "skipped",
+                    "command": "python -m pytest -q <path>",
+                    "output": "no related test file found",
+                })
+            else:
+                checks.append(
+                    self._build_check_result(
+                        kind="test",
+                        command=["python", "-m", "pytest", "-q", str(test_file)],
+                        cwd=self.workspace_root,
+                    )
+                )
+        return checks
+
+    def _validate_shell_command(self, command: str) -> Optional[ToolExecutionResult]:
+        for pattern in self._contract.shell_command_patterns:
+            if re.match(pattern, command):
+                return None
+        return ToolExecutionResult(
+            "error",
+            f"Command '{command}' is not allowed in {self.mood} mood",
+        )
 
     async def execute_tool_call(self, name: str, arguments: Dict[str, Any]) -> ToolExecutionResult:
-        """Routes a tool call to the appropriate internal handler.
+        if name in _MUTATING_TOOLS and self._contract.fs_mode == "read_only":
+            return ToolExecutionResult("error", f"Mood '{self.mood}' is read-only and cannot execute '{name}'")
+        if name in _NETWORK_TOOLS and self._contract.network_mode == "blocked":
+            return ToolExecutionResult("error", f"Mood '{self.mood}' blocks network tool '{name}'")
 
-        P2: Validates mood-based tool constraints before execution.
-        """
-        # P2: Validate tool is allowed by mood
         is_allowed, deny_reason = self._is_tool_allowed(name)
         if not is_allowed:
             return ToolExecutionResult("error", deny_reason or f"Tool '{name}' not allowed")
 
-        # P2: Check if tool requires user confirmation
         if self._requires_confirmation(name):
-            # Return special status to trigger ask_user flow
-            return ToolExecutionResult("requires_confirmation", f"Tool '{name}' requires user approval in {self.mood} mood", {
-                "tool_name": name,
-                "arguments": arguments,
-                "mood": self.mood,
-            })
+            return ToolExecutionResult(
+                "requires_confirmation",
+                f"Tool '{name}' requires user approval in {self.mood} mood",
+                {"tool_name": name, "arguments": arguments, "mood": self.mood},
+            )
 
         handler = getattr(self, f"handle_{name}", None)
         if not handler:
@@ -122,59 +233,65 @@ class ToolExecutor:
 
         try:
             return await handler(arguments)
-        except Exception as e:
-            logger.exception(f"Error executing tool {name}")
-            return ToolExecutionResult("error", f"Internal error in {name}: {str(e)}")
+        except Exception as exc:
+            logger.exception("Error executing tool %s", name)
+            return ToolExecutionResult("error", f"Internal error in {name}: {exc}")
 
     async def handle_write_file(self, args: Dict[str, Any]) -> ToolExecutionResult:
         path = args.get("path")
         content = args.get("content", "")
         if not path:
             return ToolExecutionResult("error", "Missing 'path' argument")
-            
-        full_path = self._to_abs_path(path)
-        if not self._is_path_allowed(full_path):
-            return ToolExecutionResult("error", f"Path not allowed by runtime policy: {path}")
-        logger.info(f"Writing {len(content)} characters to {full_path}")
-        FileService.write_file(Path(full_path), str(content), self.token)
-        return ToolExecutionResult("success", f"File written: {path}", {"path": full_path, "size": len(content)})
+        error = self._validate_mutation_path(path)
+        if error:
+            return error
 
+        full_path = self._to_abs_path(path)
+        logger.info("Writing %d characters to %s", len(content), full_path)
+        FileService.write_file(Path(full_path), str(content), self.token)
+        return ToolExecutionResult(
+            "success",
+            f"File written: {path}",
+            {
+                "path": full_path,
+                "size": len(content),
+                "checks": self._post_write_checks(full_path),
+            },
+        )
 
     async def handle_patch_file(self, args: Dict[str, Any]) -> ToolExecutionResult:
         path = args.get("path")
         diff = args.get("diff")
         if not path or not diff:
             return ToolExecutionResult("error", "Missing 'path' or 'diff' argument")
-        
+        error = self._validate_mutation_path(path)
+        if error:
+            return error
+
         full_path = self._to_abs_path(path)
-        if not self._is_path_allowed(full_path):
-            return ToolExecutionResult("error", f"Path not allowed by runtime policy: {path}")
         FileService.patch_file(Path(full_path), diff=str(diff), token=self.token)
-        return ToolExecutionResult("success", f"File patched: {path}")
+        return ToolExecutionResult(
+            "success",
+            f"File patched: {path}",
+            {"path": full_path, "checks": self._post_write_checks(full_path)},
+        )
 
     async def handle_create_dir(self, args: Dict[str, Any]) -> ToolExecutionResult:
         path = args.get("path")
         if not path:
             return ToolExecutionResult("error", "Missing 'path' argument")
-        
+        error = self._validate_mutation_path(path)
+        if error:
+            return error
+
         full_path = self._to_abs_path(path)
-        if not self._is_path_allowed(full_path):
-            return ToolExecutionResult("error", f"Path not allowed by runtime policy: {path}")
         FileService.create_dir(Path(full_path), self.token)
-        return ToolExecutionResult("success", f"Directory created: {path}")
-
-
-    def _to_abs_path(self, path: str) -> str:
-        if os.path.isabs(path):
-            return path
-        return os.path.normpath(os.path.join(self.workspace_root, path))
+        return ToolExecutionResult("success", f"Directory created: {path}", {"path": full_path})
 
     async def handle_read_file(self, args: Dict[str, Any]) -> ToolExecutionResult:
-        """Read file contents with optional line range."""
         path = args.get("path")
         if not path:
             return ToolExecutionResult("error", "Missing 'path' argument")
-
         full_path = self._to_abs_path(path)
         if not self._is_path_allowed(full_path):
             return ToolExecutionResult("error", f"Path not allowed by runtime policy: {path}")
@@ -182,29 +299,25 @@ class ToolExecutor:
         try:
             start_line = args.get("start_line", 1)
             end_line = args.get("end_line", 999999)
-
             content, content_hash = FileService.get_file_content(
                 Path(full_path),
                 start_line=start_line,
                 end_line=end_line,
-                token=self.token
+                token=self.token,
             )
-
             return ToolExecutionResult(
                 "success",
                 f"Read {len(content)} characters from {path}",
-                {"content": content, "hash": content_hash}
+                {"content": content, "hash": content_hash},
             )
-        except Exception as e:
-            logger.exception(f"Error reading file {path}")
-            return ToolExecutionResult("error", f"Failed to read file: {str(e)}")
+        except Exception as exc:
+            logger.exception("Error reading file %s", path)
+            return ToolExecutionResult("error", f"Failed to read file: {exc}")
 
     async def handle_list_files(self, args: Dict[str, Any]) -> ToolExecutionResult:
-        """List files in directory with optional pattern and depth."""
         path = args.get("path", ".")
         max_depth = args.get("max_depth", 2)
         pattern = args.get("pattern")
-
         full_path = self._to_abs_path(path)
         if not self._is_path_allowed(full_path):
             return ToolExecutionResult("error", f"Path not allowed by runtime policy: {path}")
@@ -213,65 +326,46 @@ class ToolExecutor:
             root = Path(full_path)
             if not root.exists():
                 return ToolExecutionResult("error", f"Path does not exist: {path}")
-
             if not root.is_dir():
                 return ToolExecutionResult("error", f"Path is not a directory: {path}")
 
-            # Collect files respecting max_depth
             files: List[str] = []
             gitignore_patterns = self._load_gitignore(root)
 
             def should_ignore(rel_path: str) -> bool:
-                # Skip hidden and common ignore patterns
                 parts = Path(rel_path).parts
-                if any(p.startswith('.') for p in parts):
+                if any(part.startswith(".") for part in parts):
                     return True
-                if any(p in {'node_modules', '__pycache__', 'venv', '.venv', 'dist', 'build'} for p in parts):
+                if any(part in {"node_modules", "__pycache__", "venv", ".venv", "dist", "build"} for part in parts):
                     return True
-                # Check gitignore patterns
-                for ignore_pat in gitignore_patterns:
-                    if fnmatch.fnmatch(rel_path, ignore_pat):
-                        return True
-                return False
+                return any(fnmatch.fnmatch(rel_path, ignore_pat) for ignore_pat in gitignore_patterns)
 
             for item in root.rglob("*"):
                 try:
                     rel_path = item.relative_to(root)
-                    depth = len(rel_path.parts)
-
-                    if depth > max_depth:
+                    if len(rel_path.parts) > max_depth:
                         continue
-
                     rel_str = str(rel_path).replace("\\", "/")
-
                     if should_ignore(rel_str):
                         continue
-
                     if pattern and not fnmatch.fnmatch(item.name, pattern):
                         continue
-
                     if item.is_file():
                         files.append(rel_str)
-
-                    if len(files) >= 100:  # Safety limit
+                    if len(files) >= 100:
                         break
                 except Exception:
                     continue
 
             files.sort()
-            return ToolExecutionResult(
-                "success",
-                f"Found {len(files)} files in {path}",
-                {"files": files, "count": len(files)}
-            )
-        except Exception as e:
-            logger.exception(f"Error listing files in {path}")
-            return ToolExecutionResult("error", f"Failed to list files: {str(e)}")
+            return ToolExecutionResult("success", f"Found {len(files)} files in {path}", {"files": files, "count": len(files)})
+        except Exception as exc:
+            logger.exception("Error listing files in %s", path)
+            return ToolExecutionResult("error", f"Failed to list files: {exc}")
 
     def _load_gitignore(self, root: Path) -> List[str]:
-        """Load gitignore patterns from .gitignore file."""
         gitignore_file = root / ".gitignore"
-        patterns = []
+        patterns: list[str] = []
         if gitignore_file.exists():
             try:
                 for line in gitignore_file.read_text(encoding="utf-8").splitlines():
@@ -283,24 +377,17 @@ class ToolExecutor:
         return patterns
 
     async def handle_search_text(self, args: Dict[str, Any]) -> ToolExecutionResult:
-        """Search for text pattern in files using grep."""
         pattern = args.get("pattern")
         if not pattern:
             return ToolExecutionResult("error", "Missing 'pattern' argument")
-
         path = args.get("path", ".")
         glob_pattern = args.get("glob")
         max_results = args.get("max_results", 100)
-
         full_path = self._to_abs_path(path)
         if not self._is_path_allowed(full_path):
             return ToolExecutionResult("error", f"Path not allowed by runtime policy: {path}")
 
         try:
-            # Try to use ripgrep if available, fallback to grep
-            cmd_parts = []
-
-            # Check if rg is available
             try:
                 subprocess.run(["rg", "--version"], capture_output=True, check=True)
                 cmd_parts = ["rg", "--line-number", "--no-heading", "--color=never"]
@@ -308,201 +395,173 @@ class ToolExecutor:
                     cmd_parts.extend(["--glob", glob_pattern])
                 cmd_parts.extend([pattern, full_path])
             except (subprocess.CalledProcessError, FileNotFoundError):
-                # Fallback to grep
                 cmd_parts = ["grep", "-rn", pattern, full_path]
                 if glob_pattern:
                     cmd_parts.extend(["--include", glob_pattern])
-
-            result = subprocess.run(
-                cmd_parts,
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-
+            result = subprocess.run(cmd_parts, capture_output=True, text=True, timeout=10)
             lines = result.stdout.splitlines()[:max_results]
-
-            return ToolExecutionResult(
-                "success",
-                f"Found {len(lines)} matches for '{pattern}'",
-                {"matches": lines, "count": len(lines)}
-            )
+            return ToolExecutionResult("success", f"Found {len(lines)} matches for '{pattern}'", {"matches": lines, "count": len(lines)})
         except subprocess.TimeoutExpired:
             return ToolExecutionResult("error", "Search timeout exceeded")
-        except Exception as e:
-            logger.exception(f"Error searching for pattern '{pattern}'")
-            return ToolExecutionResult("error", f"Failed to search: {str(e)}")
+        except Exception as exc:
+            logger.exception("Error searching for pattern '%s'", pattern)
+            return ToolExecutionResult("error", f"Failed to search: {exc}")
 
     async def handle_search_replace(self, args: Dict[str, Any]) -> ToolExecutionResult:
-        """Search and replace text in a file."""
         path = args.get("path")
         old_text = args.get("old_text")
         new_text = args.get("new_text")
-
         if not path or old_text is None or new_text is None:
             return ToolExecutionResult("error", "Missing required arguments: path, old_text, new_text")
+        error = self._validate_mutation_path(path)
+        if error:
+            return error
 
         full_path = self._to_abs_path(path)
-        if not self._is_path_allowed(full_path):
-            return ToolExecutionResult("error", f"Path not allowed by runtime policy: {path}")
-
         try:
-            # Read current content
             content, _ = FileService.get_file_content(Path(full_path), token=self.token)
-
-            # Check that old_text is unique
             count = content.count(old_text)
             if count == 0:
                 return ToolExecutionResult("error", f"Text not found in file: {old_text[:50]}...")
-            elif count > 1:
+            if count > 1:
                 return ToolExecutionResult("error", f"Text appears {count} times in file, must be unique")
-
-            # Perform replacement
             new_content = content.replace(old_text, new_text)
             FileService.write_file(Path(full_path), new_content, self.token)
-
             return ToolExecutionResult(
                 "success",
                 f"Replaced text in {path}",
-                {"old_length": len(old_text), "new_length": len(new_text)}
+                {
+                    "old_length": len(old_text),
+                    "new_length": len(new_text),
+                    "checks": self._post_write_checks(full_path),
+                },
             )
-        except Exception as e:
-            logger.exception(f"Error in search_replace for {path}")
-            return ToolExecutionResult("error", f"Failed to replace: {str(e)}")
+        except Exception as exc:
+            logger.exception("Error in search_replace for %s", path)
+            return ToolExecutionResult("error", f"Failed to replace: {exc}")
 
     async def handle_shell_exec(self, args: Dict[str, Any]) -> ToolExecutionResult:
-        """Execute a shell command with timeout."""
         command = args.get("command")
         if not command:
             return ToolExecutionResult("error", "Missing 'command' argument")
-
         timeout = args.get("timeout", 30)
+        validation_error = self._validate_shell_command(str(command))
+        if validation_error:
+            return validation_error
 
         try:
-            logger.warning(f"Executing shell command: {command}")
-
-            # Run in workspace directory
+            logger.warning("Executing shell command: %s", command)
             proc = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=self.workspace_root
+                cwd=self.workspace_root,
             )
-
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=timeout
-                )
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.communicate()
                 return ToolExecutionResult("error", f"Command timeout after {timeout}s")
 
-            stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
-            stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
-
+            stdout_text = stdout.decode("utf-8", errors="replace") if stdout else ""
+            stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
             return ToolExecutionResult(
                 "success" if proc.returncode == 0 else "error",
                 f"Command exited with code {proc.returncode}",
-                {
-                    "stdout": stdout_text,
-                    "stderr": stderr_text,
-                    "returncode": proc.returncode
-                }
+                {"stdout": stdout_text, "stderr": stderr_text, "returncode": proc.returncode},
             )
-        except Exception as e:
-            logger.exception(f"Error executing command: {command}")
-            return ToolExecutionResult("error", f"Failed to execute: {str(e)}")
-
-    # ── P2: Meta-Tools ────────────────────────────────────────────────────────
+        except Exception as exc:
+            logger.exception("Error executing command: %s", command)
+            return ToolExecutionResult("error", f"Failed to execute: {exc}")
 
     async def handle_ask_user(self, args: Dict[str, Any]) -> ToolExecutionResult:
-        """Pause the loop and ask the user a question.
-
-        Returns a special status that signals the agentic loop to pause and wait for user input.
-        """
         question = args.get("question")
         if not question:
             return ToolExecutionResult("error", "Missing 'question' argument")
-
-        options = args.get("options", [])
-        context = args.get("context", "")
-
-        # Return special status to pause loop
-        return ToolExecutionResult("user_question", question, {
-            "question": question,
-            "options": options,
-            "context": context,
-        })
+        return ToolExecutionResult(
+            "user_question",
+            question,
+            {
+                "question": question,
+                "options": args.get("options", []),
+                "context": args.get("context", ""),
+            },
+        )
 
     async def handle_propose_plan(self, args: Dict[str, Any]) -> ToolExecutionResult:
-        """Propose an execution plan for user approval.
-
-        Returns a special status that signals the agentic loop to pause and wait for plan approval.
-        """
         title = args.get("title")
         objective = args.get("objective")
         tasks = args.get("tasks", [])
-
         if not title or not objective:
             return ToolExecutionResult("error", "Missing 'title' or 'objective'")
-
         if not tasks:
             return ToolExecutionResult("error", "Plan must include at least one task")
-
-        # Validate tasks structure
         for idx, task in enumerate(tasks):
             if not isinstance(task, dict):
                 return ToolExecutionResult("error", f"Task {idx} is not a valid object")
             if not task.get("id") or not task.get("title"):
                 return ToolExecutionResult("error", f"Task {idx} missing 'id' or 'title'")
             if not task.get("agent_rationale"):
-                return ToolExecutionResult("error", f"Task {task.get('id')} missing 'agent_rationale' (explain WHY you chose this mood)")
-
-        # Return special status to pause loop for plan review
-        return ToolExecutionResult("plan_proposed", f"Proposed plan: {title}", {
-            "title": title,
-            "objective": objective,
-            "tasks": tasks,
-        })
+                return ToolExecutionResult(
+                    "error",
+                    f"Task {task.get('id')} missing 'agent_rationale' (explain WHY you chose this mood)",
+                )
+        return ToolExecutionResult(
+            "plan_proposed",
+            f"Proposed plan: {title}",
+            {"title": title, "objective": objective, "tasks": tasks},
+        )
 
     async def handle_web_search(self, args: Dict[str, Any]) -> ToolExecutionResult:
-        """Search the web for information.
-
-        P2: Proxies to existing web search infrastructure if available, otherwise returns placeholder.
-        """
         query = args.get("query")
         if not query:
             return ToolExecutionResult("error", "Missing 'query' argument")
+        if self._contract.network_mode == "blocked":
+            return ToolExecutionResult("error", f"Mood '{self.mood}' blocks network access")
 
         try:
-            # Try to import and use existing web search service
+            from ...models.web_search import WebSearchQuery
             from ...services.web_search_service import WebSearchService
 
-            results = await WebSearchService.search(query, max_results=5)
-            if not results:
-                return ToolExecutionResult("success", f"No results found for: {query}", {"results": []})
-
-            # Format results
-            formatted = "\n\n".join([
-                f"[{i+1}] {r.get('title', 'Untitled')}\n{r.get('snippet', '')}\nURL: {r.get('url', '')}"
-                for i, r in enumerate(results[:5])
-            ])
-
-            return ToolExecutionResult("success", f"Found {len(results)} results for: {query}", {
-                "query": query,
-                "results": results,
-                "formatted": formatted,
-            })
+            provider_list = args.get("providers") or ["duckduckgo"]
+            if isinstance(provider_list, str):
+                provider_list = [provider.strip() for provider in provider_list.split(",") if provider.strip()]
+            request = WebSearchQuery(
+                query=str(query),
+                max_results=min(int(args.get("max_results", 5) or 5), 50),
+                providers=provider_list or ["duckduckgo"],
+            )
+            response = await WebSearchService.search(request)
+            results = [result.model_dump() for result in response.results]
+            filtered = self._filter_web_results(results)
+            formatted = "\n\n".join(
+                [
+                    f"[{idx + 1}] {item.get('title', 'Untitled')}\n{item.get('snippet', '')}\nURL: {item.get('url', '')}"
+                    for idx, item in enumerate(filtered[:5])
+                ]
+            )
+            return ToolExecutionResult(
+                "success",
+                f"Found {len(filtered)} results for: {query}",
+                {
+                    "query": str(query),
+                    "results": filtered,
+                    "formatted": formatted,
+                    "providers_used": list(response.providers_used),
+                },
+            )
         except ImportError:
-            # Fallback: return placeholder if web search not configured
             logger.warning("WebSearchService not available, returning placeholder")
-            return ToolExecutionResult("success", f"[Web search placeholder] Query: {query}", {
-                "query": query,
-                "results": [],
-                "note": "Web search not configured. Install a web search provider to enable this feature.",
-            })
-        except Exception as e:
-            logger.exception(f"Error in web_search for query: {query}")
-            return ToolExecutionResult("error", f"Web search failed: {str(e)}")
+            return ToolExecutionResult(
+                "success",
+                f"[Web search placeholder] Query: {query}",
+                {
+                    "query": str(query),
+                    "results": [],
+                    "note": "Web search not configured. Install a web search provider to enable this feature.",
+                },
+            )
+        except Exception as exc:
+            logger.exception("Error in web_search for query: %s", query)
+            return ToolExecutionResult("error", f"Web search failed: {exc}")

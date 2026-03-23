@@ -85,6 +85,25 @@ class TestPlanApproval:
         assert thread.mood == "dialoger"
         assert thread.proposed_plan is None
 
+    def test_approve_failure_does_not_mark_thread_as_approved(self, test_client, valid_token, tmp_path):
+        thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path))
+
+        with patch("tools.gimo_server.services.custom_plan_service.CustomPlanService") as mock_cps:
+            mock_cps.create_plan_from_llm.side_effect = RuntimeError("boom")
+
+            resp = test_client.post(
+                f"/ops/threads/{thread_id}/plan/respond",
+                params={"action": "approve"},
+                headers={"Authorization": f"Bearer {valid_token}"},
+            )
+
+        assert resp.status_code == 500
+        thread = ConversationService.get_thread(thread_id)
+        assert thread is not None
+        assert thread.mood == "dialoger"
+        assert thread.metadata.get("plan_approved") is None
+        assert thread.proposed_plan == SAMPLE_PLAN
+
     def test_modify_updates_plan(self, test_client, valid_token, tmp_path):
         thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path))
         modified = {"title": "Smaller plan", "objective": "Quick fix", "tasks": [

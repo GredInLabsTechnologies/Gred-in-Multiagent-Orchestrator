@@ -231,3 +231,48 @@ class TestExecuteRun:
 
         mock_ops.update_run_status.assert_called_with("r1", "error", msg="Internal engine error")
         assert "r1" not in worker._running_ids
+
+
+@pytest.mark.asyncio
+@patch("tools.gimo_server.services.run_worker.OpsService")
+async def test_critic_gate_skips_mature_high_quality_outputs(mock_ops):
+    from tools.gimo_server.services.run_worker import RunWorker
+
+    class FakeGics:
+        def __init__(self):
+            self.writes = []
+
+        def get(self, _key):
+            return {"fields": {"samples": 20, "success_rate": 0.95, "successes": 19, "critic_calls": 4, "critic_skips": 3}}
+
+        def put(self, key, value):
+            self.writes.append((key, value))
+
+    mock_ops._gics = FakeGics()
+
+    worker = RunWorker()
+
+    with patch("tools.gimo_server.services.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
+        approved, output, raw = await worker._critic_with_retry(
+            run_id="r1",
+            output_text="Concrete execution summary with no errors.",
+            base_prompt="Do the thing",
+            intent_effective="EXECUTE",
+            path_scope=[],
+            requested_model="test-model",
+            initial_raw={
+                "content": "Concrete execution summary with no errors.",
+                "usage": {"completion_tokens": 42},
+                "final_model_used": "test-model",
+            },
+        )
+
+    assert approved is True
+    assert output == "Concrete execution summary with no errors."
+    assert raw["content"] == "Concrete execution summary with no errors."
+    mock_critic.assert_not_awaited()
+    assert mock_ops._gics.writes
+    _, persisted = mock_ops._gics.writes[-1]
+    assert persisted["critic_skips"] == 4
+    assert "avg_output_tokens" in persisted
+    assert persisted["avg_output_tokens"] > 0

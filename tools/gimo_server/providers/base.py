@@ -21,6 +21,8 @@ class ProviderAdapter(ABC):
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.0,
+        max_tokens: int | None = None,
+        response_format: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """Call chat completions with tool_calls support.
 
@@ -28,6 +30,8 @@ class ProviderAdapter(ABC):
             messages: List of message dicts with "role" and "content"
             tools: Optional list of tool definitions in OpenAI format
             temperature: Sampling temperature
+            max_tokens: Optional output-token budget for the response
+            response_format: Optional provider-native response format payload
 
         Returns:
             {
