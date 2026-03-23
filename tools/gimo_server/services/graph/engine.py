@@ -87,6 +87,7 @@ class GraphEngine(
             reducers=self.graph.reducers,
             workflow_id=self.graph.id,
         )
+        self._cycle_edges: set = self._detect_cycles()
 
     async def execute(self, initial_state: Optional[Dict[str, Any]] = None) -> WorkflowState:
         if initial_state:
@@ -417,6 +418,91 @@ class GraphEngine(
             })
         except Exception as e:
             logger.debug("GICS command_trace record failed: %s", e)
+
+    # ── Fase 4: Ciclos declarativos ──────────────────────────
+
+    def _detect_cycles(self) -> set:
+        """DFS para identificar back-edges (aristas que forman ciclos).
+
+        Retorna un set de edge_keys con formato 'from_node->to_node'.
+        """
+        visited: set = set()
+        in_stack: set = set()
+        cycle_edges: set = set()
+
+        def dfs(node_id: str) -> None:
+            visited.add(node_id)
+            in_stack.add(node_id)
+            for edge in self._edges_from.get(node_id, []):
+                if edge.to_node not in visited:
+                    dfs(edge.to_node)
+                elif edge.to_node in in_stack:
+                    cycle_edges.add(f"{edge.from_node}->{edge.to_node}")
+            in_stack.discard(node_id)
+
+        for node in self.graph.nodes:
+            if node.id not in visited:
+                dfs(node.id)
+
+        return cycle_edges
+
+    def _get_next_node(self, node_id: str, output: Any) -> Optional[str]:
+        """Override de CheckpointMixin que añade soporte para ciclos declarativos.
+
+        Para cada arista candidata:
+        1. Si tiene break_condition y evalúa True → saltar (romper el ciclo)
+        2. Si tiene max_iterations y el contador lo alcanzó → saltar
+        3. Evaluación normal de condition (sin cambios)
+        4. Al seguir una arista cíclica, incrementar contador y registrar GICS
+        """
+        edges = self._edges_from.get(node_id, [])
+        if not edges:
+            return None
+
+        cycle_counters = self.state.data.setdefault("_cycle_counters", {})
+
+        for edge in edges:
+            edge_key = f"{edge.from_node}->{edge.to_node}"
+
+            # 1. break_condition: si es True, no seguir esta arista
+            if edge.break_condition:
+                if self._evaluate_condition(edge.break_condition, output):
+                    continue
+
+            # 2. max_iterations: si el contador alcanzó el límite, no seguir
+            if edge.max_iterations is not None:
+                count = cycle_counters.get(edge_key, 0)
+                if count >= edge.max_iterations:
+                    continue
+
+            # 3. condition normal
+            if edge.condition:
+                if not self._evaluate_condition(edge.condition, output):
+                    continue
+
+            # Seguir esta arista — si es cíclica, incrementar contador
+            is_cycle = (
+                edge_key in self._cycle_edges
+                or edge.max_iterations is not None
+                or edge.break_condition is not None
+            )
+            if is_cycle:
+                cycle_counters[edge_key] = cycle_counters.get(edge_key, 0) + 1
+                self._record_cycle_stats(edge_key, cycle_counters[edge_key])
+
+            return edge.to_node
+
+        return None
+
+    def _record_cycle_stats(self, edge_key: str, count: int) -> None:
+        gics = getattr(self, "_gics", None)
+        if not gics:
+            return
+        gics_key = f"ops:cycle_stats:{self.graph.id}:{edge_key.replace('->', ':')}"
+        try:
+            gics.put(gics_key, {"count": count, "edge": edge_key})
+        except Exception as e:
+            logger.debug("GICS cycle_stats record failed: %s", e)
 
     def _apply_state_update(self, output: Dict[str, Any]) -> None:
         self._state_manager.apply_update(self.state.data, output)

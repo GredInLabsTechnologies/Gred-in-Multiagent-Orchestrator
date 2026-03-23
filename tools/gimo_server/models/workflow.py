@@ -18,6 +18,8 @@ class WorkflowEdge(BaseModel):
     from_node: str = Field(alias="from")
     to_node: str = Field(alias="to")
     condition: Optional[str] = None
+    max_iterations: Optional[int] = None
+    break_condition: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
 

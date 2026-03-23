@@ -1222,3 +1222,161 @@ async def test_send_budget_distributed():
 
     # Cada instancia recibe 50 tokens (100 / 2)
     assert all(b == 50.0 for b in seen_budgets)
+
+
+# ── Fase 4: Ciclos declarativos ──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_cycle_break_condition_exits_loop():
+    """Loop A→B→A con break_condition: cuando done=True el loop para."""
+    # Grafo: A→B (normal), B→A (break_condition="done"), B→C (default)
+    nodes = [
+        WorkflowNode(id="A", type="transform"),
+        WorkflowNode(id="B", type="transform"),
+        WorkflowNode(id="C", type="transform", config={"final": True}),
+    ]
+    edges = [
+        WorkflowEdge(**{"from": "A", "to": "B"}),
+        WorkflowEdge(**{"from": "B", "to": "A", "break_condition": "done"}),
+        WorkflowEdge(**{"from": "B", "to": "C"}),
+    ]
+    graph = WorkflowGraph(id="cycle_break", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph)
+
+    call_count = {"n": 0}
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        call_count["n"] += 1
+        if node.id == "B" and call_count["n"] >= 4:  # 2 rondas completas → romper loop
+            return {"done": True}
+        if node.config:
+            return node.config
+        return {}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["final"] is True
+    # Ciclo debe haber ocurrido y terminado
+    assert "_cycle_counters" in state.data
+
+
+@pytest.mark.asyncio
+async def test_cycle_max_iterations_exits_to_node_c():
+    """Self-loop A→A con max_iterations=3, luego A→C."""
+    nodes = [
+        WorkflowNode(id="A", type="transform"),
+        WorkflowNode(id="C", type="transform", config={"exit": True}),
+    ]
+    edges = [
+        # La arista de loop tiene max_iterations=3
+        WorkflowEdge(**{"from": "A", "to": "A", "max_iterations": 3}),
+        # Arista de salida sin condición
+        WorkflowEdge(**{"from": "A", "to": "C"}),
+    ]
+    graph = WorkflowGraph(id="cycle_maxiter", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph, max_iterations=20)
+
+    ticks = {"n": 0}
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        if node.id == "A":
+            ticks["n"] += 1
+        if node.config:
+            return node.config
+        return {}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    # A se ejecuta 4 veces: 3 iteraciones del loop + 1 inicial antes de salir
+    assert ticks["n"] == 4
+    assert state.data["exit"] is True
+    assert state.data["_cycle_counters"]["A->A"] == 3
+
+
+@pytest.mark.asyncio
+async def test_cycle_nested_loops():
+    """Nested loops:
+    - Loop interno: C→B (max_iterations=2)
+    - Loop externo: C→A (max_iterations=2)
+    - Salida cuando ambos contadores se agotan: C→D (default)
+    """
+    nodes = [
+        WorkflowNode(id="A", type="transform"),
+        WorkflowNode(id="B", type="transform"),
+        WorkflowNode(id="C", type="transform"),
+        WorkflowNode(id="D", type="transform", config={"done": True}),
+    ]
+    edges = [
+        WorkflowEdge(**{"from": "A", "to": "B"}),
+        WorkflowEdge(**{"from": "B", "to": "C"}),
+        WorkflowEdge(**{"from": "C", "to": "B", "max_iterations": 2}),  # inner loop
+        WorkflowEdge(**{"from": "C", "to": "A", "max_iterations": 2}),  # outer loop
+        WorkflowEdge(**{"from": "C", "to": "D"}),                        # exit
+    ]
+    graph = WorkflowGraph(id="nested_loops", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph, max_iterations=50)
+
+    visited = []
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        visited.append(node.id)
+        if node.config:
+            return node.config
+        return {}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["done"] is True
+    # Ciclos fueron detectados
+    assert "_cycle_counters" in state.data
+    # Contadores de ciclos internos y externos alcanzaron sus límites
+    assert state.data["_cycle_counters"].get("C->B", 0) == 2
+    assert state.data["_cycle_counters"].get("C->A", 0) == 2
+
+
+@pytest.mark.asyncio
+async def test_cycle_global_max_iterations_respected():
+    """Self-loop sin break_condition ni max_iterations respeta max_iterations global."""
+    nodes = [WorkflowNode(id="A", type="transform")]
+    edges = [WorkflowEdge(**{"from": "A", "to": "A"})]
+    graph = WorkflowGraph(id="cycle_global_cap", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph, max_iterations=5)
+
+    ticks = {"n": 0}
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        ticks["n"] += 1
+        return {"count": ticks["n"]}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["aborted_reason"] == "max_iterations_exceeded"
+    assert ticks["n"] == 5
+
+
+@pytest.mark.asyncio
+async def test_cycle_backward_compat_self_loop():
+    """Self-loop existente sin campos nuevos sigue funcionando igual."""
+    nodes = [WorkflowNode(id="A", type="transform", config={"tick": 1})]
+    edges = [WorkflowEdge(**{"from": "A", "to": "A"})]
+    graph = WorkflowGraph(id="cycle_compat", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph, max_iterations=2)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return {"count": state.get("count", 0) + 1}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert len(state.checkpoints) == 2
+    assert state.data["count"] == 2
+    assert state.data["aborted_reason"] == "max_iterations_exceeded"
