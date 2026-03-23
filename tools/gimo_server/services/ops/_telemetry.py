@@ -100,3 +100,56 @@ class TelemetryMixin:
             return cls._gics.get_model_reliability(provider_type=provider_type, model_id=model_id)
         except Exception:
             return None
+
+    @classmethod
+    def batch_put_telemetry(cls, records: List[Dict[str, Any]], atomic: bool = False) -> Optional[Any]:
+        """Write a batch of telemetry records via GICS put_many (1.3.4 primitive).
+
+        Each record must be a dict with at least {"key": str, "value": Any}.
+        Preferred over individual put() calls when flushing run-end telemetry.
+        Falls back to individual puts if put_many unavailable.
+        """
+        if not cls._gics:
+            return None
+        try:
+            return cls._gics.put_many(records, atomic=atomic)
+        except Exception as e:
+            logger.warning("batch_put_telemetry put_many failed, skipping: %s", e)
+            return None
+
+    @classmethod
+    def latest_events_by_prefix(cls, prefix: str) -> Optional[Any]:
+        """Return latest events for a prefix using GICS latest_by_prefix (1.3.4).
+
+        Useful for dashboard endpoints that need the most recent event per agent/model/run.
+        """
+        if not cls._gics:
+            return None
+        try:
+            return cls._gics.latest_by_prefix(prefix=prefix)
+        except Exception:
+            return None
+
+    @classmethod
+    def count_events_by_prefix(cls, prefix: str) -> Optional[int]:
+        """Count events under a prefix using GICS count_prefix (1.3.4).
+
+        Cheaper than scan for pure-count dashboard queries.
+        """
+        if not cls._gics:
+            return None
+        try:
+            result = cls._gics.count_prefix(prefix=prefix)
+            return int(result) if result is not None else None
+        except Exception:
+            return None
+
+    @classmethod
+    def scan_telemetry_summary(cls, prefix: str) -> Optional[Any]:
+        """Inspect telemetry metadata without loading payloads via GICS scan_summary (1.3.4)."""
+        if not cls._gics:
+            return None
+        try:
+            return cls._gics.scan_summary(prefix=prefix)
+        except Exception:
+            return None

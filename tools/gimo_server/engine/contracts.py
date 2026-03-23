@@ -26,6 +26,19 @@ class StageOutput(BaseModel):
     error: Optional[str] = None
 
 
+class FileTaskSpec(BaseModel):
+    """Explicit contract for file-write tasks.
+
+    When present in StageInput.context["file_task_spec"], FileWrite uses this
+    as the authoritative source for target_path instead of regex extraction.
+    """
+    kind: Literal["file_task"] = "file_task"
+    target_path: str
+    write_mode: Literal["create", "overwrite", "append"] = "overwrite"
+    allowed_root: Optional[str] = None
+    requires_review: bool = False
+
+
 class ExecutionStage(Protocol):
     name: str
     async def execute(self, input: StageInput) -> StageOutput: ...

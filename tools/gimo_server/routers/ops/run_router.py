@@ -118,7 +118,23 @@ async def approve_draft(
 
     run = None
     config = OpsService.get_config()
-    should_run = (auto_run if auto_run is not None else config.default_auto_run) and execution_decision == "AUTO_RUN_ELIGIBLE"
+    intent_effective = str(context.get("intent_effective") or "").upper()
+    excluded_intents = [i.upper() for i in (config.auto_run_excluded_intents or [])]
+    auto_run_blocked_by_intent = intent_effective in excluded_intents
+
+    should_run = (
+        (auto_run if auto_run is not None else config.default_auto_run)
+        and execution_decision == "AUTO_RUN_ELIGIBLE"
+        and not auto_run_blocked_by_intent
+    )
+
+    if auto_run_blocked_by_intent and (auto_run is True or config.default_auto_run):
+        # Audit: auto_run was requested but blocked by intent exclusion policy.
+        audit_log(
+            "OPS", f"/ops/drafts/{draft_id}/approve", approved.id,
+            operation="AUTO_RUN_BLOCKED",
+            actor=actor,
+        )
 
     if should_run:
         try:

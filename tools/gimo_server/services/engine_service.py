@@ -1,7 +1,25 @@
 from __future__ import annotations
+import logging
 from importlib import import_module
 from typing import Any, Dict, List, Optional
 from ..engine.pipeline import Pipeline
+
+logger = logging.getLogger("orchestrator.services.engine")
+
+# Keys that child_context is not permitted to override.
+# These govern composition selection and orchestration invariants.
+_PROTECTED_CONTEXT_KEYS: frozenset[str] = frozenset({
+    "intent_effective",
+    "intent_class",
+    "spawn_depth",
+    "multi_agent",
+    "wake_on_demand",
+    "child_run_mode",
+    "custom_plan_id",
+    "structured",
+    "execution_decision",
+    "workspace_root",
+})
 
 class EngineService:
     """Entry point for executing unified pipelines."""
@@ -111,9 +129,14 @@ class EngineService:
         if draft and getattr(draft, "prompt", None) and "prompt" not in context:
             context["prompt"] = draft.prompt
 
-        # Child-specific context overrides parent draft context (Gap 3)
+        # Child-specific context overrides parent draft context.
+        # Protected keys (orchestration invariants) cannot be overridden by a child.
         if getattr(run, "child_context", None):
-            context.update(run.child_context)
+            safe_overrides = {
+                k: v for k, v in run.child_context.items()
+                if k not in _PROTECTED_CONTEXT_KEYS
+            }
+            context.update(safe_overrides)
         if getattr(run, "child_prompt", None):
             context["prompt"] = run.child_prompt
 
@@ -128,9 +151,37 @@ class EngineService:
             if not own_child_tasks:
                 context.pop("child_tasks", None)
 
+        # Log explicit GICS degradation so operators know when historical reliability
+        # is unavailable and routing falls back to static priors.
+        try:
+            gics = getattr(OpsService, "_gics", None)
+            gics_available = bool(gics and getattr(gics, "_client", None))
+        except Exception:
+            gics_available = False
+        if not gics_available:
+            logger.warning(
+                "[GICS_DEGRADED] run=%s — GICS unavailable, routing decisions fall back to static priors. "
+                "Historical reliability data not consulted.",
+                run_id,
+            )
+            OpsService.append_log(
+                run_id, level="WARN",
+                msg="[GICS_DEGRADED] Historical reliability unavailable — routing uses static priors."
+            )
+
+        # Valid explicit execution modes — checked before heuristic inference.
+        _VALID_EXECUTION_MODES = {
+            "legacy_run", "file_task", "structured_plan",
+            "multi_agent", "agent_task", "merge_gate", "custom_plan",
+        }
+
         # Infer composition if not provided
         if not composition:
-            if context.get("custom_plan_id"):
+            # Honour an explicit execution_mode from context first (avoids heuristic drift).
+            explicit_mode = context.get("execution_mode")
+            if explicit_mode and explicit_mode in _VALID_EXECUTION_MODES:
+                composition = explicit_mode
+            elif context.get("custom_plan_id"):
                 composition = "custom_plan"
             elif (
                 bool(context.get("multi_agent"))

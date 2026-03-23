@@ -229,11 +229,21 @@ class NodeExecutorMixin:
 
         # Import at call time to avoid circular import
         from .engine import GraphEngine as _GraphEngine
+
+        # Guard against infinite recursion via self-referencing or cyclic sub_graphs.
+        current_depth = getattr(self, "_sub_graph_depth", 0)
+        if current_depth >= _GraphEngine._MAX_SUB_GRAPH_DEPTH:
+            raise RuntimeError(
+                f"sub_graph recursion limit reached at depth {current_depth} "
+                f"(graph={self.graph.id}, node={node.id})"
+            )
+
         sub_engine = _GraphEngine(
             graph=sub_graph,
             max_iterations=self.max_iterations,
             storage=self.storage,
-            persist_checkpoints=self.persist_checkpoints
+            persist_checkpoints=self.persist_checkpoints,
+            _sub_graph_depth=current_depth + 1,
         )
 
         sub_result = await sub_engine.execute(initial_state=initial_state)
