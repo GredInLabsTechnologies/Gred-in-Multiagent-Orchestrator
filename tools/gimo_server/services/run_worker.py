@@ -361,7 +361,13 @@ class RunWorker:
         current_raw.setdefault("content", output_text)
         gics = getattr(OpsService, "_gics", None)
         quality = QualityService.analyze_output(output_text)
-        model_name = str(requested_model or "unknown")
+        model_name = str(
+            current_raw.get("final_model_used")
+            or current_raw.get("model")
+            or current_raw.get("model_attempted")
+            or requested_model
+            or "unknown"
+        )
 
         def _fields(record: dict | None) -> dict:
             if not isinstance(record, dict):
@@ -401,8 +407,9 @@ class RunWorker:
                 usage = raw.get("usage", {}) if isinstance(raw, dict) else {}
                 completion_tokens = int(usage.get("completion_tokens", 0) or 0)
                 if completion_tokens > 0:
-                    prev_samples = int(fields.get("samples", 0) or 0)
+                    prev_samples = int(fields.get("avg_output_samples", fields.get("samples", 0)) or 0)
                     avg_output = float(fields.get("avg_output_tokens", 0) or 0)
+                    updated["avg_output_samples"] = prev_samples + 1
                     updated["avg_output_tokens"] = ((avg_output * prev_samples) + completion_tokens) / max(1, prev_samples + 1)
                 gics.put(key, updated)
             except Exception:

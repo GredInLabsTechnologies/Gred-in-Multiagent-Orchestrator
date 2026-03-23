@@ -6,6 +6,7 @@ import pytest
 
 from tools.gimo_server.models.conversation import GimoThread
 from tools.gimo_server.services.conversation_service import ConversationService
+from tools.gimo_server.services.agentic_loop_service import AgenticLoopService, ThreadExecutionBusyError
 
 
 class TestThreadCreation:
@@ -96,3 +97,76 @@ class TestGetThreadEndpoint:
         for t in threads:
             assert "mood" in t
             assert "proposed_plan" in t
+
+    def test_get_thread_proofs_returns_verified_chain(self, test_client, valid_token, tmp_path, monkeypatch):
+        create_resp = test_client.post(
+            "/ops/threads",
+            params={"workspace_root": str(tmp_path), "title": "Proof Test"},
+            headers={"Authorization": f"Bearer {valid_token}"},
+        )
+        thread_id = create_resp.json()["id"]
+
+        monkeypatch.setattr(
+            AgenticLoopService,
+            "get_thread_proofs",
+            lambda requested_thread_id: {
+                "thread_id": requested_thread_id,
+                "verified": True,
+                "proofs": [{"proof_id": "proof_1"}, {"proof_id": "proof_2"}],
+            },
+        )
+
+        resp = test_client.get(
+            f"/ops/threads/{thread_id}/proofs",
+            headers={"Authorization": f"Bearer {valid_token}"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["thread_id"] == thread_id
+        assert data["verified"] is True
+        assert [proof["proof_id"] for proof in data["proofs"]] == ["proof_1", "proof_2"]
+
+    def test_chat_returns_409_when_thread_is_busy(self, test_client, valid_token, tmp_path, monkeypatch):
+        create_resp = test_client.post(
+            "/ops/threads",
+            params={"workspace_root": str(tmp_path), "title": "Busy Chat"},
+            headers={"Authorization": f"Bearer {valid_token}"},
+        )
+        thread_id = create_resp.json()["id"]
+
+        def raise_busy(_thread_id: str) -> None:
+            raise ThreadExecutionBusyError("Thread is busy")
+
+        monkeypatch.setattr(AgenticLoopService, "reserve_thread_execution", raise_busy)
+
+        resp = test_client.post(
+            f"/ops/threads/{thread_id}/chat",
+            params={"content": "hello"},
+            headers={"Authorization": f"Bearer {valid_token}"},
+        )
+
+        assert resp.status_code == 409
+        assert "busy" in resp.json()["detail"].lower()
+
+    def test_chat_stream_returns_409_when_thread_is_busy(self, test_client, valid_token, tmp_path, monkeypatch):
+        create_resp = test_client.post(
+            "/ops/threads",
+            params={"workspace_root": str(tmp_path), "title": "Busy Stream"},
+            headers={"Authorization": f"Bearer {valid_token}"},
+        )
+        thread_id = create_resp.json()["id"]
+
+        def raise_busy(_thread_id: str) -> None:
+            raise ThreadExecutionBusyError("Thread is busy")
+
+        monkeypatch.setattr(AgenticLoopService, "reserve_thread_execution", raise_busy)
+
+        resp = test_client.post(
+            f"/ops/threads/{thread_id}/chat/stream",
+            params={"content": "hello"},
+            headers={"Authorization": f"Bearer {valid_token}"},
+        )
+
+        assert resp.status_code == 409
+        assert "busy" in resp.json()["detail"].lower()

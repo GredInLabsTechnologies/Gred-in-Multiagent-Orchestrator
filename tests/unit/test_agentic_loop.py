@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 from tools.gimo_server.services.agentic_loop_service import (
     AgenticResult,
     AgenticLoopService,
+    ThreadExecutionBusyError,
     _generate_workspace_tree,
     _build_messages_from_thread,
 )
@@ -282,6 +283,123 @@ async def test_run_loop_persists_execution_proofs(tmp_path: Path):
     assert result.response == "done"
     proof_keys = [key for key in gics.records if key.startswith("ops:proof:thread_proof:")]
     assert len(proof_keys) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_loop_recovers_from_corrupt_proof_history_and_still_persists_new_proofs(tmp_path: Path):
+    gics = _FakeGics(
+        {
+            "ops:proof:thread_bad:proof_legacy": {
+                "proof_id": "proof_legacy",
+                "prev_proof_id": "",
+                "thread_id": "thread_bad",
+                "tool_name": "read_file",
+                "input_hash": "a",
+                "output_hash": "b",
+                "mood": "forensic",
+                "cost_usd": 0.0,
+                "timestamp": 1.0,
+            }
+        }
+    )
+    adapter = AsyncMock()
+    adapter.chat_with_tools = AsyncMock(
+        side_effect=[
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": json.dumps({"path": "x.txt"})},
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "finish_reason": "tool_calls",
+            },
+            {
+                "content": "done",
+                "tool_calls": [],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "finish_reason": "stop",
+            },
+        ]
+    )
+
+    with patch.object(AgenticLoopService, "_get_gics", return_value=gics), patch(
+        "tools.gimo_server.services.agentic_loop_service.ToolExecutor.execute_tool_call",
+        new=AsyncMock(return_value={"status": "success", "message": "ok", "data": {"content": "x"}}),
+    ):
+        result = await AgenticLoopService._run_loop(
+            adapter=adapter,
+            provider_id="test-provider",
+            model="test-model",
+            workspace_root=str(tmp_path),
+            token="system",
+            mood="neutral",
+            mood_profile=get_mood_profile("neutral"),
+            messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}],
+            max_turns=2,
+            temperature=0.0,
+            tools=[{"type": "function", "function": {"name": "read_file"}}],
+            task_key="agentic_chat",
+            thread_id="thread_bad",
+            persist_conversation=False,
+            allow_hitl=False,
+        )
+
+    assert result.response == "done"
+    proof_keys = sorted(key for key in {**gics.seed, **gics.records} if key.startswith("ops:proof:thread_bad:"))
+    assert len(proof_keys) == 2
+    with patch.object(AgenticLoopService, "_get_gics", return_value=gics):
+        payload = AgenticLoopService.get_thread_proofs("thread_bad")
+    assert payload["verified"] is False
+    assert len(payload["proofs"]) == 2
+
+
+def test_get_thread_proofs_marks_malformed_records_unverified():
+    gics = _FakeGics(
+        {
+            "ops:proof:thread_bad:proof_1": {
+                "proof_id": "proof_1",
+                "prev_proof_id": "",
+                "thread_id": "thread_bad",
+                "tool_name": "read_file",
+                "input_hash": "a",
+                "output_hash": "b",
+                "mood": "forensic",
+                "cost_usd": 0.0,
+                "timestamp": 1.0,
+            }
+        }
+    )
+
+    with patch.object(AgenticLoopService, "_get_gics", return_value=gics):
+        payload = AgenticLoopService.get_thread_proofs("thread_bad")
+
+    assert payload["thread_id"] == "thread_bad"
+    assert payload["verified"] is False
+    assert len(payload["proofs"]) == 1
+    assert payload["proofs"][0]["proof_id"] == "proof_1"
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_concurrent_execution_for_same_thread(tmp_path: Path):
+    original_threads_dir = ConversationService.THREADS_DIR
+    ConversationService.THREADS_DIR = tmp_path / "threads"
+    try:
+        thread = ConversationService.create_thread(workspace_root=str(tmp_path), title="busy")
+        AgenticLoopService.reserve_thread_execution(thread.id)
+        with pytest.raises(ThreadExecutionBusyError):
+            await AgenticLoopService.run(
+                thread_id=thread.id,
+                user_message="hi",
+                workspace_root=str(tmp_path),
+                token="system",
+            )
+    finally:
+        AgenticLoopService.release_thread_execution(thread.id)
+        ConversationService.THREADS_DIR = original_threads_dir
 
 
 @pytest.mark.asyncio

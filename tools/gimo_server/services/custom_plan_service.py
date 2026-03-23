@@ -21,6 +21,10 @@ logger = logging.getLogger("orchestrator.custom_plans")
 PLANS_DIR = OPS_DATA_DIR / "custom_plans"
 
 
+class PlanExecutionBusyError(RuntimeError):
+    """Raised when a custom plan already has an active execution."""
+
+
 # Models
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -204,7 +208,106 @@ def _calculate_layout(tasks: List[Dict[str, Any]], task_ids: set) -> tuple[Dict[
 class CustomPlanService:
     """File-backed service for user-defined execution graphs."""
 
+    PLAN_LOCK_SCOPE = "custom_plan_execution"
+    PLAN_LOCK_TTL_SECONDS = 120
+    PLAN_LOCK_HEARTBEAT_SECONDS = 30
     _save_lock = threading.Lock()
+    _execution_lock = threading.Lock()
+    _active_plan_executions: Dict[str, str] = {}
+
+    @staticmethod
+    def _get_ops_service():
+        try:
+            from .ops_service import OpsService
+
+            return OpsService
+        except Exception:
+            return None
+
+    @classmethod
+    def reserve_plan_execution(cls, plan_id: str) -> Dict[str, Any]:
+        owner_id = f"plan_exec_{uuid.uuid4().hex[:16]}"
+        ops_service = cls._get_ops_service()
+        if ops_service is not None:
+            ops_service.recover_stale_execution_lock(cls.PLAN_LOCK_SCOPE, plan_id)
+            try:
+                return ops_service.acquire_execution_lock(
+                    cls.PLAN_LOCK_SCOPE,
+                    plan_id,
+                    owner_id,
+                    ttl_seconds=cls.PLAN_LOCK_TTL_SECONDS,
+                    metadata={"plan_id": plan_id},
+                )
+            except RuntimeError as exc:
+                raise PlanExecutionBusyError(str(exc)) from exc
+
+        with cls._execution_lock:
+            active_owner = cls._active_plan_executions.get(plan_id)
+            if active_owner and active_owner != owner_id:
+                raise PlanExecutionBusyError(f"Plan {plan_id} already has an active execution")
+            cls._active_plan_executions[plan_id] = owner_id
+        return {
+            "lock_id": owner_id,
+            "scope": cls.PLAN_LOCK_SCOPE,
+            "resource_id": plan_id,
+            "owner_id": owner_id,
+            "backend": "memory",
+        }
+
+    @classmethod
+    def release_plan_execution(cls, plan_id: str, owner_id: str | None = None) -> None:
+        ops_service = cls._get_ops_service()
+        if ops_service is not None and owner_id:
+            ops_service.release_execution_lock(cls.PLAN_LOCK_SCOPE, plan_id, owner_id)
+            return
+
+        with cls._execution_lock:
+            active_owner = cls._active_plan_executions.get(plan_id)
+            if owner_id is None or active_owner == owner_id:
+                cls._active_plan_executions.pop(plan_id, None)
+
+    @classmethod
+    def heartbeat_plan_execution(cls, plan_id: str, owner_id: str) -> Dict[str, Any] | None:
+        ops_service = cls._get_ops_service()
+        if ops_service is not None:
+            return ops_service.heartbeat_execution_lock(
+                cls.PLAN_LOCK_SCOPE,
+                plan_id,
+                owner_id,
+                ttl_seconds=cls.PLAN_LOCK_TTL_SECONDS,
+            )
+        with cls._execution_lock:
+            if cls._active_plan_executions.get(plan_id) != owner_id:
+                raise RuntimeError(f"Plan {plan_id} lock held by another owner")
+        return None
+
+    @classmethod
+    def _start_plan_execution_heartbeat(
+        cls, plan_id: str, owner_id: str
+    ) -> tuple[asyncio.Event, asyncio.Task[None]]:
+        stop_event = asyncio.Event()
+
+        async def _heartbeat() -> None:
+            while not stop_event.is_set():
+                await asyncio.sleep(cls.PLAN_LOCK_HEARTBEAT_SECONDS)
+                if stop_event.is_set():
+                    break
+                try:
+                    cls.heartbeat_plan_execution(plan_id, owner_id)
+                except Exception:
+                    logger.warning("Plan execution heartbeat failed for %s", plan_id, exc_info=True)
+                    break
+
+        return stop_event, asyncio.create_task(_heartbeat())
+
+    @staticmethod
+    async def _stop_heartbeat(stop_event: asyncio.Event, task: asyncio.Task[None]) -> None:
+        stop_event.set()
+        task.cancel()
+        try:
+            await task
+        except BaseException:
+            pass
 
     @classmethod
     def _ensure_dir(cls) -> None:
@@ -408,7 +511,7 @@ class CustomPlanService:
 
     @classmethod
     def _has_failed_dependency(cls, node: PlanNode, node_map: Dict[str, PlanNode]) -> bool:
-        return any(node_map.get(dep) and node_map[dep].status == "error" for dep in node.depends_on)
+        return any(node_map.get(dep) and node_map[dep].status in {"error", "skipped"} for dep in node.depends_on)
 
     @classmethod
     def _overlapping_files(cls, artifacts: Dict[str, Dict[str, Any]]) -> Dict[str, List[str]]:
@@ -419,7 +522,7 @@ class CustomPlanService:
         return {path: node_ids for path, node_ids in owners.items() if len(node_ids) > 1}
 
     @classmethod
-    async def execute_plan(
+    async def _execute_plan_reserved(
         cls,
         plan_id: str,
         skill_id: Optional[str] = None,
@@ -589,6 +692,28 @@ class CustomPlanService:
         return plan
 
     @classmethod
+    async def execute_plan(
+        cls,
+        plan_id: str,
+        skill_id: Optional[str] = None,
+        skill_run_id: Optional[str] = None,
+        skill_command: Optional[str] = None,
+    ) -> Optional[CustomPlan]:
+        reservation = cls.reserve_plan_execution(plan_id)
+        owner_id = str(reservation.get("owner_id") or "")
+        stop_event, heartbeat_task = cls._start_plan_execution_heartbeat(plan_id, owner_id)
+        try:
+            return await cls._execute_plan_reserved(
+                plan_id=plan_id,
+                skill_id=skill_id,
+                skill_run_id=skill_run_id,
+                skill_command=skill_command,
+            )
+        finally:
+            await cls._stop_heartbeat(stop_event, heartbeat_task)
+            cls.release_plan_execution(plan_id, owner_id)
+
+    @classmethod
     async def _execute_node(
         cls,
         plan: CustomPlan,
@@ -687,7 +812,13 @@ class CustomPlanService:
             )
 
             node.output = result.response.strip()
-            node.error = None
+            if result.finish_reason != "stop":
+                node.error = (
+                    f"Agentic loop ended with finish_reason='{result.finish_reason}'"
+                    + (f": {result.response[:200]}" if result.response else "")
+                )
+            else:
+                node.error = None
 
             # Extract usage from agentic result
             usage = result.usage
@@ -718,6 +849,8 @@ class CustomPlanService:
 
         if node.error is None:
             node.status = "done"
+        else:
+            node.status = "error"
 
         quality_score = 85.0 if node.status == "done" else 40.0
         cascade_level = 0  # No cascade in node execution (simplified)

@@ -11,6 +11,7 @@ from tools.gimo_server.services.custom_plan_service import (
     CreatePlanRequest,
     UpdatePlanRequest,
     CustomPlanService,
+    PlanExecutionBusyError,
 )
 from .common import _actor_label, _require_role
 
@@ -100,9 +101,23 @@ async def execute_plan(
         CustomPlanService.validate_plan(plan)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    
+
+    try:
+        reservation = CustomPlanService.reserve_plan_execution(plan_id)
+    except PlanExecutionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    owner_id = str(reservation.get("owner_id") or "")
+    stop_event, heartbeat_task = CustomPlanService._start_plan_execution_heartbeat(plan_id, owner_id)
+
+    async def _runner() -> None:
+        try:
+            await CustomPlanService._execute_plan_reserved(plan_id)
+        finally:
+            await CustomPlanService._stop_heartbeat(stop_event, heartbeat_task)
+            CustomPlanService.release_plan_execution(plan_id, owner_id)
+
     # Run in background to avoid HTTP timeout
-    asyncio.create_task(CustomPlanService.execute_plan(plan_id))
+    asyncio.create_task(_runner())
     
     audit_log("PLANS", f"/ops/custom-plans/{plan_id}/execute", plan_id, operation="EXECUTE", actor=_actor_label(auth))
-    return plan
+    return plan.model_copy(update={"status": "running", "run_log": []})

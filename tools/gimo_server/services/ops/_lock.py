@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -15,6 +16,118 @@ class LockMixin:
     """Merge lock acquire / release / heartbeat / recovery."""
 
     @classmethod
+    def _execution_lock_path(cls, scope: str, resource_id: str) -> Any:
+        safe_scope = str(scope or "execution").strip().lower().replace(" ", "_")
+        lock_key = f"{safe_scope}:{resource_id or 'default'}"
+        digest = hashlib.sha256(lock_key.encode("utf-8", errors="ignore")).hexdigest()[:24]
+        return cls.LOCKS_DIR / f"{safe_scope}_{digest}.json"
+
+    @classmethod
+    def recover_stale_execution_lock(cls, scope: str, resource_id: str) -> bool:
+        """Remove a stale execution lock for a generic scoped resource."""
+        lock_path = cls._execution_lock_path(scope, resource_id)
+        if not lock_path.exists():
+            return False
+        try:
+            with cls._lock():
+                if not lock_path.exists():
+                    return False
+                data = json.loads(lock_path.read_text(encoding="utf-8"))
+                expires_str = str(data.get("expires_at") or "")
+                if expires_str:
+                    expires = datetime.fromisoformat(expires_str)
+                    if _utcnow() > expires:
+                        lock_path.unlink(missing_ok=True)
+                        logger.info("Recovered stale %s lock for resource=%s", scope, resource_id)
+                        return True
+        except Exception as exc:
+            logger.warning("recover_stale_execution_lock error for scope=%s resource=%s: %s", scope, resource_id, exc)
+        return False
+
+    @classmethod
+    def acquire_execution_lock(
+        cls,
+        scope: str,
+        resource_id: str,
+        owner_id: str,
+        *,
+        ttl_seconds: int = 120,
+        metadata: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Acquire a file-based execution lease for a scoped resource."""
+        lock_path = cls._execution_lock_path(scope, resource_id)
+        expires_at = _utcnow() + timedelta(seconds=ttl_seconds)
+        with cls._lock():
+            if lock_path.exists():
+                try:
+                    data = json.loads(lock_path.read_text(encoding="utf-8"))
+                    expires_str = str(data.get("expires_at") or "")
+                    if expires_str:
+                        expires = datetime.fromisoformat(expires_str)
+                        if _utcnow() <= expires and data.get("owner_id") != owner_id:
+                            raise RuntimeError(
+                                f"{scope} lock held by owner={data.get('owner_id')} until {expires_str}"
+                            )
+                except RuntimeError:
+                    raise
+                except Exception:
+                    pass
+            lock_id = f"lock_{os.urandom(4).hex()}"
+            payload: Dict[str, Any] = {
+                "lock_id": lock_id,
+                "scope": scope,
+                "resource_id": resource_id,
+                "owner_id": owner_id,
+                "expires_at": expires_at.isoformat(),
+            }
+            if metadata:
+                payload["metadata"] = dict(metadata)
+            lock_path.write_text(_json_dump(payload), encoding="utf-8")
+        return payload
+
+    @classmethod
+    def release_execution_lock(cls, scope: str, resource_id: str, owner_id: str) -> None:
+        """Release a scoped execution lock if it is still held by *owner_id*."""
+        lock_path = cls._execution_lock_path(scope, resource_id)
+        if not lock_path.exists():
+            return
+        try:
+            with cls._lock():
+                data = json.loads(lock_path.read_text(encoding="utf-8"))
+                if data.get("owner_id") == owner_id:
+                    lock_path.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.warning(
+                "release_execution_lock error for scope=%s resource=%s: %s",
+                scope,
+                resource_id,
+                exc,
+            )
+
+    @classmethod
+    def heartbeat_execution_lock(
+        cls,
+        scope: str,
+        resource_id: str,
+        owner_id: str,
+        *,
+        ttl_seconds: int = 120,
+    ) -> Dict[str, Any]:
+        """Extend the TTL of a scoped execution lock held by *owner_id*."""
+        lock_path = cls._execution_lock_path(scope, resource_id)
+        if not lock_path.exists():
+            raise RuntimeError(f"No {scope} lock found for resource={resource_id}")
+        with cls._lock():
+            data = json.loads(lock_path.read_text(encoding="utf-8"))
+            if data.get("owner_id") != owner_id:
+                raise RuntimeError(
+                    f"{scope} lock held by owner={data.get('owner_id')}, not {owner_id}"
+                )
+            data["expires_at"] = (_utcnow() + timedelta(seconds=ttl_seconds)).isoformat()
+            lock_path.write_text(_json_dump(data), encoding="utf-8")
+            return data
+
+    @classmethod
     def recover_stale_lock(cls, repo_id: str) -> bool:
         """Remove a merge lock that is past its TTL.
 
@@ -24,14 +137,17 @@ class LockMixin:
         if not lock_path.exists():
             return False
         try:
-            data = json.loads(lock_path.read_text(encoding="utf-8"))
-            expires_str = str(data.get("expires_at") or "")
-            if expires_str:
-                expires = datetime.fromisoformat(expires_str)
-                if _utcnow() > expires:
-                    lock_path.unlink(missing_ok=True)
-                    logger.info("Recovered stale merge lock for repo=%s", repo_id)
-                    return True
+            with cls._lock():
+                if not lock_path.exists():
+                    return False
+                data = json.loads(lock_path.read_text(encoding="utf-8"))
+                expires_str = str(data.get("expires_at") or "")
+                if expires_str:
+                    expires = datetime.fromisoformat(expires_str)
+                    if _utcnow() > expires:
+                        lock_path.unlink(missing_ok=True)
+                        logger.info("Recovered stale merge lock for repo=%s", repo_id)
+                        return True
         except Exception as exc:
             logger.warning("recover_stale_lock error for repo=%s: %s", repo_id, exc)
         return False

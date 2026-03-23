@@ -108,13 +108,19 @@ class ContextIndexer:
         root = Path(workspace_root).resolve()
         contents = []
         for path_str in path_scope:
-            path_str_safe = path_str.lstrip('/')
-            path = (root / path_str_safe).resolve()
-            
-            if not str(path).startswith(str(root)):
+            requested_path = Path(path_str)
+            path = (
+                requested_path.resolve()
+                if requested_path.is_absolute()
+                else (root / path_str.lstrip("/\\")).resolve()
+            )
+
+            try:
+                path.relative_to(root)
+            except ValueError:
                 contents.append(f"--- {path_str} ---\n[Access denied: Path outside workspace]\n")
                 continue
-                
+
             if path.is_file():
                 try:
                     text_content = path.read_text(encoding="utf-8")

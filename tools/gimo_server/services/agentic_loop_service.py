@@ -4,7 +4,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List
@@ -14,7 +16,7 @@ from ..engine.tools.chat_tools_schema import CHAT_TOOLS, get_tool_risk_level
 from ..engine.tools.executor import ToolExecutor
 from ..ops_models import GimoItem, GimoTurn
 from ..providers.base import ProviderAdapter
-from ..security.execution_proof import ExecutionProofChain
+from ..security.execution_proof import ExecutionProof, ExecutionProofChain
 from .conversation_service import ConversationService
 from .cost_service import CostService
 from .notification_service import NotificationService
@@ -79,6 +81,10 @@ class AgenticResult:
     usage: Dict[str, Any] = field(default_factory=dict)
     turns_used: int = 0
     finish_reason: str = "stop"
+
+
+class ThreadExecutionBusyError(RuntimeError):
+    """Raised when a conversational thread already has an active agentic loop."""
 
 
 def _generate_workspace_tree(workspace_root: str, max_depth: int = 2, max_entries: int = 100) -> str:
@@ -189,8 +195,107 @@ def _resolve_orchestrator_adapter() -> tuple[ProviderAdapter, str, str]:
 class AgenticLoopService:
     """Runs the agentic loop: LLM -> tool_calls -> execute -> repeat."""
 
+    THREAD_LOCK_SCOPE = "thread_execution"
+    THREAD_LOCK_TTL_SECONDS = 120
+    THREAD_LOCK_HEARTBEAT_SECONDS = 30
     _pending_approvals: Dict[str, asyncio.Event] = {}
     _approval_results: Dict[str, bool] = {}
+    _thread_execution_lock = threading.Lock()
+    _active_thread_executions: Dict[str, str] = {}
+
+    @staticmethod
+    def _get_ops_service():
+        try:
+            from .ops_service import OpsService
+
+            return OpsService
+        except Exception:
+            return None
+
+    @classmethod
+    def reserve_thread_execution(cls, thread_id: str) -> Dict[str, Any]:
+        owner_id = f"thread_exec_{uuid.uuid4().hex[:16]}"
+        ops_service = cls._get_ops_service()
+        if ops_service is not None:
+            ops_service.recover_stale_execution_lock(cls.THREAD_LOCK_SCOPE, thread_id)
+            try:
+                return ops_service.acquire_execution_lock(
+                    cls.THREAD_LOCK_SCOPE,
+                    thread_id,
+                    owner_id,
+                    ttl_seconds=cls.THREAD_LOCK_TTL_SECONDS,
+                    metadata={"thread_id": thread_id},
+                )
+            except RuntimeError as exc:
+                raise ThreadExecutionBusyError(str(exc)) from exc
+
+        with cls._thread_execution_lock:
+            active_owner = cls._active_thread_executions.get(thread_id)
+            if active_owner and active_owner != owner_id:
+                raise ThreadExecutionBusyError(f"Thread {thread_id} already has an active execution")
+            cls._active_thread_executions[thread_id] = owner_id
+        return {
+            "lock_id": owner_id,
+            "scope": cls.THREAD_LOCK_SCOPE,
+            "resource_id": thread_id,
+            "owner_id": owner_id,
+            "backend": "memory",
+        }
+
+    @classmethod
+    def release_thread_execution(cls, thread_id: str, owner_id: str | None = None) -> None:
+        ops_service = cls._get_ops_service()
+        if ops_service is not None and owner_id:
+            ops_service.release_execution_lock(cls.THREAD_LOCK_SCOPE, thread_id, owner_id)
+            return
+
+        with cls._thread_execution_lock:
+            active_owner = cls._active_thread_executions.get(thread_id)
+            if owner_id is None or active_owner == owner_id:
+                cls._active_thread_executions.pop(thread_id, None)
+
+    @classmethod
+    def heartbeat_thread_execution(cls, thread_id: str, owner_id: str) -> Dict[str, Any] | None:
+        ops_service = cls._get_ops_service()
+        if ops_service is not None:
+            return ops_service.heartbeat_execution_lock(
+                cls.THREAD_LOCK_SCOPE,
+                thread_id,
+                owner_id,
+                ttl_seconds=cls.THREAD_LOCK_TTL_SECONDS,
+            )
+        with cls._thread_execution_lock:
+            if cls._active_thread_executions.get(thread_id) != owner_id:
+                raise RuntimeError(f"Thread {thread_id} lock held by another owner")
+        return None
+
+    @classmethod
+    def _start_thread_execution_heartbeat(
+        cls, thread_id: str, owner_id: str
+    ) -> tuple[asyncio.Event, asyncio.Task[None]]:
+        stop_event = asyncio.Event()
+
+        async def _heartbeat() -> None:
+            while not stop_event.is_set():
+                await asyncio.sleep(cls.THREAD_LOCK_HEARTBEAT_SECONDS)
+                if stop_event.is_set():
+                    break
+                try:
+                    cls.heartbeat_thread_execution(thread_id, owner_id)
+                except Exception:
+                    logger.warning("Thread execution heartbeat failed for %s", thread_id, exc_info=True)
+                    break
+
+        return stop_event, asyncio.create_task(_heartbeat())
+
+    @staticmethod
+    async def _stop_heartbeat(stop_event: asyncio.Event, task: asyncio.Task[None]) -> None:
+        stop_event.set()
+        task.cancel()
+        try:
+            await task
+        except BaseException:
+            pass
 
     @classmethod
     def submit_approval(cls, thread_id: str, tool_call_id: str, approved: bool) -> bool:
@@ -328,10 +433,10 @@ class AgenticLoopService:
         return f"{message}\n{data_str}"
 
     @classmethod
-    def _load_execution_proof_chain(cls, thread_id: str) -> ExecutionProofChain:
+    def _scan_execution_proof_records(cls, thread_id: str) -> tuple[List[Dict[str, Any]], bool]:
         gics = cls._get_gics()
         if not gics:
-            return ExecutionProofChain(thread_id)
+            return [], True
         try:
             rows = gics.scan(prefix=f"ops:proof:{thread_id}:")
             records: List[Dict[str, Any]] = []
@@ -339,10 +444,56 @@ class AgenticLoopService:
                 fields = cls._gics_fields(row)
                 if fields:
                     records.append(fields)
+            return records, True
+        except Exception:
+            logger.warning("Unable to scan proof chain for thread %s", thread_id, exc_info=True)
+            return [], False
+
+    @classmethod
+    def _best_effort_sort_proof_records(cls, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        def _sort_key(record: Dict[str, Any]) -> tuple[float, str]:
+            try:
+                timestamp = float(record.get("timestamp", 0) or 0)
+            except Exception:
+                timestamp = 0.0
+            return timestamp, str(record.get("proof_id", ""))
+
+        return sorted(records, key=_sort_key)
+
+    @classmethod
+    def _recover_appendable_execution_proof_chain(
+        cls, thread_id: str, records: List[Dict[str, Any]]
+    ) -> ExecutionProofChain:
+        recovered_records: List[Dict[str, Any]] = []
+        for record in records:
+            try:
+                recovered_records.append(ExecutionProof(**record).to_dict())
+            except Exception:
+                continue
+
+        if not recovered_records:
+            return ExecutionProofChain(thread_id)
+
+        try:
+            return ExecutionProofChain.from_records(thread_id, recovered_records)
+        except Exception:
+            logger.warning("Unable to recover appendable proof chain for thread %s", thread_id, exc_info=True)
+            return ExecutionProofChain(thread_id)
+
+    @classmethod
+    def _load_execution_proof_chain(cls, thread_id: str, *, recover: bool = False) -> ExecutionProofChain | None:
+        records, scanned_ok = cls._scan_execution_proof_records(thread_id)
+        if not scanned_ok:
+            return None
+        if not records:
+            return ExecutionProofChain(thread_id)
+        try:
             return ExecutionProofChain.from_records(thread_id, records)
         except Exception:
-            logger.debug("Unable to load proof chain for thread %s", thread_id, exc_info=True)
-            return ExecutionProofChain(thread_id)
+            logger.warning("Unable to reconstruct proof chain for thread %s", thread_id, exc_info=True)
+            if recover:
+                return cls._recover_appendable_execution_proof_chain(thread_id, records)
+            return None
 
     @classmethod
     def _persist_execution_proof(
@@ -366,9 +517,21 @@ class AgenticLoopService:
 
     @classmethod
     def get_thread_proofs(cls, thread_id: str) -> Dict[str, Any]:
-        chain = cls._load_execution_proof_chain(thread_id)
-        proofs = [proof.to_dict() for proof in chain.to_list()]
-        return {"thread_id": thread_id, "verified": chain.verify(), "proofs": proofs}
+        records, scanned_ok = cls._scan_execution_proof_records(thread_id)
+        if not scanned_ok:
+            return {"thread_id": thread_id, "verified": False, "proofs": []}
+        if not records:
+            return {"thread_id": thread_id, "verified": True, "proofs": []}
+        try:
+            chain = ExecutionProofChain.from_records(thread_id, records)
+            proofs = [proof.to_dict() for proof in chain.to_list()]
+            return {"thread_id": thread_id, "verified": chain.verify(), "proofs": proofs}
+        except Exception:
+            return {
+                "thread_id": thread_id,
+                "verified": False,
+                "proofs": cls._best_effort_sort_proof_records(records),
+            }
 
     @staticmethod
     async def _noop_emit(_event: str, _data: Dict[str, Any]) -> None:
@@ -414,7 +577,7 @@ class AgenticLoopService:
         iterations_used = 0
         total_cost = 0.0
         total_budget = float(mood_profile.contract.max_cost_per_turn_usd or 0.0) * max(1, max_turns)
-        proof_chain = cls._load_execution_proof_chain(thread_id) if thread_id else None
+        proof_chain = cls._load_execution_proof_chain(thread_id, recover=True) if thread_id else None
         last_content = ""
 
         await emit_event(
@@ -778,8 +941,9 @@ class AgenticLoopService:
         )
         return result
 
-    @staticmethod
-    async def run(
+    @classmethod
+    async def _run_reserved(
+        cls,
         thread_id: str,
         user_message: str,
         workspace_root: str,
@@ -832,8 +996,31 @@ class AgenticLoopService:
             allow_hitl=True,
         )
 
-    @staticmethod
-    async def run_stream(
+    @classmethod
+    async def run(
+        cls,
+        thread_id: str,
+        user_message: str,
+        workspace_root: str,
+        token: str = "system",
+    ) -> AgenticResult:
+        reservation = cls.reserve_thread_execution(thread_id)
+        owner_id = str(reservation.get("owner_id") or "")
+        stop_event, heartbeat_task = cls._start_thread_execution_heartbeat(thread_id, owner_id)
+        try:
+            return await cls._run_reserved(
+                thread_id=thread_id,
+                user_message=user_message,
+                workspace_root=workspace_root,
+                token=token,
+            )
+        finally:
+            await cls._stop_heartbeat(stop_event, heartbeat_task)
+            cls.release_thread_execution(thread_id, owner_id)
+
+    @classmethod
+    async def _run_stream_reserved(
+        cls,
         thread_id: str,
         user_message: str,
         workspace_root: str,
@@ -912,6 +1099,29 @@ class AgenticLoopService:
                 yield event
         finally:
             await asyncio.gather(task, return_exceptions=True)
+
+    @classmethod
+    async def run_stream(
+        cls,
+        thread_id: str,
+        user_message: str,
+        workspace_root: str,
+        token: str = "system",
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        reservation = cls.reserve_thread_execution(thread_id)
+        owner_id = str(reservation.get("owner_id") or "")
+        stop_event, heartbeat_task = cls._start_thread_execution_heartbeat(thread_id, owner_id)
+        try:
+            async for event in cls._run_stream_reserved(
+                thread_id=thread_id,
+                user_message=user_message,
+                workspace_root=workspace_root,
+                token=token,
+            ):
+                yield event
+        finally:
+            await cls._stop_heartbeat(stop_event, heartbeat_task)
+            cls.release_thread_execution(thread_id, owner_id)
 
     @staticmethod
     async def run_node(

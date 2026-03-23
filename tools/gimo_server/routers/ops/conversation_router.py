@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from ...ops_models import GimoThread, GimoTurn, GimoItem, GimoItemType
 from ...services.conversation_service import ConversationService
-from ...services.agentic_loop_service import AgenticLoopService
+from ...services.agentic_loop_service import AgenticLoopService, ThreadExecutionBusyError
 from ...security import verify_token
 from ...security.auth import AuthContext
 from .common import _require_role
@@ -145,13 +145,16 @@ async def chat_message(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     # Run agentic loop
-    token = auth.actor or "CLI"
-    result = await AgenticLoopService.run(
-        thread_id=thread_id,
-        user_message=content,
-        workspace_root=thread.workspace_root,
-        token=token
-    )
+    token = getattr(auth, "actor", None) or "CLI"
+    try:
+        result = await AgenticLoopService.run(
+            thread_id=thread_id,
+            user_message=content,
+            workspace_root=thread.workspace_root,
+            token=token,
+        )
+    except ThreadExecutionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return {
         "status": "ok",
@@ -180,18 +183,29 @@ async def chat_message_stream(
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    token = auth.actor or "CLI"
+    token = getattr(auth, "actor", None) or "CLI"
+
+    try:
+        reservation = AgenticLoopService.reserve_thread_execution(thread_id)
+    except ThreadExecutionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    owner_id = str(reservation.get("owner_id") or "")
+    stop_event, heartbeat_task = AgenticLoopService._start_thread_execution_heartbeat(thread_id, owner_id)
 
     async def event_generator():
-        async for event in AgenticLoopService.run_stream(
-            thread_id=thread_id,
-            user_message=content,
-            workspace_root=thread.workspace_root,
-            token=token,
-        ):
-            event_type = event.get("event", "message")
-            data = json.dumps(event.get("data", {}), ensure_ascii=False)
-            yield f"event: {event_type}\ndata: {data}\n\n"
+        try:
+            async for event in AgenticLoopService._run_stream_reserved(
+                thread_id=thread_id,
+                user_message=content,
+                workspace_root=thread.workspace_root,
+                token=token,
+            ):
+                event_type = event.get("event", "message")
+                data = json.dumps(event.get("data", {}), ensure_ascii=False)
+                yield f"event: {event_type}\ndata: {data}\n\n"
+        finally:
+            await AgenticLoopService._stop_heartbeat(stop_event, heartbeat_task)
+            AgenticLoopService.release_thread_execution(thread_id, owner_id)
 
     return StreamingResponse(
         event_generator(),

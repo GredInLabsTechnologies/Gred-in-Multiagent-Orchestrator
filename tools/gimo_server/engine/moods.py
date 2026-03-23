@@ -80,7 +80,7 @@ MOOD_PROFILES: Dict[str, MoodProfile] = {
         ),
         temperature=0.0,
         max_turns=25,
-        tool_whitelist={"read_file", "list_files", "search_text", "ask_user"},
+        tool_whitelist={"read_file", "list_files", "search_text", "ask_user", "web_search"},
         tool_blacklist=set(),
         requires_confirmation={"write_file", "shell_exec", "patch_file", "search_replace"},
         response_style="detailed",

@@ -7,7 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.gimo_server.services.custom_plan_service import CustomPlan, CustomPlanService, PlanNode
+from tools.gimo_server.services.custom_plan_service import (
+    CustomPlan,
+    CustomPlanService,
+    PlanExecutionBusyError,
+    PlanNode,
+)
 from tools.gimo_server.services.sandbox_service import SandboxHandle, SandboxService
 
 
@@ -64,6 +69,7 @@ async def test_execute_plan_runs_independent_layer_nodes_in_parallel(monkeypatch
     monkeypatch.setattr(CustomPlanService, "_execute_node", fake_execute_node)
     monkeypatch.setattr("tools.gimo_server.services.notification_service.NotificationService.publish", fake_publish)
     monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=4))
+    monkeypatch.setattr("tools.gimo_server.services.authority.ExecutionAuthority.get", lambda: (_ for _ in ()).throw(RuntimeError("skip-governor")))
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.get_current_branch", lambda _repo: "main")
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.is_worktree_clean", lambda _repo: True)
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.create_branch", lambda *_args, **_kwargs: None)
@@ -285,6 +291,16 @@ async def test_execute_plan_uses_unique_worktree_run_ids_per_execution(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_execute_plan_rejects_concurrent_same_plan():
+    CustomPlanService.reserve_plan_execution("plan_busy")
+    try:
+        with pytest.raises(PlanExecutionBusyError):
+            await CustomPlanService.execute_plan("plan_busy")
+    finally:
+        CustomPlanService.release_plan_execution("plan_busy")
+
+
+@pytest.mark.asyncio
 async def test_execute_plan_does_not_persist_done_before_commit(monkeypatch, tmp_path: Path):
     plan = CustomPlan(
         id="plan_commit_failure",
@@ -343,3 +359,143 @@ async def test_execute_plan_does_not_persist_done_before_commit(monkeypatch, tmp
     assert any(snapshot.get("worker") == "running" for snapshot in snapshots)
     assert any(snapshot.get("worker") == "error" for snapshot in snapshots)
     assert all(snapshot.get("worker") != "done" for snapshot in snapshots)
+
+
+@pytest.mark.asyncio
+async def test_execute_plan_blocks_transitive_dependents_of_failed_nodes(monkeypatch, tmp_path: Path):
+    plan = CustomPlan(
+        id="plan_transitive_skip",
+        name="transitive skip",
+        context={"workspace_root": str(tmp_path)},
+        nodes=[
+            PlanNode(id="orch", label="Orchestrator", node_type="orchestrator", role="orchestrator", is_orchestrator=True),
+            PlanNode(id="a", label="A", depends_on=["orch"]),
+            PlanNode(id="b", label="B", depends_on=["a"]),
+            PlanNode(id="c", label="C", depends_on=["b"]),
+        ],
+    )
+
+    executed: list[str] = []
+
+    async def fake_publish(*_args, **_kwargs):
+        return None
+
+    async def fake_execute_node(
+        plan_obj,
+        node_map,
+        node_id,
+        plan_id,
+        skill_id=None,
+        skill_run_id=None,
+        skill_command=None,
+        node_idx=0,
+        layer_size=1,
+        total_nodes=1,
+        workspace_override=None,
+        repo_root=None,
+        base_ref="HEAD",
+        execution_id="",
+    ):
+        executed.append(node_id)
+        node = node_map[node_id]
+        if node_id == "a":
+            node.status = "error"
+            node.error = "boom"
+            return {"node_id": node_id, "status": "error", "changed_files": [], "diff": "", "commit_sha": "", "branch_name": ""}
+        node.status = "done"
+        node.output = f"done:{node_id}"
+        return {"node_id": node_id, "status": "done", "changed_files": [], "diff": "", "commit_sha": "", "branch_name": ""}
+
+    monkeypatch.setattr(CustomPlanService, "get_plan", lambda _pid: plan)
+    monkeypatch.setattr(CustomPlanService, "_save", lambda _plan: None)
+    monkeypatch.setattr(CustomPlanService, "_execute_node", fake_execute_node)
+    monkeypatch.setattr("tools.gimo_server.services.notification_service.NotificationService.publish", fake_publish)
+    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=4))
+    monkeypatch.setattr("tools.gimo_server.services.authority.ExecutionAuthority.get", lambda: (_ for _ in ()).throw(RuntimeError("skip-governor")))
+    monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.get_current_branch", lambda _repo: "main")
+    monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.is_worktree_clean", lambda _repo: True)
+    monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.create_branch", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.fast_forward_branch", lambda *_args, **_kwargs: (True, ""))
+    monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.delete_branch", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService._run_git", lambda *_args, **_kwargs: (0, "", ""))
+
+    result = await CustomPlanService.execute_plan(plan.id)
+
+    assert result is plan
+    assert executed == ["orch", "a"]
+    assert plan.status == "error"
+    assert {node.id: node.status for node in plan.nodes} == {
+        "orch": "done",
+        "a": "error",
+        "b": "skipped",
+        "c": "skipped",
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_node_treats_non_stop_finish_reason_as_error(monkeypatch, tmp_path: Path):
+    plan = CustomPlan(
+        id="plan_finish_reason",
+        name="finish reason",
+        context={"workspace_root": str(tmp_path)},
+        nodes=[
+            PlanNode(id="orch", label="Orchestrator", node_type="orchestrator", role="orchestrator", is_orchestrator=True),
+            PlanNode(id="worker", label="Worker", depends_on=["orch"], prompt="do it"),
+        ],
+    )
+    node_map = {node.id: node for node in plan.nodes}
+    worktree_path = tmp_path / "wt_finish_reason"
+    worktree_path.mkdir()
+
+    async def fake_publish(*_args, **_kwargs):
+        return None
+
+    async def fake_run_node(**_kwargs):
+        return SimpleNamespace(
+            response="Budget exhausted while working.",
+            usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2, "cost_usd": 0.0},
+            finish_reason="budget_exhausted",
+        )
+
+    class _FakeCostStore:
+        def save_cost_event(self, event):
+            return None
+
+        def get_plan_snapshot(self, **_kwargs):
+            return SimpleNamespace(nodes=[], total_cost_usd=0.0, estimated_savings_usd=0.0, nodes_optimized=0)
+
+    class _FakeStorageService:
+        def __init__(self, _gics):
+            self.cost = _FakeCostStore()
+
+    monkeypatch.setattr("tools.gimo_server.services.notification_service.NotificationService.publish", fake_publish)
+    monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.SandboxService.create_worktree_handle", lambda *_args, **_kwargs: SandboxHandle(
+        run_id="plan_finish_reason_worker",
+        repo_path=str(tmp_path),
+        worktree_path=worktree_path,
+        branch_name="gimo_branch",
+        base_ref="HEAD",
+    ))
+    monkeypatch.setattr("tools.gimo_server.services.agentic_loop_service.AgenticLoopService.run_node", fake_run_node)
+    monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.get_changed_files", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.get_diff_text", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.commit_all", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("tools.gimo_server.services.storage_service.StorageService", _FakeStorageService)
+    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService._gics", object())
+    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService.get_config", lambda: SimpleNamespace(economy=SimpleNamespace(autonomy_level="balanced")))
+
+    artifact = await CustomPlanService._execute_node(
+        plan,
+        node_map,
+        "worker",
+        plan.id,
+        total_nodes=2,
+        repo_root=tmp_path,
+        base_ref="HEAD",
+        execution_id="exec1",
+    )
+
+    assert artifact is not None
+    assert artifact["status"] == "error"
+    assert node_map["worker"].status == "error"
+    assert "finish_reason='budget_exhausted'" in (node_map["worker"].error or "")

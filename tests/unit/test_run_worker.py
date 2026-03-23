@@ -276,3 +276,102 @@ async def test_critic_gate_skips_mature_high_quality_outputs(mock_ops):
     assert persisted["critic_skips"] == 4
     assert "avg_output_tokens" in persisted
     assert persisted["avg_output_tokens"] > 0
+
+
+@pytest.mark.asyncio
+@patch("tools.gimo_server.services.run_worker.OpsService")
+async def test_critic_gate_uses_final_model_used_for_initial_skip_lookup(mock_ops):
+    from tools.gimo_server.services.run_worker import RunWorker
+
+    class FakeGics:
+        def __init__(self):
+            self.writes = []
+
+        def get(self, key):
+            if key.endswith("requested-model"):
+                return {"fields": {"samples": 1, "success_rate": 0.10}}
+            if key.endswith("resolved-model"):
+                return {"fields": {"samples": 20, "success_rate": 0.95, "successes": 19, "critic_calls": 4, "critic_skips": 3}}
+            return None
+
+        def put(self, key, value):
+            self.writes.append((key, value))
+
+    mock_ops._gics = FakeGics()
+    mock_ops.append_log = MagicMock()
+
+    worker = RunWorker()
+
+    with patch("tools.gimo_server.services.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
+        approved, output, raw = await worker._critic_with_retry(
+            run_id="r1",
+            output_text="Concrete execution summary with no errors.",
+            base_prompt="Do the thing",
+            intent_effective="EXECUTE",
+            path_scope=[],
+            requested_model="requested-model",
+            initial_raw={
+                "content": "Concrete execution summary with no errors.",
+                "usage": {"completion_tokens": 42},
+                "final_model_used": "resolved-model",
+            },
+        )
+
+    assert approved is True
+    assert output == "Concrete execution summary with no errors."
+    assert raw["content"] == "Concrete execution summary with no errors."
+    mock_critic.assert_not_awaited()
+    assert mock_ops._gics.writes[-1][0] == "ops:task:run_worker_execution:resolved-model"
+
+
+@pytest.mark.asyncio
+@patch("tools.gimo_server.services.run_worker.OpsService")
+async def test_critic_gate_preserves_legacy_avg_output_tokens_history(mock_ops):
+    from tools.gimo_server.services.run_worker import RunWorker
+
+    class FakeGics:
+        def __init__(self):
+            self.writes = []
+
+        def get(self, _key):
+            return {
+                "fields": {
+                    "samples": 20,
+                    "success_rate": 0.95,
+                    "successes": 19,
+                    "critic_calls": 4,
+                    "critic_skips": 3,
+                    "avg_output_tokens": 100.0,
+                }
+            }
+
+        def put(self, key, value):
+            self.writes.append((key, value))
+
+    mock_ops._gics = FakeGics()
+    mock_ops.append_log = MagicMock()
+
+    worker = RunWorker()
+
+    with patch("tools.gimo_server.services.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
+        approved, output, raw = await worker._critic_with_retry(
+            run_id="r1",
+            output_text="Concrete execution summary with no errors.",
+            base_prompt="Do the thing",
+            intent_effective="EXECUTE",
+            path_scope=[],
+            requested_model="legacy-model",
+            initial_raw={
+                "content": "Concrete execution summary with no errors.",
+                "usage": {"completion_tokens": 10},
+                "final_model_used": "legacy-model",
+            },
+        )
+
+    assert approved is True
+    assert output == "Concrete execution summary with no errors."
+    assert raw["content"] == "Concrete execution summary with no errors."
+    mock_critic.assert_not_awaited()
+    _, persisted = mock_ops._gics.writes[-1]
+    assert persisted["avg_output_samples"] == 21
+    assert persisted["avg_output_tokens"] > 90.0

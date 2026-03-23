@@ -260,6 +260,42 @@ def test_phase7_merge_lock_ttl_heartbeat_and_recovery(tmp_path):
     assert recovered is True
 
 
+def test_phase7_generic_execution_lock_ttl_heartbeat_and_recovery(tmp_path):
+    _setup_ops_dirs(tmp_path)
+
+    lock = OpsService.acquire_execution_lock(
+        "thread_execution",
+        "thread_A",
+        "owner_1",
+        ttl_seconds=2,
+        metadata={"thread_id": "thread_A"},
+    )
+    assert lock["owner_id"] == "owner_1"
+    assert lock["resource_id"] == "thread_A"
+
+    lock2 = OpsService.heartbeat_execution_lock(
+        "thread_execution",
+        "thread_A",
+        "owner_1",
+        ttl_seconds=2,
+    )
+    assert lock2["owner_id"] == "owner_1"
+
+    with pytest.raises(RuntimeError):
+        OpsService.acquire_execution_lock("thread_execution", "thread_A", "owner_2", ttl_seconds=30)
+
+    lock_file = OpsService._execution_lock_path("thread_execution", "thread_A")
+    payload = __import__("json").loads(lock_file.read_text(encoding="utf-8"))
+    payload["expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    lock_file.write_text(__import__("json").dumps(payload), encoding="utf-8")
+
+    recovered = OpsService.recover_stale_execution_lock("thread_execution", "thread_A")
+    assert recovered is True
+
+    lock3 = OpsService.acquire_execution_lock("thread_execution", "thread_A", "owner_2", ttl_seconds=30)
+    assert lock3["owner_id"] == "owner_2"
+
+
 def test_phase7_merge_gate_lock_conflict_sets_merge_locked(tmp_path, monkeypatch):
     _setup_ops_dirs(tmp_path)
     _, approved = _seed_draft_and_approved(draft_id="d3", approved_id="a3")
