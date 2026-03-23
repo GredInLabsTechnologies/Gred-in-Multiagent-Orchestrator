@@ -1542,3 +1542,189 @@ async def test_time_travel_backward_compat_resume_from_checkpoint():
     state = await engine.execute()
     assert state.data["resumed_from_checkpoint"]["node_id"] == "A"
     assert state.data["b"] == 2
+
+
+# ── Fase 6: Swarm ────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_swarm_handoff_chain_a_b_c():
+    """Swarm con 3 agentes: A→B→C handoff chain completo."""
+    nodes = [
+        WorkflowNode(
+            id="SW",
+            type="agent_task",
+            config={
+                "pattern": "swarm",
+                "start_agent": "agent_a",
+                "agents": [
+                    {"id": "agent_a", "name": "A", "handoff_targets": ["agent_b"]},
+                    {"id": "agent_b", "name": "B", "handoff_targets": ["agent_c"]},
+                    {"id": "agent_c", "name": "C", "handoff_targets": []},
+                ],
+            },
+        )
+    ]
+    graph = WorkflowGraph(id="swarm_abc", nodes=nodes, edges=[])
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        agent_id = node.config.get("agent_id", "")
+        if agent_id == "agent_a":
+            return {"handoff_to": "agent_b", "done_a": True}
+        if agent_id == "agent_b":
+            return {"handoff_to": "agent_c", "done_b": True}
+        return {"final": True}  # agent_c — sin handoff
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["pattern"] == "swarm"
+    assert state.data["active_agent"] == "agent_c"
+    chain = state.data["handoff_chain"]
+    assert len(chain) == 2
+    assert chain[0]["from"] == "agent_a" and chain[0]["to"] == "agent_b"
+    assert chain[1]["from"] == "agent_b" and chain[1]["to"] == "agent_c"
+    assert len(state.data["proofs"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_swarm_handoff_context_filtering():
+    """Agente con context_keys solo recibe las claves relevantes."""
+    seen_contexts = []
+
+    nodes = [
+        WorkflowNode(
+            id="SW",
+            type="agent_task",
+            config={
+                "pattern": "swarm",
+                "start_agent": "focused",
+                "agents": [
+                    {
+                        "id": "focused",
+                        "name": "Focused",
+                        "context_keys": ["ticket", "scope"],
+                        "handoff_targets": [],
+                    },
+                ],
+            },
+        )
+    ]
+    graph = WorkflowGraph(id="swarm_ctx", nodes=nodes, edges=[])
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        if node.config.get("role") == "swarm_agent":
+            seen_contexts.append(node.config.get("context", {}))
+        return {}
+
+    engine._execute_node = mock_execute
+    await engine.execute(initial_state={"ticket": "T-1", "scope": "auth", "noise": "ignore"})
+
+    assert len(seen_contexts) == 1
+    ctx = seen_contexts[0]
+    assert "ticket" in ctx and "scope" in ctx
+    assert "noise" not in ctx
+
+
+@pytest.mark.asyncio
+async def test_swarm_max_iterations_respected():
+    """El loop de swarm respeta max_iterations."""
+    nodes = [
+        WorkflowNode(
+            id="SW",
+            type="agent_task",
+            config={
+                "pattern": "swarm",
+                "max_iterations": 3,
+                "start_agent": "looper",
+                "agents": [
+                    {"id": "looper", "name": "Looper", "handoff_targets": ["looper"]},
+                ],
+            },
+        )
+    ]
+    graph = WorkflowGraph(id="swarm_loop", nodes=nodes, edges=[])
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        # Siempre intenta hacer handoff a sí mismo
+        return {"handoff_to": "looper"}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["pattern"] == "swarm"
+    assert state.data["iterations"] == 3
+
+
+@pytest.mark.asyncio
+async def test_swarm_mood_contract_blocks_incompatible_handoff():
+    """Handoff de agente 'critical' bloquea y registra la violación."""
+    nodes = [
+        WorkflowNode(
+            id="SW",
+            type="agent_task",
+            config={
+                "pattern": "swarm",
+                "start_agent": "critical_agent",
+                "agents": [
+                    {
+                        "id": "critical_agent",
+                        "mood": "critical",
+                        "handoff_targets": ["standard_agent"],
+                    },
+                    {"id": "standard_agent", "mood": "standard"},
+                ],
+            },
+        )
+    ]
+    graph = WorkflowGraph(id="swarm_mood", nodes=nodes, edges=[])
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        if node.config.get("agent_id") == "critical_agent":
+            return {"handoff_to": "standard_agent"}
+        return {}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert "swarm_mood_violation" in state.data
+    violation = state.data["swarm_mood_violation"]
+    assert violation["from"] == "critical_agent"
+    assert violation["from_mood"] == "critical"
+
+
+@pytest.mark.asyncio
+async def test_swarm_backward_compat_other_patterns():
+    """supervisor_workers y otros patterns siguen funcionando con swarm integrado."""
+    nodes = [
+        WorkflowNode(
+            id="AG",
+            type="agent_task",
+            config={
+                "pattern": "supervisor_workers",
+                "workers": [{"id": "w1", "task": "t1"}],
+            },
+        )
+    ]
+    graph = WorkflowGraph(id="compat_sw", nodes=nodes, edges=[])
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        worker_id = node.config.get("worker_id")
+        if worker_id:
+            return {"worker": worker_id}
+        return {}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["pattern"] == "supervisor_workers"
+    assert "w1" in state.data["worker_results"]

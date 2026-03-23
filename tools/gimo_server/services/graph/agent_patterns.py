@@ -72,6 +72,9 @@ class AgentPatternsMixin:
         if pattern == "handoff":
             return await self._run_handoff(node)
 
+        if pattern == "swarm":
+            return await self._run_swarm(node)
+
         # default agent_task behaves as a single executable node
         output = await self._call_execute_node(node)
         if isinstance(output, dict):

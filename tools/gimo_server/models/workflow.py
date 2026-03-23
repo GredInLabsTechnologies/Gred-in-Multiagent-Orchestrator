@@ -80,6 +80,17 @@ def is_graph_command(output: Any) -> bool:
     return isinstance(output, GraphCommand)
 
 
+class SwarmAgent(BaseModel):
+    """Fase 6: agente participante en un swarm descentralizado."""
+    id: str
+    name: str = ""
+    instructions: str = ""
+    tools: List[str] = Field(default_factory=list)
+    handoff_targets: List[str] = Field(default_factory=list)
+    mood: Optional[str] = None
+    context_keys: List[str] = Field(default_factory=list)
+
+
 class WorkflowContract(BaseModel):
     pre_conditions: List[ContractCheck] = Field(default_factory=list)
     post_conditions: List[ContractCheck] = Field(default_factory=list)

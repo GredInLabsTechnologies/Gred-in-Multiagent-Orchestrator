@@ -40,6 +40,7 @@ from .node_executor import NodeExecutorMixin
 from .checkpoint_manager import CheckpointMixin
 from .map_reduce import MapReduceMixin
 from .state_manager import StateManager
+from .swarm import SwarmMixin
 from .time_travel import TimeTravelMixin
 
 # Sentinel: nodo siguiente no fue overrideado por un Command
@@ -55,6 +56,7 @@ class GraphEngine(
     NodeExecutorMixin,
     CheckpointMixin,
     MapReduceMixin,
+    SwarmMixin,
     TimeTravelMixin,
 ):
     """MVP Graph Execution Engine."""
