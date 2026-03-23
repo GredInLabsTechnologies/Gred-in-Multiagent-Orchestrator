@@ -26,6 +26,7 @@ class WorkflowGraph(BaseModel):
     nodes: List[WorkflowNode]
     edges: List[WorkflowEdge]
     state_schema: Dict[str, Any] = Field(default_factory=dict)
+    reducers: Dict[str, str] = Field(default_factory=dict)
 
 class WorkflowCheckpoint(BaseModel):
     node_id: str

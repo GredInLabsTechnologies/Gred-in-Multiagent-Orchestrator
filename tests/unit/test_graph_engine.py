@@ -783,3 +783,138 @@ def test_critical_file_integrity_check():
     content = test_file.read_bytes().replace(b'\r\n', b'\n')
     h = hashlib.sha256(content).hexdigest()
     assert len(h) == 64
+
+
+# ── Fase 1: State Reducers ──────────────────────────────────
+
+from tools.gimo_server.services.graph.state_manager import StateManager
+
+
+def test_reducer_overwrite_is_default():
+    sm = StateManager()
+    state = {"x": 1}
+    sm.apply_update(state, {"x": 99})
+    assert state["x"] == 99
+
+
+def test_reducer_append_concatenates_lists():
+    sm = StateManager(reducers={"items": "append"})
+    state = {"items": ["a", "b"]}
+    sm.apply_update(state, {"items": ["c", "d"]})
+    assert state["items"] == ["a", "b", "c", "d"]
+
+
+def test_reducer_append_from_parallel_branches():
+    sm = StateManager(reducers={"results": "append"})
+    state: dict = {}
+    sm.apply_update(state, {"results": ["branch_a"]})
+    sm.apply_update(state, {"results": ["branch_b"]})
+    assert state["results"] == ["branch_a", "branch_b"]
+
+
+def test_reducer_add_sums_numbers():
+    sm = StateManager(reducers={"score": "add"})
+    state = {"score": 10}
+    sm.apply_update(state, {"score": 5})
+    assert state["score"] == 15
+
+
+def test_reducer_add_from_none():
+    sm = StateManager(reducers={"count": "add"})
+    state: dict = {}
+    sm.apply_update(state, {"count": 7})
+    assert state["count"] == 7
+
+
+def test_reducer_overwrite_backward_compat():
+    sm = StateManager()
+    state = {"a": 1, "b": 2}
+    sm.apply_update(state, {"b": 99, "c": 3})
+    assert state == {"a": 1, "b": 99, "c": 3}
+
+
+def test_reducer_merge_dict_deep_merge():
+    sm = StateManager(reducers={"meta": "merge_dict"})
+    state = {"meta": {"k1": "v1", "k2": "old"}}
+    sm.apply_update(state, {"meta": {"k2": "new", "k3": "v3"}})
+    assert state["meta"] == {"k1": "v1", "k2": "new", "k3": "v3"}
+
+
+def test_reducer_dedupe_append_no_duplicates():
+    sm = StateManager(reducers={"tags": "dedupe_append"})
+    state = {"tags": ["a", "b"]}
+    sm.apply_update(state, {"tags": ["b", "c"]})
+    assert state["tags"] == ["a", "b", "c"]
+
+
+def test_reducer_max():
+    sm = StateManager(reducers={"peak": "max"})
+    state = {"peak": 5}
+    sm.apply_update(state, {"peak": 3})
+    assert state["peak"] == 5
+    sm.apply_update(state, {"peak": 10})
+    assert state["peak"] == 10
+
+
+def test_reducer_min():
+    sm = StateManager(reducers={"floor": "min"})
+    state = {"floor": 5}
+    sm.apply_update(state, {"floor": 3})
+    assert state["floor"] == 3
+    sm.apply_update(state, {"floor": 10})
+    assert state["floor"] == 3
+
+
+def test_reducer_conflict_detection_calls_gics():
+    gics_calls = []
+
+    class FakeGICS:
+        def put(self, key, fields):
+            gics_calls.append((key, fields))
+
+    sm = StateManager(reducers={}, gics_client=FakeGICS(), workflow_id="wf1")
+    state = {"x": 1}
+    sm.apply_update(state, {"x": 2})
+    assert len(gics_calls) == 1
+    assert gics_calls[0][0] == "ops:reducer_conflict:wf1:x"
+    assert gics_calls[0][1]["key"] == "x"
+    assert gics_calls[0][1]["current_value"] == 1
+    assert gics_calls[0][1]["new_value"] == 2
+
+
+def test_reducer_no_conflict_when_same_value():
+    gics_calls = []
+
+    class FakeGICS:
+        def put(self, key, fields):
+            gics_calls.append((key, fields))
+
+    sm = StateManager(reducers={}, gics_client=FakeGICS(), workflow_id="wf1")
+    state = {"x": 1}
+    sm.apply_update(state, {"x": 1})
+    assert len(gics_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_graph_engine_uses_reducers_from_graph():
+    nodes = [
+        WorkflowNode(id="A", type="transform"),
+        WorkflowNode(id="B", type="transform"),
+    ]
+    edges = [WorkflowEdge(**{"from": "A", "to": "B"})]
+    graph = WorkflowGraph(
+        id="test_reducers",
+        nodes=nodes,
+        edges=edges,
+        reducers={"items": "append"},
+    )
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return {"items": [node.id]}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["items"] == ["A", "B"]

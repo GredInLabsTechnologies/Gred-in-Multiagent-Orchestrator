@@ -36,6 +36,7 @@ from .contract_validator import ContractValidatorMixin
 from .agent_patterns import AgentPatternsMixin
 from .node_executor import NodeExecutorMixin
 from .checkpoint_manager import CheckpointMixin
+from .state_manager import StateManager
 
 logger = logging.getLogger("orchestrator.services.graph_engine")
 
@@ -75,6 +76,10 @@ class GraphEngine(
         self._model_router = ModelRouterService(storage=self.storage, confidence_service=self._confidence_service)
         self._provider_service = provider_service or ProviderService()
         self._cascade_service = CascadeService(self._provider_service, self._model_router)
+        self._state_manager = StateManager(
+            reducers=self.graph.reducers,
+            workflow_id=self.graph.id,
+        )
 
     async def execute(self, initial_state: Optional[Dict[str, Any]] = None) -> WorkflowState:
         if initial_state:
@@ -124,7 +129,7 @@ class GraphEngine(
                     output = await self._run_node_with_retries(node)
 
                     if isinstance(output, dict):
-                        self.state.data.update(output)
+                        self._apply_state_update(output)
 
                     self._update_budget_counters(output)
 
@@ -333,6 +338,9 @@ class GraphEngine(
         if len(params) >= 2:
             return await execute_callable(node, self.state.data)
         return await execute_callable(node)
+
+    def _apply_state_update(self, output: Dict[str, Any]) -> None:
+        self._state_manager.apply_update(self.state.data, output)
 
     def _append_step_log(
         self,
