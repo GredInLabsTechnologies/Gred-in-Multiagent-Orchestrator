@@ -21,6 +21,12 @@ _PROTECTED_CONTEXT_KEYS: frozenset[str] = frozenset({
     "workspace_root",
 })
 
+# Valid explicit execution modes. Module-level so it is not recreated on each call.
+_VALID_EXECUTION_MODES: frozenset[str] = frozenset({
+    "legacy_run", "file_task", "structured_plan",
+    "multi_agent", "agent_task", "merge_gate", "custom_plan",
+})
+
 class EngineService:
     """Entry point for executing unified pipelines."""
 
@@ -168,12 +174,6 @@ class EngineService:
                 run_id, level="WARN",
                 msg="[GICS_DEGRADED] Historical reliability unavailable — routing uses static priors."
             )
-
-        # Valid explicit execution modes — checked before heuristic inference.
-        _VALID_EXECUTION_MODES = {
-            "legacy_run", "file_task", "structured_plan",
-            "multi_agent", "agent_task", "merge_gate", "custom_plan",
-        }
 
         # Infer composition if not provided
         if not composition:
