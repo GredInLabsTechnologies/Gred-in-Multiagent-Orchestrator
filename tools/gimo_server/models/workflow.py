@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, ConfigDict
 
 class WorkflowNode(BaseModel):
@@ -49,6 +49,30 @@ class WorkflowExecuteRequest(BaseModel):
 class ContractCheck(BaseModel):
     type: Literal["file_exists", "tests_pass", "function_exists", "no_new_vulnerabilities", "custom"]
     params: Dict[str, Any] = Field(default_factory=dict)
+
+class SendAction(BaseModel):
+    """Fase 3: acción de fan-out para map-reduce dinámico."""
+    node: str
+    state: Dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphCommand(BaseModel):
+    """Fase 2: comando de routing con update atómico de estado.
+
+    goto:   nodo destino (str) o lista de nodos (solo 1 sin Send).
+    update: dict de actualizaciones de estado aplicadas vía StateManager.
+    send:   lista de SendAction para map-reduce (Fase 3).
+    graph:  "PARENT" para escapar de un subgraph al grafo padre.
+    """
+    goto: Optional[Union[str, List[str]]] = None
+    update: Dict[str, Any] = Field(default_factory=dict)
+    send: Optional[List[SendAction]] = None
+    graph: Optional[str] = None
+
+
+def is_graph_command(output: Any) -> bool:
+    return isinstance(output, GraphCommand)
+
 
 class WorkflowContract(BaseModel):
     pre_conditions: List[ContractCheck] = Field(default_factory=list)

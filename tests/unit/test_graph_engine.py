@@ -918,3 +918,307 @@ async def test_graph_engine_uses_reducers_from_graph():
     state = await engine.execute()
 
     assert state.data["items"] == ["A", "B"]
+
+
+# ── Fase 2: GraphCommand ──────────────────────────────────
+
+from tools.gimo_server.ops_models import GraphCommand, SendAction, is_graph_command
+
+
+# -- Helpers de grafo para Fase 2/3 --
+def _make_graph(nodes, edges, reducers=None):
+    return WorkflowGraph(
+        id="test_cmd",
+        nodes=nodes,
+        edges=edges,
+        reducers=reducers or {},
+    )
+
+
+@pytest.mark.asyncio
+async def test_command_goto_overrides_routing():
+    """Un nodo retorna GraphCommand con goto → el engine salta al nodo indicado."""
+    nodes = [
+        WorkflowNode(id="A", type="transform"),
+        WorkflowNode(id="B", type="transform", config={"path": "normal"}),
+        WorkflowNode(id="C", type="transform", config={"path": "command"}),
+    ]
+    edges = [
+        WorkflowEdge(**{"from": "A", "to": "B"}),
+    ]
+    graph = _make_graph(nodes, edges)
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        if node.id == "A":
+            return GraphCommand(goto="C")
+        return node.config
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert [cp.node_id for cp in state.checkpoints] == ["A", "C"]
+    assert state.data["path"] == "command"
+
+
+@pytest.mark.asyncio
+async def test_command_goto_with_atomic_update():
+    """Command con goto + update aplica el update antes de seguir."""
+    nodes = [
+        WorkflowNode(id="A", type="transform"),
+        WorkflowNode(id="B", type="transform", config={"b": True}),
+    ]
+    edges = []
+    graph = _make_graph(nodes, edges)
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        if node.id == "A":
+            return GraphCommand(goto="B", update={"injected": 42})
+        return node.config
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["injected"] == 42
+    assert state.data["b"] is True
+    assert [cp.node_id for cp in state.checkpoints] == ["A", "B"]
+
+
+@pytest.mark.asyncio
+async def test_command_goto_without_update():
+    """Command con goto vacío y sin update enruta correctamente."""
+    nodes = [
+        WorkflowNode(id="A", type="transform"),
+        WorkflowNode(id="Z", type="transform", config={"z": True}),
+    ]
+    graph = _make_graph(nodes, [])
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        if node.id == "A":
+            return GraphCommand(goto="Z")
+        return node.config
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["z"] is True
+
+
+@pytest.mark.asyncio
+async def test_command_graph_parent_escape():
+    """Command con graph='PARENT' marca _subgraph_escape y detiene el grafo."""
+    nodes = [WorkflowNode(id="A", type="transform")]
+    graph = _make_graph(nodes, [])
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return GraphCommand(graph="PARENT", update={"escaped": True})
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["_subgraph_escape"] is True
+    assert state.data["escaped"] is True
+
+
+@pytest.mark.asyncio
+async def test_command_multiple_goto_without_send_raises():
+    """Command con múltiples goto sin Send debe elevar ValueError."""
+    nodes = [WorkflowNode(id="A", type="transform")]
+    graph = _make_graph(nodes, [])
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return GraphCommand(goto=["B", "C"])
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    # El error es capturado y el nodo falla con aborted_reason
+    assert state.data.get("aborted_reason") == "node_failure"
+
+
+@pytest.mark.asyncio
+async def test_backward_compat_nodes_without_command():
+    """Nodos normales (sin Command) siguen funcionando exactamente igual."""
+    nodes = [
+        WorkflowNode(id="A", type="transform", config={"a": 1}),
+        WorkflowNode(id="B", type="transform", config={"b": 2}),
+    ]
+    edges = [WorkflowEdge(**{"from": "A", "to": "B"})]
+    graph = _make_graph(nodes, edges)
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return node.config
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["a"] == 1
+    assert state.data["b"] == 2
+    assert [cp.node_id for cp in state.checkpoints] == ["A", "B"]
+
+
+# ── Fase 3: Send (Map-Reduce) ──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_send_map_reduce_with_append_reducer():
+    """Command con send ejecuta múltiples instancias y mergea con reducer append."""
+    nodes = [
+        WorkflowNode(id="dispatcher", type="transform"),
+        WorkflowNode(id="worker",     type="transform"),
+    ]
+    graph = _make_graph(nodes, [], reducers={"results": "append"})
+    engine = GraphEngine(graph)
+
+    call_states = []
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        if node.id == "dispatcher":
+            return GraphCommand(
+                send=[
+                    SendAction(node="worker", state={"item": "a"}),
+                    SendAction(node="worker", state={"item": "b"}),
+                    SendAction(node="worker", state={"item": "c"}),
+                ],
+            )
+        # worker: devuelve su item como resultado
+        call_states.append(state.get("item"))
+        return {"results": [state["item"]]}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert sorted(state.data["results"]) == ["a", "b", "c"]
+    assert sorted(call_states) == ["a", "b", "c"]
+    assert len(state.data["send_proofs"]) == 1
+    assert all(p["ok"] for p in state.data["send_proofs"][0])
+
+
+@pytest.mark.asyncio
+async def test_send_reducer_add_sums_scores():
+    """Send con reducer 'add' acumula scores de todas las instancias."""
+    nodes = [
+        WorkflowNode(id="fan_out", type="transform"),
+        WorkflowNode(id="scorer",  type="transform"),
+    ]
+    graph = _make_graph(nodes, [], reducers={"score": "add"})
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        if node.id == "fan_out":
+            return GraphCommand(
+                send=[
+                    SendAction(node="scorer", state={"val": 10}),
+                    SendAction(node="scorer", state={"val": 20}),
+                    SendAction(node="scorer", state={"val": 30}),
+                ]
+            )
+        return {"score": state["val"]}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert state.data["score"] == 60
+
+
+@pytest.mark.asyncio
+async def test_send_semaphore_limits_parallelism():
+    """El semaphore debe respetar send_max_parallel."""
+    nodes = [
+        WorkflowNode(id="fan", type="transform"),
+        WorkflowNode(id="slow", type="transform"),
+    ]
+    graph = _make_graph(nodes, [], reducers={"r": "append"})
+    engine = GraphEngine(graph)
+    counters = {"active": 0, "peak": 0}
+
+    async def mock_execute(node, state):
+        if node.id == "fan":
+            return GraphCommand(
+                send=[SendAction(node="slow", state={"i": i}) for i in range(5)]
+            )
+        counters["active"] += 1
+        counters["peak"] = max(counters["peak"], counters["active"])
+        await asyncio.sleep(0.02)
+        counters["active"] -= 1
+        return {"r": [state["i"]]}
+
+    engine._execute_node = mock_execute
+    await engine.execute(initial_state={"send_max_parallel": 2})
+
+    assert counters["peak"] <= 2
+
+
+@pytest.mark.asyncio
+async def test_send_partial_failure_doesnt_kill_others():
+    """Fallo de una instancia no cancela las demás."""
+    nodes = [
+        WorkflowNode(id="fan",    type="transform"),
+        WorkflowNode(id="worker", type="transform"),
+    ]
+    graph = _make_graph(nodes, [], reducers={"ok_list": "append"})
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        if node.id == "fan":
+            return GraphCommand(
+                send=[
+                    SendAction(node="worker", state={"x": 1}),
+                    SendAction(node="worker", state={"x": "boom"}),
+                    SendAction(node="worker", state={"x": 3}),
+                ]
+            )
+        if state["x"] == "boom":
+            raise RuntimeError("worker bombed")
+        return {"ok_list": [state["x"]]}
+
+    engine._execute_node = mock_execute
+    state = await engine.execute()
+
+    assert sorted(state.data["ok_list"]) == [1, 3]
+    proofs = state.data["send_proofs"][0]
+    assert any(not p["ok"] for p in proofs)
+    assert any(p["ok"] for p in proofs)
+
+
+@pytest.mark.asyncio
+async def test_send_budget_distributed():
+    """El budget se distribuye equitativamente entre las instancias Send."""
+    nodes = [
+        WorkflowNode(id="fan",    type="transform"),
+        WorkflowNode(id="worker", type="transform"),
+    ]
+    graph = _make_graph(nodes, [])
+    engine = GraphEngine(graph)
+    seen_budgets = []
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        if node.id == "fan":
+            return GraphCommand(
+                send=[
+                    SendAction(node="worker", state={"i": 1}),
+                    SendAction(node="worker", state={"i": 2}),
+                ]
+            )
+        seen_budgets.append(state.get("budget", {}).get("max_tokens"))
+        return {}
+
+    engine._execute_node = mock_execute
+    await engine.execute(initial_state={"budget": {"max_tokens": 100}})
+
+    # Cada instancia recibe 50 tokens (100 / 2)
+    assert all(b == 50.0 for b in seen_budgets)

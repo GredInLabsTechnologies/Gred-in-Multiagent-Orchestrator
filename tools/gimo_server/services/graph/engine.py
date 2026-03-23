@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional
 
 from tools.gimo_server.ops_models import (
     CostEvent,
+    GraphCommand,
+    is_graph_command,
     WorkflowCheckpoint,
     WorkflowGraph,
     WorkflowNode,
@@ -36,7 +38,11 @@ from .contract_validator import ContractValidatorMixin
 from .agent_patterns import AgentPatternsMixin
 from .node_executor import NodeExecutorMixin
 from .checkpoint_manager import CheckpointMixin
+from .map_reduce import MapReduceMixin
 from .state_manager import StateManager
+
+# Sentinel: nodo siguiente no fue overrideado por un Command
+_NO_COMMAND_OVERRIDE = object()
 
 logger = logging.getLogger("orchestrator.services.graph_engine")
 
@@ -47,6 +53,7 @@ class GraphEngine(
     AgentPatternsMixin,
     NodeExecutorMixin,
     CheckpointMixin,
+    MapReduceMixin,
 ):
     """MVP Graph Execution Engine."""
 
@@ -128,6 +135,14 @@ class GraphEngine(
                 try:
                     output = await self._run_node_with_retries(node)
 
+                    # Fase 2: detectar GraphCommand
+                    next_node_override = _NO_COMMAND_OVERRIDE
+                    if is_graph_command(output):
+                        effective_output, next_node_override = await self._handle_graph_command(
+                            output, node.id
+                        )
+                        output = effective_output
+
                     if isinstance(output, dict):
                         self._apply_state_update(output)
 
@@ -179,7 +194,10 @@ class GraphEngine(
                         output=output,
                     )
 
-                    current_node_id = self._get_next_node(node.id, output)
+                    if next_node_override is _NO_COMMAND_OVERRIDE:
+                        current_node_id = self._get_next_node(node.id, output)
+                    else:
+                        current_node_id = next_node_override
 
                     budget_reason = self._check_budget_after_step()
                     if budget_reason:
@@ -338,6 +356,67 @@ class GraphEngine(
         if len(params) >= 2:
             return await execute_callable(node, self.state.data)
         return await execute_callable(node)
+
+    async def _handle_graph_command(
+        self,
+        command: GraphCommand,
+        node_id: str,
+    ):
+        """Procesa un GraphCommand: aplica update, ejecuta sends, resuelve next node.
+
+        Retorna (effective_output_dict, next_node_id_or_None).
+        """
+        effective_output = dict(command.update) if command.update else {}
+
+        # Aplicar update atómico vía StateManager (antes de Send para que los
+        # workers lo vean en su estado base)
+        if command.update:
+            self._state_manager.apply_update(self.state.data, command.update)
+
+        # Fase 3: ejecutar Send (map-reduce) si hay acciones
+        if command.send:
+            await self._execute_send_actions(command.send, node_id)
+
+        # GICS: registrar traza del command
+        self._record_command_trace(command, node_id)
+
+        # Resolver nodo siguiente
+        if command.graph == "PARENT":
+            # Escape de subgraph hacia el grafo padre
+            self.state.data["_subgraph_escape"] = True
+            return effective_output, None
+
+        if command.goto is None:
+            return effective_output, self._get_next_node(node_id, effective_output)
+
+        if isinstance(command.goto, list):
+            if len(command.goto) == 0:
+                return effective_output, None
+            if len(command.goto) == 1:
+                return effective_output, command.goto[0]
+            # Múltiples targets sin Send → error
+            raise ValueError(
+                f"Command.goto con múltiples targets {command.goto} requiere Send. "
+                "Use command.send para fan-out."
+            )
+
+        return effective_output, command.goto
+
+    def _record_command_trace(self, command: GraphCommand, node_id: str) -> None:
+        gics = getattr(self, "_gics", None)
+        if not gics:
+            return
+        key = f"ops:command_trace:{self.graph.id}"
+        try:
+            gics.put(key, {
+                "node_id": node_id,
+                "goto": command.goto,
+                "has_update": bool(command.update),
+                "has_send": bool(command.send),
+                "graph": command.graph,
+            })
+        except Exception as e:
+            logger.debug("GICS command_trace record failed: %s", e)
 
     def _apply_state_update(self, output: Dict[str, Any]) -> None:
         self._state_manager.apply_update(self.state.data, output)

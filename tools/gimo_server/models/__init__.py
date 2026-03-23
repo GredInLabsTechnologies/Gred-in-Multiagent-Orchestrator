@@ -37,7 +37,8 @@ from .graph_state import (
 )
 from .workflow import (
     WorkflowNode, WorkflowEdge, WorkflowGraph, WorkflowCheckpoint,
-    WorkflowState, WorkflowExecuteRequest, ContractCheck, WorkflowContract
+    WorkflowState, WorkflowExecuteRequest, ContractCheck, WorkflowContract,
+    SendAction, GraphCommand, is_graph_command,
 )
 from .eval import (
     EvalGoldenCase, EvalDataset, EvalJudgeConfig, EvalGateConfig,
