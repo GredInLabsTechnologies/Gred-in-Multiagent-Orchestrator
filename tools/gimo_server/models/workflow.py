@@ -36,6 +36,10 @@ class WorkflowCheckpoint(BaseModel):
     state: Dict[str, Any]
     output: Any
     status: Literal["completed", "failed"]
+    # Fase 5: Time-Travel
+    parent_checkpoint_id: Optional[str] = None
+    fork_id: Optional[str] = None
+    replayed: bool = False
 
 class WorkflowState(BaseModel):
     version: int = 1

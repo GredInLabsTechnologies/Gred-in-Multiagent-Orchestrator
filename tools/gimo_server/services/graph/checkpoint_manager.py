@@ -66,6 +66,19 @@ class CheckpointMixin:
                 state=checkpoint.state,
                 output=checkpoint.output,
                 status=checkpoint.status,
+                # Fase 5: Time-Travel fields (optional kwargs, backward compat)
+                parent_checkpoint_id=getattr(checkpoint, "parent_checkpoint_id", None),
+                fork_id=getattr(checkpoint, "fork_id", None),
+                replayed=getattr(checkpoint, "replayed", False),
+            )
+        except TypeError:
+            # Storage no acepta los nuevos kwargs — fallback sin ellos
+            self.storage.save_checkpoint(
+                workflow_id=self.graph.id,
+                node_id=checkpoint.node_id,
+                state=checkpoint.state,
+                output=checkpoint.output,
+                status=checkpoint.status,
             )
         except Exception as exc:
             logger.error("Failed to persist checkpoint for node=%s: %s", checkpoint.node_id, exc)

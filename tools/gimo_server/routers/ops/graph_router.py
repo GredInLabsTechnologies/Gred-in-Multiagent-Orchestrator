@@ -1,15 +1,24 @@
 """OPS graph endpoint — migrated from legacy /ui/graph."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from ...security import check_rate_limit
 from ...security.auth import AuthContext
 from ...services.ops_service import OpsService
 from ...services.plan_graph_builder import build_graph_from_ops_plan
-from ..ops.common import require_read, _WORKFLOW_ENGINES
+from ..ops.common import require_read, require_operator, _WORKFLOW_ENGINES
 
 router = APIRouter(prefix="/ops/graph", tags=["graph"])
+
+
+class TimeTravelRequest(BaseModel):
+    action: str  # "replay" | "fork"
+    checkpoint_index: int = -1
+    state_patch: Optional[Dict[str, Any]] = None
 
 
 def _get_graph_for_custom_plan():
@@ -96,3 +105,53 @@ def get_graph(
         return {"nodes": [], "edges": []}
 
     return _build_engine_graph(engine)
+
+
+@router.post("/{workflow_id}/time-travel")
+async def time_travel(
+    workflow_id: str,
+    request: TimeTravelRequest,
+    auth: AuthContext = Depends(require_operator),
+    _rl: None = Depends(check_rate_limit),
+):
+    """Fase 5: Time-Travel — replay o fork desde un checkpoint.
+
+    - action=replay: re-ejecuta el engine desde el checkpoint indicado (in-place)
+    - action=fork: crea un nuevo engine con estado editado, retorna fork_workflow_id
+    """
+    engine = _WORKFLOW_ENGINES.get(workflow_id)
+    if not engine:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found or not active")
+
+    if request.action == "replay":
+        try:
+            engine.replay_from_checkpoint(request.checkpoint_index)
+        except (ValueError, IndexError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {
+            "action": "replay",
+            "workflow_id": workflow_id,
+            "checkpoint_index": request.checkpoint_index,
+            "timeline": engine.get_checkpoint_timeline(),
+        }
+
+    if request.action == "fork":
+        try:
+            fork_engine = engine.fork_from_checkpoint(
+                request.checkpoint_index,
+                request.state_patch,
+            )
+        except (ValueError, IndexError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        fork_id = fork_engine.state.data.get("fork_id", f"fork_{workflow_id}")
+        _WORKFLOW_ENGINES[fork_id] = fork_engine
+        return {
+            "action": "fork",
+            "workflow_id": workflow_id,
+            "fork_workflow_id": fork_id,
+            "checkpoint_index": request.checkpoint_index,
+            "timeline": fork_engine.get_checkpoint_timeline(),
+        }
+
+    raise HTTPException(status_code=400, detail=f"action inválida: '{request.action}'. Use 'replay' o 'fork'")

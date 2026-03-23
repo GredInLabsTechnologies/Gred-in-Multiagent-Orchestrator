@@ -40,6 +40,7 @@ from .node_executor import NodeExecutorMixin
 from .checkpoint_manager import CheckpointMixin
 from .map_reduce import MapReduceMixin
 from .state_manager import StateManager
+from .time_travel import TimeTravelMixin
 
 # Sentinel: nodo siguiente no fue overrideado por un Command
 _NO_COMMAND_OVERRIDE = object()
@@ -54,6 +55,7 @@ class GraphEngine(
     NodeExecutorMixin,
     CheckpointMixin,
     MapReduceMixin,
+    TimeTravelMixin,
 ):
     """MVP Graph Execution Engine."""
 
@@ -88,6 +90,7 @@ class GraphEngine(
             workflow_id=self.graph.id,
         )
         self._cycle_edges: set = self._detect_cycles()
+        self._replaying: bool = False
 
     async def execute(self, initial_state: Optional[Dict[str, Any]] = None) -> WorkflowState:
         if initial_state:
@@ -182,8 +185,10 @@ class GraphEngine(
                         node_id=node.id,
                         state=self.state.data.copy(),
                         output=output,
-                        status="completed"
+                        status="completed",
+                        replayed=self._replaying,
                     )
+                    self._replaying = False
                     self.state.checkpoints.append(checkpoint)
                     self._persist_checkpoint(checkpoint)
 

@@ -1380,3 +1380,165 @@ async def test_cycle_backward_compat_self_loop():
     assert len(state.checkpoints) == 2
     assert state.data["count"] == 2
     assert state.data["aborted_reason"] == "max_iterations_exceeded"
+
+
+# ── Fase 5: Time-Travel ──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_time_travel_replay_re_executes_from_checkpoint():
+    """replay_from_checkpoint restaura estado y re-ejecuta desde el nodo siguiente."""
+    nodes = [
+        WorkflowNode(id="A", type="transform", config={"a": 1}),
+        WorkflowNode(id="B", type="transform", config={"b": 2}),
+        WorkflowNode(id="C", type="transform", config={"c": 3}),
+    ]
+    edges = [
+        WorkflowEdge(**{"from": "A", "to": "B"}),
+        WorkflowEdge(**{"from": "B", "to": "C"}),
+    ]
+    graph = WorkflowGraph(id="tt_replay", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return node.config
+
+    engine._execute_node = mock_execute
+
+    # Primera ejecución completa
+    await engine.execute()
+    assert engine.state.data["c"] == 3
+    assert len(engine.state.checkpoints) == 3
+
+    # Replay desde checkpoint 0 (nodo A): debe re-ejecutar B y C
+    engine.replay_from_checkpoint(0)
+    state = await engine.execute()
+
+    assert state.data["replayed_from"]["node_id"] == "A"
+    assert state.data["b"] == 2
+    assert state.data["c"] == 3
+    # El primer checkpoint replayed debe estar marcado
+    replayed_cps = [cp for cp in state.checkpoints if cp.replayed]
+    assert len(replayed_cps) >= 1
+
+
+@pytest.mark.asyncio
+async def test_time_travel_fork_creates_independent_engine():
+    """fork_from_checkpoint crea un engine independiente con state editado."""
+    nodes = [
+        WorkflowNode(id="A", type="transform", config={"a": 1}),
+        WorkflowNode(id="B", type="transform", config={"b": 2}),
+    ]
+    edges = [WorkflowEdge(**{"from": "A", "to": "B"})]
+    graph = WorkflowGraph(id="tt_fork", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return node.config
+
+    engine._execute_node = mock_execute
+    await engine.execute()
+
+    # Fork desde checkpoint 0 (A) con state_patch
+    fork = engine.fork_from_checkpoint(0, state_patch={"injected": 99})
+    fork._execute_node = mock_execute
+
+    fork_state = await fork.execute()
+
+    # Fork es independiente — estado del engine original no fue afectado
+    assert "injected" not in engine.state.data
+    # Fork tiene el patch
+    assert fork_state.data["injected"] == 99
+    # Fork tiene fork_id en state
+    assert "fork_id" in fork_state.data
+    assert fork_state.data["forked_from"]["parent_workflow_id"] == "tt_fork"
+
+
+@pytest.mark.asyncio
+async def test_time_travel_fork_inherits_checkpoints():
+    """El fork hereda los checkpoints anteriores al punto de fork."""
+    nodes = [
+        WorkflowNode(id="A", type="transform"),
+        WorkflowNode(id="B", type="transform"),
+        WorkflowNode(id="C", type="transform"),
+    ]
+    edges = [
+        WorkflowEdge(**{"from": "A", "to": "B"}),
+        WorkflowEdge(**{"from": "B", "to": "C"}),
+    ]
+    graph = WorkflowGraph(id="tt_fork_inherit", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return {}
+
+    engine._execute_node = mock_execute
+    await engine.execute()  # A, B, C completados
+
+    # Fork desde checkpoint 1 (B) — el fork hereda A y B
+    fork = engine.fork_from_checkpoint(1)
+    fork._execute_node = mock_execute
+
+    # El fork ya tiene 2 checkpoints heredados (A y B)
+    assert len(fork.state.checkpoints) == 2
+    assert fork.state.checkpoints[0].node_id == "A"
+    assert fork.state.checkpoints[1].node_id == "B"
+    # Todos tienen fork_id asignado
+    assert all(cp.fork_id for cp in fork.state.checkpoints)
+
+    # El fork ejecuta desde C (siguiente a B)
+    fork_state = await fork.execute()
+    cp_nodes = [cp.node_id for cp in fork_state.checkpoints]
+    assert "C" in cp_nodes
+
+
+def test_time_travel_get_checkpoint_timeline():
+    """get_checkpoint_timeline retorna lista navegable de todos los checkpoints."""
+    from tools.gimo_server.ops_models import WorkflowCheckpoint, WorkflowState
+    nodes = [WorkflowNode(id="X", type="transform")]
+    graph = WorkflowGraph(id="tt_timeline", nodes=nodes, edges=[])
+    engine = GraphEngine(graph)
+
+    # Inyectar checkpoints manualmente
+    engine.state.checkpoints = [
+        WorkflowCheckpoint(node_id="A", state={}, output={}, status="completed"),
+        WorkflowCheckpoint(node_id="B", state={}, output={}, status="completed", fork_id="f1"),
+        WorkflowCheckpoint(node_id="C", state={}, output=None, status="failed", replayed=True),
+    ]
+
+    timeline = engine.get_checkpoint_timeline()
+
+    assert len(timeline) == 3
+    assert timeline[0]["node_id"] == "A"
+    assert timeline[0]["index"] == 0
+    assert timeline[1]["fork_id"] == "f1"
+    assert timeline[2]["replayed"] is True
+    assert timeline[2]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_time_travel_backward_compat_resume_from_checkpoint():
+    """resume_from_checkpoint existente sigue funcionando sin cambios."""
+    nodes = [
+        WorkflowNode(id="A", type="transform", config={"a": 1}),
+        WorkflowNode(id="B", type="transform", config={"b": 2}),
+    ]
+    edges = [WorkflowEdge(**{"from": "A", "to": "B"})]
+    graph = WorkflowGraph(id="tt_compat_resume", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return node.config
+
+    engine._execute_node = mock_execute
+    await engine.execute()
+
+    next_node = engine.resume_from_checkpoint(0)
+    assert next_node == "B"
+
+    state = await engine.execute()
+    assert state.data["resumed_from_checkpoint"]["node_id"] == "A"
+    assert state.data["b"] == 2
