@@ -49,6 +49,9 @@ class GraphEngine(
 ):
     """MVP Graph Execution Engine."""
 
+    # Maximum nesting depth for sub_graph nodes to prevent infinite recursion.
+    _MAX_SUB_GRAPH_DEPTH: int = 5
+
     def __init__(
         self,
         graph: WorkflowGraph,
@@ -58,6 +61,7 @@ class GraphEngine(
         workflow_timeout_seconds: Optional[int] = None,
         confidence_service: Optional[ConfidenceService] = None,
         provider_service: Optional[ProviderService] = None,
+        _sub_graph_depth: int = 0,
     ):
         self.graph = graph
         self.state = WorkflowState()
@@ -66,6 +70,7 @@ class GraphEngine(
         self.persist_checkpoints = persist_checkpoints
         self.workflow_timeout_seconds = workflow_timeout_seconds
         self._confidence_service = confidence_service
+        self._sub_graph_depth = _sub_graph_depth
         self._nodes_by_id = {node.id: node for node in self.graph.nodes}
         self._resume_from_node_id: Optional[str] = None
         self._execution_started_at: Optional[float] = None

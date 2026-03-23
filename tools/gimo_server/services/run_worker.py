@@ -223,6 +223,19 @@ class RunWorker:
             repo_root = base_path or settings.repo_root_dir
             target_path = repo_root / target
 
+        # Workspace bounds check: reject paths that escape the repo root
+        try:
+            resolved_target = target_path.resolve()
+            resolved_root = Path(str(base_path or get_settings().repo_root_dir)).resolve()
+            resolved_target.relative_to(resolved_root)
+            target_path = resolved_target
+        except ValueError:
+            OpsService.append_log(
+                run_id, level="ERROR",
+                msg=f"Task {task_id}: Path traversal rejected — '{target}' escapes workspace."
+            )
+            return False
+
         OpsService.append_log(
             run_id, level="INFO",
             msg=f"Task {task_id}: File target → {target_path} (model: {model})"

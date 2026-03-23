@@ -2,8 +2,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+from pathlib import Path
 from typing import Any, Dict
-from ..contracts import StageInput, StageOutput, ExecutionStage
+from ..contracts import FileTaskSpec, StageInput, StageOutput, ExecutionStage
 from ..tools.executor import ToolExecutor
 from ...services.runtime_policy_service import RuntimePolicyService
 
@@ -13,6 +14,16 @@ class FileWrite(ExecutionStage):
     @property
     def name(self) -> str:
         return "file_write"
+
+    @staticmethod
+    def _assert_within_workspace(path: str, workspace_root: str) -> None:
+        """Raise ValueError if path resolves outside workspace_root."""
+        ws = Path(workspace_root).resolve()
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            candidate = ws / candidate
+        candidate = candidate.resolve()
+        candidate.relative_to(ws)  # raises ValueError if outside workspace
 
     @staticmethod
     def _extract_fallback_path(content: str, context: Dict[str, Any]) -> str | None:
@@ -77,13 +88,34 @@ class FileWrite(ExecutionStage):
                     artifacts_out["error"] = f"Failed to parse arguments for {name}: {str(e)}"
                     break
         else:
-            # Fallback path if no tool calls found
-            target_path = self._extract_fallback_path(llm_content, input.context)
+            # Fallback path if no tool calls found.
+            # Priority 1: explicit FileTaskSpec contract in context (preferred).
+            spec_raw = input.context.get("file_task_spec")
+            if spec_raw:
+                try:
+                    spec = FileTaskSpec.model_validate(spec_raw)
+                    target_path = spec.target_path
+                except Exception:
+                    target_path = None
+            else:
+                target_path = None
+            # Priority 2: heuristic extraction from LLM content (backwards-compat fallback).
+            if not target_path:
+                target_path = self._extract_fallback_path(llm_content, input.context)
             logger.info("[FileWrite] target_path extracted: %r (content[:80]=%r)", target_path, llm_content[:80])
             if not target_path:
                 status = "fail"
                 artifacts_out["error"] = "No tool calls and no target file path detected"
             else:
+                # Workspace bounds check: reject paths that escape the workspace
+                try:
+                    self._assert_within_workspace(target_path, workspace_root)
+                except ValueError:
+                    logger.warning("[FileWrite] Path traversal rejected: %r escapes workspace %r", target_path, workspace_root)
+                    status = "fail"
+                    artifacts_out["error"] = f"Path traversal rejected: {target_path!r} escapes workspace"
+                    artifacts_out["file_op_results"] = results
+                    return StageOutput(status=status, artifacts=artifacts_out)
                 fallback_content = llm_content.strip()
                 # Strip any TARGET_FILE directive line that the agent may have emitted
                 fallback_content = re.sub(r"(?m)^TARGET_FILE:[^\n]*\n?", "", fallback_content).strip()

@@ -1,7 +1,155 @@
 from __future__ import annotations
+import logging
+from enum import Enum, auto
 from importlib import import_module
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from ..engine.pipeline import Pipeline
+
+logger = logging.getLogger("orchestrator.services.engine")
+
+
+class ContextPolicy(Enum):
+    """Policy governing whether a context field can be overridden by a child run.
+
+    IMMUTABLE       — Set by the orchestrator at run creation. A child cannot
+                      change this field. Attempts are blocked and logged.
+                      This is the safe default for unknown fields (fail-closed).
+
+    CHILD_OVERRIDABLE — The child run may set or override this field. Used for
+                        task-specific parameters that legitimately vary per child
+                        (prompt, target_path, model, etc.).
+
+    CHILD_EXCLUSIVE  — This field is meaningful only when set by a child. It is
+                       automatically stripped from the parent context before a
+                       child run executes, ensuring fractal runs don't inherit
+                       parent orchestration state.
+
+    PARENT_ONLY     — Valid only in the parent orchestrator context. Automatically
+                      stripped when executing as a child run, regardless of whether
+                      the child sets it. A child that explicitly sets this field is
+                      also blocked. Prevents parent orchestration flags from leaking
+                      into child scopes or being injected upward.
+    """
+    IMMUTABLE = auto()
+    CHILD_OVERRIDABLE = auto()
+    CHILD_EXCLUSIVE = auto()
+    PARENT_ONLY = auto()
+
+
+# ── Context Field Registry ────────────────────────────────────────────────────
+#
+# Single source of truth for every context field's security policy.
+# Adding a new field: pick its policy and add one line here. No other code
+# needs to change. The merge function below reads this registry at call time.
+#
+# Default for unlisted fields: IMMUTABLE (fail-closed).
+# If a new field should be child-overridable, add it here explicitly.
+#
+_CONTEXT_FIELD_REGISTRY: Dict[str, ContextPolicy] = {
+    # ── Orchestration invariants (IMMUTABLE) ──────────────────────────────────
+    # These determine composition, security posture and execution boundaries.
+    # A child that overrides these could escape its execution scope.
+    "intent_effective":   ContextPolicy.IMMUTABLE,
+    "intent_class":       ContextPolicy.IMMUTABLE,
+    "spawn_depth":        ContextPolicy.IMMUTABLE,
+    "execution_decision": ContextPolicy.IMMUTABLE,
+    "workspace_root":     ContextPolicy.IMMUTABLE,
+    "execution_mode":     ContextPolicy.IMMUTABLE,
+
+    # ── Parent-only orchestration flags (PARENT_ONLY) ─────────────────────────
+    # These flags drive parent-level composition decisions (wake-on-demand,
+    # multi-agent spawning). They are automatically stripped when the context
+    # is applied to a child run — a child starts clean unless it sets them
+    # explicitly in its own child_context, which is also blocked here.
+    "multi_agent":        ContextPolicy.PARENT_ONLY,
+    "wake_on_demand":     ContextPolicy.PARENT_ONLY,
+
+    # ── Composition-determining flags (IMMUTABLE) ─────────────────────────────
+    # These are read by the heuristic composition inference block.
+    # A child cannot force a different composition on its parent's context.
+    "child_run_mode":     ContextPolicy.IMMUTABLE,
+    "custom_plan_id":     ContextPolicy.IMMUTABLE,
+    "structured":         ContextPolicy.IMMUTABLE,
+
+    # ── Child-overridable task parameters ─────────────────────────────────────
+    # Legitimate per-child variation. A child sets its own task content,
+    # routing preferences, and execution tuning within the bounds set here.
+    "prompt":             ContextPolicy.CHILD_OVERRIDABLE,
+    "task_id":            ContextPolicy.CHILD_OVERRIDABLE,
+    "role":               ContextPolicy.CHILD_OVERRIDABLE,
+    "target_path":        ContextPolicy.CHILD_OVERRIDABLE,
+    "target_file":        ContextPolicy.CHILD_OVERRIDABLE,
+    "file_path":          ContextPolicy.CHILD_OVERRIDABLE,
+    "file_task_spec":     ContextPolicy.CHILD_OVERRIDABLE,
+    "model":              ContextPolicy.CHILD_OVERRIDABLE,
+    "provider_type":      ContextPolicy.CHILD_OVERRIDABLE,
+    "task_type":          ContextPolicy.CHILD_OVERRIDABLE,
+    "ace_multi_pass":     ContextPolicy.CHILD_OVERRIDABLE,
+    "ace_max_passes":     ContextPolicy.CHILD_OVERRIDABLE,  # bounded in llm_execute.py
+    "gen_context":        ContextPolicy.CHILD_OVERRIDABLE,
+    "max_spawn_depth":    ContextPolicy.CHILD_OVERRIDABLE,
+
+    # ── Child-exclusive fields ─────────────────────────────────────────────────
+    # Valid only when set by the child itself. These are stripped from the
+    # parent draft context before applying child overrides, so a child that
+    # doesn't set them explicitly starts clean.
+    "child_tasks":        ContextPolicy.CHILD_EXCLUSIVE,
+}
+
+_DEFAULT_CONTEXT_POLICY = ContextPolicy.IMMUTABLE  # fail-closed for unknown fields
+
+# Valid explicit execution modes. Module-level so it is not recreated per call.
+_VALID_EXECUTION_MODES: frozenset[str] = frozenset({
+    "legacy_run", "file_task", "structured_plan",
+    "multi_agent", "agent_task", "merge_gate", "custom_plan",
+})
+
+
+def _apply_child_context(
+    base: Dict[str, Any],
+    child_context: Dict[str, Any],
+    *,
+    is_child_run: bool = False,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Merge child_context into base according to the field registry.
+
+    Returns (updated_base, blocked_keys).
+
+    Rules:
+    - IMMUTABLE keys in child_context are dropped and logged.
+    - CHILD_OVERRIDABLE keys are applied.
+    - CHILD_EXCLUSIVE keys in base are stripped first, then applied from child.
+    - PARENT_ONLY keys are stripped from base when is_child_run=True, and are
+      also blocked if the child tries to set them explicitly.
+    - Unknown keys use _DEFAULT_CONTEXT_POLICY (IMMUTABLE → blocked).
+    """
+    blocked: List[str] = []
+
+    # Strip CHILD_EXCLUSIVE keys that the parent draft may carry — a child that
+    # doesn't explicitly set them should not inherit the parent's version.
+    # Strip PARENT_ONLY keys when executing as a child run — these flags are
+    # meaningful only in the parent orchestrator scope.
+    for key, policy in _CONTEXT_FIELD_REGISTRY.items():
+        if policy == ContextPolicy.CHILD_EXCLUSIVE:
+            base.pop(key, None)
+        elif policy == ContextPolicy.PARENT_ONLY and is_child_run:
+            base.pop(key, None)
+
+    for key, value in child_context.items():
+        policy = _CONTEXT_FIELD_REGISTRY.get(key, _DEFAULT_CONTEXT_POLICY)
+        if policy in (ContextPolicy.IMMUTABLE, ContextPolicy.PARENT_ONLY):
+            blocked.append(key)
+        else:
+            base[key] = value
+
+    if blocked:
+        logger.warning(
+            "[CHILD_CTX] Blocked %d immutable key override(s): %s",
+            len(blocked),
+            ", ".join(repr(k) for k in blocked),
+        )
+
+    return base, blocked
 
 class EngineService:
     """Entry point for executing unified pipelines."""
@@ -111,26 +259,53 @@ class EngineService:
         if draft and getattr(draft, "prompt", None) and "prompt" not in context:
             context["prompt"] = draft.prompt
 
-        # Child-specific context overrides parent draft context (Gap 3)
+        # Child-specific context overrides — governed by _CONTEXT_FIELD_REGISTRY.
+        # is_child_run=True causes PARENT_ONLY fields (wake_on_demand, multi_agent)
+        # to be stripped from the inherited draft context, and blocks the child
+        # from injecting them back. CHILD_EXCLUSIVE fields (child_tasks) are
+        # stripped unless the child explicitly sets them in its own child_context.
+        is_child_run = bool(getattr(run, "parent_run_id", None))
         if getattr(run, "child_context", None):
-            context.update(run.child_context)
+            context, _blocked = _apply_child_context(
+                context, run.child_context, is_child_run=is_child_run
+            )
+            if _blocked:
+                OpsService.append_log(
+                    run_id, level="WARN",
+                    msg=f"[CHILD_CTX] Blocked immutable key overrides: {_blocked}",
+                )
+        elif is_child_run:
+            # No child_context provided but still a child run — strip PARENT_ONLY
+            # and CHILD_EXCLUSIVE fields inherited from the parent draft context.
+            context, _ = _apply_child_context(context, {}, is_child_run=True)
         if getattr(run, "child_prompt", None):
             context["prompt"] = run.child_prompt
 
-        # For child runs, strip parent-orchestration keys inherited from the
-        # draft context.  A child should never see wake_on_demand or the
-        # parent's child_tasks list — only its OWN child_context determines
-        # whether it spawns further sub-agents (fractal).
-        if getattr(run, "parent_run_id", None):
-            own_child_tasks = (run.child_context or {}).get("child_tasks")
-            context.pop("wake_on_demand", None)
-            context.pop("multi_agent", None)
-            if not own_child_tasks:
-                context.pop("child_tasks", None)
+        # Log explicit GICS degradation so operators know when historical reliability
+        # is unavailable and routing falls back to static priors.
+        try:
+            gics = getattr(OpsService, "_gics", None)
+            gics_available = bool(gics and getattr(gics, "_client", None))
+        except Exception:
+            gics_available = False
+        if not gics_available:
+            logger.warning(
+                "[GICS_DEGRADED] run=%s — GICS unavailable, routing decisions fall back to static priors. "
+                "Historical reliability data not consulted.",
+                run_id,
+            )
+            OpsService.append_log(
+                run_id, level="WARN",
+                msg="[GICS_DEGRADED] Historical reliability unavailable — routing uses static priors."
+            )
 
         # Infer composition if not provided
         if not composition:
-            if context.get("custom_plan_id"):
+            # Honour an explicit execution_mode from context first (avoids heuristic drift).
+            explicit_mode = context.get("execution_mode")
+            if explicit_mode and explicit_mode in _VALID_EXECUTION_MODES:
+                composition = explicit_mode
+            elif context.get("custom_plan_id"):
                 composition = "custom_plan"
             elif (
                 bool(context.get("multi_agent"))

@@ -135,6 +135,11 @@ class RefactorConfig(BaseModel):
 
 class OpsConfig(BaseModel):
     default_auto_run: bool = False
+    # Intent types that are never eligible for auto_run, regardless of default_auto_run.
+    # These intents require human review before execution.
+    auto_run_excluded_intents: List[str] = Field(
+        default_factory=lambda: ["MERGE_REQUEST", "SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"]
+    )
     draft_cleanup_ttl_days: int = 7
     max_concurrent_runs: int = 3
     operator_can_generate: bool = False

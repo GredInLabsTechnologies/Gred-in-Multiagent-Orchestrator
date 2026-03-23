@@ -13,6 +13,7 @@ Compliance: GICS_1_3_4_CLIENT_CONSUMPTION_SCOPE.md — GIMO section.
 import asyncio
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -62,6 +63,18 @@ class GicsService:
         self._supervisor: Optional[GICSDaemonSupervisor] = None
         self._client: Optional[GICSClient] = None
         self._health_task: Optional[asyncio.Task] = None
+
+        # Per-key locks to prevent read-modify-write races in reliability tracking.
+        # Threading locks (not asyncio) because the GICS IPC calls are synchronous.
+        self._outcome_locks: Dict[str, threading.Lock] = {}
+        self._outcome_locks_mutex = threading.Lock()
+
+    def _outcome_lock(self, key: str) -> threading.Lock:
+        """Return (creating if needed) the per-key lock for reliability writes."""
+        with self._outcome_locks_mutex:
+            if key not in self._outcome_locks:
+                self._outcome_locks[key] = threading.Lock()
+            return self._outcome_locks[key]
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -297,6 +310,22 @@ class GicsService:
     ) -> Dict[str, Any]:
         """Seed initial model priors (phase-1 catalog metadata → GICS)."""
         key = self._model_key(provider_type, model_id)
+        with self._outcome_lock(key):
+            return self._seed_model_prior_locked(
+                key=key, provider_type=provider_type, model_id=model_id,
+                prior_scores=prior_scores, metadata=metadata,
+            )
+
+    def _seed_model_prior_locked(
+        self,
+        *,
+        key: str,
+        provider_type: str,
+        model_id: str,
+        prior_scores: Dict[str, float],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Inner implementation — must be called with _outcome_lock(key) held."""
         existing = self.get(key)
         fields = dict((existing or {}).get("fields") or {})
         priors = dict(prior_scores or {})
@@ -334,44 +363,49 @@ class GicsService:
         cost_usd: Optional[float] = None,
         task_type: str = "general",
     ) -> Dict[str, Any]:
-        """Register post-task evidence and update reliability score."""
+        """Register post-task evidence and update reliability score.
+
+        Thread-safe: uses a per-key lock to prevent concurrent read-modify-write
+        races when multiple runs finish simultaneously for the same model.
+        """
         key = self._model_key(provider_type, model_id)
-        existing = self.get(key)
-        fields = dict((existing or {}).get("fields") or {})
+        with self._outcome_lock(key):
+            existing = self.get(key)
+            fields = dict((existing or {}).get("fields") or {})
 
-        samples = int(fields.get("samples", 0) or 0) + 1
-        successes = int(fields.get("successes", 0) or 0) + (1 if success else 0)
-        failures = int(fields.get("failures", 0) or 0) + (0 if success else 1)
-        failure_streak = 0 if success else int(fields.get("failure_streak", 0) or 0) + 1
+            samples = int(fields.get("samples", 0) or 0) + 1
+            successes = int(fields.get("successes", 0) or 0) + (1 if success else 0)
+            failures = int(fields.get("failures", 0) or 0) + (0 if success else 1)
+            failure_streak = 0 if success else int(fields.get("failure_streak", 0) or 0) + 1
 
-        prev_latency = float(fields.get("avg_latency_ms", 0.0) or 0.0)
-        prev_cost = float(fields.get("avg_cost_usd", 0.0) or 0.0)
-        new_latency = float(latency_ms or 0.0)
-        new_cost = float(cost_usd or 0.0)
-        avg_latency = ((prev_latency * (samples - 1)) + new_latency) / max(1, samples)
-        avg_cost = ((prev_cost * (samples - 1)) + new_cost) / max(1, samples)
+            prev_latency = float(fields.get("avg_latency_ms", 0.0) or 0.0)
+            prev_cost = float(fields.get("avg_cost_usd", 0.0) or 0.0)
+            new_latency = float(latency_ms or 0.0)
+            new_cost = float(cost_usd or 0.0)
+            avg_latency = ((prev_latency * (samples - 1)) + new_latency) / max(1, samples)
+            avg_cost = ((prev_cost * (samples - 1)) + new_cost) / max(1, samples)
 
-        success_rate = successes / max(1, samples)
-        prior_score = float(fields.get("score", 0.5) or 0.5)
-        blended_score = max(0.0, min(1.0, (prior_score * 0.2) + (success_rate * 0.8)))
-        anomaly = failure_streak >= 3
+            success_rate = successes / max(1, samples)
+            prior_score = float(fields.get("score", 0.5) or 0.5)
+            blended_score = max(0.0, min(1.0, (prior_score * 0.2) + (success_rate * 0.8)))
+            anomaly = failure_streak >= 3
 
-        outcome = {
-            "provider_type": provider_type,
-            "model_id": model_id,
-            "task_type": task_type,
-            "score": blended_score,
-            "samples": samples,
-            "successes": successes,
-            "failures": failures,
-            "failure_streak": failure_streak,
-            "avg_latency_ms": avg_latency,
-            "avg_cost_usd": avg_cost,
-            "anomaly": anomaly,
-            "updated_at": int(time.time()),
-        }
-        self.put(key, {**fields, **outcome})
-        return {**fields, **outcome}
+            outcome = {
+                "provider_type": provider_type,
+                "model_id": model_id,
+                "task_type": task_type,
+                "score": blended_score,
+                "samples": samples,
+                "successes": successes,
+                "failures": failures,
+                "failure_streak": failure_streak,
+                "avg_latency_ms": avg_latency,
+                "avg_cost_usd": avg_cost,
+                "anomaly": anomaly,
+                "updated_at": int(time.time()),
+            }
+            self.put(key, {**fields, **outcome})
+            return {**fields, **outcome}
 
     def get_model_reliability(
         self, *, provider_type: str, model_id: str

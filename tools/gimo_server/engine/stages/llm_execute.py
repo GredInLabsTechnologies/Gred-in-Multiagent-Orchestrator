@@ -2,6 +2,9 @@ from __future__ import annotations
 from ..contracts import StageInput, StageOutput, ExecutionStage
 from ...services.provider_service import ProviderService
 
+# Hard upper bound on multi-pass iterations to prevent context-injection amplification.
+_ACE_MAX_PASSES_CEILING = 10
+
 class LlmExecute(ExecutionStage):
     @property
     def name(self) -> str:
@@ -14,7 +17,8 @@ class LlmExecute(ExecutionStage):
 
         gen_context = input.context.get("gen_context", {})
         multi_pass = input.context.get("ace_multi_pass", False)
-        max_passes = int(input.context.get("ace_max_passes", 3)) if multi_pass else 1
+        raw_passes = int(input.context.get("ace_max_passes", 3)) if multi_pass else 1
+        max_passes = min(raw_passes, _ACE_MAX_PASSES_CEILING)
 
         try:
             current_prompt = prompt

@@ -260,14 +260,45 @@ python scripts\\ci\\quality_gates.py
 
 ### Sistema de Storage
 - **Actual**: JSON file-backed para OPS state, SQLite para cost/trust/eval storage.
-- **GICS**: Daemon Node.js para almacenamiento distribuido (experimental).
+- **GICS**: Daemon con SDK Python para almacenamiento distribuido de memoria operativa.
+  Ver sección "Autoridad de GICS" a continuación.
+
+### Autoridad de Motores de Ejecución
+
+GIMO tiene **dos motores de ejecución** con dominios distintos y no superpuestos:
+
+| Motor | Archivo | Dominio |
+|---|---|---|
+| **Pipeline** | `tools/gimo_server/engine/pipeline.py` | Runs operativos creados desde drafts aprobados. Es el motor principal invocado por `RunWorker → EngineService`. |
+| **GraphEngine** | `tools/gimo_server/services/graph/engine.py` | Ejecución de workflows estructurados (`WorkflowGraph`). Usado desde rutas `/ops/workflow/*`. No compite con Pipeline. |
+
+Cada run operativo usa Pipeline. GraphEngine es para workflows definidos explícitamente como grafos.
+Los dos motores no se solapan ni se sustituyen mutuamente.
+
+### Autoridad de GICS
+
+GICS (`tools/gimo_server/services/gics_service.py`) **no es un daemon experimental**. Es la memoria operativa central de GIMO. Participa en:
+
+- **Fiabilidad de modelos**: `record_model_outcome()` + `get_model_reliability()` — score empírico blended (80% tasa real + 20% prior) con detección de anomalías (failure_streak ≥ 3).
+- **Routing de modelos**: `ModelRouterService` excluye modelos con `anomaly=True` via `_filter_gics_anomalies()`.
+- **Telemetría de agentes**: push de outcomes y eventos de runs al namespace `ops:*`.
+- **ACE pre-flight**: capability history para decisiones de decomposición multi-agente.
+- **Priors de política**: `seed_profile()` / `seed_policy()` para priors por workspace/host.
+
+**Source of truth por dominio**:
+- `OPS JSON` (`.orch_data/ops/`) → estado operacional duradero (drafts, runs, config)
+- `Pipeline journal` → trazabilidad de ejecución por stage
+- `GICS` → memoria estadística, fiabilidad, capability, policy priors
+- `Provider config` → topología y binding de proveedores LLM
 
 ### Flujo Principal Detallado
-1. **Draft**: Se recibe un prompt o intent y se genera un borrador (`ExecutionPlanDraft`).
-2. **Approved**: El usuario (o regla automatica) aprueba el plan.
-3. **Run**: El draft se convierte en un plan de ejecucion en el `GraphEngine`.
-4. **RunWorker**: El worker asincrono toma los nodos del grafo y delega el trabajo real.
-5. **ProviderService / LLM**: Se solicita inferencia al proveedor configurado.
+1. **Draft**: Se recibe un prompt o intent y se genera un borrador (`OpsDraft`).
+2. **Approved**: El usuario (o regla automatica) aprueba el plan (`OpsApproved`).
+3. **Run**: Se crea un run con `status=pending` (`OpsRun`).
+4. **RunWorker**: El worker asíncrono detecta el run y llama a `EngineService.execute_run()`.
+5. **EngineService**: Selecciona composición (por `execution_mode` explícito o heurística) y ejecuta Pipeline.
+6. **Pipeline stages**: PolicyGate → RiskGate → [LlmExecute / FileWrite / SpawnAgents / etc.]
+7. **ProviderService / LLM**: Se solicita inferencia al proveedor configurado.
 
 IDE → MCP tool → OpsService → RunWorker → ProviderService → Adapter → LLM
 

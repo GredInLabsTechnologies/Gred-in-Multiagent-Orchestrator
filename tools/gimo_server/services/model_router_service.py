@@ -211,6 +211,33 @@ class ModelRouterService:
                 reason_parts.append("hw_caution:small_local_only")
         return candidates
 
+    def _filter_gics_anomalies(self, candidates: list[ModelEntry], reason_parts: list[str]) -> list[ModelEntry]:
+        """Exclude models flagged as anomalous by GICS (failure_streak >= 3).
+
+        Fails open: if GICS is unavailable or raises, returns candidates unchanged.
+        Never returns an empty list — always preserves at least the original set.
+        """
+        try:
+            from .ops_service import OpsService
+            gics = getattr(OpsService, "_gics", None)
+            if not gics:
+                return candidates
+            filtered = []
+            for m in candidates:
+                try:
+                    rel = gics.get_model_reliability(
+                        provider_type=m.provider_id, model_id=m.model_id
+                    )
+                    if rel and rel.get("anomaly", False):
+                        reason_parts.append(f"gics_anomaly_excluded:{m.model_id}")
+                        continue
+                except Exception:
+                    pass
+                filtered.append(m)
+            return filtered if filtered else candidates
+        except Exception:
+            return candidates
+
     def _apply_eco_mode_selection(self, candidates: list[ModelEntry], config: Any, reason_parts: list[str], hw_state: str) -> Optional[RoutingDecision]:
         if hasattr(config, "economy") and config.economy is not None and config.economy.eco_mode.mode != "off":
             autonomy = config.economy.autonomy_level
@@ -265,6 +292,7 @@ class ModelRouterService:
 
         candidates = self._filter_capabilities(all_models, cap_needed, tier_min, tier_max, reason_parts)
         candidates = self._filter_hardware(candidates, hw_state, config, reason_parts)
+        candidates = self._filter_gics_anomalies(candidates, reason_parts)
 
         if not candidates:
             candidates = [m for m in all_models if tier_min <= m.quality_tier <= tier_max]
