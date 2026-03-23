@@ -612,9 +612,17 @@ class CustomPlanService:
 
             layer_results = await asyncio.gather(
                 *[_run_with_limit(node_id, idx) for idx, node_id in enumerate(runnable)],
-                return_exceptions=False,
+                return_exceptions=True,
             )
-            for artifact in layer_results:
+            for result_idx, artifact in enumerate(layer_results):
+                if isinstance(artifact, BaseException):
+                    failed_node_id = runnable[result_idx]
+                    failed_node = node_map[failed_node_id]
+                    if failed_node.status not in ("done", "error", "skipped"):
+                        failed_node.status = "error"
+                        failed_node.error = f"Unhandled exception: {artifact}"[:500]
+                    logger.error("Parallel node %s raised: %s", failed_node_id, artifact, exc_info=artifact)
+                    continue
                 if artifact and artifact.get("status") == "done":
                     node_artifacts[artifact["node_id"]] = artifact
             cls._save(plan)
@@ -902,15 +910,18 @@ class CustomPlanService:
 
         completed_after = sum(1 for n in plan.nodes if n.status in ("done", "error", "skipped"))
         finish_progress = min(max(completed_after / max(total_nodes, 1), 0.0), 1.0)
-        await cls._finalize_node_execution(
-            plan,
-            plan_id,
-            node,
-            skill_id,
-            skill_run_id,
-            skill_command,
-            progress=finish_progress,
-        )
+        try:
+            await cls._finalize_node_execution(
+                plan,
+                plan_id,
+                node,
+                skill_id,
+                skill_run_id,
+                skill_command,
+                progress=finish_progress,
+            )
+        except Exception:
+            logger.warning("Failed to finalize node %s", node.id, exc_info=True)
 
         return {
             "node_id": node.id,
