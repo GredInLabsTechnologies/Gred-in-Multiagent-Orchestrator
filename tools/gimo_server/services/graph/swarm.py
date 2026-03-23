@@ -38,10 +38,10 @@ class SwarmMixin:
         max_iters = int(node.config.get("max_iterations", 10) or 10)
         start_agent_id: Optional[str] = (
             node.config.get("start_agent")
-            or (agents_config[0]["id"] if agents_config else None)
+            or (agents_config[0].get("id") if agents_config else None)
         )
 
-        agents: Dict[str, Dict[str, Any]] = {a["id"]: a for a in agents_config}
+        agents: Dict[str, Dict[str, Any]] = {a["id"]: a for a in agents_config if a.get("id")}
 
         active_agent_id: Optional[str] = start_agent_id
         handoff_chain: List[Dict[str, Any]] = []

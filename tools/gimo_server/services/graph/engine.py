@@ -10,6 +10,7 @@ Core execution loop that delegates to specialized mixins:
 from __future__ import annotations
 
 import asyncio
+import copy
 from datetime import datetime, timezone
 import inspect
 import logging
@@ -158,6 +159,15 @@ class GraphEngine(
                 self.storage.save_workflow(self.graph.id, self._serialize_graph())
 
             if not self.graph.nodes:
+                _ed = int((time.perf_counter() - stream_started_at) * 1000)
+                self._record_stream_metrics(event_count + 1, 0, _ed)
+                yield _mk_event("done", None, {
+                    "workflow_id": self.graph.id,
+                    "status": "completed",
+                    "total_nodes": 0,
+                    "total_events": event_count + 1,
+                    "duration_ms": _ed,
+                })
                 return
 
             current_node_id = self._resume_from_node_id or self.graph.nodes[0].id
@@ -274,7 +284,7 @@ class GraphEngine(
 
                     checkpoint = WorkflowCheckpoint(
                         node_id=node.id,
-                        state=self.state.data.copy(),
+                        state=copy.deepcopy(self.state.data),
                         output=output,
                         status="completed",
                         replayed=self._replaying,
@@ -333,7 +343,7 @@ class GraphEngine(
                         error_text = str(e) or e.__class__.__name__
                     checkpoint = WorkflowCheckpoint(
                         node_id=node.id,
-                        state=self.state.data.copy(),
+                        state=copy.deepcopy(self.state.data),
                         output=None,
                         status="failed",
                     )
@@ -354,6 +364,13 @@ class GraphEngine(
                         "step_id": step_id,
                         "error": error_text,
                         "node_type": node.type,
+                    }, duration_ms=duration_ms)
+                    # Emit node_end on error path so stream consumers see symmetric open/close
+                    event_count += 1
+                    yield _mk_event("node_end", node.id, {
+                        "step_id": step_id,
+                        "status": "failed",
+                        "next_node": None,
                     }, duration_ms=duration_ms)
                     break
 
@@ -522,7 +539,9 @@ class GraphEngine(
             return effective_output, None
 
         if command.goto is None:
-            return effective_output, self._get_next_node(node_id, effective_output)
+            # Evaluate routing against full current state, not just the update dict,
+            # so conditions on keys set by earlier nodes resolve correctly.
+            return effective_output, self._get_next_node(node_id, self.state.data)
 
         if isinstance(command.goto, list):
             if len(command.goto) == 0:
