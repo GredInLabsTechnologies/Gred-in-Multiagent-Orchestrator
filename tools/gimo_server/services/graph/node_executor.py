@@ -1,6 +1,7 @@
 """Node execution dispatch for GraphEngine."""
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from pathlib import Path
@@ -54,11 +55,11 @@ class NodeExecutorMixin:
 
         return {
             "role": "assistant",
-            "content": resp["content"],
-            "provider": resp["provider"],
-            "model_used": resp["model"],
-            "tokens_used": resp["tokens_used"],
-            "cost_usd": resp["cost_usd"],
+            "content": resp.get("content") or resp.get("result") or "",
+            "provider": resp.get("provider", "unknown"),
+            "model_used": resp.get("model") or resp.get("model_used", "unknown"),
+            "tokens_used": resp.get("tokens_used", 0),
+            "cost_usd": resp.get("cost_usd", 0.0),
             "quality_rating": quality.model_dump()
         }
 
@@ -221,7 +222,7 @@ class NodeExecutorMixin:
                  if pk in self.state.data:
                      initial_state[ck] = self.state.data[pk]
         else:
-            initial_state = self.state.data.copy()
+            initial_state = copy.deepcopy(self.state.data)
 
         initial_state.pop("budget_counters", None)
         initial_state.pop("step_logs", None)
@@ -233,7 +234,9 @@ class NodeExecutorMixin:
             graph=sub_graph,
             max_iterations=self.max_iterations,
             storage=self.storage,
-            persist_checkpoints=self.persist_checkpoints
+            persist_checkpoints=self.persist_checkpoints,
+            confidence_service=getattr(self, "_confidence_service", None),
+            provider_service=getattr(self, "_provider_service", None),
         )
 
         sub_result = await sub_engine.execute(initial_state=initial_state)

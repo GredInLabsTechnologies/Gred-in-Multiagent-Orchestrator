@@ -55,7 +55,7 @@ def build_graph_from_ops_plan(plan_data: Any, draft_id: str = None) -> Tuple[Lis
                         "backstory": task.agent_assignee.backstory,
                     },
                     "instructions": task.agent_assignee.instructions,
-                    "estimated_tokens": len(task.agent_assignee.system_prompt) // 4,
+                    "estimated_tokens": len(task.agent_assignee.system_prompt or "") // 4,
                     "editable": True
                 })
             

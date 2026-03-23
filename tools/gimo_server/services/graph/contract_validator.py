@@ -19,7 +19,10 @@ class ContractValidatorMixin:
     def _run_contract_check(self, node) -> Dict[str, Any]:
         """Execute contract checks in pre/post mode."""
         from tools.gimo_server.ops_models import WorkflowContract
-        raw_contract = node.config.get("contract", node.config)
+        raw_contract = node.config.get("contract")
+        if raw_contract is None:
+            logger.warning("Node %s has no 'contract' key in config; skipping contract check", node.id)
+            return {"contract_phase": "pre", "checks_total": 0, "checks_failed": [], "contract_passed": True, "blast_radius": None}
         contract = WorkflowContract.model_validate(raw_contract)
         phase = str(node.config.get("phase", "pre")).lower()
         checks = contract.pre_conditions if phase == "pre" else contract.post_conditions
