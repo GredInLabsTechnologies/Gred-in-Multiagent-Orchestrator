@@ -7,6 +7,7 @@ Provee:
 """
 from __future__ import annotations
 
+import copy
 import logging
 import uuid
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -39,8 +40,8 @@ class TimeTravelMixin:
 
         checkpoint = self.state.checkpoints[idx]
 
-        # Restaurar estado del checkpoint
-        self.state.data = dict(checkpoint.state)
+        # Restaurar estado del checkpoint (deep copy para aislar de mutaciones futuras)
+        self.state.data = copy.deepcopy(checkpoint.state)
         self.state.data["execution_paused"] = False
         self.state.data["replayed_from"] = {
             "node_id": checkpoint.node_id,
@@ -83,12 +84,15 @@ class TimeTravelMixin:
         fork_id = str(uuid.uuid4())
 
         # Crear nuevo engine del mismo tipo con el mismo grafo
+        # Heredar confidence_service y provider_service si están disponibles
         fork_engine = type(self)(
             graph=self.graph,
             max_iterations=self.max_iterations,
             storage=self.storage,
             persist_checkpoints=self.persist_checkpoints,
             workflow_timeout_seconds=self.workflow_timeout_seconds,
+            confidence_service=getattr(self, "_confidence_service", None),
+            provider_service=getattr(self, "_provider_service", None),
         )
 
         # Heredar cadena de checkpoints anteriores marcados con fork_id
@@ -97,8 +101,8 @@ class TimeTravelMixin:
             inherited.append(cp.model_copy(update={"fork_id": fork_id}))
         fork_engine.state.checkpoints = inherited
 
-        # Estado base del checkpoint + patch
-        forked_state = dict(checkpoint.state)
+        # Estado base del checkpoint + patch (deep copy para aislar de mutaciones futuras)
+        forked_state = copy.deepcopy(checkpoint.state)
         if state_patch:
             forked_state.update(state_patch)
         forked_state["execution_paused"] = False

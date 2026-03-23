@@ -197,8 +197,10 @@ class GraphEngine(
 
                     # Fase 2: detectar GraphCommand
                     next_node_override = _NO_COMMAND_OVERRIDE
+                    _command_handled = False
                     if is_graph_command(output):
                         cmd = output
+                        _command_handled = True
                         event_count += 1
                         yield _mk_event("command", node.id, {
                             "goto": cmd.goto,
@@ -222,12 +224,16 @@ class GraphEngine(
                             })
                         output = effective_output
 
+                    # Apply state update only for non-command outputs;
+                    # _handle_graph_command already called state_manager for commands.
                     if isinstance(output, dict):
-                        self._apply_state_update(output)
-                        event_count += 1
-                        yield _mk_event("state_update", node.id, {
-                            "keys_updated": list(output.keys()),
-                        })
+                        if not _command_handled:
+                            self._apply_state_update(output)
+                        if output:
+                            event_count += 1
+                            yield _mk_event("state_update", node.id, {
+                                "keys_updated": list(output.keys()),
+                            })
 
                     self._update_budget_counters(output)
 

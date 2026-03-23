@@ -1,6 +1,7 @@
 """Checkpoint persistence and serialization for GraphEngine."""
 from __future__ import annotations
 
+import copy
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, TYPE_CHECKING
@@ -19,7 +20,7 @@ class CheckpointMixin:
             raise ValueError("No checkpoints available to resume from")
 
         checkpoint = self.state.checkpoints[checkpoint_index]
-        self.state.data = dict(checkpoint.state)
+        self.state.data = copy.deepcopy(checkpoint.state)
         self.state.data["resumed_from_checkpoint"] = {
             "node_id": checkpoint.node_id,
             "checkpoint_index": checkpoint_index,
@@ -49,6 +50,8 @@ class CheckpointMixin:
                     "from": edge.from_node,
                     "to": edge.to_node,
                     "condition": edge.condition,
+                    "max_iterations": edge.max_iterations,
+                    "break_condition": edge.break_condition,
                 }
                 for edge in self.graph.edges
             ],
@@ -127,6 +130,8 @@ class CheckpointMixin:
                 key, val = condition.split("!=", 1)
                 key = key.strip()
                 val = val.strip().strip('"').strip("'")
+                if val.lower() == "true": val = True
+                elif val.lower() == "false": val = False
                 return str(output.get(key)) != str(val)
 
             return bool(output.get(condition))
