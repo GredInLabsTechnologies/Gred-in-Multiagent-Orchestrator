@@ -15,7 +15,7 @@ import inspect
 import logging
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from tools.gimo_server.ops_models import (
     CostEvent,
@@ -45,6 +45,22 @@ from .time_travel import TimeTravelMixin
 
 # Sentinel: nodo siguiente no fue overrideado por un Command
 _NO_COMMAND_OVERRIDE = object()
+
+
+def _mk_event(
+    event_type: str,
+    node_id: Optional[str],
+    data: Dict[str, Any],
+    duration_ms: int = 0,
+) -> Dict[str, Any]:
+    """Crea un evento de stream con formato estándar."""
+    return {
+        "event_type": event_type,
+        "node_id": node_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "data": data,
+        "duration_ms": duration_ms,
+    }
 
 logger = logging.getLogger("orchestrator.services.graph_engine")
 
@@ -95,6 +111,23 @@ class GraphEngine(
         self._replaying: bool = False
 
     async def execute(self, initial_state: Optional[Dict[str, Any]] = None) -> WorkflowState:
+        """Executes the graph and returns final WorkflowState.
+
+        Delegates to execute_stream() so all loop logic lives in one place.
+        """
+        async for _ in self.execute_stream(initial_state):
+            pass
+        return self.state
+
+    async def execute_stream(
+        self, initial_state: Optional[Dict[str, Any]] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Async generator that yields stream events during graph execution.
+
+        Events: workflow_start, node_start, node_end, state_update, checkpoint,
+                command, send_map, send_reduce, cycle_iteration, pause, error, done.
+        Each event: {event_type, node_id, timestamp, data, duration_ms}
+        """
         if initial_state:
             self.state.data.update(initial_state)
         if self._execution_started_at is None:
@@ -104,6 +137,19 @@ class GraphEngine(
         self.state.data["trace_id"] = trace_id
         ObservabilityService.record_workflow_start(self.graph.id, trace_id)
 
+        stream_started_at = time.perf_counter()
+        event_count = 0
+        total_nodes = 0
+
+        event_count += 1
+        yield _mk_event("workflow_start", None, {
+            "workflow_id": self.graph.id,
+            "trace_id": trace_id,
+            "node_count": len(self.graph.nodes),
+        })
+
+        workflow_status = "completed"
+
         try:
             self.state.data.setdefault("step_logs", [])
             self.state.data.setdefault("budget_counters", {"steps": 0, "tokens": 0, "cost_usd": 0.0})
@@ -112,7 +158,7 @@ class GraphEngine(
                 self.storage.save_workflow(self.graph.id, self._serialize_graph())
 
             if not self.graph.nodes:
-                return self.state
+                return
 
             current_node_id = self._resume_from_node_id or self.graph.nodes[0].id
             self._resume_from_node_id = None
@@ -134,9 +180,17 @@ class GraphEngine(
                     raise
 
                 iterations += 1
+                total_nodes += 1
                 step_id = f"step_{iterations}"
                 logger.info("%s: executing node=%s type=%s", step_id, node.id, node.type)
                 started_at = time.perf_counter()
+
+                event_count += 1
+                yield _mk_event("node_start", node.id, {
+                    "step_id": step_id,
+                    "node_type": node.type,
+                    "iteration": iterations,
+                })
 
                 try:
                     output = await self._run_node_with_retries(node)
@@ -144,13 +198,36 @@ class GraphEngine(
                     # Fase 2: detectar GraphCommand
                     next_node_override = _NO_COMMAND_OVERRIDE
                     if is_graph_command(output):
+                        cmd = output
+                        event_count += 1
+                        yield _mk_event("command", node.id, {
+                            "goto": cmd.goto,
+                            "has_update": bool(cmd.update),
+                            "has_send": bool(cmd.send),
+                            "graph": cmd.graph,
+                        })
+                        if cmd.send:
+                            event_count += 1
+                            yield _mk_event("send_map", node.id, {
+                                "send_count": len(cmd.send),
+                                "targets": [s.node for s in cmd.send],
+                            })
                         effective_output, next_node_override = await self._handle_graph_command(
                             output, node.id
                         )
+                        if cmd.send:
+                            event_count += 1
+                            yield _mk_event("send_reduce", node.id, {
+                                "send_proofs": self.state.data.get("send_proofs", []),
+                            })
                         output = effective_output
 
                     if isinstance(output, dict):
                         self._apply_state_update(output)
+                        event_count += 1
+                        yield _mk_event("state_update", node.id, {
+                            "keys_updated": list(output.keys()),
+                        })
 
                     self._update_budget_counters(output)
 
@@ -174,11 +251,17 @@ class GraphEngine(
                                 "workflow_id": self.graph.id,
                                 "node_id": node.id,
                                 "reason": reason,
-                                "context": output
+                                "context": output,
                             }))
                         except Exception as ne:
                             logger.error(f"Failed to publish notification: {ne}")
 
+                        duration_ms = int((time.perf_counter() - started_at) * 1000)
+                        event_count += 1
+                        yield _mk_event("pause", node.id, {
+                            "reason": reason,
+                            "step_id": step_id,
+                        }, duration_ms=duration_ms)
                         break
 
                     self.state.data["execution_paused"] = False
@@ -194,6 +277,13 @@ class GraphEngine(
                     self.state.checkpoints.append(checkpoint)
                     self._persist_checkpoint(checkpoint)
 
+                    duration_ms = int((time.perf_counter() - started_at) * 1000)
+                    event_count += 1
+                    yield _mk_event("checkpoint", node.id, {
+                        "checkpoint_index": len(self.state.checkpoints) - 1,
+                        "status": "completed",
+                    }, duration_ms=duration_ms)
+
                     self._append_step_log(
                         step_id=step_id,
                         node=node,
@@ -202,10 +292,27 @@ class GraphEngine(
                         output=output,
                     )
 
+                    prev_node_id = current_node_id
                     if next_node_override is _NO_COMMAND_OVERRIDE:
                         current_node_id = self._get_next_node(node.id, output)
+                        if current_node_id:
+                            edge_key = f"{prev_node_id}->{current_node_id}"
+                            if edge_key in self._cycle_edges:
+                                cycle_count = self.state.data.get("_cycle_counters", {}).get(edge_key, 0)
+                                event_count += 1
+                                yield _mk_event("cycle_iteration", node.id, {
+                                    "edge": edge_key,
+                                    "count": cycle_count,
+                                })
                     else:
                         current_node_id = next_node_override
+
+                    event_count += 1
+                    yield _mk_event("node_end", node.id, {
+                        "step_id": step_id,
+                        "status": "completed",
+                        "next_node": current_node_id,
+                    }, duration_ms=duration_ms)
 
                     budget_reason = self._check_budget_after_step()
                     if budget_reason:
@@ -222,10 +329,11 @@ class GraphEngine(
                         node_id=node.id,
                         state=self.state.data.copy(),
                         output=None,
-                        status="failed"
+                        status="failed",
                     )
                     self.state.checkpoints.append(checkpoint)
                     self._persist_checkpoint(checkpoint)
+                    duration_ms = int((time.perf_counter() - started_at) * 1000)
                     self._append_step_log(
                         step_id=step_id,
                         node=node,
@@ -235,6 +343,12 @@ class GraphEngine(
                     )
                     if not self.state.data.get("aborted_reason") and not self.state.data.get("pause_reason"):
                         self.state.data["aborted_reason"] = "node_failure"
+                    event_count += 1
+                    yield _mk_event("error", node.id, {
+                        "step_id": step_id,
+                        "error": error_text,
+                        "node_type": node.type,
+                    }, duration_ms=duration_ms)
                     break
 
             if current_node_id and iterations >= self.max_iterations:
@@ -242,19 +356,26 @@ class GraphEngine(
                 self.state.data["aborted_reason"] = "max_iterations_exceeded"
 
         finally:
-            workflow_status = "completed"
             if self.state.data.get("aborted_reason"):
                 workflow_status = "failed"
             elif self.state.data.get("execution_paused"):
                 workflow_status = "paused"
-
             ObservabilityService.record_workflow_end(
                 self.graph.id,
                 trace_id,
-                status=workflow_status
+                status=workflow_status,
             )
 
-        return self.state
+        stream_duration_ms = int((time.perf_counter() - stream_started_at) * 1000)
+        self._record_stream_metrics(event_count + 1, total_nodes, stream_duration_ms)
+        event_count += 1
+        yield _mk_event("done", None, {
+            "workflow_id": self.graph.id,
+            "status": workflow_status,
+            "total_nodes": total_nodes,
+            "total_events": event_count,
+            "duration_ms": stream_duration_ms,
+        })
 
     async def _run_node_with_retries(self, node: WorkflowNode) -> Any:
         attempts = 0
@@ -514,6 +635,21 @@ class GraphEngine(
     def _apply_state_update(self, output: Dict[str, Any]) -> None:
         self._state_manager.apply_update(self.state.data, output)
 
+    def _record_stream_metrics(self, total_events: int, total_nodes: int, duration_ms: int) -> None:
+        """Fase 7: registra métricas de streaming en GICS."""
+        gics = getattr(self, "_gics", None)
+        if not gics:
+            return
+        key = f"ops:stream_metrics:{self.graph.id}"
+        try:
+            gics.put(key, {
+                "total_events": total_events,
+                "total_nodes": total_nodes,
+                "duration_ms": duration_ms,
+            })
+        except Exception as e:
+            logger.debug("GICS stream_metrics record failed: %s", e)
+
     def _append_step_log(
         self,
         *,
@@ -595,3 +731,4 @@ class GraphEngine(
 
              except Exception as e:
                  logger.warning("Failed to save cost event for node %s: %s", node.id, e)
+

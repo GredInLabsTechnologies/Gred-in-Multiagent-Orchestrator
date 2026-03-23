@@ -1728,3 +1728,149 @@ async def test_swarm_backward_compat_other_patterns():
 
     assert state.data["pattern"] == "supervisor_workers"
     assert "w1" in state.data["worker_results"]
+
+
+# ── Fase 7: Graph Streaming + Observability ──────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_stream_yields_workflow_start_and_done():
+    """execute_stream emite workflow_start al inicio y done al final."""
+    nodes = [WorkflowNode(id="A", type="transform", config={})]
+    graph = WorkflowGraph(id="stream_basic", nodes=nodes, edges=[])
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return {"x": 1}
+
+    engine._execute_node = mock_execute
+
+    events = []
+    async for event in engine.execute_stream():
+        events.append(event)
+
+    event_types = [e["event_type"] for e in events]
+    assert event_types[0] == "workflow_start"
+    assert event_types[-1] == "done"
+
+    start_evt = events[0]
+    assert start_evt["data"]["workflow_id"] == "stream_basic"
+    assert "trace_id" in start_evt["data"]
+
+    done_evt = events[-1]
+    assert done_evt["data"]["status"] == "completed"
+    assert done_evt["data"]["total_nodes"] == 1
+    assert done_evt["data"]["total_events"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_stream_emits_node_start_and_node_end_per_node():
+    """Cada nodo emite node_start y node_end con step_id y next_node."""
+    nodes = [
+        WorkflowNode(id="A", type="transform", config={}),
+        WorkflowNode(id="B", type="transform", config={}),
+    ]
+    edges = [WorkflowEdge(**{"from": "A", "to": "B"})]
+    graph = WorkflowGraph(id="stream_nodes", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return {}
+
+    engine._execute_node = mock_execute
+
+    events = []
+    async for event in engine.execute_stream():
+        events.append(event)
+
+    starts = [e for e in events if e["event_type"] == "node_start"]
+    ends = [e for e in events if e["event_type"] == "node_end"]
+
+    assert len(starts) == 2
+    assert len(ends) == 2
+    assert starts[0]["node_id"] == "A"
+    assert starts[1]["node_id"] == "B"
+    # node_end for A should indicate next_node=B
+    a_end = next(e for e in ends if e["node_id"] == "A")
+    assert a_end["data"]["next_node"] == "B"
+    # node_end for B: no further node
+    b_end = next(e for e in ends if e["node_id"] == "B")
+    assert b_end["data"]["next_node"] is None
+
+
+@pytest.mark.asyncio
+async def test_stream_emits_error_event_on_node_failure():
+    """Cuando un nodo falla, execute_stream emite un evento 'error'."""
+    nodes = [WorkflowNode(id="FAIL", type="transform", config={})]
+    graph = WorkflowGraph(id="stream_error", nodes=nodes, edges=[])
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        raise ValueError("boom")
+
+    engine._execute_node = mock_execute
+
+    events = []
+    async for event in engine.execute_stream():
+        events.append(event)
+
+    error_events = [e for e in events if e["event_type"] == "error"]
+    assert len(error_events) == 1
+    assert error_events[0]["node_id"] == "FAIL"
+    assert "boom" in error_events[0]["data"]["error"]
+
+    done_evt = events[-1]
+    assert done_evt["data"]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_stream_execute_backward_compat():
+    """execute() sigue funcionando igual tras delegar a execute_stream()."""
+    nodes = [
+        WorkflowNode(id="A", type="transform", config={"v": 1}),
+        WorkflowNode(id="B", type="transform", config={"v": 2}),
+    ]
+    edges = [WorkflowEdge(**{"from": "A", "to": "B"})]
+    graph = WorkflowGraph(id="stream_compat", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return node.config
+
+    engine._execute_node = mock_execute
+
+    state = await engine.execute(initial_state={"init": True})
+
+    assert len(state.checkpoints) == 2
+    assert state.data["v"] == 2
+    assert state.data["init"] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_emits_state_update_events():
+    """execute_stream emite state_update después de cada nodo que retorna dict."""
+    nodes = [
+        WorkflowNode(id="A", type="transform", config={}),
+        WorkflowNode(id="B", type="transform", config={}),
+    ]
+    edges = [WorkflowEdge(**{"from": "A", "to": "B"})]
+    graph = WorkflowGraph(id="stream_state_update", nodes=nodes, edges=edges)
+    engine = GraphEngine(graph)
+
+    async def mock_execute(node, state):
+        await asyncio.sleep(0)
+        return {"result": node.id}
+
+    engine._execute_node = mock_execute
+
+    events = []
+    async for event in engine.execute_stream():
+        events.append(event)
+
+    state_updates = [e for e in events if e["event_type"] == "state_update"]
+    assert len(state_updates) == 2
+    # Each update contains the keys from the output
+    for su in state_updates:
+        assert "result" in su["data"]["keys_updated"]

@@ -1,9 +1,11 @@
 """OPS graph endpoint — migrated from legacy /ui/graph."""
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ...security import check_rate_limit
@@ -155,3 +157,39 @@ async def time_travel(
         }
 
     raise HTTPException(status_code=400, detail=f"action inválida: '{request.action}'. Use 'replay' o 'fork'")
+
+
+class WorkflowStreamRequest(BaseModel):
+    initial_state: Dict[str, Any] = {}
+    persist_checkpoints: bool = False
+    workflow_timeout_seconds: Optional[int] = None
+
+
+@router.post("/workflows/{workflow_id}/execute/stream")
+async def execute_workflow_stream(
+    workflow_id: str,
+    request: WorkflowStreamRequest,
+    auth: AuthContext = Depends(require_operator),
+    _rl: None = Depends(check_rate_limit),
+):
+    """Fase 7: Streaming SSE de la ejecución del grafo.
+
+    Emite eventos SSE: workflow_start, node_start, node_end, state_update,
+    checkpoint, command, send_map, send_reduce, cycle_iteration, pause, error, done.
+    """
+    engine = _WORKFLOW_ENGINES.get(workflow_id)
+    if not engine:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found or not active")
+
+    async def _event_generator():
+        async for event in engine.execute_stream(request.initial_state or None):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
