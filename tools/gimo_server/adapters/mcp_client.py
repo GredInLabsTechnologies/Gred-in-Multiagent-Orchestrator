@@ -11,11 +11,17 @@ from ..ops_models import McpServerConfig
 logger = logging.getLogger("orchestrator.adapters.mcp_client")
 
 
+MCP_PROTOCOL_VERSION = "2024-11-05"
+MAX_RETRIES = 3
+RETRY_BACKOFF_BASE = 1.0
+
+
 class McpClient:
     def __init__(self, server_name: str, config: McpServerConfig):
         self.server_name = server_name
         self.config = config
         self._process: Optional[asyncio.subprocess.Process] = None
+        self._request_id_counter: int = 0
 
     async def __aenter__(self) -> "McpClient":
         await self.connect()
@@ -61,18 +67,22 @@ class McpClient:
                 pass
             self._process = None
 
+    def _next_request_id(self) -> int:
+        self._request_id_counter += 1
+        return self._request_id_counter
+
     async def _send_request(self, method: str, params: Optional[Dict] = None) -> Any:
         if not self._process or not self._process.stdin or not self._process.stdout:
             raise RuntimeError("MCP server is not running")
 
-        request_id = 1
+        request_id = self._next_request_id()
         payload = {
             "jsonrpc": "2.0",
             "id": request_id,
             "method": method,
             "params": params or {},
         }
-        
+
         message = json.dumps(payload) + "\n"
         self._process.stdin.write(message.encode("utf-8"))
         await self._process.stdin.drain()
@@ -84,11 +94,11 @@ class McpClient:
                     stderr = await self._process.stderr.read()
                     logger.error(f"MCP Server [{self.server_name}] stderr: {stderr.decode('utf-8', errors='replace')}")
                 raise RuntimeError(f"MCP server [{self.server_name}] exited unexpectedly")
-            
+
             line = line_bytes.decode("utf-8").strip()
             if not line:
                 continue
-            
+
             result = self._parse_response(line, request_id)
             if result is not None:
                 return result
@@ -112,11 +122,11 @@ class McpClient:
 
     async def initialize(self) -> None:
         await self._send_request(
-            "initialize", 
+            "initialize",
             {
-                "protocolVersion": "0.1.0",
+                "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "gimo-orchestrator", "version": "0.1.0"}
+                "clientInfo": {"name": "gimo-orchestrator", "version": "1.0.0"}
             }
         )
         if not self._process or not self._process.stdin:
@@ -160,4 +170,25 @@ class McpClient:
         return tools
 
     async def call_tool(self, name: str, arguments: Dict[str, Any]) -> Any:
-        return await self._send_request("tools/call", {"name": name, "arguments": arguments})
+        last_error: Optional[Exception] = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                return await self._send_request("tools/call", {"name": name, "arguments": arguments})
+            except RuntimeError as e:
+                last_error = e
+                if "exited unexpectedly" in str(e) and attempt < MAX_RETRIES - 1:
+                    wait = RETRY_BACKOFF_BASE * (2 ** attempt)
+                    logger.warning(
+                        "MCP tool call '%s' failed (attempt %d/%d), retrying in %.1fs: %s",
+                        name, attempt + 1, MAX_RETRIES, wait, e,
+                    )
+                    await asyncio.sleep(wait)
+                    # Try to reconnect
+                    try:
+                        await self.stop()
+                        await self.connect()
+                    except Exception as reconnect_err:
+                        logger.error("Reconnect failed: %s", reconnect_err)
+                else:
+                    raise
+        raise last_error  # type: ignore[misc]

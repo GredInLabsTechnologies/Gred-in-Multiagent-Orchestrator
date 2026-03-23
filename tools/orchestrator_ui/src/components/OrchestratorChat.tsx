@@ -1,14 +1,54 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, Loader2, Send, Sparkles, X, RefreshCw, AlertTriangle, ChevronDown, Activity, Bot, User } from 'lucide-react';
+import { Check, Loader2, Send, Sparkles, X, RefreshCw, AlertTriangle, ChevronDown, Activity, Bot, User, MessageSquare, Wrench, ShieldAlert } from 'lucide-react';
 import { API_BASE, ChatExecutionStep, ChatExecutionStepStatus, OpsApproveResponse, OpsDraft, Skill, SkillExecuteResponse } from '../types';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
 import { useToast } from './Toast';
 import { AgentActionApproval, ActionDraftUi } from './AgentActionApproval';
 
-type ComposerMode = 'generate' | 'draft';
+type ComposerMode = 'generate' | 'draft' | 'agentic';
 type DraftViewTab = 'pending' | 'approved' | 'rejected_error' | 'all';
+
+interface AgenticToolCall {
+    tool_call_id: string;
+    tool_name: string;
+    arguments: Record<string, unknown>;
+    status: string;
+    risk: string;
+    duration?: number;
+    message?: string;
+}
+
+// P2: Conversational Planning Interfaces
+interface UserQuestion {
+    question: string;
+    options?: string[];
+    context?: string;
+}
+
+interface PlanTask {
+    id: string;
+    title: string;
+    description: string;
+    depends_on?: string[];
+    agent_mood: string;
+    agent_rationale: string;
+    model?: string;
+}
+
+interface ProposedPlan {
+    title: string;
+    objective: string;
+    tasks: PlanTask[];
+}
+
+interface ThreadSummary {
+    id: string;
+    title: string;
+    created_at?: string;
+    turns?: unknown[];
+}
 
 interface ChatMessage {
     id: string;
@@ -115,6 +155,263 @@ const msgVariants = {
     visible: { opacity: 1, y: 0, scale: 1 },
 };
 
+// ── P2: Mood Indicator Component ──────────────────────────────────────────────
+
+const MoodIndicator: React.FC<{ mood: string }> = ({ mood }) => {
+    const moodConfig: Record<string, { color: string; emoji: string; label: string }> = {
+        neutral: { color: 'text-gray-400', emoji: '🤖', label: 'Neutral' },
+        forensic: { color: 'text-blue-400', emoji: '🔍', label: 'Investigando' },
+        executor: { color: 'text-green-400', emoji: '⚙️', label: 'Ejecutando' },
+        dialoger: { color: 'text-cyan-400', emoji: '💬', label: 'Conversando' },
+        creative: { color: 'text-magenta-400', emoji: '✨', label: 'Creativo' },
+        guardian: { color: 'text-red-400', emoji: '🛡️', label: 'Cauteloso' },
+        mentor: { color: 'text-yellow-400', emoji: '🎯', label: 'Enseñando' },
+    };
+
+    const config = moodConfig[mood] || moodConfig.neutral;
+
+    return (
+        <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-2/40 border border-white/[0.06] text-[10px] ${config.color}`}>
+            <span>{config.emoji}</span>
+            <span className="uppercase tracking-wider">{config.label}</span>
+        </div>
+    );
+};
+
+// ── P2: Plan Review Component ─────────────────────────────────────────────────
+
+interface PlanReviewProps {
+    plan: ProposedPlan;
+    onApprove: () => void;
+    onReject: (feedback: string) => void;
+    onModify: () => void;
+    isProcessing: boolean;
+}
+
+const PlanReview: React.FC<PlanReviewProps> = ({ plan, onApprove, onReject, onModify, isProcessing }) => {
+    const [feedback, setFeedback] = useState('');
+    const [showRejectInput, setShowRejectInput] = useState(false);
+
+    const moodEmojis: Record<string, string> = {
+        forensic: '🔍',
+        executor: '⚙️',
+        dialoger: '💬',
+        creative: '✨',
+        guardian: '🛡️',
+        mentor: '🎯',
+        neutral: '🤖',
+    };
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-xl border border-magenta-500/30 bg-gradient-to-br from-magenta-500/10 to-purple-500/5 p-4 space-y-3"
+        >
+            {/* Header */}
+            <div className="flex items-start justify-between">
+                <div>
+                    <div className="text-xs uppercase tracking-wider text-magenta-400 font-bold flex items-center gap-1.5">
+                        📋 Plan Propuesto
+                    </div>
+                    <h3 className="text-lg font-bold text-text-primary mt-1">{plan.title}</h3>
+                    <p className="text-sm text-text-secondary mt-0.5">{plan.objective}</p>
+                </div>
+            </div>
+
+            {/* Tasks */}
+            <div className="space-y-2 max-h-80 overflow-y-auto custom-scrollbar">
+                {plan.tasks.map((task, idx) => {
+                    const moodEmoji = moodEmojis[task.agent_mood] || '🤖';
+                    const depends = task.depends_on || [];
+
+                    return (
+                        <div
+                            key={task.id}
+                            className="rounded-lg border border-white/[0.06] bg-surface-2/40 p-3 space-y-1.5"
+                        >
+                            <div className="flex items-start justify-between">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-lg">{moodEmoji}</span>
+                                    <div>
+                                        <div className="text-sm font-semibold text-text-primary">{task.title}</div>
+                                        <div className="text-[10px] text-text-tertiary">
+                                            Mood: <span className="text-accent-primary">{task.agent_mood}</span>
+                                            {task.model && task.model !== 'auto' && ` · Modelo: ${task.model}`}
+                                        </div>
+                                    </div>
+                                </div>
+                                <span className="text-[10px] text-text-tertiary">#{idx + 1}</span>
+                            </div>
+
+                            {task.description && (
+                                <p className="text-xs text-text-secondary pl-8">{task.description}</p>
+                            )}
+
+                            {task.agent_rationale && (
+                                <div className="pl-8 mt-1">
+                                    <div className="text-[10px] text-text-tertiary italic">
+                                        💡 {task.agent_rationale}
+                                    </div>
+                                </div>
+                            )}
+
+                            {depends.length > 0 && (
+                                <div className="pl-8 mt-1 text-[10px] text-text-tertiary">
+                                    Depende de: {depends.join(', ')}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* Actions */}
+            <div className="pt-2 border-t border-white/[0.06] flex items-center gap-2">
+                {!showRejectInput ? (
+                    <>
+                        <button
+                            onClick={onApprove}
+                            disabled={isProcessing}
+                            className="flex-1 px-3 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-400 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isProcessing ? <Loader2 size={14} className="inline animate-spin mr-1" /> : <Check size={14} className="inline mr-1" />}
+                            Aprobar y Ejecutar
+                        </button>
+                        <button
+                            onClick={() => setShowRejectInput(true)}
+                            disabled={isProcessing}
+                            className="px-3 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-400 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <X size={14} className="inline mr-1" />
+                            Rechazar
+                        </button>
+                        <button
+                            onClick={onModify}
+                            disabled={isProcessing}
+                            className="px-3 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-400 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Modificar (próximamente)"
+                        >
+                            <RefreshCw size={14} />
+                        </button>
+                    </>
+                ) : (
+                    <div className="flex-1 flex items-center gap-2">
+                        <input
+                            type="text"
+                            value={feedback}
+                            onChange={(e) => setFeedback(e.target.value)}
+                            placeholder="Razón del rechazo (opcional)..."
+                            className="flex-1 px-3 py-2 rounded-lg bg-surface-3/50 border border-white/[0.06] text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-accent-primary/50"
+                            autoFocus
+                        />
+                        <button
+                            onClick={() => {
+                                onReject(feedback);
+                                setShowRejectInput(false);
+                                setFeedback('');
+                            }}
+                            className="px-3 py-2 rounded-lg bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium"
+                        >
+                            Confirmar
+                        </button>
+                        <button
+                            onClick={() => {
+                                setShowRejectInput(false);
+                                setFeedback('');
+                            }}
+                            className="px-3 py-2 rounded-lg bg-surface-2/40 border border-white/[0.06] text-text-secondary text-sm"
+                        >
+                            Cancelar
+                        </button>
+                    </div>
+                )}
+            </div>
+        </motion.div>
+    );
+};
+
+// ── P2: User Question Component ───────────────────────────────────────────────
+
+interface UserQuestionProps {
+    question: UserQuestion;
+    onAnswer: (answer: string) => void;
+}
+
+const UserQuestionPrompt: React.FC<UserQuestionProps> = ({ question, onAnswer }) => {
+    const [customAnswer, setCustomAnswer] = useState('');
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-xl border border-cyan-500/30 bg-gradient-to-br from-cyan-500/10 to-blue-500/5 p-4 space-y-3"
+        >
+            <div className="flex items-start gap-3">
+                <div className="text-2xl">❓</div>
+                <div className="flex-1">
+                    <div className="text-xs uppercase tracking-wider text-cyan-400 font-bold">
+                        Pregunta del Agente
+                    </div>
+                    <p className="text-sm font-semibold text-text-primary mt-1">{question.question}</p>
+                    {question.context && (
+                        <p className="text-xs text-text-tertiary mt-1 italic">{question.context}</p>
+                    )}
+                </div>
+            </div>
+
+            {/* Options */}
+            {question.options && question.options.length > 0 ? (
+                <div className="space-y-2">
+                    <div className="text-[10px] uppercase tracking-wider text-text-tertiary">Opciones sugeridas:</div>
+                    <div className="grid grid-cols-2 gap-2">
+                        {question.options.map((opt, idx) => (
+                            <button
+                                key={idx}
+                                onClick={() => onAnswer(opt)}
+                                className="px-3 py-2 rounded-lg bg-surface-2/60 hover:bg-accent-primary/20 border border-white/[0.06] hover:border-accent-primary/30 text-sm text-text-primary transition-all text-left"
+                            >
+                                {opt}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="text-[10px] text-text-tertiary text-center">O escribe tu respuesta:</div>
+                </div>
+            ) : null}
+
+            {/* Custom answer */}
+            <div className="flex items-center gap-2">
+                <input
+                    type="text"
+                    value={customAnswer}
+                    onChange={(e) => setCustomAnswer(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' && customAnswer.trim()) {
+                            onAnswer(customAnswer);
+                            setCustomAnswer('');
+                        }
+                    }}
+                    placeholder="Tu respuesta..."
+                    className="flex-1 px-3 py-2 rounded-lg bg-surface-3/50 border border-white/[0.06] text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-accent-primary/50"
+                    autoFocus
+                />
+                <button
+                    onClick={() => {
+                        if (customAnswer.trim()) {
+                            onAnswer(customAnswer);
+                            setCustomAnswer('');
+                        }
+                    }}
+                    disabled={!customAnswer.trim()}
+                    className="px-3 py-2 rounded-lg bg-accent-primary/20 hover:bg-accent-primary/30 border border-accent-primary/30 text-accent-primary text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    <Send size={14} />
+                </button>
+            </div>
+        </motion.div>
+    );
+};
+
 export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     isCollapsed = false,
     providerConnected = true,
@@ -145,6 +442,15 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     const [skillsLoaded, setSkillsLoaded] = useState(false);
     const [skillsLoading, setSkillsLoading] = useState(false);
     const [selectedSuggestionIdx, setSelectedSuggestionIdx] = useState(0);
+    // Agentic chat state
+    const [agenticThreadId, setAgenticThreadId] = useState<string | null>(null);
+    const [agenticToolCalls, setAgenticToolCalls] = useState<AgenticToolCall[]>([]);
+    const [pendingApproval, setPendingApproval] = useState<AgenticToolCall | null>(null);
+    const [threadHistory, setThreadHistory] = useState<ThreadSummary[]>([]);
+    // P2: Conversational Planning State
+    const [currentMood, setCurrentMood] = useState<string>('neutral');
+    const [pendingQuestion, setPendingQuestion] = useState<UserQuestion | null>(null);
+    const [proposedPlan, setProposedPlan] = useState<ProposedPlan | null>(null);
     const { addToast } = useToast();
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -566,6 +872,285 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
         return true;
     };
 
+    /* ── Agentic chat via SSE ── */
+    const handleAgenticChat = async (prompt: string) => {
+        let threadId = agenticThreadId;
+
+        // Create thread if needed
+        if (!threadId) {
+            const createResp = await fetchWithRetry(`${API_BASE}/ops/threads?workspace_root=.&title=UI+Agentic+Session`, {
+                method: 'POST', credentials: 'include',
+            });
+            if (!createResp.ok) throw new Error(`HTTP ${createResp.status}`);
+            const threadData = await createResp.json();
+            threadId = threadData.id;
+            setAgenticThreadId(threadId);
+        }
+
+        // Open SSE stream
+        const resp = await fetch(`${API_BASE}/ops/threads/${threadId}/chat/stream?content=${encodeURIComponent(prompt)}`, {
+            method: 'POST', credentials: 'include',
+        });
+
+        if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let accumulatedText = '';
+        let currentEventType = 'message';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (line.startsWith('event: ')) {
+                    currentEventType = line.slice(7).trim();
+                    continue;
+                }
+                if (!line.startsWith('data: ')) continue;
+                const raw = line.slice(6).trim();
+                if (!raw) continue;
+
+                let data: Record<string, unknown>;
+                try { data = JSON.parse(raw); } catch { continue; }
+
+                switch (currentEventType) {
+                    case 'text_delta':
+                        accumulatedText += (data.content as string) || '';
+                        break;
+
+                    case 'tool_call_start': {
+                        const tc: AgenticToolCall = {
+                            tool_call_id: data.tool_call_id as string,
+                            tool_name: data.tool_name as string,
+                            arguments: (data.arguments as Record<string, unknown>) || {},
+                            status: 'running',
+                            risk: (data.risk as string) || 'LOW',
+                        };
+                        setAgenticToolCalls(prev => [...prev, tc]);
+                        break;
+                    }
+
+                    case 'tool_call_end':
+                        setAgenticToolCalls(prev => prev.map(tc =>
+                            tc.tool_call_id === data.tool_call_id
+                                ? { ...tc, status: data.status as string, duration: data.duration as number, message: (data.message as string)?.slice(0, 200) }
+                                : tc
+                        ));
+                        break;
+
+                    case 'tool_approval_required':
+                        setPendingApproval({
+                            tool_call_id: data.tool_call_id as string,
+                            tool_name: data.tool_name as string,
+                            arguments: (data.arguments as Record<string, unknown>) || {},
+                            status: 'pending_approval',
+                            risk: 'HIGH',
+                        });
+                        break;
+
+                    // ── P2: Conversational Planning Events ────────────────────
+
+                    case 'session_start':
+                        // Mood info in session start
+                        if (data.mood) setCurrentMood(data.mood as string);
+                        break;
+
+                    case 'user_question':
+                        // Agent is asking a question
+                        setPendingQuestion({
+                            question: (data.question as string) || '',
+                            options: (data.options as string[]) || [],
+                            context: (data.context as string) || '',
+                        });
+                        appendMessage({
+                            id: `m-question-${Date.now()}`,
+                            role: 'assistant',
+                            text: `❓ ${data.question as string}`,
+                            ts: new Date().toISOString(),
+                        });
+                        break;
+
+                    case 'plan_proposed':
+                        // Agent proposed a plan
+                        setProposedPlan(data as ProposedPlan);
+                        appendMessage({
+                            id: `m-plan-${Date.now()}`,
+                            role: 'assistant',
+                            text: `📋 Plan propuesto: ${(data as ProposedPlan).title}`,
+                            ts: new Date().toISOString(),
+                        });
+                        break;
+
+                    case 'confirmation_required':
+                        // Tool requires confirmation due to mood constraints
+                        appendMessage({
+                            id: `m-confirm-${Date.now()}`,
+                            role: 'system',
+                            text: `⚠️ ${(data.message as string) || 'Confirmación requerida para continuar'}`,
+                            ts: new Date().toISOString(),
+                        });
+                        break;
+
+                    case 'done': {
+                        const finalResp = (data.response as string) || accumulatedText;
+                        const toolCalls = (data.tool_calls as AgenticToolCall[]) || [];
+                        const usage = (data.usage as Record<string, number>) || {};
+                        appendMessage({
+                            id: `m-agentic-${Date.now()}`,
+                            role: 'assistant',
+                            text: finalResp,
+                            ts: new Date().toISOString(),
+                        });
+                        if (toolCalls.length > 0) {
+                            setAgenticToolCalls(toolCalls);
+                        }
+                        const tokens = usage.total_tokens || 0;
+                        const cost = usage.cost_usd || 0;
+                        if (tokens) {
+                            addToast(`${tokens.toLocaleString()} tokens | $${cost.toFixed(4)}`, 'info');
+                        }
+                        break;
+                    }
+
+                    case 'error':
+                        appendMessage({
+                            id: `m-agentic-err-${Date.now()}`,
+                            role: 'system',
+                            text: (data.message as string) || 'Error en el loop agentic.',
+                            ts: new Date().toISOString(),
+                            failed: true,
+                        });
+                        break;
+                }
+            }
+        }
+
+        setAgenticToolCalls([]);
+        setPendingApproval(null);
+    };
+
+    const handleApproveHitl = async (toolCallId: string, approved: boolean) => {
+        if (!agenticThreadId) return;
+        try {
+            await fetchWithRetry(
+                `${API_BASE}/ops/threads/${agenticThreadId}/approve-tool?tool_call_id=${toolCallId}&approved=${approved}`,
+                { method: 'POST', credentials: 'include' },
+            );
+            setPendingApproval(null);
+            addToast(approved ? 'Tool aprobado' : 'Tool rechazado', approved ? 'success' : 'info');
+        } catch {
+            addToast('Error al enviar aprobacion', 'error');
+        }
+    };
+
+    // ── P2: Plan Approval Handlers ────────────────────────────────────────────
+
+    const handleApprovePlan = async () => {
+        if (!agenticThreadId || !proposedPlan) return;
+        try {
+            const resp = await fetchWithRetry(
+                `${API_BASE}/ops/threads/${agenticThreadId}/plan/respond`,
+                {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'approve', feedback: '' }),
+                },
+            );
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const result = await resp.json();
+
+            setProposedPlan(null);
+            setCurrentMood('executor');
+            addToast('Plan aprobado. Ejecución iniciada.', 'success');
+
+            appendMessage({
+                id: `m-plan-approved-${Date.now()}`,
+                role: 'system',
+                text: `✓ Plan aprobado. Ejecución en progreso (plan_id: ${result.plan_id || '?'})`,
+                ts: new Date().toISOString(),
+            });
+        } catch (err) {
+            addToast('Error al aprobar el plan', 'error');
+        }
+    };
+
+    const handleRejectPlan = async (feedback: string) => {
+        if (!agenticThreadId || !proposedPlan) return;
+        try {
+            const resp = await fetchWithRetry(
+                `${API_BASE}/ops/threads/${agenticThreadId}/plan/respond`,
+                {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'reject', feedback: feedback || 'Plan rechazado' }),
+                },
+            );
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+            setProposedPlan(null);
+            setCurrentMood('dialoger');
+            addToast('Plan rechazado. El agente revisará.', 'info');
+
+            appendMessage({
+                id: `m-plan-rejected-${Date.now()}`,
+                role: 'system',
+                text: `✗ Plan rechazado. El agente revisará basándose en tu feedback.`,
+                ts: new Date().toISOString(),
+            });
+        } catch (err) {
+            addToast('Error al rechazar el plan', 'error');
+        }
+    };
+
+    const handleModifyPlan = () => {
+        addToast('Modificación de plan aún no implementada', 'info');
+    };
+
+    const handleAnswerQuestion = async (answer: string) => {
+        if (!pendingQuestion) return;
+        setPendingQuestion(null);
+
+        // Send answer as a new user message
+        appendMessage({
+            id: `m-answer-${Date.now()}`,
+            role: 'user',
+            text: answer,
+            ts: new Date().toISOString(),
+        });
+
+        // Continue the chat with the answer
+        setIsSending(true);
+        try {
+            await handleAgenticChat(answer);
+        } catch (err: any) {
+            handleSendError(err, answer);
+        } finally {
+            setIsSending(false);
+        }
+    };
+
+    const fetchThreadHistory = useCallback(async () => {
+        try {
+            const resp = await fetchWithRetry(`${API_BASE}/ops/threads`, { credentials: 'include' });
+            if (!resp.ok) return;
+            const data: ThreadSummary[] = await resp.json();
+            setThreadHistory(data);
+        } catch { /* ignore */ }
+    }, []);
+
+    useEffect(() => {
+        if (mode === 'agentic') void fetchThreadHistory();
+    }, [mode, fetchThreadHistory]);
+
     /* ── Send logic ── */
     const handleSend = async (retryPrompt?: string) => {
         const prompt = retryPrompt || input.trim();
@@ -594,6 +1179,8 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
         try {
             if (slash) {
                 await executeSlashSkill(prompt);
+            } else if (mode === 'agentic') {
+                await handleAgenticChat(prompt);
             } else if (mode === 'generate') {
                 await handleGenerateDraft(prompt);
             } else {
@@ -639,6 +1226,13 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                 className={`px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider transition-all ${mode === 'draft' ? 'bg-accent-primary/20 text-accent-primary' : 'text-text-secondary hover:text-text-primary'}`}
                             >
                                 Draft
+                            </button>
+                            <button
+                                onClick={() => setMode('agentic')}
+                                className={`px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider transition-all ${mode === 'agentic' ? 'bg-accent-primary/20 text-accent-primary' : 'text-text-secondary hover:text-text-primary'}`}
+                            >
+                                <MessageSquare size={11} className="inline mr-1" />
+                                Chat
                             </button>
                         </div>
                     </div>
@@ -830,6 +1424,86 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                             ))}
                         </AnimatePresence>
 
+                        {/* P2: Mood Indicator */}
+                        {mode === 'agentic' && currentMood !== 'neutral' && !isCollapsed && (
+                            <div className="flex justify-end">
+                                <MoodIndicator mood={currentMood} />
+                            </div>
+                        )}
+
+                        {/* P2: Proposed Plan Review */}
+                        {mode === 'agentic' && proposedPlan && !isCollapsed && (
+                            <PlanReview
+                                plan={proposedPlan}
+                                onApprove={handleApprovePlan}
+                                onReject={handleRejectPlan}
+                                onModify={handleModifyPlan}
+                                isProcessing={isSending}
+                            />
+                        )}
+
+                        {/* P2: Pending User Question */}
+                        {mode === 'agentic' && pendingQuestion && !isCollapsed && (
+                            <UserQuestionPrompt
+                                question={pendingQuestion}
+                                onAnswer={handleAnswerQuestion}
+                            />
+                        )}
+
+                        {/* Agentic tool calls in progress */}
+                        {mode === 'agentic' && agenticToolCalls.length > 0 && (
+                            <div className="rounded-xl border border-white/[0.06] bg-surface-2/40 px-3 py-2 space-y-1">
+                                <div className="text-[9px] uppercase tracking-wider text-text-tertiary flex items-center gap-1">
+                                    <Wrench size={10} /> Tool Calls
+                                </div>
+                                {agenticToolCalls.map((tc) => (
+                                    <div key={tc.tool_call_id} className="flex items-center gap-2 text-[11px]">
+                                        <span className={tc.status === 'success' ? 'text-emerald-400' : tc.status === 'error' || tc.status === 'denied' ? 'text-red-400' : 'text-amber-400'}>
+                                            {tc.status === 'success' ? '✓' : tc.status === 'error' ? '✗' : tc.status === 'denied' ? '⊘' : '⋯'}
+                                        </span>
+                                        <span className="text-text-primary font-mono">{tc.tool_name}</span>
+                                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full border ${tc.risk === 'HIGH' ? 'border-red-500/30 text-red-400' : tc.risk === 'MEDIUM' ? 'border-amber-500/30 text-amber-400' : 'border-white/[0.06] text-text-tertiary'}`}>
+                                            {tc.risk}
+                                        </span>
+                                        {tc.duration != null && (
+                                            <span className="text-[9px] text-text-tertiary">{tc.duration.toFixed(1)}s</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* HITL approval required */}
+                        {pendingApproval && (
+                            <motion.div
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="rounded-xl border border-red-500/30 bg-red-500/5 px-3.5 py-3 space-y-2"
+                            >
+                                <div className="flex items-center gap-2 text-[11px] text-red-400 font-semibold">
+                                    <ShieldAlert size={14} />
+                                    Aprobacion requerida: {pendingApproval.tool_name}
+                                </div>
+                                <pre className="text-[10px] text-text-secondary bg-surface-2/60 rounded-lg p-2 max-h-24 overflow-auto">
+                                    {JSON.stringify(pendingApproval.arguments, null, 2).slice(0, 300)}
+                                </pre>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => void handleApproveHitl(pendingApproval.tool_call_id, true)}
+                                        className="px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] hover:bg-emerald-500/20 transition-colors"
+                                    >
+                                        <Check size={11} className="inline mr-1" /> Aprobar
+                                    </button>
+                                    <button
+                                        onClick={() => void handleApproveHitl(pendingApproval.tool_call_id, false)}
+                                        className="px-3 py-1.5 rounded-lg bg-red-500/15 border border-red-500/30 text-red-400 text-[10px] hover:bg-red-500/20 transition-colors"
+                                    >
+                                        <X size={11} className="inline mr-1" /> Rechazar
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
+
                         {/* Thinking indicator */}
                         {isSending && (
                             <motion.div
@@ -870,7 +1544,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                                 }
                             }}
                             rows={1}
-                            placeholder={mode === 'generate' ? 'Describe el workflow o usa /comando...' : 'Crear draft manual...'}
+                            placeholder={mode === 'agentic' ? 'Chat agentic con GIMO...' : mode === 'generate' ? 'Describe el workflow o usa /comando...' : 'Crear draft manual...'}
                             className="flex-1 w-full min-h-[40px] max-h-[120px] rounded-xl bg-surface-2/60 border border-white/[0.06] px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-accent-primary/50 transition-colors duration-200 resize-none overflow-y-auto"
                         />
                         {isSlashInput && (
@@ -914,9 +1588,40 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
                 </div>
             </div>
 
-            {/* Drafts sidebar */}
+            {/* Sidebar: Drafts or Thread History */}
             {!isCollapsed && (
                 <aside className="w-72 min-w-[240px] max-w-[320px] bg-surface-0/60 backdrop-blur-lg flex flex-col min-h-0">
+                    {/* Thread history (agentic mode) */}
+                    {mode === 'agentic' && (
+                        <div className="border-b border-white/[0.04]">
+                            <div className="h-11 px-4 flex items-center justify-between shrink-0">
+                                <span className="text-[10px] uppercase tracking-wider text-text-secondary font-bold">
+                                    Conversaciones
+                                </span>
+                                <button
+                                    onClick={() => { setAgenticThreadId(null); setMessages([{ id: 'm-welcome-new', role: 'system', text: 'Nueva sesion agentic. Escribe un mensaje para comenzar.', ts: new Date().toISOString() }]); }}
+                                    className="text-[10px] text-accent-primary hover:text-accent-primary/80 transition-colors"
+                                >
+                                    + Nueva
+                                </button>
+                            </div>
+                            <div className="max-h-48 overflow-y-auto px-3 pb-2 space-y-1 custom-scrollbar">
+                                {threadHistory.length === 0 && (
+                                    <p className="text-[10px] text-text-tertiary text-center py-2">Sin conversaciones previas.</p>
+                                )}
+                                {threadHistory.map(th => (
+                                    <button
+                                        key={th.id}
+                                        onClick={() => { setAgenticThreadId(th.id); addToast(`Thread: ${th.id.slice(0, 8)}`, 'info'); }}
+                                        className={`w-full text-left rounded-lg px-2 py-1.5 text-[10px] transition-colors ${agenticThreadId === th.id ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/20' : 'text-text-secondary hover:bg-white/[0.04] border border-transparent'}`}
+                                    >
+                                        <div className="truncate font-medium">{th.title || 'Sin titulo'}</div>
+                                        <div className="text-[9px] text-text-tertiary">{th.id.slice(0, 8)} · {Array.isArray(th.turns) ? th.turns.length : 0} turnos</div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                     <div className="h-11 px-4 border-b border-white/[0.04] flex items-center justify-between shrink-0">
                         <span className="text-[10px] uppercase tracking-wider text-text-secondary font-bold">
                             Drafts

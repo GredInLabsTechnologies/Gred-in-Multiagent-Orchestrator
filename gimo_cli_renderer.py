@@ -4,6 +4,7 @@ Provides Rich-based rendering for tool calls, LLM responses, and session state.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 from rich.console import Console
@@ -117,9 +118,155 @@ class ChatRenderer:
             content += f"\n\n[dim]{hint}[/dim]"
         self.console.print(Panel(content, title="GIMO", border_style="red"))
 
+    def render_tool_call_start(self, tool_name: str, args: dict, risk: str) -> None:
+        """Render a tool call as it starts (streaming mode)."""
+        risk_color = {"LOW": "green", "MEDIUM": "yellow", "HIGH": "red"}.get(risk, "dim")
+        arg_parts = []
+        for key, val in (args or {}).items():
+            val_str = str(val)
+            if len(val_str) > 40:
+                val_str = val_str[:37] + "..."
+            arg_parts.append(f"{key}={val_str}")
+        arg_summary = " ".join(arg_parts[:3])
+        self.console.print(
+            f"  [dim]\u25b8[/dim] {tool_name} {arg_summary}  [{risk_color}]{risk}[/{risk_color}] [dim]...[/dim]"
+        )
+
+    def render_tool_call_result(self, tool_name: str, status: str, duration: float, risk: str) -> None:
+        """Render tool call completion (streaming mode)."""
+        if status == "success":
+            symbol = "[green]\u2713[/green]"
+        elif status == "denied":
+            symbol = "[red]\u2298 DENIED[/red]"
+        else:
+            symbol = "[red]\u2717[/red]"
+        self.console.print(f"    {symbol} [dim]{duration:.1f}s[/dim]")
+
+    def render_hitl_prompt(self, tool_name: str, args: dict) -> bool:
+        """Ask user for HITL approval. Returns True if approved."""
+        self.console.print()
+        self.console.print(Panel(
+            f"[bold red]HIGH RISK[/bold red] tool requires approval:\n\n"
+            f"  Tool: [bold]{tool_name}[/bold]\n"
+            f"  Args: {json.dumps(args, indent=2, ensure_ascii=False)[:300]}",
+            title="\u26a0 HITL Approval Required",
+            border_style="red",
+        ))
+        try:
+            answer = self.console.input("[bold yellow]Approve? (y/N): [/bold yellow]").strip().lower()
+            return answer in ("y", "yes", "si", "s\u00ed")
+        except (EOFError, KeyboardInterrupt):
+            return False
+
+    def render_streaming_text(self, text: str) -> None:
+        """Render text content as it arrives during streaming."""
+        if text:
+            self.console.print(Markdown(text))
+
     def get_user_input(self) -> str:
         """Prompt user for input."""
         try:
             return self.console.input("[bold cyan]> [/bold cyan]").strip()
         except (EOFError, KeyboardInterrupt):
             return "/exit"
+
+    # ── P2: Conversational Planning Renderers ─────────────────────────────────
+
+    def render_mood_indicator(self, mood: str) -> None:
+        """Render the current agent mood."""
+        mood_colors = {
+            "neutral": "dim",
+            "forensic": "blue",
+            "executor": "green",
+            "dialoger": "cyan",
+            "creative": "magenta",
+            "guardian": "red",
+            "mentor": "yellow",
+        }
+        color = mood_colors.get(mood, "dim")
+        self.console.print(f"[{color}][mood: {mood}][/{color}]")
+
+    def render_user_question(self, question: str, options: List[str], context: str) -> None:
+        """Render a question from the agent."""
+        self.console.print()
+        content_parts = [f"[bold]{question}[/bold]"]
+        if context:
+            content_parts.append(f"\n[dim]{context}[/dim]")
+        if options:
+            content_parts.append("\n\nSuggested answers:")
+            for idx, opt in enumerate(options, 1):
+                content_parts.append(f"  {idx}. {opt}")
+
+        self.console.print(Panel(
+            "\n".join(content_parts),
+            title="\u2753 Question",
+            border_style="cyan",
+        ))
+
+    def render_plan(self, plan: Dict[str, Any]) -> None:
+        """Render a proposed execution plan."""
+        title = plan.get("title", "Execution Plan")
+        objective = plan.get("objective", "")
+        tasks = plan.get("tasks", [])
+
+        self.console.print()
+        self.console.print(Panel(
+            f"[bold]{title}[/bold]\n\n{objective}",
+            title="\ud83d\udccb Plan Proposed",
+            border_style="magenta",
+        ))
+
+        # Render tasks
+        for idx, task in enumerate(tasks, 1):
+            task_id = task.get("id", f"t{idx}")
+            task_title = task.get("title", "Task")
+            task_desc = task.get("description", "")
+            mood = task.get("agent_mood", "neutral")
+            rationale = task.get("agent_rationale", "")
+            depends = task.get("depends_on", [])
+
+            mood_emoji = {
+                "forensic": "\ud83d\udd0d",
+                "executor": "\u2699\ufe0f",
+                "dialoger": "\ud83d\udcac",
+                "creative": "\u2728",
+                "guardian": "\ud83d\udee1\ufe0f",
+                "mentor": "\ud83c\udfaf",
+                "neutral": "\ud83e\udd16",
+            }.get(mood, "\ud83e\udd16")
+
+            task_parts = [f"[bold]{mood_emoji} {task_title}[/bold] (mood: {mood})"]
+            if task_desc:
+                task_parts.append(f"  {task_desc}")
+            if rationale:
+                task_parts.append(f"  [dim italic]Why: {rationale}[/dim italic]")
+            if depends:
+                task_parts.append(f"  [dim]Depends on: {', '.join(depends)}[/dim]")
+
+            self.console.print()
+            self.console.print("\n".join(task_parts))
+
+        self.console.print()
+        self.console.print(Rule("Review the plan above", style="dim magenta"))
+
+    def get_plan_approval(self) -> str:
+        """Prompt user to approve, reject, or modify a plan.
+
+        Returns: "approve", "reject", or "modify"
+        """
+        self.console.print()
+        self.console.print("[bold yellow]Approve this plan?[/bold yellow]")
+        self.console.print("  [cyan]y[/cyan] = Approve and execute")
+        self.console.print("  [red]n[/red] = Reject (ask agent to revise)")
+        self.console.print("  [yellow]m[/yellow] = Modify (edit tasks)")
+
+        try:
+            answer = self.console.input("[bold]Choice (y/n/m): [/bold]").strip().lower()
+            if answer in ("y", "yes", "si", "s\u00ed", "approve"):
+                return "approve"
+            elif answer in ("m", "modify", "edit"):
+                return "modify"
+            else:
+                return "reject"
+        except (EOFError, KeyboardInterrupt):
+            return "reject"

@@ -1,9 +1,13 @@
-"""OpenAI function-calling tool schemas for GIMO agentic chat."""
+"""OpenAI function-calling tool schemas for GIMO agentic chat.
+
+P2: Added meta-tools for conversational planning (ask_user, propose_plan, web_search).
+"""
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
 TOOL_RISK_LEVELS: Dict[str, str] = {
+    # File operations
     "read_file": "LOW",
     "list_files": "LOW",
     "search_text": "LOW",
@@ -12,6 +16,10 @@ TOOL_RISK_LEVELS: Dict[str, str] = {
     "search_replace": "MEDIUM",
     "create_dir": "MEDIUM",
     "shell_exec": "HIGH",
+    # P2: Meta-tools
+    "ask_user": "LOW",
+    "propose_plan": "LOW",
+    "web_search": "LOW",
 }
 
 
@@ -200,6 +208,113 @@ CHAT_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["path"],
+            },
+        },
+    },
+    # ── P2: Meta-Tools for Conversational Planning ───────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_user",
+            "description": (
+                "Ask the user a clarifying question before proceeding. "
+                "Use this when you need more information to complete the task correctly. "
+                "The loop will pause until the user responds."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The question to ask the user.",
+                    },
+                    "options": {
+                        "type": "array",
+                        "description": "Optional list of suggested answers (e.g., ['Python', 'JavaScript', 'Both']).",
+                        "items": {"type": "string"},
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Why you're asking this question (helps the user understand).",
+                    },
+                },
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_plan",
+            "description": (
+                "Propose an execution plan for a complex task. "
+                "Use this when the task requires 3+ file changes, structural refactors, "
+                "or new project setup. Include rationale for why you chose each mood and model. "
+                "The loop will pause for user approval before execution."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Plan title (e.g., 'Engineering Calculator Implementation').",
+                    },
+                    "objective": {
+                        "type": "string",
+                        "description": "High-level goal of the plan.",
+                    },
+                    "tasks": {
+                        "type": "array",
+                        "description": "List of tasks to execute in dependency order.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string", "description": "Unique task ID (e.g., 't1')."},
+                                "title": {"type": "string", "description": "Task title."},
+                                "description": {"type": "string", "description": "What this task does."},
+                                "depends_on": {
+                                    "type": "array",
+                                    "description": "IDs of tasks that must complete first.",
+                                    "items": {"type": "string"},
+                                },
+                                "agent_mood": {
+                                    "type": "string",
+                                    "description": "Mood for this task (neutral, forensic, executor, dialoger, creative, guardian, mentor).",
+                                },
+                                "agent_rationale": {
+                                    "type": "string",
+                                    "description": "WHY you chose this mood and model for this task.",
+                                },
+                                "model": {
+                                    "type": "string",
+                                    "description": "Model to use ('auto' or specific like 'gpt-4o').",
+                                },
+                            },
+                            "required": ["id", "title", "description", "agent_mood", "agent_rationale"],
+                        },
+                    },
+                },
+                "required": ["title", "objective", "tasks"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "Search the web for technical information, documentation, or best practices. "
+                "Use this when you need up-to-date information beyond your training data."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query.",
+                    },
+                },
+                "required": ["query"],
             },
         },
     },

@@ -1,5 +1,7 @@
+import json
 from typing import List, Optional, Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from ...ops_models import GimoThread, GimoTurn, GimoItem, GimoItemType
 from ...services.conversation_service import ConversationService
 from ...services.agentic_loop_service import AgenticLoopService
@@ -147,3 +149,160 @@ async def chat_message(
         "usage": result.usage,
         "finish_reason": result.finish_reason
     }
+
+
+@router.post("/{thread_id}/chat/stream", responses={404: {"description": "Thread not found"}})
+async def chat_message_stream(
+    thread_id: str,
+    content: str,
+    auth: Annotated[AuthContext, Depends(verify_token)]
+):
+    """
+    Send a message and stream the agentic response via SSE.
+
+    Emits events: session_start, iteration_start, text_delta,
+    tool_call_start, tool_call_end, tool_approval_required, error, done.
+    """
+    _require_role(auth, "operator")
+
+    thread = ConversationService.get_thread(thread_id)
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    token = auth.actor or "CLI"
+
+    async def event_generator():
+        async for event in AgenticLoopService.run_stream(
+            thread_id=thread_id,
+            user_message=content,
+            workspace_root=thread.workspace_root,
+            token=token,
+        ):
+            event_type = event.get("event", "message")
+            data = json.dumps(event.get("data", {}), ensure_ascii=False)
+            yield f"event: {event_type}\ndata: {data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/{thread_id}/approve-tool", responses={404: {"description": "Approval not found"}})
+async def approve_tool(
+    thread_id: str,
+    tool_call_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    approved: bool = True,
+):
+    """
+    Approve or deny a pending HIGH-risk tool call (HITL).
+    """
+    _require_role(auth, "operator")
+
+    success = AgenticLoopService.submit_approval(thread_id, tool_call_id, approved)
+    if not success:
+        raise HTTPException(status_code=404, detail="No pending approval found for this tool call")
+
+    return {"status": "ok", "approved": approved, "tool_call_id": tool_call_id}
+
+
+# ── P2: Plan Approval Endpoint ────────────────────────────────────────────────
+
+@router.post("/{thread_id}/plan/respond", responses={404: {"description": "Thread or plan not found"}})
+async def respond_to_plan(
+    thread_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    action: str,  # "approve", "reject", "modify"
+    feedback: str = "",
+    modified_plan: Optional[dict] = None,
+):
+    """
+    P2: Respond to a proposed plan.
+
+    Actions:
+    - "approve": Execute the plan as proposed
+    - "reject": Reject the plan and provide feedback to the agent
+    - "modify": Update specific tasks in the plan (provide modified_plan)
+
+    The agent will resume from the paused state based on the response.
+    """
+    _require_role(auth, "operator")
+
+    thread = ConversationService.get_thread(thread_id)
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    if not thread.proposed_plan:
+        raise HTTPException(status_code=404, detail="No proposed plan found in this thread")
+
+    if action == "approve":
+        # Mark plan as approved, transition mood to executor
+        thread.mood = "executor"
+        thread.metadata["plan_approved"] = True
+        thread.metadata["plan_approved_at"] = json.dumps({"time": "now"})  # Placeholder
+        ConversationService.save_thread(thread)
+
+        # Create the plan for execution using CustomPlanService
+        from ...services.custom_plan_service import CustomPlanService
+
+        try:
+            plan = CustomPlanService.create_plan_from_llm(
+                plan_data={"tasks": thread.proposed_plan.get("tasks", [])},
+                name=thread.proposed_plan.get("title", "Approved Plan"),
+                description=thread.proposed_plan.get("objective", ""),
+            )
+
+            # Execute plan in background
+            import asyncio
+            asyncio.create_task(CustomPlanService.execute_plan(plan.id))
+
+            return {
+                "status": "approved",
+                "message": "Plan approved and execution started",
+                "plan_id": plan.id,
+                "mood_transition": "executor",
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to create plan: {str(e)}")
+
+    elif action == "reject":
+        # Clear proposed plan, add rejection feedback to thread
+        thread.proposed_plan = None
+        thread.mood = "dialoger"  # Back to dialog mode
+        ConversationService.save_thread(thread)
+
+        # Add rejection as user message so agent can re-plan
+        user_turn = ConversationService.add_turn(thread_id, agent_id="user")
+        if user_turn:
+            rejection_msg = f"[PLAN REJECTED] {feedback or 'Plan rejected. Please revise.'}"
+            item = GimoItem(type="text", content=rejection_msg, status="completed")
+            ConversationService.append_item(thread_id, user_turn.id, item)
+
+        return {
+            "status": "rejected",
+            "message": "Plan rejected. Agent will revise.",
+            "mood_transition": "dialoger",
+        }
+
+    elif action == "modify":
+        if not modified_plan:
+            raise HTTPException(status_code=400, detail="modified_plan required for 'modify' action")
+
+        # Update proposed plan with user modifications
+        thread.proposed_plan = modified_plan
+        ConversationService.save_thread(thread)
+
+        return {
+            "status": "modified",
+            "message": "Plan updated with your changes. Review again or approve.",
+            "modified_plan": modified_plan,
+        }
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid action: {action}. Must be 'approve', 'reject', or 'modify'.")

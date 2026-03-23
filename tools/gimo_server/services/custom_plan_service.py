@@ -476,22 +476,44 @@ class CustomPlanService:
 
         final_prompt = cls._build_node_prompt(node, dep_outputs)
 
+        # P2: Use AgenticLoopService.run_node() for tool-enabled execution
         try:
-            from ..services.provider_service import ProviderService
+            from ..services.agentic_loop_service import AgenticLoopService
             from ..services.storage_service import StorageService
             from ..services.ops_service import OpsService
-            gen_context = {**plan.context, "mode": "custom_plan_node", "model": node.model, "provider": node.provider, "role": node.role, "node_type": node.node_type}
-            resp = await asyncio.wait_for(ProviderService.static_generate(prompt=final_prompt, context=gen_context), timeout=300)
-            node.output = str(resp.get("content", "")).strip()
+
+            # Determine mood from node config or role
+            node_mood = node.config.get("mood", "executor")  # Default to executor for plan nodes
+            workspace = plan.context.get("workspace_root", ".")
+
+            logger.info(f"[plan-node] Executing {node.id} with mood={node_mood}")
+
+            # Execute node with agentic loop
+            result = await asyncio.wait_for(
+                AgenticLoopService.run_node(
+                    workspace_root=workspace,
+                    node_prompt=final_prompt,
+                    mood=node_mood,
+                    max_turns=10,  # Shorter than main loop
+                    temperature=None,  # Use mood default
+                    tools=None,  # Use all tools
+                    token="plan_executor",
+                ),
+                timeout=300
+            )
+
+            node.output = result.response.strip()
             node.status = "done"
             node.error = None
 
-            prompt_tokens = int(resp.get("prompt_tokens") or 0)
-            completion_tokens = int(resp.get("completion_tokens") or 0)
-            total_tokens = int(resp.get("tokens_used") or (prompt_tokens + completion_tokens))
-            cost_usd = float(resp.get("cost_usd") or 0.0)
+            # Extract usage from agentic result
+            usage = result.usage
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", 0)
+            cost_usd = usage.get("cost_usd", 0.0)
             quality_score = 85.0 if node.status == "done" else 40.0
-            cascade_level = 1 if str(resp.get("execution_decision") or "") == "FALLBACK_MODEL_USED" else 0
+            cascade_level = 0  # No cascade in node execution (simplified)
 
             try:
                 storage = StorageService(OpsService._gics)
@@ -499,8 +521,8 @@ class CustomPlanService:
                     id=f"ce_{uuid.uuid4().hex[:12]}",
                     workflow_id=plan_id,
                     node_id=node.id,
-                    model=str(resp.get("model") or node.model or "auto"),
-                    provider=str(resp.get("provider") or node.provider or "auto"),
+                    model=str(node.model or "auto"),
+                    provider=str(node.provider or "auto"),
                     task_type=str(node.node_type or node.role or "worker"),
                     input_tokens=prompt_tokens,
                     output_tokens=completion_tokens,
@@ -508,7 +530,7 @@ class CustomPlanService:
                     cost_usd=cost_usd,
                     quality_score=quality_score,
                     cascade_level=cascade_level,
-                    cache_hit=bool(resp.get("cache_hit", False)),
+                    cache_hit=False,
                 ))
                 cfg = OpsService.get_config()
                 snap = storage.cost.get_plan_snapshot(

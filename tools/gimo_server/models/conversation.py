@@ -32,3 +32,6 @@ class GimoThread(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # P2: Mood-driven conversational flow
+    mood: str = "neutral"  # Current mood of the agent (neutral, forensic, executor, dialoger, creative, guardian, mentor)
+    proposed_plan: Dict[str, Any] | None = None  # Plan proposed by propose_plan tool, awaiting approval

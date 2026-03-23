@@ -421,18 +421,173 @@ def _interactive_chat(config: dict[str, Any]) -> None:
         with history_path.open("a", encoding="utf-8") as f:
             f.write(f"> {user_input}\n")
 
-        # Call chat endpoint
-        with renderer.render_thinking():
-            try:
-                base_url, timeout_seconds = _api_settings(config)
-                token = _resolve_token()
-                headers = {"Authorization": f"Bearer {token}"} if token else {}
+        # Try SSE streaming first, fall back to sync
+        base_url, timeout_seconds = _api_settings(config)
+        auth_token = _resolve_token()
+        headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+        headers["Accept"] = "text/event-stream"
 
+        chat_response = ""
+        usage = {}
+
+        try:
+            stream_timeout = httpx.Timeout(
+                connect=timeout_seconds,
+                read=600.0,  # 10 min for long agentic loops
+                write=timeout_seconds,
+                pool=timeout_seconds,
+            )
+            with httpx.Client(timeout=stream_timeout) as client:
+                with client.stream(
+                    "POST",
+                    f"{base_url}/ops/threads/{thread_id}/chat/stream",
+                    params={"content": user_input},
+                    headers=headers,
+                ) as response:
+                    if response.status_code != 200:
+                        # Fall back to sync endpoint
+                        raise httpx.HTTPStatusError(
+                            f"Stream returned {response.status_code}",
+                            request=response.request,
+                            response=response,
+                        )
+
+                    current_event_type = "message"
+                    for line in response.iter_lines():
+                        if not line or line.startswith(":"):
+                            continue
+
+                        # Parse SSE format
+                        if line.startswith("event: "):
+                            current_event_type = line[7:].strip()
+                            continue
+                        if not line.startswith("data: "):
+                            continue
+
+                        raw_data = line[6:].strip()
+                        if not raw_data:
+                            continue
+
+                        try:
+                            data = json.loads(raw_data)
+                        except json.JSONDecodeError:
+                            continue
+
+                        evt = current_event_type
+
+                        if evt == "text_delta":
+                            # Accumulate for final render
+                            chat_response += data.get("content", "")
+
+                        elif evt == "tool_call_start":
+                            renderer.render_tool_call_start(
+                                data.get("tool_name", "?"),
+                                data.get("arguments", {}),
+                                data.get("risk", "LOW"),
+                            )
+
+                        elif evt == "tool_approval_required":
+                            # HITL: ask user for approval
+                            approved = renderer.render_hitl_prompt(
+                                data.get("tool_name", "?"),
+                                data.get("arguments", {}),
+                            )
+                            # Submit approval to backend
+                            try:
+                                client.post(
+                                    f"{base_url}/ops/threads/{thread_id}/approve-tool",
+                                    params={
+                                        "tool_call_id": data.get("tool_call_id", ""),
+                                        "approved": str(approved).lower(),
+                                    },
+                                    headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                                )
+                            except Exception:
+                                pass  # Best effort
+
+                        elif evt == "tool_call_end":
+                            renderer.render_tool_call_result(
+                                data.get("tool_name", "?"),
+                                data.get("status", "error"),
+                                data.get("duration", 0.0),
+                                data.get("risk", "LOW"),
+                            )
+
+                        elif evt == "done":
+                            chat_response = data.get("response", chat_response)
+                            usage = data.get("usage", {})
+
+                        elif evt == "error":
+                            renderer.render_error(data.get("message", "Unknown error"))
+
+                        # ── P2: Conversational Planning Events ────────────────
+
+                        elif evt == "user_question":
+                            # Agent is asking the user a question
+                            question = data.get("question", "")
+                            options = data.get("options", [])
+                            context = data.get("context", "")
+                            renderer.render_user_question(question, options, context)
+                            # The chat response will be handled by the "done" event
+
+                        elif evt == "plan_proposed":
+                            # Agent proposed an execution plan
+                            plan = data
+                            renderer.render_plan(plan)
+
+                            # Ask user to approve/reject/modify
+                            approval = renderer.get_plan_approval()
+
+                            # Submit plan response to backend
+                            try:
+                                client.post(
+                                    f"{base_url}/ops/threads/{thread_id}/plan/respond",
+                                    params={"action": approval},
+                                    json={"feedback": "User feedback from CLI"},
+                                    headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                                )
+
+                                if approval == "approve":
+                                    renderer.console.print("[green]\u2713 Plan approved. Execution started.[/green]")
+                                elif approval == "reject":
+                                    renderer.console.print("[red]\u2717 Plan rejected. Agent will revise.[/red]")
+                                else:
+                                    renderer.console.print("[yellow]Plan modification not yet implemented in CLI. Please approve or reject.[/yellow]")
+                            except Exception as e:
+                                renderer.render_error(f"Failed to submit plan response: {e}")
+
+                        elif evt == "confirmation_required":
+                            # Tool requires user confirmation (mood constraint)
+                            tool_name = data.get("tool_name", "?")
+                            message = data.get("message", "")
+                            renderer.console.print()
+                            renderer.console.print(Panel(
+                                f"{message}\n\nTool: [bold]{tool_name}[/bold]",
+                                title="\u26a0 Confirmation Required",
+                                border_style="yellow",
+                            ))
+                            try:
+                                answer = renderer.console.input("[bold yellow]Approve? (y/N): [/bold yellow]").strip().lower()
+                                approved = answer in ("y", "yes", "si", "s\u00ed")
+                                # TODO: Submit confirmation to backend (similar to HITL approval)
+                                if not approved:
+                                    renderer.console.print("[dim]Confirmation denied. Agent will skip this action.[/dim]")
+                            except (EOFError, KeyboardInterrupt):
+                                pass
+
+                        elif evt == "session_start":
+                            # Enhanced with mood info (P2)
+                            mood = data.get("mood", "neutral")
+                            renderer.render_mood_indicator(mood)
+
+        except (httpx.HTTPStatusError, httpx.ConnectError):
+            # Fall back to sync POST
+            try:
                 with httpx.Client(timeout=max(timeout_seconds, 300.0)) as client:
                     response = client.post(
                         f"{base_url}/ops/threads/{thread_id}/chat",
                         params={"content": user_input},
-                        headers=headers,
+                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
                     )
 
                 if response.status_code != 200:
@@ -440,24 +595,26 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                     continue
 
                 payload = response.json()
+                tool_calls = payload.get("tool_calls", [])
+                if tool_calls:
+                    renderer.render_tool_calls(tool_calls)
+                chat_response = payload.get("response", "")
+                usage = payload.get("usage", {})
             except httpx.TimeoutException:
                 renderer.render_error("Request timed out. The LLM may need more time.")
                 continue
             except Exception as exc:
                 renderer.render_error(f"Request failed: {exc}")
                 continue
-
-        # Render tool calls
-        tool_calls = payload.get("tool_calls", [])
-        if tool_calls:
-            renderer.render_tool_calls(tool_calls)
+        except httpx.TimeoutException:
+            renderer.render_error("Stream timed out. The LLM may need more time.")
+            continue
+        except Exception as exc:
+            renderer.render_error(f"Stream failed: {exc}")
+            continue
 
         # Render response
-        chat_response = payload.get("response", "")
         renderer.render_response(chat_response)
-
-        # Render footer
-        usage = payload.get("usage", {})
         renderer.render_footer(usage)
 
         # Save to history
@@ -834,65 +991,17 @@ def run(
 
 
 @app.command()
-def chat(
-    thread_id: str | None = typer.Option(None, help="Existing thread id"),
-) -> None:
-    """Open a minimal conversational session against /ops/threads."""
-    config = _load_config()
-    workspace_root = str(_project_root())
+def chat() -> None:
+    """Interactive agentic chat session with GIMO orchestrator."""
+    try:
+        config = _load_config()
+    except typer.Exit:
+        _ensure_project_dirs()
+        if not _config_path().exists():
+            _save_config(_default_config())
+        config = _load_config()
 
-    if thread_id is None:
-        with console.status("[bold green]Creating conversation..."):
-            status_code, payload = _api_request(
-                config,
-                "POST",
-                "/ops/threads",
-                params={"workspace_root": workspace_root, "title": "CLI Session"},
-            )
-        if status_code != 201 or not isinstance(payload, dict):
-            console.print(f"[red]Failed to create thread ({status_code}): {payload}[/red]")
-            raise typer.Exit(1)
-        thread_id = str(payload.get("id") or "")
-
-    if not thread_id:
-        console.print("[red]No thread id available.[/red]")
-        raise typer.Exit(1)
-
-    history_path = _history_dir() / f"{thread_id}.log"
-    console.print(
-        Panel(
-            f"Conversation ID: [bold]{thread_id}[/bold]\nType /exit to quit.",
-            title="GIMO Chat",
-            border_style="magenta",
-        )
-    )
-
-    while True:
-        user_input = console.input("[bold blue]You> [/bold blue]").strip()
-        if not user_input:
-            continue
-        if user_input.lower() in {"/exit", "/quit", "exit", "quit"}:
-            break
-
-        with console.status("[bold green]Sending message..."):
-            status_code, payload = _api_request(
-                config,
-                "POST",
-                f"/ops/threads/{thread_id}/messages",
-                params={"content": user_input},
-            )
-
-        with history_path.open("a", encoding="utf-8") as handle:
-            handle.write(f"You: {user_input}\n")
-            handle.write(f"Result: {payload}\n")
-
-        if status_code == 200 and isinstance(payload, dict):
-            console.print(
-                f"[green]Message delivered.[/green] Turn ID: {payload.get('turn_id', 'unknown')}"
-            )
-            continue
-
-        console.print(f"[red]Chat failed ({status_code}): {payload}[/red]")
+    _interactive_chat(config)
 
 
 @app.command()
@@ -1111,161 +1220,505 @@ def watch(
         _emit_output(events, json_output=True)
 
 
-@app.command()
-def chat(
-    workspace: str = typer.Option(
-        None,
-        "--workspace",
-        "-w",
-        help="Workspace root directory (defaults to current directory)"
-    ),
-):
-    """
-    Interactive chat mode with GIMO orchestrator.
+# ---------------------------------------------------------------------------
+# Sub-apps for grouped commands
+# ---------------------------------------------------------------------------
 
-    This is the main interface for chatting with GIMO.
-    When invoked without subcommands, starts an interactive session.
-    """
-    from gimo_cli_renderer import GimoChatRenderer
+providers_app = typer.Typer(name="providers", help="Manage LLM providers and connectors.")
+trust_app = typer.Typer(name="trust", help="Trust engine dashboard and controls.")
+mastery_app = typer.Typer(name="mastery", help="Token economy, cost analytics, and budget forecast.")
+skills_app = typer.Typer(name="skills", help="List and execute registered skills.")
+repos_app = typer.Typer(name="repos", help="Repository management.")
+threads_app = typer.Typer(name="threads", help="Conversation thread management.")
+observe_app = typer.Typer(name="observe", help="Observability: metrics, traces, and alerts.")
 
-    workspace_root = workspace or str(_project_root())
+app.add_typer(providers_app, name="providers")
+app.add_typer(trust_app, name="trust")
+app.add_typer(mastery_app, name="mastery")
+app.add_typer(skills_app, name="skills")
+app.add_typer(repos_app, name="repos")
+app.add_typer(threads_app, name="threads")
+app.add_typer(observe_app, name="observe")
 
-    # Preflight checks
-    renderer = GimoChatRenderer()
 
-    # 1. Check if backend is running
-    try:
-        config = _load_config()
-    except typer.Exit:
-        renderer.show_error(
-            "Project not initialized.\n"
-            "Run 'gimo init' first to set up the workspace."
-        )
+# --- providers ---
+
+
+@providers_app.command("list")
+def providers_list(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """List configured providers."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/providers")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
         raise typer.Exit(1)
-
-    try:
-        base_url, timeout = _api_settings(config)
-        token = _resolve_token()
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
-
-        with httpx.Client(timeout=timeout) as client:
-            health_resp = client.get(f"{base_url}/health", headers=headers)
-            if health_resp.status_code != 200:
-                raise Exception(f"Health check failed: HTTP {health_resp.status_code}")
-    except Exception as e:
-        renderer.show_error(
-            f"Backend server is not running.\n"
-            f"Error: {str(e)}\n\n"
-            f"Start the server with: GIMO_LAUNCHER.cmd"
-        )
-        raise typer.Exit(1)
-
-    # 2. Check if orchestrator is configured
-    try:
-        with httpx.Client(timeout=timeout) as client:
-            providers_resp = client.get(f"{base_url}/ops/providers", headers=headers)
-            if providers_resp.status_code != 200:
-                raise Exception(f"HTTP {providers_resp.status_code}")
-
-            providers_data = providers_resp.json()
-            roles = providers_data.get("roles", {})
-            orch_binding = roles.get("orchestrator")
-
-            if not orch_binding:
-                renderer.show_error(
-                    "No orchestrator configured.\n\n"
-                    "Configure a provider:\n"
-                    "  1. Visit http://localhost:5173 (GIMO UI)\n"
-                    "  2. Go to Settings > Providers\n"
-                    "  3. Add a provider and assign it to 'orchestrator' role"
-                )
-                raise typer.Exit(1)
-
-            orchestrator_info = f"{orch_binding.get('model', 'unknown')} ({orch_binding.get('provider_id', 'unknown')})"
-    except Exception as e:
-        renderer.show_error(f"Failed to check orchestrator config: {str(e)}")
-        raise typer.Exit(1)
-
-    # 3. Create or get thread
-    try:
-        with httpx.Client(timeout=timeout) as client:
-            # List existing threads for this workspace
-            threads_resp = client.get(
-                f"{base_url}/ops/threads",
-                params={"workspace_root": workspace_root},
-                headers=headers
-            )
-
-            if threads_resp.status_code == 200:
-                threads = threads_resp.json()
-                # Use most recent active thread
-                active_threads = [t for t in threads if t.get("status") == "active"]
-                if active_threads:
-                    thread = active_threads[0]
-                    thread_id = thread["id"]
-                else:
-                    # Create new thread
-                    create_resp = client.post(
-                        f"{base_url}/ops/threads",
-                        params={"workspace_root": workspace_root, "title": "CLI Chat Session"},
-                        headers=headers
-                    )
-                    create_resp.raise_for_status()
-                    thread = create_resp.json()
-                    thread_id = thread["id"]
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, dict):
+        table = Table(title="Providers", show_header=True)
+        table.add_column("Key", style="cyan")
+        table.add_column("Value", style="white")
+        for k, v in payload.items():
+            if k == "providers" and isinstance(v, dict):
+                for pid, pdata in v.items():
+                    ptype = pdata.get("type", "?") if isinstance(pdata, dict) else str(pdata)
+                    table.add_row(f"  {pid}", ptype)
             else:
-                raise Exception(f"Failed to list threads: HTTP {threads_resp.status_code}")
-    except Exception as e:
-        renderer.show_error(f"Failed to create chat thread: {str(e)}")
+                table.add_row(k, str(v)[:120])
+        console.print(table)
+    else:
+        console.print(payload)
+
+
+@providers_app.command("test")
+def providers_test(
+    provider_id: str = typer.Argument(..., help="Provider ID to test."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Test connectivity for a provider."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "POST", f"/ops/connectors/{provider_id}/health")
+    if json_output:
+        _emit_output({"status_code": status_code, "result": payload}, json_output=True)
+        return
+    if status_code == 200:
+        console.print(f"[green]Provider '{provider_id}' is healthy.[/green]")
+    else:
+        console.print(f"[red]Provider '{provider_id}' test failed ({status_code}): {payload}[/red]")
+
+
+@providers_app.command("models")
+def providers_models(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """List models available from the active provider."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/provider/models")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
         raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, list):
+        table = Table(title="Available Models", show_header=True)
+        table.add_column("Model", style="cyan")
+        for m in payload:
+            name = m.get("id", str(m)) if isinstance(m, dict) else str(m)
+            table.add_row(name)
+        console.print(table)
+    else:
+        console.print(payload)
 
-    # Show session header
-    renderer.show_header(orchestrator_info, workspace_root, thread_id)
 
-    # Interactive loop
-    while True:
-        try:
-            user_input = renderer.show_user_prompt()
+# --- trust ---
 
-            if not user_input.strip():
-                continue
 
-            # Exit commands
-            if user_input.strip().lower() in {"/exit", "/quit", "exit", "quit"}:
-                renderer.show_info("Goodbye!")
-                break
-
-            # Send message to backend
-            with renderer.show_thinking_spinner():
-                with httpx.Client(timeout=120.0) as client:  # Longer timeout for chat
-                    chat_resp = client.post(
-                        f"{base_url}/ops/threads/{thread_id}/chat",
-                        params={"content": user_input},
-                        headers=headers
+@trust_app.command("status")
+def trust_status(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Show trust engine dashboard."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/trust/dashboard")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, dict):
+        table = Table(title="Trust Dashboard", show_header=True)
+        table.add_column("Dimension", style="cyan")
+        table.add_column("Score", style="magenta")
+        table.add_column("State", style="white")
+        entries = payload.get("entries") or payload.get("dimensions") or []
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict):
+                    table.add_row(
+                        str(entry.get("dimension", entry.get("key", "?"))),
+                        str(entry.get("score", "?")),
+                        str(entry.get("state", entry.get("circuit_state", "?"))),
                     )
+        console.print(table)
+        summary = payload.get("summary") or payload.get("aggregate")
+        if summary:
+            console.print(f"[dim]Aggregate: {summary}[/dim]")
+    else:
+        console.print(payload)
 
-                    if chat_resp.status_code != 200:
-                        renderer.show_error(f"Chat request failed: HTTP {chat_resp.status_code}\n{chat_resp.text}")
-                        continue
 
-                    response_data = chat_resp.json()
+@trust_app.command("reset")
+def trust_reset(
+    yes: bool = typer.Option(False, "--yes", help="Skip confirmation."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Reset trust engine state."""
+    if not yes and sys.stdin.isatty():
+        if not typer.confirm("Reset trust engine? This clears all trust scores.", default=False):
+            console.print("[yellow]Aborted.[/yellow]")
+            raise typer.Exit(0)
+    config = _load_config()
+    status_code, payload = _api_request(config, "POST", "/ops/trust/reset")
+    if json_output:
+        _emit_output({"status_code": status_code, "result": payload}, json_output=True)
+        return
+    if status_code == 200:
+        console.print("[green]Trust engine reset successfully.[/green]")
+    else:
+        console.print(f"[red]Reset failed ({status_code}): {payload}[/red]")
 
-            # Render response
-            from gimo_cli_renderer import render_chat_session
-            render_chat_session(
-                orchestrator_info=orchestrator_info,
-                workspace=workspace_root,
-                thread_id=thread_id,
-                user_message=user_input,
-                response_data=response_data
-            )
 
-        except KeyboardInterrupt:
-            console.print("\n[dim]Use /exit to quit[/dim]")
-            continue
-        except Exception as e:
-            renderer.show_error(f"Error: {str(e)}")
-            continue
+# --- mastery ---
+
+
+@mastery_app.command("status")
+def mastery_status(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Show token mastery status (economy, hardware, efficiency)."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/mastery/status")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, dict):
+        table = Table(title="Token Mastery", show_header=False)
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="magenta")
+        for k, v in payload.items():
+            if not isinstance(v, (dict, list)):
+                table.add_row(k, str(v))
+        console.print(table)
+    else:
+        console.print(payload)
+
+
+@mastery_app.command("forecast")
+def mastery_forecast(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Show budget forecast and burn rate."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/mastery/forecast")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, dict):
+        table = Table(title="Budget Forecast", show_header=False)
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="magenta")
+        for k, v in payload.items():
+            if not isinstance(v, (dict, list)):
+                table.add_row(k, str(v))
+        console.print(table)
+    else:
+        console.print(payload)
+
+
+@mastery_app.command("analytics")
+def mastery_analytics(
+    days: int = typer.Option(30, "--days", help="Number of days for analytics."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Show cost analytics over a time range."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/mastery/analytics", params={"days": days})
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(payload)
+
+
+# --- skills ---
+
+
+@skills_app.command("list")
+def skills_list(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """List registered skills."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/skills")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, list):
+        table = Table(title="Skills", show_header=True)
+        table.add_column("ID", style="cyan")
+        table.add_column("Name", style="white")
+        table.add_column("Description", style="dim")
+        for skill in payload:
+            if isinstance(skill, dict):
+                table.add_row(
+                    str(skill.get("id", "?")),
+                    str(skill.get("name", "?")),
+                    str(skill.get("description", ""))[:60],
+                )
+        console.print(table)
+    else:
+        console.print(payload)
+
+
+@skills_app.command("run")
+def skills_run(
+    skill_id: str = typer.Argument(..., help="Skill ID to execute."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Execute a registered skill."""
+    config = _load_config()
+    with console.status("[bold green]Executing skill..."):
+        status_code, payload = _api_request(config, "POST", f"/ops/skills/{skill_id}/execute")
+    if json_output:
+        _emit_output({"status_code": status_code, "result": payload}, json_output=True)
+        return
+    if status_code == 200:
+        console.print(f"[green]Skill '{skill_id}' executed successfully.[/green]")
+        if isinstance(payload, dict):
+            console.print_json(data=payload)
+    else:
+        console.print(f"[red]Execution failed ({status_code}): {payload}[/red]")
+
+
+# --- repos ---
+
+
+@repos_app.command("list")
+def repos_list(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """List known repositories."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/repos")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, list):
+        table = Table(title="Repositories", show_header=True)
+        table.add_column("Path", style="cyan")
+        table.add_column("Active", style="green")
+        for repo in payload:
+            if isinstance(repo, dict):
+                table.add_row(str(repo.get("path", "?")), str(repo.get("active", "")))
+            else:
+                table.add_row(str(repo), "")
+        console.print(table)
+    elif isinstance(payload, dict):
+        repos = payload.get("repos") or payload.get("repositories") or []
+        active = payload.get("active") or payload.get("selected")
+        if repos:
+            for r in repos:
+                marker = " [green]*[/green]" if str(r) == str(active) else ""
+                console.print(f"  {r}{marker}")
+        else:
+            console.print_json(data=payload)
+    else:
+        console.print(payload)
+
+
+@repos_app.command("select")
+def repos_select(
+    path: str = typer.Argument(..., help="Repository path to select."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Select a repository as active workspace."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "POST", "/ops/repos/select", params={"path": path})
+    if json_output:
+        _emit_output({"status_code": status_code, "result": payload}, json_output=True)
+        return
+    if status_code == 200:
+        console.print(f"[green]Repository selected: {path}[/green]")
+    else:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+
+
+# --- threads ---
+
+
+@threads_app.command("list")
+def threads_list(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """List conversation threads."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/threads")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, list):
+        table = Table(title="Threads", show_header=True)
+        table.add_column("ID", style="cyan")
+        table.add_column("Title", style="white")
+        table.add_column("Turns", style="magenta")
+        table.add_column("Created", style="dim")
+        for t in payload:
+            if isinstance(t, dict):
+                turns = t.get("turns", [])
+                table.add_row(
+                    str(t.get("id", "?"))[:12],
+                    str(t.get("title", "Untitled"))[:40],
+                    str(len(turns) if isinstance(turns, list) else "?"),
+                    str(t.get("created_at", ""))[:19],
+                )
+        console.print(table)
+    else:
+        console.print(payload)
+
+
+@threads_app.command("show")
+def threads_show(
+    thread_id: str = typer.Argument(..., help="Thread ID to display."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Show details of a specific thread."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", f"/ops/threads/{thread_id}")
+    if status_code != 200:
+        console.print(f"[red]Thread not found ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, dict):
+        console.print(Panel(
+            f"Title: {payload.get('title', 'Untitled')}\n"
+            f"Workspace: {payload.get('workspace_root', '?')}\n"
+            f"Turns: {len(payload.get('turns', []))}",
+            title=f"Thread {thread_id[:12]}",
+            border_style="cyan",
+        ))
+        for turn in payload.get("turns", []):
+            if not isinstance(turn, dict):
+                continue
+            agent = turn.get("agent_id", "?")
+            items = turn.get("items", [])
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                itype = item.get("type", "?")
+                content = str(item.get("content", ""))[:200]
+                if itype == "text" and content:
+                    prefix = "[bold cyan]>[/bold cyan]" if agent in ("user", "User") else "[bold green]GIMO:[/bold green]"
+                    console.print(f"  {prefix} {content}")
+                elif itype == "tool_call":
+                    meta = item.get("metadata", {})
+                    console.print(f"  [dim]\u25b8 {meta.get('tool_name', '?')}[/dim]")
+    else:
+        console.print(payload)
+
+
+# --- observe ---
+
+
+@observe_app.command("metrics")
+def observe_metrics(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Show observability metrics."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/observability/metrics")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, dict):
+        table = Table(title="Metrics", show_header=False)
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="magenta")
+        for k, v in payload.items():
+            if not isinstance(v, (dict, list)):
+                table.add_row(k, str(v))
+        console.print(table)
+    else:
+        console.print(payload)
+
+
+@observe_app.command("alerts")
+def observe_alerts(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Show active alerts."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/observability/alerts")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, dict):
+        alerts = payload.get("alerts", [])
+        count = payload.get("count", len(alerts) if isinstance(alerts, list) else 0)
+        if not alerts:
+            console.print(f"[green]No active alerts. (count={count})[/green]")
+            return
+        table = Table(title="Alerts", show_header=True)
+        table.add_column("Level", style="yellow")
+        table.add_column("Message", style="white")
+        for alert in (alerts if isinstance(alerts, list) else []):
+            if isinstance(alert, dict):
+                table.add_row(str(alert.get("level", "?")), str(alert.get("message", ""))[:80])
+            else:
+                table.add_row("?", str(alert)[:80])
+        console.print(table)
+    else:
+        console.print(payload)
+
+
+@observe_app.command("traces")
+def observe_traces(
+    limit: int = typer.Option(10, "--limit", help="Number of traces."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Show recent traces."""
+    config = _load_config()
+    status_code, payload = _api_request(config, "GET", "/ops/observability/traces", params={"limit": limit})
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+    if isinstance(payload, list):
+        table = Table(title="Traces", show_header=True)
+        table.add_column("ID", style="cyan")
+        table.add_column("Status", style="magenta")
+        table.add_column("Duration", style="dim")
+        for t in payload:
+            if isinstance(t, dict):
+                table.add_row(
+                    str(t.get("trace_id", t.get("id", "?")))[:12],
+                    str(t.get("status", "?")),
+                    str(t.get("duration_ms", t.get("duration", "?")))[:10],
+                )
+        console.print(table)
+    else:
+        console.print(payload)
 
 
 if __name__ == "__main__":

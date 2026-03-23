@@ -1,9 +1,13 @@
+import asyncio
 import os
 import httpx
 import logging
 from pathlib import Path
 
 logger = logging.getLogger("mcp_bridge")
+
+MAX_PROXY_RETRIES = 2
+RETRY_BACKOFF = 1.0
 
 # Default local backend URL
 BACKEND_URL = "http://127.0.0.1:9325"
@@ -86,6 +90,30 @@ async def proxy_to_api(method: str, path: str, **kwargs) -> str:
             return result
 
     except httpx.ConnectError:
+        # Retry once after a short delay
+        for attempt in range(MAX_PROXY_RETRIES):
+            try:
+                await asyncio.sleep(RETRY_BACKOFF * (attempt + 1))
+                async with httpx.AsyncClient(timeout=30.0) as retry_client:
+                    request = retry_client.build_request(
+                        method=method, url=url, params=query_params, json=body, headers=headers,
+                    )
+                    response = await retry_client.send(request)
+                    try:
+                        data = response.json()
+                        import json
+                        data_str = json.dumps(data, indent=2) if isinstance(data, (dict, list)) else str(data)
+                    except Exception:
+                        data_str = response.text
+                    if 200 <= response.status_code < 300:
+                        return f"✅ Success ({response.status_code}):\n{data_str}"
+                    return f"❌ Error ({response.status_code}):\n{data_str}"
+            except httpx.ConnectError:
+                continue
+            except Exception as retry_err:
+                logger.error(f"Bridge retry error: {retry_err}")
+                break
+
         return (
             "❌ Connection Error: The GIMO backend is not reachable.\n"
             f"Please ensure it is running on {BACKEND_URL} or use the 'gimo_start_engine' tool."

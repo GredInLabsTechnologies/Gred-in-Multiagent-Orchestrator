@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 from ...services.file_service import FileService
+from ..moods import get_mood_profile, MoodProfile  # P2: Import mood engine
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +19,54 @@ class ToolExecutionResult(Dict[str, Any]):
 class ToolExecutor:
     """
     Handles execution of artifact tools with safety checks.
+
+    P2: Enhanced with mood-based tool constraints (whitelist/blacklist/requires_confirmation).
     """
-    def __init__(self, workspace_root: str, policy: Optional[Dict[str, Any]] = None, token: str = "SYSTEM"):
+    def __init__(
+        self,
+        workspace_root: str,
+        policy: Optional[Dict[str, Any]] = None,
+        token: str = "SYSTEM",
+        mood: str = "neutral",
+    ):
         self.workspace_root = workspace_root
         self.policy = policy or {}
         self.token = token
+        self.mood = mood
+        self._mood_profile: Optional[MoodProfile] = None
+
+        # Load mood profile if valid
+        try:
+            self._mood_profile = get_mood_profile(mood)
+        except KeyError:
+            logger.warning(f"Invalid mood '{mood}', using neutral")
+            self._mood_profile = get_mood_profile("neutral")
+
+    def _is_tool_allowed(self, tool_name: str) -> tuple[bool, Optional[str]]:
+        """Check if a tool is allowed by the current mood profile.
+
+        Returns: (is_allowed, reason_if_denied)
+        """
+        if not self._mood_profile:
+            return True, None
+
+        # Check blacklist first
+        if tool_name in self._mood_profile.tool_blacklist:
+            return False, f"Tool '{tool_name}' is blacklisted in {self.mood} mood"
+
+        # Check whitelist (empty whitelist = all allowed)
+        if self._mood_profile.tool_whitelist:
+            if tool_name not in self._mood_profile.tool_whitelist:
+                allowed_tools = ", ".join(sorted(self._mood_profile.tool_whitelist))
+                return False, f"Tool '{tool_name}' not in {self.mood} mood whitelist. Allowed: {allowed_tools}"
+
+        return True, None
+
+    def _requires_confirmation(self, tool_name: str) -> bool:
+        """Check if a tool requires user confirmation before execution."""
+        if not self._mood_profile:
+            return False
+        return tool_name in self._mood_profile.requires_confirmation
 
     def _is_path_allowed(self, full_path: str) -> bool:
         allowed_paths = []
@@ -54,11 +98,28 @@ class ToolExecutor:
 
 
     async def execute_tool_call(self, name: str, arguments: Dict[str, Any]) -> ToolExecutionResult:
-        """Routes a tool call to the appropriate internal handler."""
+        """Routes a tool call to the appropriate internal handler.
+
+        P2: Validates mood-based tool constraints before execution.
+        """
+        # P2: Validate tool is allowed by mood
+        is_allowed, deny_reason = self._is_tool_allowed(name)
+        if not is_allowed:
+            return ToolExecutionResult("error", deny_reason or f"Tool '{name}' not allowed")
+
+        # P2: Check if tool requires user confirmation
+        if self._requires_confirmation(name):
+            # Return special status to trigger ask_user flow
+            return ToolExecutionResult("requires_confirmation", f"Tool '{name}' requires user approval in {self.mood} mood", {
+                "tool_name": name,
+                "arguments": arguments,
+                "mood": self.mood,
+            })
+
         handler = getattr(self, f"handle_{name}", None)
         if not handler:
             return ToolExecutionResult("error", f"Unknown tool: {name}")
-        
+
         try:
             return await handler(arguments)
         except Exception as e:
@@ -353,3 +414,95 @@ class ToolExecutor:
         except Exception as e:
             logger.exception(f"Error executing command: {command}")
             return ToolExecutionResult("error", f"Failed to execute: {str(e)}")
+
+    # ── P2: Meta-Tools ────────────────────────────────────────────────────────
+
+    async def handle_ask_user(self, args: Dict[str, Any]) -> ToolExecutionResult:
+        """Pause the loop and ask the user a question.
+
+        Returns a special status that signals the agentic loop to pause and wait for user input.
+        """
+        question = args.get("question")
+        if not question:
+            return ToolExecutionResult("error", "Missing 'question' argument")
+
+        options = args.get("options", [])
+        context = args.get("context", "")
+
+        # Return special status to pause loop
+        return ToolExecutionResult("user_question", question, {
+            "question": question,
+            "options": options,
+            "context": context,
+        })
+
+    async def handle_propose_plan(self, args: Dict[str, Any]) -> ToolExecutionResult:
+        """Propose an execution plan for user approval.
+
+        Returns a special status that signals the agentic loop to pause and wait for plan approval.
+        """
+        title = args.get("title")
+        objective = args.get("objective")
+        tasks = args.get("tasks", [])
+
+        if not title or not objective:
+            return ToolExecutionResult("error", "Missing 'title' or 'objective'")
+
+        if not tasks:
+            return ToolExecutionResult("error", "Plan must include at least one task")
+
+        # Validate tasks structure
+        for idx, task in enumerate(tasks):
+            if not isinstance(task, dict):
+                return ToolExecutionResult("error", f"Task {idx} is not a valid object")
+            if not task.get("id") or not task.get("title"):
+                return ToolExecutionResult("error", f"Task {idx} missing 'id' or 'title'")
+            if not task.get("agent_rationale"):
+                return ToolExecutionResult("error", f"Task {task.get('id')} missing 'agent_rationale' (explain WHY you chose this mood)")
+
+        # Return special status to pause loop for plan review
+        return ToolExecutionResult("plan_proposed", f"Proposed plan: {title}", {
+            "title": title,
+            "objective": objective,
+            "tasks": tasks,
+        })
+
+    async def handle_web_search(self, args: Dict[str, Any]) -> ToolExecutionResult:
+        """Search the web for information.
+
+        P2: Proxies to existing web search infrastructure if available, otherwise returns placeholder.
+        """
+        query = args.get("query")
+        if not query:
+            return ToolExecutionResult("error", "Missing 'query' argument")
+
+        try:
+            # Try to import and use existing web search service
+            from ...services.web_search_service import WebSearchService
+
+            results = await WebSearchService.search(query, max_results=5)
+            if not results:
+                return ToolExecutionResult("success", f"No results found for: {query}", {"results": []})
+
+            # Format results
+            formatted = "\n\n".join([
+                f"[{i+1}] {r.get('title', 'Untitled')}\n{r.get('snippet', '')}\nURL: {r.get('url', '')}"
+                for i, r in enumerate(results[:5])
+            ])
+
+            return ToolExecutionResult("success", f"Found {len(results)} results for: {query}", {
+                "query": query,
+                "results": results,
+                "formatted": formatted,
+            })
+        except ImportError:
+            # Fallback: return placeholder if web search not configured
+            logger.warning("WebSearchService not available, returning placeholder")
+            return ToolExecutionResult("success", f"[Web search placeholder] Query: {query}", {
+                "query": query,
+                "results": [],
+                "note": "Web search not configured. Install a web search provider to enable this feature.",
+            })
+        except Exception as e:
+            logger.exception(f"Error in web_search for query: {query}")
+            return ToolExecutionResult("error", f"Web search failed: {str(e)}")

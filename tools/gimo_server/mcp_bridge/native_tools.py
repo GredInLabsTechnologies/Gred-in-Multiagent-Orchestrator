@@ -399,4 +399,158 @@ def register_native_tools(mcp: FastMCP):
         except Exception as e:
             return f"Search error: {e}"
 
+    @mcp.tool()
+    async def gimo_chat(message: str, thread_id: str = "", workspace_root: str = "") -> str:
+        """Send a message to GIMO's agentic chat and get a response with tool execution.
+
+        P2: Enhanced with conversational planning. If the agent proposes a plan or asks
+        a question, the response will include that information.
+
+        Creates a new thread if thread_id is empty.
+        Returns the assistant response, tool calls, and any pending actions (questions/plans).
+        """
+        from .bridge import proxy_to_api, _get_auth_token, BACKEND_URL
+        import httpx
+        import json
+
+        try:
+            token = _get_auth_token()
+            headers = {}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                # Create thread if needed
+                if not thread_id:
+                    ws = workspace_root or "."
+                    resp = await client.post(
+                        f"{BACKEND_URL}/ops/threads",
+                        params={"workspace_root": ws, "title": "MCP Chat Session"},
+                        headers=headers,
+                    )
+                    if resp.status_code != 201:
+                        return f"Failed to create thread: HTTP {resp.status_code} {resp.text[:200]}"
+                    thread_data = resp.json()
+                    thread_id = thread_data.get("id", "")
+
+                # Send chat message
+                resp = await client.post(
+                    f"{BACKEND_URL}/ops/threads/{thread_id}/chat",
+                    params={"content": message},
+                    headers=headers,
+                )
+
+                if resp.status_code != 200:
+                    return f"Chat failed: HTTP {resp.status_code} {resp.text[:200]}"
+
+                result = resp.json()
+                response_text = result.get("response", "")
+                tool_calls = result.get("tool_calls", [])
+                usage = result.get("usage", {})
+                finish_reason = result.get("finish_reason", "stop")
+
+                # P2: Check thread state for pending actions
+                thread_resp = await client.get(
+                    f"{BACKEND_URL}/ops/threads/{thread_id}",
+                    headers=headers,
+                )
+                thread_state = thread_resp.json() if thread_resp.status_code == 200 else {}
+                proposed_plan = thread_state.get("proposed_plan")
+                mood = thread_state.get("mood", "neutral")
+
+                # Format output
+                parts = [f"Thread: {thread_id} | Mood: {mood}"]
+                if tool_calls:
+                    parts.append(f"\nTool calls ({len(tool_calls)}):")
+                    for tc in tool_calls:
+                        status_icon = "+" if tc.get("status") == "success" else "x"
+                        parts.append(f"  [{status_icon}] {tc.get('name', '?')} ({tc.get('risk', 'LOW')}) {tc.get('duration', 0):.1f}s")
+
+                parts.append(f"\nResponse:\n{response_text}")
+
+                # P2: Indicate pending actions
+                if finish_reason == "user_question":
+                    parts.append("\n[AWAITING USER ANSWER] Send another message to continue.")
+                elif finish_reason == "plan_proposed" and proposed_plan:
+                    plan_title = proposed_plan.get("title", "Execution Plan")
+                    task_count = len(proposed_plan.get("tasks", []))
+                    parts.append(f"\n[PLAN PROPOSED] {plan_title} ({task_count} tasks)")
+                    parts.append("Use gimo_approve_plan() to approve or gimo_reject_plan() to reject.")
+
+                tokens = usage.get("total_tokens", 0)
+                cost = usage.get("cost_usd", 0)
+                if tokens:
+                    parts.append(f"\n[{tokens:,} tokens | ${cost:.4f}]")
+
+                return "\n".join(parts)
+
+        except Exception as e:
+            return f"gimo_chat error: {e}"
+
+    # ── P2: Plan Approval Tools ───────────────────────────────────────────────
+
+    @mcp.tool()
+    async def gimo_approve_plan(thread_id: str) -> str:
+        """Approve the proposed execution plan in the given thread.
+
+        P2: The agent will transition to executor mood and begin executing the plan.
+        """
+        from .bridge import _get_auth_token, BACKEND_URL
+        import httpx
+
+        try:
+            token = _get_auth_token()
+            headers = {}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{BACKEND_URL}/ops/threads/{thread_id}/plan/respond",
+                    params={"action": "approve"},
+                    json={"feedback": "Approved via MCP"},
+                    headers=headers,
+                )
+
+                if resp.status_code != 200:
+                    return f"Failed to approve plan: HTTP {resp.status_code} {resp.text[:200]}"
+
+                result = resp.json()
+                plan_id = result.get("plan_id", "")
+                return f"✓ Plan approved. Execution started (plan_id: {plan_id}). Mood transitioned to: {result.get('mood_transition', 'executor')}"
+
+        except Exception as e:
+            return f"gimo_approve_plan error: {e}"
+
+    @mcp.tool()
+    async def gimo_reject_plan(thread_id: str, feedback: str = "") -> str:
+        """Reject the proposed plan and ask the agent to revise.
+
+        P2: The agent will transition back to dialoger mood and revise the plan based on feedback.
+        """
+        from .bridge import _get_auth_token, BACKEND_URL
+        import httpx
+
+        try:
+            token = _get_auth_token()
+            headers = {}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{BACKEND_URL}/ops/threads/{thread_id}/plan/respond",
+                    params={"action": "reject", "feedback": feedback or "Plan rejected. Please revise."},
+                    headers=headers,
+                )
+
+                if resp.status_code != 200:
+                    return f"Failed to reject plan: HTTP {resp.status_code} {resp.text[:200]}"
+
+                result = resp.json()
+                return f"✗ Plan rejected. Agent will revise. Mood transitioned to: {result.get('mood_transition', 'dialoger')}"
+
+        except Exception as e:
+            return f"gimo_reject_plan error: {e}"
+
     logger.info("Registered Native Tools")

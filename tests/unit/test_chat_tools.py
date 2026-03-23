@@ -20,8 +20,8 @@ class TestChatToolsSchema:
     """Tests for tool definitions."""
 
     def test_chat_tools_count(self):
-        """Should have 8 tools defined."""
-        assert len(CHAT_TOOLS) == 8
+        """Should have 11 tools defined (8 base + 3 P2 meta-tools)."""
+        assert len(CHAT_TOOLS) == 11
 
     def test_all_tools_have_required_fields(self):
         """Each tool should have proper OpenAI function format."""
@@ -46,6 +46,9 @@ class TestChatToolsSchema:
             "shell_exec",
             "patch_file",
             "create_dir",
+            "ask_user",
+            "propose_plan",
+            "web_search",
         }
         assert names == expected
 

@@ -14,6 +14,7 @@ from filelock import FileLock
 from pydantic import BaseModel, Field, field_validator
 
 from ..config import OPS_DATA_DIR
+from ..engine.moods import MoodType, MOOD_PROMPTS  # P2: Import moods from central engine
 
 logger = logging.getLogger("orchestrator.skills")
 
@@ -24,44 +25,8 @@ MARKETPLACE_DIR = OPS_DATA_DIR / "skill_marketplace"
 COMMAND_RE = re.compile(r"^/[a-z0-9_-]{2,32}$")
 SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,80}$")
 
-# ── Agent Moods ───────────────────────────────────────────────────────────────
-# 6 behavioural presets that shape agent personality via system prompt injection.
-
-MoodType = Literal["neutral", "forensic", "executor", "dialoger", "creative", "guardian", "mentor"]
-
-MOOD_PROMPTS: Dict[str, str] = {
-    "neutral": "",
-    "forensic": (
-        "[MOOD: FORENSIC] You are meticulous and analytical. "
-        "Investigate every detail, trace root causes, question assumptions, "
-        "and produce exhaustive evidence-backed findings. Never skip edge cases."
-    ),
-    "executor": (
-        "[MOOD: EXECUTOR] You are direct and results-oriented. "
-        "Cut through ambiguity, make decisions fast, ship working output. "
-        "Minimize discussion, maximize throughput."
-    ),
-    "dialoger": (
-        "[MOOD: DIALOGER] You are collaborative and consultative. "
-        "Before acting, ask clarifying questions. Propose options to the user. "
-        "Seek agreement before executing irreversible actions."
-    ),
-    "creative": (
-        "[MOOD: CREATIVE] You are imaginative and exploratory. "
-        "Suggest unconventional approaches, explore alternative solutions, "
-        "and think outside established patterns. Challenge the status quo."
-    ),
-    "guardian": (
-        "[MOOD: GUARDIAN] You are security-focused and cautious. "
-        "Prioritize safety, validate inputs, check for vulnerabilities, "
-        "and raise warnings about risky operations before proceeding."
-    ),
-    "mentor": (
-        "[MOOD: MENTOR] You are educational and explanatory. "
-        "Teach as you work. Explain your reasoning, share best practices, "
-        "and help the user learn from the process."
-    ),
-}
+# ── Agent Moods (P2: Migrated to engine/moods.py) ─────────────────────────────
+# MoodType and MOOD_PROMPTS now imported from central mood engine
 
 
 class DuplicateCommandError(ValueError):

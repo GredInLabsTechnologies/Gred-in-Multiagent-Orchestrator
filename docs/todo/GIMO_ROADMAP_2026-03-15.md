@@ -75,7 +75,7 @@ Resultado: **660+ tests, 23 skipped, 17 pre-existing order-dependent failures** 
 
 **Meta:** GIMO es usable por humanos (CLI) y por IAs (MCP/API) de multiples formas. Potencia + rendimiento + higiene + sencillez.
 
-**Avance 2026-03-22:** P1 cerrado. 754 tests pasando (3:05 min). Legacy routes migradas a /ops/ con 308 redirects. routes.py reducido de 1209→475 LOC. routers/legacy/ eliminado. i18n con react-i18next (EN+ES). Rate limiting por rol. Security audit: 0 HIGH findings (bandit), 0 vulnerabilities (npm audit). Frontend Vite 6. Tag v1.0.
+**Avance 2026-03-22:** P1 cerrado. 778 tests pasando (3:05 min). Legacy routes migradas a /ops/ con 308 redirects. routes.py reducido de 1209→475 LOC. routers/legacy/ eliminado. i18n con react-i18next (EN+ES). Rate limiting por rol. Security audit: 0 HIGH findings (bandit), 0 vulnerabilities (npm audit). Frontend Vite 6. Tag v1.0-beta.
 
 ### P1.1 — CLI de GIMO (`gimo`)
 
@@ -126,7 +126,7 @@ Resultado: **660+ tests, 23 skipped, 17 pre-existing order-dependent failures** 
 | # | Tarea | Detalle | Estado |
 |---|-------|---------|--------|
 | 1 | Mapear TODOS los fetch/axios calls del frontend | Tabla endpoint → componente → metodo → estado | `DONE` — All fetch calls migrated to fetchWithRetry, legacy /ui/* → /ops/* |
-| 2 | Verificar que cada endpoint existe y responde correctamente | Test automatizado: frontend call → backend response | `DONE` — 754 tests covering all OPS routers |
+| 2 | Verificar que cada endpoint existe y responde correctamente | Test automatizado: frontend call → backend response | `DONE` — 778 tests covering all OPS routers |
 | 3 | Eliminar endpoints muertos del backend | Cualquier ruta sin consumidor documentado → deprecar o eliminar | `DONE` — routers/legacy/ deleted, routes.py reduced 1209→475 LOC |
 | 4 | Unificar manejo de errores frontend: toast + retry + fallback | Ningun error silencioso, todo visible al usuario | `DONE` — fetchWithRetry with exponential backoff, toast on errors, i18n EN+ES |
 
