@@ -19,6 +19,7 @@ class ChatRenderer:
 
     def __init__(self, console: Optional[Console] = None):
         self.console = console or Console()
+        self.telemetry_html: Optional[str] = None
 
     def render_session_header(
         self,
@@ -44,7 +45,6 @@ class ChatRenderer:
         name = tool.get("name", "unknown")
         status = tool.get("status", "success")
         duration = tool.get("duration", 0.0)
-        risk = tool.get("risk", "LOW")
         args = tool.get("arguments", {})
 
         # Build arg summary (short)
@@ -58,13 +58,10 @@ class ChatRenderer:
 
         if status == "success":
             symbol = "[green]\u2713[/green]"
-            style = "dim"
         elif status == "error":
             symbol = "[red]\u2717[/red]"
-            style = "dim red"
         else:
             symbol = "[yellow]\u2298[/yellow]"
-            style = "dim yellow"
 
         line = Text.from_markup(
             f"  [dim]\u25b8[/dim] {name} {arg_summary}  {symbol} [dim]{duration:.1f}s[/dim]"
@@ -97,8 +94,6 @@ class ChatRenderer:
     def render_footer(self, usage: Dict[str, Any]) -> None:
         tokens = usage.get("total_tokens", 0)
         cost = usage.get("cost_usd", 0.0)
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
 
         parts = []
         if tokens:
@@ -277,7 +272,6 @@ class ChatRenderer:
 
         # Render tasks
         for idx, task in enumerate(tasks, 1):
-            task_id = task.get("id", f"t{idx}")
             task_title = task.get("title", "Task")
             task_desc = task.get("description", "")
             mood = task.get("agent_mood", "neutral")

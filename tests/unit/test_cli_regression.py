@@ -15,7 +15,7 @@ def test_terminal_status():
     assert _terminal_status("pending") is False
     assert _terminal_status("awaiting_subagents") is False
     # Test completely unknown generic
-    assert _terminal_status("some_unknown_weird_state") is True
+    assert _terminal_status("some_unknown_weird_state") is False
 
 
 def test_handle_chat_slash_command_workspace():
@@ -112,3 +112,48 @@ def test_chat_renderer_tool_call_search_replace(mock_print):
     assert mock_print.call_count == 3
     assert "old: foo" in mock_print.call_args_list[1][0][0]
     assert "new: bar" in mock_print.call_args_list[2][0][0]
+
+
+from unittest.mock import MagicMock
+from gimo import _project_root
+import subprocess
+from pathlib import Path
+
+def test_project_root_git_repo(monkeypatch):
+    mock_run = MagicMock()
+    mock_run.return_value.stdout = 'C:/fake/repo\n'
+    monkeypatch.setattr(subprocess, 'run', mock_run)
+    
+    root = _project_root()
+    assert str(root).replace('\\', '/') == 'C:/fake/repo'
+
+def test_project_root_no_git(monkeypatch):
+    def mock_run_fail(*args, **kwargs):
+        raise Exception('Not a git repo')
+    monkeypatch.setattr(subprocess, 'run', mock_run_fail)
+    
+    root = _project_root()
+    assert root == Path.cwd()
+
+@patch('gimo._write_json')
+@patch('gimo._runs_dir', return_value=Path('/fake/runs'))
+def test_run_artifact_persistence(mock_runs_dir, mock_write_json):
+    from gimo import app
+    from typer.testing import CliRunner
+    runner = CliRunner()
+    
+    with patch('gimo._load_config', return_value={}): 
+        with patch('gimo._api_request', return_value=(200, {'run': {'id': 'run-999'}}, )):
+            result = runner.invoke(app, ['run', 'plan-123', '--no-confirm', '--no-wait'])
+            
+            # Should have written to run-999.json
+            args, kwargs = mock_write_json.call_args
+            assert 'run-999.json' in str(args[0])
+            
+        with patch('gimo._api_request', return_value=(200, {'run': None}, )):
+            result = runner.invoke(app, ['run', 'plan-123', '--no-confirm', '--no-wait'])
+            
+            # Should have written to plan-123_RANDOM.json
+            args, kwargs = mock_write_json.call_args
+            assert 'plan-123_' in str(args[0])
+            assert 'run-999.json' not in str(args[0])

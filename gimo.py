@@ -13,6 +13,7 @@ import typer
 import yaml
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 from cli_constants import (
     DEFAULT_API_BASE_URL,
     DEFAULT_TIMEOUT_SECONDS,
@@ -37,7 +38,11 @@ console = Console()
 
 
 def _project_root() -> Path:
-    return Path.cwd()
+    try:
+        probe = subprocess.run(["git", "rev-parse", "--show-toplevel"], text=True, capture_output=True, check=True)
+        return Path(probe.stdout.strip())
+    except Exception:
+        return Path.cwd()
 
 
 def _gimo_dir() -> Path:
@@ -644,7 +649,7 @@ def _preflight_check(config: dict[str, Any]) -> tuple[bool, str]:
         if status_code != 200:
             return False, f"Server returned HTTP {status_code}. Is GIMO running?"
     except Exception as exc:
-        return False, f"Cannot reach GIMO server: {exc}\nStart it with: GIMO_LAUNCHER.cmd"
+        return False, f"Cannot reach GIMO server: {exc}\nStart it with: gimo.cmd"
 
     try:
         status_code, payload = _provider_config_request(config)
@@ -705,16 +710,224 @@ def _interactive_chat(config: dict[str, Any]) -> None:
     history_path = _history_dir() / f"{thread_id}.log"
     _ensure_project_dirs()
 
-    # Initialize Textual App
-    try:
-        from gimo_tui import GimoApp
-        app = GimoApp(
-            config=config,
+    # Main loop
+    while True:
+        user_input = renderer.get_user_input()
+        if not user_input:
+            continue
+        if user_input.lower() in {"/exit", "/quit"}:
+            console.print("[dim]Session ended.[/dim]")
+            break
+        handled, updated_model = _handle_chat_slash_command(
+            config,
+            user_input,
+            workspace_root=workspace_root,
             thread_id=thread_id,
         )
-        app.run()
-    except KeyboardInterrupt:
-        console.print("[dim]Session ended.[/dim]")
+        if handled:
+            if updated_model is not None:
+                model = updated_model
+            continue
+
+        # Save to history
+        with history_path.open("a", encoding="utf-8") as f:
+            f.write(f"> {user_input}\n")
+
+        # Try SSE streaming first, fall back to sync
+        base_url, timeout_seconds = _api_settings(config)
+        auth_token = _resolve_token()
+        headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+        headers["Accept"] = "text/event-stream"
+
+        chat_response = ""
+        usage = {}
+
+        try:
+            stream_timeout = httpx.Timeout(
+                connect=timeout_seconds,
+                read=600.0,  # 10 min for long agentic loops
+                write=timeout_seconds,
+                pool=timeout_seconds,
+            )
+            with httpx.Client(timeout=stream_timeout) as client:
+                with renderer.render_thinking():
+                    with client.stream(
+                        "POST",
+                        f"{base_url}/ops/threads/{thread_id}/chat/stream",
+                        params={"content": user_input},
+                        headers=headers,
+                    ) as response:
+                        if response.status_code != 200:
+                            # Fall back to sync endpoint
+                            raise httpx.HTTPStatusError(
+                                f"Stream returned {response.status_code}",
+                                request=response.request,
+                                response=response,
+                            )
+
+                        current_event_type = "message"
+                        for line in response.iter_lines():
+                            if not line or line.startswith(":"):
+                                continue
+
+                            # Parse SSE format
+                            if line.startswith("event: "):
+                                current_event_type = line[7:].strip()
+                                continue
+                            if not line.startswith("data: "):
+                                continue
+
+                            raw_data = line[6:].strip()
+                            if not raw_data:
+                                continue
+
+                            try:
+                                data = json.loads(raw_data)
+                            except json.JSONDecodeError:
+                                continue
+
+                            evt = current_event_type
+
+                            if evt == "text_delta":
+                                # Accumulate for final render
+                                chat_response += data.get("content", "")
+
+                            elif evt == "tool_call_start":
+                                renderer.render_tool_call_start(
+                                    data.get("tool_name", "?"),
+                                    data.get("arguments", {}),
+                                    data.get("risk", "LOW"),
+                                )
+
+                            elif evt == "tool_approval_required":
+                                # HITL: ask user for approval
+                                approved = renderer.render_hitl_prompt(
+                                    data.get("tool_name", "?"),
+                                    data.get("arguments", {}),
+                                )
+                                # Submit approval to backend
+                                try:
+                                    client.post(
+                                        f"{base_url}/ops/threads/{thread_id}/approve-tool",
+                                        params={
+                                            "tool_call_id": data.get("tool_call_id", ""),
+                                            "approved": str(approved).lower(),
+                                        },
+                                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                                    )
+                                except Exception:
+                                    pass  # Best effort
+
+                            elif evt == "tool_call_end":
+                                renderer.render_tool_call_result(
+                                    data.get("tool_name", "?"),
+                                    data.get("status", "error"),
+                                    data.get("duration", 0.0),
+                                    data.get("risk", "LOW"),
+                                )
+
+                            elif evt == "done":
+                                chat_response = data.get("response", chat_response)
+                                usage = data.get("usage", {})
+
+                            elif evt == "error":
+                                renderer.render_error(data.get("message", "Unknown error"))
+
+                            # P2: conversational planning events
+                            elif evt == "user_question":
+                                question = data.get("question", "")
+                                options = data.get("options", [])
+                                context = data.get("context", "")
+                                renderer.render_user_question(question, options, context)
+
+                            elif evt == "plan_proposed":
+                                plan = data
+                                renderer.render_plan(plan)
+                                approval = renderer.get_plan_approval()
+
+                                try:
+                                    client.post(
+                                        f"{base_url}/ops/threads/{thread_id}/plan/respond",
+                                        params={"action": approval},
+                                        json={"feedback": "User feedback from CLI"},
+                                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                                    )
+
+                                    if approval == "approve":
+                                        renderer.console.print("[green]\u2713 Plan approved. Execution started.[/green]")
+                                    elif approval == "reject":
+                                        renderer.console.print("[red]\u2717 Plan rejected. Agent will revise.[/red]")
+                                    else:
+                                        renderer.console.print("[yellow]Plan modification not yet implemented in CLI. Please approve or reject.[/yellow]")
+                                except Exception as e:
+                                    renderer.render_error(f"Failed to submit plan response: {e}")
+
+                            elif evt == "confirmation_required":
+                                tool_name = data.get("tool_name", "?")
+                                message = data.get("message", "")
+                                renderer.console.print()
+                                renderer.console.print(Panel(
+                                    f"{message}\n\nTool: [bold]{tool_name}[/bold]",
+                                    title="\u26a0 Confirmation Required",
+                                    border_style="yellow",
+                                ))
+                                try:
+                                    answer = renderer.console.input("[bold yellow]Approve? (y/N): [/bold yellow]").strip().lower()
+                                    approved = answer in ("y", "yes", "si", "s\u00ed")
+                                    # TODO: Submit confirmation to backend (similar to HITL approval)
+                                    if not approved:
+                                        renderer.console.print("[dim]Confirmation denied. Agent will skip this action.[/dim]")
+                                except (EOFError, KeyboardInterrupt):
+                                    pass
+
+                            elif evt == "session_start":
+                                mood = data.get("mood", "neutral")
+                                renderer.render_mood_indicator(mood)
+
+        except (httpx.HTTPStatusError, httpx.ConnectError):
+            # Fall back to sync POST
+            try:
+                with httpx.Client(timeout=max(timeout_seconds, 300.0)) as client:
+                    with renderer.render_thinking():
+                        response = client.post(
+                            f"{base_url}/ops/threads/{thread_id}/chat",
+                            params={"content": user_input},
+                            headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                        )
+
+                if response.status_code != 200:
+                    renderer.render_error(f"HTTP {response.status_code}: {response.text[:200]}")
+                    continue
+
+                payload = response.json()
+                tool_calls = payload.get("tool_calls", [])
+                if tool_calls:
+                    renderer.render_tool_calls(tool_calls)
+                chat_response = payload.get("response", "")
+                usage = payload.get("usage", {})
+            except httpx.TimeoutException:
+                renderer.render_error("Request timed out. The LLM may need more time.")
+                continue
+            except Exception as exc:
+                renderer.render_error(f"Request failed: {exc}")
+                continue
+        except httpx.TimeoutException:
+            renderer.render_error("Stream timed out. The LLM may need more time.")
+            continue
+        except Exception as exc:
+            renderer.render_error(f"Stream failed: {exc}")
+            continue
+
+        # Render response
+        renderer.render_response(chat_response)
+        renderer.render_footer(usage)
+
+        # Save to history
+        with history_path.open("a", encoding="utf-8") as f:
+            f.write(f"{chat_response}\n---\n")
+
+
+@app.callback()
 
 
 @app.callback()
@@ -1032,7 +1245,14 @@ def run(
     approved = payload.get("approved") if isinstance(payload.get("approved"), dict) else {}
     run_payload = payload.get("run") if isinstance(payload.get("run"), dict) else None
 
-    run_path = _runs_dir() / f"{plan_id}.json"
+    record_id = str(run_payload.get("id", "")) if run_payload else ""
+    if record_id:
+        base_name = record_id
+    else:
+        import uuid
+        base_name = f"{plan_id}_{uuid.uuid4().hex[:8]}"
+
+    run_path = _runs_dir() / f"{base_name}.json"
     _write_json(run_path, payload)
 
     final_run_payload = run_payload
@@ -1084,6 +1304,20 @@ def run(
         )
     )
 
+
+@app.command()
+def tui() -> None:
+    """Launch the experimental Textual UI."""
+    try:
+        config = _load_config()
+    except Exception:
+        _ensure_project_dirs()
+        config = _load_config()
+
+    from gimo_tui import GimoApp
+    console.print("[dim]Launching TUI...[/dim]")
+    app_tui = GimoApp(config=config, thread_id="tui_default")
+    app_tui.run()
 
 @app.command()
 def chat() -> None:

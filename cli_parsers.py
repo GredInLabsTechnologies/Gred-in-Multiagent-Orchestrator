@@ -17,4 +17,4 @@ def parse_plan_action(text: str) -> str:
 
 def is_terminal_status(status: str, active_statuses: frozenset, terminal_statuses: frozenset) -> bool:
     """Determine if a run status is terminal."""
-    return status in terminal_statuses or (bool(status) and status not in active_statuses)
+    return status in terminal_statuses
