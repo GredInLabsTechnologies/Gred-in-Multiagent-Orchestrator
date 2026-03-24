@@ -872,9 +872,22 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                                     border_style="yellow",
                                 ))
                                 try:
-                                    answer = renderer.console.input("[bold yellow]Approve? (y/N): [/bold yellow]").strip().lower()
-                                    approved = answer in ("y", "yes", "si", "s\u00ed")
-                                    # TODO: Submit confirmation to backend (similar to HITL approval)
+                                    answer = renderer.console.input("[bold yellow]Approve? (y/N): [/bold yellow]").strip()
+                                    from cli_parsers import parse_yes_no
+                                    approved = parse_yes_no(answer)
+                                    
+                                    try:
+                                        client.post(
+                                            f"{base_url}/ops/threads/{thread_id}/approve-tool",
+                                            params={
+                                                "tool_call_id": data.get("tool_call_id", ""),
+                                                "approved": str(approved).lower(),
+                                            },
+                                            headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                                        )
+                                    except Exception:
+                                        pass  # Best effort
+                                        
                                     if not approved:
                                         renderer.console.print("[dim]Confirmation denied. Agent will skip this action.[/dim]")
                                 except (EOFError, KeyboardInterrupt):
