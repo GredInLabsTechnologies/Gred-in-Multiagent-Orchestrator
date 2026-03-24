@@ -928,9 +928,6 @@ def _interactive_chat(config: dict[str, Any]) -> None:
 
 
 @app.callback()
-
-
-@app.callback()
 def main(ctx: typer.Context) -> None:
     """GIMO: Generalized Intelligent Multi-agent Orchestrator.
 

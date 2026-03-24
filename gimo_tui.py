@@ -466,6 +466,10 @@ class GimoApp(App):
         lbl = self.query_one("#graph-content", Static)
         lbl.update(text)
 
+    def _update_eco_widget(self, text: str):
+        lbl = self.query_one("#eco-content", Static)
+        lbl.update(text)
+
 if __name__ == "__main__":
     app = GimoApp()
     app.run()
