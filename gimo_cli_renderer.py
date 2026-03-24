@@ -71,8 +71,9 @@ class ChatRenderer:
         )
         self.console.print(line)
 
+        from cli_policies import CODE_EDITING_TOOL_NAMES
         # Show detail for write operations
-        if name in ("write_file", "search_replace", "patch_file") and status == "success":
+        if name in CODE_EDITING_TOOL_NAMES and status == "success":
             if name == "search_replace":
                 old = str(args.get("old_text", ""))[:60]
                 new = str(args.get("new_text", ""))[:60]
@@ -153,8 +154,9 @@ class ChatRenderer:
             border_style="red",
         ))
         try:
-            answer = self.console.input("[bold yellow]Approve? (y/N): [/bold yellow]").strip().lower()
-            return answer in ("y", "yes", "si", "s\u00ed")
+            answer = self.console.input("[bold yellow]Approve? (y/N): [/bold yellow]")
+            from cli_parsers import parse_yes_no
+            return parse_yes_no(answer)
         except (EOFError, KeyboardInterrupt):
             return False
 
@@ -164,11 +166,68 @@ class ChatRenderer:
             self.console.print(Markdown(text))
 
     def get_user_input(self) -> str:
-        """Prompt user for input."""
+        """Prompt user for input with slash command autocompletion."""
         try:
-            return self.console.input("[bold cyan]> [/bold cyan]").strip()
-        except (EOFError, KeyboardInterrupt):
-            return "/exit"
+            from prompt_toolkit import PromptSession
+            from prompt_toolkit.completion import Completer, Completion
+            from prompt_toolkit.formatted_text import HTML
+            from prompt_toolkit.styles import Style
+
+            class SlashCommandCompleter(Completer):
+                def get_completions(self, document, complete_event):
+                    from cli_commands import get_autocomplete_dict
+                    commands_dict = get_autocomplete_dict()
+                    text = document.text_before_cursor
+                    # Only complete if we're typing the first word and it starts with /
+                    parts = text.split(" ")
+                    if len(parts) == 1 and text.startswith("/"):
+                        word = parts[0]
+                        for cmd, desc in commands_dict.items():
+                            if cmd.startswith(word):
+                                yield Completion(
+                                    cmd,
+                                    start_position=-len(word),
+                                    display=cmd,
+                                    display_meta=desc
+                                )
+
+            if not hasattr(self, "_prompt_session") or not self._prompt_session:
+                custom_style = Style.from_dict({
+                    'completion-menu': 'bg:#0f1e24 #a0b2b8',
+                    'completion-menu.completion': 'bg:#0f1e24 #e0e8eb',
+                    'completion-menu.completion.current': 'bg:#1a3640 #ffffff bold',
+                    'completion-menu.meta.completion': 'bg:#162b33 #9fc8cc',
+                    'completion-menu.meta.completion.current': 'bg:#1e3f4a #ffffff bold',
+                    'completion-menu.multi-column-meta': 'bg:#162b33 #9fc8cc',
+                    'scrollbar.background': 'bg:#050a0c',
+                    'scrollbar.button': 'bg:#2a505e',
+                    'bottom-toolbar': 'bg:#1a3640 #e0e8eb',
+                })
+                # Add prompt_toolkit formatting resembling rich bold cyan >
+                self._prompt_session = PromptSession(
+                    completer=SlashCommandCompleter(),
+                    style=custom_style
+                )
+
+            try:
+                def get_toolbar():
+                    if self.telemetry_html:
+                        return HTML(self.telemetry_html)
+                    return None
+                
+                result = self._prompt_session.prompt(
+                    HTML("<b><ansicyan>&gt; </ansicyan></b>"),
+                    bottom_toolbar=get_toolbar
+                )
+                return result.strip()
+            except (EOFError, KeyboardInterrupt):
+                return "/exit"
+        except ImportError:
+            # Fallback if prompt_toolkit is not installed
+            try:
+                return self.console.input("[bold cyan]> [/bold cyan]").strip()
+            except (EOFError, KeyboardInterrupt):
+                return "/exit"
 
     # ── P2: Conversational Planning Renderers ─────────────────────────────────
 
@@ -261,12 +320,8 @@ class ChatRenderer:
         self.console.print("  [yellow]m[/yellow] = Modify (edit tasks)")
 
         try:
-            answer = self.console.input("[bold]Choice (y/n/m): [/bold]").strip().lower()
-            if answer in ("y", "yes", "si", "s\u00ed", "approve"):
-                return "approve"
-            elif answer in ("m", "modify", "edit"):
-                return "modify"
-            else:
-                return "reject"
+            answer = self.console.input("[bold]Choice (y/n/m): [/bold]")
+            from cli_parsers import parse_plan_action
+            return parse_plan_action(answer)
         except (EOFError, KeyboardInterrupt):
             return "reject"

@@ -21,6 +21,9 @@ rich==14.3.2
 typer>=0.12.5
 PyYAML>=6.0.2
 
+# CLI TUI Dashboard
+textual>=0.83.0
+
 # Observability (OpenTelemetry)
 opentelemetry-api==1.27.0
 opentelemetry-sdk==1.27.0
