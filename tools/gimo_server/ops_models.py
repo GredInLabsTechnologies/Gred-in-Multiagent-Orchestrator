@@ -16,7 +16,7 @@ try:
         ProviderType, ProviderEntry, ProviderRoleBinding,
         ProviderRolesConfig, NormalizedModelInfo, ProviderModelsCatalogResponse,
         McpServerConfig, ProviderConfig,
-        ProviderValidateRequest, ProviderValidateResponse,
+        ProviderValidateRequest, ProviderValidateResponse, ProviderSelectionRequest,
         ProviderModelInstallRequest, ProviderModelInstallResponse,
         ToolEntry, CliDependencyStatus, CliDependencyInstallRequest, CliDependencyInstallResponse,
         CircuitBreakerConfigModel, PHASE4_INTENT_CLASSES,

@@ -101,6 +101,12 @@ class ProviderValidateResponse(BaseModel):
     error_actionable: Optional[str] = None
 
 
+class ProviderSelectionRequest(BaseModel):
+    provider_id: str
+    model: Optional[str] = None
+    prefer_family: Optional[str] = None
+
+
 class ProviderModelInstallRequest(BaseModel):
     model_id: str
 

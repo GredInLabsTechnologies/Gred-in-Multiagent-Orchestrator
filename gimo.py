@@ -172,6 +172,7 @@ def _api_request(
     path: str,
     *,
     params: dict[str, Any] | None = None,
+    json_body: dict[str, Any] | None = None,
 ) -> tuple[int, Any]:
     base_url, timeout_seconds = _api_settings(config)
     token = _resolve_token()
@@ -179,7 +180,7 @@ def _api_request(
     url = f"{base_url}{path}"
 
     with httpx.Client(timeout=timeout_seconds) as client:
-        response = client.request(method, url, params=params, headers=headers)
+        response = client.request(method, url, params=params, json=json_body, headers=headers)
 
     payload: Any
     try:
@@ -187,6 +188,173 @@ def _api_request(
     except ValueError:
         payload = response.text
     return response.status_code, payload
+
+
+def _provider_config_request(config: dict[str, Any]) -> tuple[int, Any]:
+    status_code, payload = _api_request(config, "GET", "/ops/providers")
+    if status_code != 404:
+        return status_code, payload
+    return _api_request(config, "GET", "/ops/provider")
+
+
+def _chat_provider_summary(config: dict[str, Any]) -> tuple[str, str]:
+    status_code, payload = _provider_config_request(config)
+    if status_code != 200 or not isinstance(payload, dict):
+        return "unknown", "unknown"
+    provider_id = str(payload.get("orchestrator_provider") or payload.get("active") or "unknown")
+    model_id = str(payload.get("orchestrator_model") or payload.get("model_id") or "unknown")
+    return provider_id, model_id
+
+
+def _render_chat_models(config: dict[str, Any]) -> None:
+    status_code, payload = _api_request(config, "GET", "/ops/provider/models")
+    if status_code != 200:
+        console.print(f"[red]Failed to fetch models ({status_code}): {payload}[/red]")
+        return
+    if not isinstance(payload, list):
+        console.print(payload)
+        return
+    table = Table(title="Available Models", show_header=True)
+    table.add_column("Model", style="cyan")
+    for item in payload:
+        model_name = item.get("id", str(item)) if isinstance(item, dict) else str(item)
+        table.add_row(model_name)
+    console.print(table)
+
+
+def _select_chat_provider(
+    config: dict[str, Any],
+    provider_id: str,
+    *,
+    model: str | None = None,
+    prefer_family: str | None = None,
+) -> tuple[int, Any]:
+    payload: dict[str, Any] = {"provider_id": provider_id}
+    if model:
+        payload["model"] = model
+    if prefer_family:
+        payload["prefer_family"] = prefer_family
+    return _api_request(config, "POST", "/ops/provider/select", json_body=payload)
+
+
+def _handle_chat_slash_command(
+    config: dict[str, Any],
+    user_input: str,
+    *,
+    workspace_root: str,
+    thread_id: str,
+) -> tuple[bool, str | None]:
+    if not user_input.startswith("/"):
+        return False, None
+
+    parts = user_input.strip().split(maxsplit=1)
+    command = parts[0].lower()
+    argument = parts[1].strip() if len(parts) > 1 else ""
+
+    if command == "/help":
+        console.print(
+            Panel(
+                "\n".join(
+                    [
+                        "/help          Show chat commands",
+                        "/provider      Show active orchestrator provider and model",
+                        "/provider <id> Switch active provider",
+                        "/provider <id> <model>  Switch active provider with explicit model",
+                        "/models        List models exposed by the active provider",
+                        "/model         Show preferred model from local config",
+                        "/model <id>    Set preferred model in local .gimo/config.yaml",
+                        "/workspace     Show current workspace path",
+                        "/thread        Show current thread id",
+                        "/status        Run chat preflight summary",
+                        "/exit          End the session",
+                    ]
+                ),
+                title="Chat Commands",
+                border_style="cyan",
+            )
+        )
+        return True, None
+
+    if command in {"/provider", "/providers"}:
+        if argument:
+            parts = argument.split(maxsplit=1)
+            target_provider = parts[0].strip()
+            target_model = parts[1].strip() if len(parts) > 1 else None
+            prefer_family = "qwen" if "ollama" in target_provider.lower() and not target_model else None
+            status_code, payload = _select_chat_provider(
+                config,
+                target_provider,
+                model=target_model,
+                prefer_family=prefer_family,
+            )
+            if status_code != 200:
+                console.print(f"[red]Failed to switch provider ({status_code}): {payload}[/red]")
+                return True, None
+            provider_id, model_id = _chat_provider_summary(config)
+            console.print(
+                Panel(
+                    f"Provider: [bold]{provider_id}[/bold]\nModel: [bold]{model_id}[/bold]",
+                    title="Active Orchestrator",
+                    border_style="green",
+                )
+            )
+            return True, model_id
+
+        provider_id, model_id = _chat_provider_summary(config)
+        console.print(
+            Panel(
+                f"Provider: [bold]{provider_id}[/bold]\nModel: [bold]{model_id}[/bold]",
+                title="Active Orchestrator",
+                border_style="green",
+            )
+        )
+        return True, None
+
+    if command == "/models":
+        _render_chat_models(config)
+        return True, None
+
+    if command == "/model":
+        if not argument:
+            preferred_model = str(config.get("orchestrator", {}).get("preferred_model") or "not set")
+            _, active_model = _chat_provider_summary(config)
+            console.print(
+                Panel(
+                    f"Preferred model: [bold]{preferred_model}[/bold]\nActive backend model: [bold]{active_model}[/bold]",
+                    title="Model Selection",
+                    border_style="yellow",
+                )
+            )
+            return True, None
+
+        config.setdefault("orchestrator", {})["preferred_model"] = argument
+        _save_config(config)
+        console.print(f"[green]Preferred model set to '{argument}'.[/green]")
+        return True, argument
+
+    if command == "/workspace":
+        console.print(Panel(workspace_root, title="Workspace", border_style="blue"))
+        return True, None
+
+    if command == "/thread":
+        console.print(Panel(thread_id, title="Thread", border_style="blue"))
+        return True, None
+
+    if command == "/status":
+        ok, err = _preflight_check(config)
+        provider_id, model_id = _chat_provider_summary(config)
+        status_text = "ok" if ok else f"failed: {err}"
+        console.print(
+            Panel(
+                f"Preflight: [bold]{status_text}[/bold]\nProvider: [bold]{provider_id}[/bold]\nModel: [bold]{model_id}[/bold]\nWorkspace: [bold]{workspace_root}[/bold]",
+                title="Chat Status",
+                border_style="magenta",
+            )
+        )
+        return True, None
+
+    console.print(f"[yellow]Unknown command: {command}. Use /help.[/yellow]")
+    return True, None
 
 
 def _stream_events(
@@ -345,7 +513,7 @@ def _preflight_check(config: dict[str, Any]) -> tuple[bool, str]:
         return False, f"Cannot reach GIMO server: {exc}\nStart it with: GIMO_LAUNCHER.cmd"
 
     try:
-        status_code, payload = _api_request(config, "GET", "/ops/providers")
+        status_code, payload = _provider_config_request(config)
         if status_code != 200:
             return False, "Cannot fetch provider config."
         if isinstance(payload, dict):
@@ -372,12 +540,7 @@ def _interactive_chat(config: dict[str, Any]) -> None:
         raise typer.Exit(1)
 
     # Fetch provider info for header
-    _, providers_payload = _api_request(config, "GET", "/ops/providers")
-    provider_id = "unknown"
-    model = "unknown"
-    if isinstance(providers_payload, dict):
-        provider_id = str(providers_payload.get("orchestrator_provider") or providers_payload.get("active") or "unknown")
-        model = str(providers_payload.get("orchestrator_model") or providers_payload.get("model_id") or "unknown")
+    provider_id, model = _chat_provider_summary(config)
 
     # Create thread
     with console.status("[dim]Creating session...[/dim]"):
@@ -416,6 +579,16 @@ def _interactive_chat(config: dict[str, Any]) -> None:
         if user_input.lower() in {"/exit", "/quit"}:
             console.print("[dim]Session ended.[/dim]")
             break
+        handled, updated_model = _handle_chat_slash_command(
+            config,
+            user_input,
+            workspace_root=workspace_root,
+            thread_id=thread_id,
+        )
+        if handled:
+            if updated_model is not None:
+                model = updated_model
+            continue
 
         # Save to history
         with history_path.open("a", encoding="utf-8") as f:
@@ -438,157 +611,150 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                 pool=timeout_seconds,
             )
             with httpx.Client(timeout=stream_timeout) as client:
-                with client.stream(
-                    "POST",
-                    f"{base_url}/ops/threads/{thread_id}/chat/stream",
-                    params={"content": user_input},
-                    headers=headers,
-                ) as response:
-                    if response.status_code != 200:
-                        # Fall back to sync endpoint
-                        raise httpx.HTTPStatusError(
-                            f"Stream returned {response.status_code}",
-                            request=response.request,
-                            response=response,
-                        )
-
-                    current_event_type = "message"
-                    for line in response.iter_lines():
-                        if not line or line.startswith(":"):
-                            continue
-
-                        # Parse SSE format
-                        if line.startswith("event: "):
-                            current_event_type = line[7:].strip()
-                            continue
-                        if not line.startswith("data: "):
-                            continue
-
-                        raw_data = line[6:].strip()
-                        if not raw_data:
-                            continue
-
-                        try:
-                            data = json.loads(raw_data)
-                        except json.JSONDecodeError:
-                            continue
-
-                        evt = current_event_type
-
-                        if evt == "text_delta":
-                            # Accumulate for final render
-                            chat_response += data.get("content", "")
-
-                        elif evt == "tool_call_start":
-                            renderer.render_tool_call_start(
-                                data.get("tool_name", "?"),
-                                data.get("arguments", {}),
-                                data.get("risk", "LOW"),
+                with renderer.render_thinking():
+                    with client.stream(
+                        "POST",
+                        f"{base_url}/ops/threads/{thread_id}/chat/stream",
+                        params={"content": user_input},
+                        headers=headers,
+                    ) as response:
+                        if response.status_code != 200:
+                            # Fall back to sync endpoint
+                            raise httpx.HTTPStatusError(
+                                f"Stream returned {response.status_code}",
+                                request=response.request,
+                                response=response,
                             )
 
-                        elif evt == "tool_approval_required":
-                            # HITL: ask user for approval
-                            approved = renderer.render_hitl_prompt(
-                                data.get("tool_name", "?"),
-                                data.get("arguments", {}),
-                            )
-                            # Submit approval to backend
+                        current_event_type = "message"
+                        for line in response.iter_lines():
+                            if not line or line.startswith(":"):
+                                continue
+
+                            # Parse SSE format
+                            if line.startswith("event: "):
+                                current_event_type = line[7:].strip()
+                                continue
+                            if not line.startswith("data: "):
+                                continue
+
+                            raw_data = line[6:].strip()
+                            if not raw_data:
+                                continue
+
                             try:
-                                client.post(
-                                    f"{base_url}/ops/threads/{thread_id}/approve-tool",
-                                    params={
-                                        "tool_call_id": data.get("tool_call_id", ""),
-                                        "approved": str(approved).lower(),
-                                    },
-                                    headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
-                                )
-                            except Exception:
-                                pass  # Best effort
+                                data = json.loads(raw_data)
+                            except json.JSONDecodeError:
+                                continue
 
-                        elif evt == "tool_call_end":
-                            renderer.render_tool_call_result(
-                                data.get("tool_name", "?"),
-                                data.get("status", "error"),
-                                data.get("duration", 0.0),
-                                data.get("risk", "LOW"),
-                            )
+                            evt = current_event_type
 
-                        elif evt == "done":
-                            chat_response = data.get("response", chat_response)
-                            usage = data.get("usage", {})
+                            if evt == "text_delta":
+                                # Accumulate for final render
+                                chat_response += data.get("content", "")
 
-                        elif evt == "error":
-                            renderer.render_error(data.get("message", "Unknown error"))
-
-                        # ── P2: Conversational Planning Events ────────────────
-
-                        elif evt == "user_question":
-                            # Agent is asking the user a question
-                            question = data.get("question", "")
-                            options = data.get("options", [])
-                            context = data.get("context", "")
-                            renderer.render_user_question(question, options, context)
-                            # The chat response will be handled by the "done" event
-
-                        elif evt == "plan_proposed":
-                            # Agent proposed an execution plan
-                            plan = data
-                            renderer.render_plan(plan)
-
-                            # Ask user to approve/reject/modify
-                            approval = renderer.get_plan_approval()
-
-                            # Submit plan response to backend
-                            try:
-                                client.post(
-                                    f"{base_url}/ops/threads/{thread_id}/plan/respond",
-                                    params={"action": approval},
-                                    json={"feedback": "User feedback from CLI"},
-                                    headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                            elif evt == "tool_call_start":
+                                renderer.render_tool_call_start(
+                                    data.get("tool_name", "?"),
+                                    data.get("arguments", {}),
+                                    data.get("risk", "LOW"),
                                 )
 
-                                if approval == "approve":
-                                    renderer.console.print("[green]\u2713 Plan approved. Execution started.[/green]")
-                                elif approval == "reject":
-                                    renderer.console.print("[red]\u2717 Plan rejected. Agent will revise.[/red]")
-                                else:
-                                    renderer.console.print("[yellow]Plan modification not yet implemented in CLI. Please approve or reject.[/yellow]")
-                            except Exception as e:
-                                renderer.render_error(f"Failed to submit plan response: {e}")
+                            elif evt == "tool_approval_required":
+                                # HITL: ask user for approval
+                                approved = renderer.render_hitl_prompt(
+                                    data.get("tool_name", "?"),
+                                    data.get("arguments", {}),
+                                )
+                                # Submit approval to backend
+                                try:
+                                    client.post(
+                                        f"{base_url}/ops/threads/{thread_id}/approve-tool",
+                                        params={
+                                            "tool_call_id": data.get("tool_call_id", ""),
+                                            "approved": str(approved).lower(),
+                                        },
+                                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                                    )
+                                except Exception:
+                                    pass  # Best effort
 
-                        elif evt == "confirmation_required":
-                            # Tool requires user confirmation (mood constraint)
-                            tool_name = data.get("tool_name", "?")
-                            message = data.get("message", "")
-                            renderer.console.print()
-                            renderer.console.print(Panel(
-                                f"{message}\n\nTool: [bold]{tool_name}[/bold]",
-                                title="\u26a0 Confirmation Required",
-                                border_style="yellow",
-                            ))
-                            try:
-                                answer = renderer.console.input("[bold yellow]Approve? (y/N): [/bold yellow]").strip().lower()
-                                approved = answer in ("y", "yes", "si", "s\u00ed")
-                                # TODO: Submit confirmation to backend (similar to HITL approval)
-                                if not approved:
-                                    renderer.console.print("[dim]Confirmation denied. Agent will skip this action.[/dim]")
-                            except (EOFError, KeyboardInterrupt):
-                                pass
+                            elif evt == "tool_call_end":
+                                renderer.render_tool_call_result(
+                                    data.get("tool_name", "?"),
+                                    data.get("status", "error"),
+                                    data.get("duration", 0.0),
+                                    data.get("risk", "LOW"),
+                                )
 
-                        elif evt == "session_start":
-                            # Enhanced with mood info (P2)
-                            mood = data.get("mood", "neutral")
-                            renderer.render_mood_indicator(mood)
+                            elif evt == "done":
+                                chat_response = data.get("response", chat_response)
+                                usage = data.get("usage", {})
+
+                            elif evt == "error":
+                                renderer.render_error(data.get("message", "Unknown error"))
+
+                            # P2: conversational planning events
+                            elif evt == "user_question":
+                                question = data.get("question", "")
+                                options = data.get("options", [])
+                                context = data.get("context", "")
+                                renderer.render_user_question(question, options, context)
+
+                            elif evt == "plan_proposed":
+                                plan = data
+                                renderer.render_plan(plan)
+                                approval = renderer.get_plan_approval()
+
+                                try:
+                                    client.post(
+                                        f"{base_url}/ops/threads/{thread_id}/plan/respond",
+                                        params={"action": approval},
+                                        json={"feedback": "User feedback from CLI"},
+                                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                                    )
+
+                                    if approval == "approve":
+                                        renderer.console.print("[green]\u2713 Plan approved. Execution started.[/green]")
+                                    elif approval == "reject":
+                                        renderer.console.print("[red]\u2717 Plan rejected. Agent will revise.[/red]")
+                                    else:
+                                        renderer.console.print("[yellow]Plan modification not yet implemented in CLI. Please approve or reject.[/yellow]")
+                                except Exception as e:
+                                    renderer.render_error(f"Failed to submit plan response: {e}")
+
+                            elif evt == "confirmation_required":
+                                tool_name = data.get("tool_name", "?")
+                                message = data.get("message", "")
+                                renderer.console.print()
+                                renderer.console.print(Panel(
+                                    f"{message}\n\nTool: [bold]{tool_name}[/bold]",
+                                    title="\u26a0 Confirmation Required",
+                                    border_style="yellow",
+                                ))
+                                try:
+                                    answer = renderer.console.input("[bold yellow]Approve? (y/N): [/bold yellow]").strip().lower()
+                                    approved = answer in ("y", "yes", "si", "s\u00ed")
+                                    # TODO: Submit confirmation to backend (similar to HITL approval)
+                                    if not approved:
+                                        renderer.console.print("[dim]Confirmation denied. Agent will skip this action.[/dim]")
+                                except (EOFError, KeyboardInterrupt):
+                                    pass
+
+                            elif evt == "session_start":
+                                mood = data.get("mood", "neutral")
+                                renderer.render_mood_indicator(mood)
 
         except (httpx.HTTPStatusError, httpx.ConnectError):
             # Fall back to sync POST
             try:
                 with httpx.Client(timeout=max(timeout_seconds, 300.0)) as client:
-                    response = client.post(
-                        f"{base_url}/ops/threads/{thread_id}/chat",
-                        params={"content": user_input},
-                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
-                    )
+                    with renderer.render_thinking():
+                        response = client.post(
+                            f"{base_url}/ops/threads/{thread_id}/chat",
+                            params={"content": user_input},
+                            headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                        )
 
                 if response.status_code != 200:
                     renderer.render_error(f"HTTP {response.status_code}: {response.text[:200]}")
@@ -1250,7 +1416,7 @@ def providers_list(
 ) -> None:
     """List configured providers."""
     config = _load_config()
-    status_code, payload = _api_request(config, "GET", "/ops/providers")
+    status_code, payload = _provider_config_request(config)
     if status_code != 200:
         console.print(f"[red]Failed ({status_code}): {payload}[/red]")
         raise typer.Exit(1)
@@ -1280,7 +1446,7 @@ def providers_test(
 ) -> None:
     """Test connectivity for a provider."""
     config = _load_config()
-    status_code, payload = _api_request(config, "POST", f"/ops/connectors/{provider_id}/health")
+    status_code, payload = _api_request(config, "GET", f"/ops/connectors/{provider_id}/health")
     if json_output:
         _emit_output({"status_code": status_code, "result": payload}, json_output=True)
         return

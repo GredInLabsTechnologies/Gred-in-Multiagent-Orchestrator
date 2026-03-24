@@ -315,6 +315,99 @@ class ProviderService:
         return normalized_cfg
 
     @classmethod
+    async def _resolve_runtime_model(
+        cls,
+        provider_id: str,
+        *,
+        requested_model: str | None = None,
+        prefer_family: str | None = None,
+    ) -> str:
+        cfg = cls.get_config()
+        if not cfg:
+            raise ValueError("Provider config missing")
+        entry = cfg.providers.get(provider_id)
+        if not entry:
+            raise ValueError(f"Unknown provider: {provider_id}")
+
+        canonical = cls.normalize_provider_type(entry.provider_type or entry.type)
+        current_model = str(entry.model_id or entry.model or "").strip()
+        requested_model = str(requested_model or "").strip() or None
+        prefer_family = str(prefer_family or "").strip().lower() or None
+
+        if canonical != "ollama_local":
+            return requested_model or current_model
+
+        from .provider_catalog_service import ProviderCatalogService
+
+        installed = await ProviderCatalogService.list_installed_models(canonical)
+        installed_ids = [str(model.id).strip() for model in installed if str(model.id).strip()]
+        if not installed_ids:
+            if requested_model:
+                return requested_model
+            if current_model:
+                return current_model
+            raise ValueError("No installed Ollama models found")
+
+        if requested_model:
+            if requested_model not in installed_ids:
+                raise ValueError(f"Ollama model '{requested_model}' is not installed")
+            return requested_model
+
+        if current_model in installed_ids:
+            return current_model
+
+        ranked_ids = list(installed_ids)
+        preferred_tokens = [prefer_family] if prefer_family else ["qwen"]
+        preferred_tokens.extend(["coder", "code"])
+
+        def _score(model_id: str) -> tuple[int, int, str]:
+            lower = model_id.lower()
+            family_score = 0
+            if preferred_tokens and preferred_tokens[0] and preferred_tokens[0] in lower:
+                family_score += 2
+            if any(token in lower for token in preferred_tokens[1:]):
+                family_score += 1
+            return (-family_score, len(lower), lower)
+
+        ranked_ids.sort(key=_score)
+        return ranked_ids[0]
+
+    @classmethod
+    async def select_provider(
+        cls,
+        *,
+        provider_id: str,
+        model: str | None = None,
+        prefer_family: str | None = None,
+    ) -> ProviderConfig:
+        cfg = cls.get_config()
+        if not cfg:
+            raise ValueError("Provider config missing")
+        if provider_id not in cfg.providers:
+            raise ValueError(f"Unknown provider: {provider_id}")
+
+        resolved_model = await cls._resolve_runtime_model(
+            provider_id,
+            requested_model=model,
+            prefer_family=prefer_family,
+        )
+        entry = cfg.providers[provider_id].model_copy(update={"model": resolved_model, "model_id": resolved_model})
+        cfg.providers[provider_id] = entry
+        cfg.active = provider_id
+        cfg.provider_type = cls.normalize_provider_type(entry.provider_type or entry.type)
+        cfg.model_id = resolved_model
+        cfg.auth_mode = entry.auth_mode
+        cfg.auth_ref = entry.auth_ref
+        workers = list(cfg.roles.workers) if cfg.roles else []
+        cfg.roles = ProviderRolesConfig(
+            orchestrator=ProviderRoleBinding(provider_id=provider_id, model=resolved_model),
+            workers=workers,
+        )
+        cfg.orchestrator_provider = provider_id
+        cfg.orchestrator_model = resolved_model
+        return cls.set_config(cfg)
+
+    @classmethod
     def record_validation(
         cls,
         *,

@@ -15,7 +15,7 @@ from .agent import (
 from .provider import (
     ProviderType, ProviderEntry, ProviderRoleBinding, ProviderRolesConfig,
     NormalizedModelInfo, ProviderModelsCatalogResponse, McpServerConfig, ProviderConfig,
-    ProviderValidateRequest, ProviderValidateResponse,
+    ProviderValidateRequest, ProviderValidateResponse, ProviderSelectionRequest,
     ProviderModelInstallRequest, ProviderModelInstallResponse,
     ToolEntry, CliDependencyStatus, CliDependencyInstallRequest, CliDependencyInstallResponse
 )

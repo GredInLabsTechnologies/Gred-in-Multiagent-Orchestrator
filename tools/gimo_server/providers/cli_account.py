@@ -224,21 +224,28 @@ class CliAccountAdapter(ProviderAdapter):
 
         if sys.platform == "win32":
             import subprocess as _subprocess
-            proc = await asyncio.create_subprocess_shell(
-                _subprocess.list2cmdline(cmd), stdout=PIPE, stderr=PIPE, env=env
+            completed = await asyncio.to_thread(
+                _subprocess.run,
+                cmd,
+                capture_output=True,
+                env=env,
+                timeout=300,
             )
+            stdout = completed.stdout or b""
+            stderr = completed.stderr or b""
+            returncode = completed.returncode
         else:
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=PIPE, stderr=PIPE, env=env
             )
-
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            returncode = proc.returncode
 
         out = (stdout or b"").decode("utf-8", errors="ignore").strip()
         err = (stderr or b"").decode("utf-8", errors="ignore").strip()
-        if proc.returncode != 0:
-            logger.error("[cli-account] exit code %s, stderr: %s", proc.returncode, err[:500])
-            raise RuntimeError(err or f"{self.binary} exited with code {proc.returncode}")
+        if returncode != 0:
+            logger.error("[cli-account] exit code %s, stderr: %s", returncode, err[:500])
+            raise RuntimeError(err or f"{self.binary} exited with code {returncode}")
 
         if self._is_codex:
             content = _parse_codex_jsonl(out) if out else (err or "")
@@ -287,15 +294,17 @@ class CliAccountAdapter(ProviderAdapter):
                 if tools:
                     tool_descriptions = _format_tools_for_prompt(tools)
                     tool_prompt = TOOL_CALLING_SYSTEM_PROMPT.format(tool_descriptions=tool_descriptions)
-                    parts.append(f"[System]\n{content}\n\n{tool_prompt}")
+                    content = f"{content}\n\n{tool_prompt}"
+                if self._is_claude:
+                    parts.append(f"System: {content}")
                 else:
                     parts.append(f"[System]\n{content}")
             elif role == "user":
-                parts.append(f"[User]\n{content}")
+                parts.append(f"User: {content}" if self._is_claude else f"[User]\n{content}")
             elif role == "assistant":
-                parts.append(f"[Assistant]\n{content}")
+                parts.append(f"Assistant: {content}" if self._is_claude else f"[Assistant]\n{content}")
             elif role == "tool":
-                parts.append(f"[Tool Result]\n{content}")
+                parts.append(f"Tool Result: {content}" if self._is_claude else f"[Tool Result]\n{content}")
 
         prompt = "\n\n".join(parts)
 

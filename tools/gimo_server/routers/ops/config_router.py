@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
-from tools.gimo_server.ops_models import ProviderConfig, OpsConfig
+from tools.gimo_server.ops_models import ProviderConfig, OpsConfig, ProviderSelectionRequest
 from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.provider_service import ProviderService
 from .common import _require_role, _actor_label
@@ -46,6 +46,26 @@ async def set_provider(
     _require_role(auth, "admin")
     cfg = ProviderService.set_config(config)
     audit_log("OPS", "/ops/provider", "set", operation="WRITE", actor=_actor_label(auth))
+    return ProviderService.get_public_config() or cfg
+
+
+@router.post("/provider/select", response_model=ProviderConfig)
+async def select_provider(
+    request: Request,
+    payload: ProviderSelectionRequest,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "admin")
+    try:
+        cfg = await ProviderService.select_provider(
+            provider_id=payload.provider_id,
+            model=payload.model,
+            prefer_family=payload.prefer_family,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_log("OPS", "/ops/provider/select", payload.provider_id, operation="WRITE", actor=_actor_label(auth))
     return ProviderService.get_public_config() or cfg
 
 
