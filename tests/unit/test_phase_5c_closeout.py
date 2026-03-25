@@ -145,3 +145,50 @@ async def test_hardened_task_spec_validation(mock_session):
     valid, err = worker._validate_task_spec(bad_spec2)
     assert not valid
     assert "requires_manual_merge must be True" in err
+
+def test_missing_evidence_field_fails_closed(mock_session):
+    # Remove a required field from one proof
+    del mock_session["read_proofs"][0]["evidence_hash"]
+    payload = {"acceptance_criteria": "done"}
+    
+    with patch("tools.gimo_server.services.app_session_service.AppSessionService.get_session", return_value=mock_session):
+        with pytest.raises(ValueError, match="Field 'evidence_hash' is missing or empty"):
+            DraftValidationService.validate_draft("sess_123", payload)
+
+def test_whitespace_evidence_field_fails_closed(mock_session):
+    # Set a required field to whitespace
+    mock_session["read_proofs"][0]["artifact_handle"] = "  "
+    payload = {"acceptance_criteria": "done"}
+    
+    with patch("tools.gimo_server.services.app_session_service.AppSessionService.get_session", return_value=mock_session):
+        with pytest.raises(ValueError, match="Field 'artifact_handle' is missing or empty"):
+            DraftValidationService.validate_draft("sess_123", payload)
+
+def test_empty_evidence_set_fails_closed(mock_session):
+    mock_session["read_proofs"] = []
+    payload = {"acceptance_criteria": "done"}
+    
+    with patch("tools.gimo_server.services.app_session_service.AppSessionService.get_session", return_value=mock_session):
+        with pytest.raises(ValueError, match="No reconnaissance evidence recorded"):
+            DraftValidationService.validate_draft("sess_123", payload)
+
+def test_deterministic_allowed_paths_fallback(mock_session):
+    # Case where allowed_paths is NOT provided in payload
+    payload = {"acceptance_criteria": "done"}
+    
+    with patch("tools.gimo_server.services.app_session_service.AppSessionService.get_session", return_value=mock_session):
+        with patch("tools.gimo_server.services.app_session_service.AppSessionService._save_session"):
+            res = DraftValidationService.validate_draft("sess_123", payload)
+            paths = res["validated_task_spec"]["allowed_paths"]
+            
+            # Since mock_session has h1 (file1.py) and h2 (file2.py), and kind is 'read'
+            # Stable sort key (artifact_handle, kind) means h1:read, h2:read is the order
+            assert paths == ["file1.py", "file2.py"]
+            
+            # Change discovery order in read_proofs list
+            mock_session["read_proofs"] = mock_session["read_proofs"][::-1]
+            res2 = DraftValidationService.validate_draft("sess_123", payload)
+            paths2 = res2["validated_task_spec"]["allowed_paths"]
+            
+            # Should STILL be the same due to internal sorting before extraction
+            assert paths == paths2

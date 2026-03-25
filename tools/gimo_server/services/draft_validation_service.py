@@ -33,11 +33,18 @@ class DraftValidationService:
         # 1. Extraction of evidence hash (deterministic representation of recon state)
         # B2: Deterministic hash built from real evidence content, using stable ordering.
         # We use artifact_handle and kind for a stable, unique sort key.
-        sorted_proofs = sorted(read_proofs, key=lambda p: (p.get("artifact_handle", ""), p.get("kind", "")))
+        sorted_proofs = sorted(read_proofs, key=lambda p: (str(p.get("artifact_handle", "")), str(p.get("kind", ""))))
         evidence_parts = []
         for p in sorted_proofs:
+            # P5C-DELTA: Harden validation to ensure no missing or whitespace-only fields.
+            # Every proof must be valid to be used in the task spec.
+            required_fields = ["artifact_handle", "kind", "evidence_hash", "base_commit"]
+            for field in required_fields:
+                val = p.get(field)
+                if val is None or not str(val).strip():
+                    raise ValueError(f"Draft creation rejected: Evidence record is invalid. Field '{field}' is missing or empty in proof.")
+            
             # We use artifact_handle, kind, content_hash (evidence_hash), and base_commit.
-            # This ensures that the task spec is bound to the exact state of recorded discovery.
             part = f"{p.get('artifact_handle')}:{p.get('kind')}:{p.get('evidence_hash')}:{p.get('base_commit')}"
             evidence_parts.append(part)
         evidence_content = "|".join(evidence_parts)
@@ -47,12 +54,18 @@ class DraftValidationService:
         evidence_hash = hashlib.sha256(evidence_content.encode("utf-8")).hexdigest()
         
         # 2. Preparation of Allowed Paths (never wildcard by default)
-        # We can extract these from the ReadProofs or trust the explicit list in the payload
-        # but only if they're within the repo
         raw_allowed_paths = payload.get("allowed_paths", [])
         if not raw_allowed_paths:
-            # Fallback to extraction from read_proofs if not provided
-            raw_allowed_paths = list(set([cls._get_path_from_handle(session, p["artifact_handle"]) for p in read_proofs if p["kind"] == "read"]))
+            # P5C-DELTA: Fallback to extraction from read_proofs in deterministic order.
+            # We use the same stable order as the evidence hash for fallback consistency.
+            seen = set()
+            raw_allowed_paths = []
+            for p in sorted_proofs:
+                if p.get("kind") == "read":
+                    path = cls._get_path_from_handle(session, p.get("artifact_handle", ""))
+                    if path and path not in seen:
+                        seen.add(path)
+                        raw_allowed_paths.append(path)
             
         allowed_paths = [str(p).replace("\\", "/") for p in raw_allowed_paths if p]
         
