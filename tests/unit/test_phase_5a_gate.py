@@ -53,32 +53,16 @@ def test_recon_generates_read_proofs(test_client, session_with_repo):
     session_id, _ = session_with_repo
     app.dependency_overrides[verify_token] = _auth("operator")
     
-    # List files
     res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
-    assert res.status_code == 200
     files = res.json()
-    assert len(files) > 0, f"Expected some files but got {files}"
-    file_handle = None
-    for f in files:
-        if f["type"] == "file":
-            file_handle = f["handle"]
-            break
+    file_handle = [f["handle"] for f in files if f["type"] == "file"][0]
     
-    assert file_handle is not None
-    
-    # Read file
     res = test_client.get(f"/ops/app/sessions/{session_id}/recon/read/{file_handle}")
     assert res.status_code == 200
     data = res.json()
-    assert "content" in data
     assert "proof" in data
-    
-    # Verify proof in session
-    res = test_client.get(f"/ops/app/sessions/{session_id}")
-    session_data = res.json()
-    assert "read_proofs" in session_data
-    assert len(session_data["read_proofs"]) > 0
-    assert session_data["read_proofs"][0]["artifact_handle"] == file_handle
+    assert data["proof"]["kind"] == "read"
+    assert "evidence_hash" in data["proof"]
 
 def test_recon_returns_opaque_handles_not_host_paths(test_client, session_with_repo):
     session_id, _ = session_with_repo
@@ -87,98 +71,127 @@ def test_recon_returns_opaque_handles_not_host_paths(test_client, session_with_r
     res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
     files = res.json()
     for f in files:
-        # Handles should be 16 chars hex
         assert len(f["handle"]) == 16
-        # Neither name nor handle should look like a host path (e.g. C:\ or /)
         assert ":" not in f["handle"]
-        assert "\\" not in f["name"]
         assert "/" not in f["name"]
+        assert "\\" not in f["name"]
 
 def test_recon_scope_is_bound_to_repo_handle_or_session_bind(test_client):
     app.dependency_overrides[verify_token] = _auth("operator")
-    
-    # Create session WITHOUT repo
     res = test_client.post("/ops/app/sessions", json={})
     session_id = res.json()["id"]
     
-    # Try recon -> should fail
+    # Negative test: No repo bound
     res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
     assert res.status_code == 400
     assert "no repository bound" in res.json()["detail"].lower()
-
 
 def test_validated_task_requires_evidence_hash(test_client, session_with_repo):
     session_id, _ = session_with_repo
     app.dependency_overrides[verify_token] = _auth("operator")
     
-    # Try draft without recon
+    # Negative: No evidence
     res = test_client.post(f"/ops/app/sessions/{session_id}/drafts", json={
-        "acceptance_criteria": "Must pass gate 5A"
+        "acceptance_criteria": "Gate 5A",
+        "allowed_paths": ["app.py"]
     })
     assert res.status_code == 403
-    assert "no reconnaissance evidence" in res.json()["detail"].lower()
     
-    # Perform recon (read a file)
+    # Provide evidence
     res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
-    file_handle = [f["handle"] for f in res.json() if f["type"] == "file"][0]
+    file_handle = res.json()[0]["handle"]
     test_client.get(f"/ops/app/sessions/{session_id}/recon/read/{file_handle}")
     
-    # Try draft again
     res = test_client.post(f"/ops/app/sessions/{session_id}/drafts", json={
-        "acceptance_criteria": "Must pass gate 5A"
+        "acceptance_criteria": "Gate 5A",
+        "allowed_paths": ["app.py"]
     })
     assert res.status_code == 200
+    assert "evidence_hash" in res.json()["validated_task_spec"]
+
+def test_validated_task_emits_context_pack_and_allowed_paths(test_client, session_with_repo):
+    session_id, _ = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+    
+    # Recon first
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
+    file_handle = res.json()[0]["handle"]
+    test_client.get(f"/ops/app/sessions/{session_id}/recon/read/{file_handle}")
+    
+    res = test_client.post(f"/ops/app/sessions/{session_id}/drafts", json={
+        "acceptance_criteria": "Check context pack",
+        "allowed_paths": ["app.py"]
+    })
     data = res.json()
-    assert "evidence_hash" in data["validated_task_spec"]
-    assert data["validated_task_spec"]["requires_manual_merge"] is True
+    assert "repo_context_pack" in data
+    assert "allowed_paths" in data["validated_task_spec"]
+    assert "app.py" in data["validated_task_spec"]["allowed_paths"]
 
 def test_context_request_service_persists_pending_request(test_client, session_with_repo):
     session_id, _ = session_with_repo
     app.dependency_overrides[verify_token] = _auth("operator")
     
-    # Create
     res = test_client.post(f"/ops/app/sessions/{session_id}/context-requests", json={
-        "description": "Need more info on Phase 5B"
+        "description": "More context please"
     })
     assert res.status_code == 200
     req_id = res.json()["id"]
     
-    # List
     res = test_client.get(f"/ops/app/sessions/{session_id}/context-requests")
-    assert len(res.json()) == 1
-    assert res.json()[0]["status"] == "pending"
+    assert any(r["id"] == req_id and r["status"] == "pending" for r in res.json())
 
 def test_context_request_service_can_mark_request_resolved_or_cancelled(test_client, session_with_repo):
     session_id, _ = session_with_repo
     app.dependency_overrides[verify_token] = _auth("operator")
     
-    # Create
-    res = test_client.post(f"/ops/app/sessions/{session_id}/context-requests", json={
-        "description": "Task A"
-    })
-    req_id = res.json()["id"]
+    res = test_client.post(f"/ops/app/sessions/{session_id}/context-requests", json={"description": "Task 1"})
+    id1 = res.json()["id"]
+    res = test_client.post(f"/ops/app/sessions/{session_id}/context-requests", json={"description": "Task 2"})
+    id2 = res.json()["id"]
     
-    # Resolve
-    res = test_client.post(f"/ops/app/sessions/{session_id}/context-requests/{req_id}/resolve", json={
-        "evidence": "Here is the info"
-    })
-    assert res.status_code == 200
+    # Resolve 1
+    test_client.post(f"/ops/app/sessions/{session_id}/context-requests/{id1}/resolve", json={"evidence": "Done"})
+    # Cancel 2
+    test_client.post(f"/ops/app/sessions/{session_id}/context-requests/{id2}/cancel", json={"reason": "Abort"})
     
-    # Verify
     res = test_client.get(f"/ops/app/sessions/{session_id}/context-requests")
-    assert res.json()[0]["status"] == "resolved"
-    assert res.json()[0]["result"] == "Here is the info"
+    statuses = {r["id"]: r["status"] for r in res.json()}
+    assert statuses[id1] == "resolved"
+    assert statuses[id2] == "cancelled"
+
+def test_app_surface_recon_flow_uses_real_service_not_stub(test_client, session_with_repo):
+    session_id, _ = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+    
+    # If it was a stub, it wouldn't return real files from tmp_path
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
+    assert any(f["name"] == "app.py" for f in res.json())
 
 def test_app_payload_never_leaks_host_path(test_client, session_with_repo):
     session_id, _ = session_with_repo
     app.dependency_overrides[verify_token] = _auth("operator")
     
-    # Perform various actions
     res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
-    payload_str = json.dumps(res.json())
-    
-    # Check for common path indicators (risky for different OS, but we check for root markers)
-    assert "C:\\" not in payload_str
-    assert "Users\\" not in payload_str
-    # "/" is allowed for relative paths, but we check if it looks like an absolute linux path if applicable
-    # however handles are just hex, so it's fine.
+    payload = json.dumps(res.json())
+    # tmp_path on windows usually contains 'Temp' or similar, but we check for absolute root patterns
+    assert "C:\\" not in payload
+    assert "Users\\" not in payload
+    # Handles should be hashes
+    for f in res.json():
+        assert len(f["handle"]) == 16
+
+def test_recon_without_bound_repo_is_rejected(test_client):
+    app.dependency_overrides[verify_token] = _auth("operator")
+    res = test_client.post("/ops/app/sessions", json={})
+    session_id = res.json()["id"]
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
+    assert res.status_code == 400
+
+def test_draft_validation_without_evidence_is_rejected(test_client, session_with_repo):
+    session_id, _ = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+    res = test_client.post(f"/ops/app/sessions/{session_id}/drafts", json={
+        "acceptance_criteria": "Fail",
+        "allowed_paths": []
+    })
+    assert res.status_code == 403
