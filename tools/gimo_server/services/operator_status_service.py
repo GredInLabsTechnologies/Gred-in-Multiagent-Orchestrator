@@ -2,22 +2,18 @@ import logging
 from typing import Any, Dict
 from pathlib import Path
 from tools.gimo_server.version import __version__
+from tools.gimo_server.config import REPO_ROOT_DIR
 from tools.gimo_server.services.git_service import GitService
 from tools.gimo_server.services.provider_service_impl import ProviderService
 from tools.gimo_server.services.notice_policy_service import NoticePolicyService
 from tools.gimo_server.services.conversation_service import ConversationService
-
-try:
-    from tools.gimo_server.config import WORKSPACE_ROOT
-except ImportError:
-    WORKSPACE_ROOT = "."
 
 logger = logging.getLogger("orchestrator.services.operator_status")
 
 class OperatorStatusService:
     @classmethod
     def get_status_snapshot(cls) -> Dict[str, Any]:
-        base_dir = Path(WORKSPACE_ROOT)
+        base_dir = Path(REPO_ROOT_DIR)
         
         branch = None
         dirty_files = []
@@ -58,13 +54,13 @@ class OperatorStatusService:
             "active_provider": active_provider,
             "active_model": active_model,
             "permission_mode": permission_mode,
-            "backend_status": "online",
+            "backend_status": {"authoritative": False, "reason": "Dynamic health checks not assigned to Phase 2 contracts"},
             "backend_version": __version__,
-            "active_run": None,
-            "active_stage": None,
-            "budget_spend": None, 
-            "budget_limit": None,
-            "context_percentage": None, 
+            "active_run": {"authoritative": False, "reason": "Run monitoring not assigned to Phase 2 contracts"},
+            "active_stage": {"authoritative": False, "reason": "Stage tracking not assigned to Phase 2 contracts"},
+            "budget_spend": {"authoritative": False, "reason": "Budget tracking not assigned to Phase 2 contracts"},
+            "budget_limit": {"authoritative": False, "reason": "Budget tracking not assigned to Phase 2 contracts"},
+            "context_percentage": {"authoritative": False, "reason": "Context monitoring not assigned to Phase 2 contracts"},
             "last_thread": last_thread_id,
             "last_turn": last_turn_id,
         }

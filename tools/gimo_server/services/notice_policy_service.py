@@ -8,7 +8,11 @@ class NoticePolicyService:
     def evaluate_all(cls, context_state: Dict[str, Any]) -> List[Dict[str, Any]]:
         notices = []
         
-        ctx_pct = context_state.get("context_percentage") or 0.0
+        ctx_val = context_state.get("context_percentage")
+        ctx_pct = 0.0
+        if isinstance(ctx_val, (int, float)):
+            ctx_pct = float(ctx_val)
+            
         if ctx_pct > 70.0:
             notices.append({
                 "level": "warning",
@@ -17,10 +21,10 @@ class NoticePolicyService:
             })
             
         budget_pct = context_state.get("budget_percentage")
-        if budget_pct is None:
+        if not isinstance(budget_pct, (int, float)):
             spend = context_state.get("budget_spend")
             limit = context_state.get("budget_limit")
-            if spend is not None and limit and limit > 0:
+            if isinstance(spend, (int, float)) and isinstance(limit, (int, float)) and limit > 0:
                 budget_pct = (float(spend) / float(limit)) * 100.0
             else:
                 budget_pct = 0.0
