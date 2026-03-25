@@ -377,8 +377,15 @@ class GitService:
             raise RuntimeError(f"Git clone local error: {err or out}")
 
     @staticmethod
-    def fetch_mirror(mirror_dir: Path, source_url: str) -> None:
-        code, out, err = GitService._run_git(mirror_dir, ["fetch", source_url, "+refs/heads/*:refs/heads/*", "--prune"])
+    def init_mirror(base_dir: Path, source_url: str, target_dir: Path) -> None:
+        tgt = str(target_dir.resolve())
+        code, out, err = GitService._run_git(base_dir, ["clone", "--mirror", source_url, tgt])
+        if code != 0:
+            raise RuntimeError(f"Git init mirror error: {err or out}")
+
+    @staticmethod
+    def fetch_mirror(mirror_dir: Path) -> None:
+        code, out, err = GitService._run_git(mirror_dir, ["fetch", "--prune"])
         if code != 0:
             raise RuntimeError(f"Git fetch mirror error: {err or out}")
 

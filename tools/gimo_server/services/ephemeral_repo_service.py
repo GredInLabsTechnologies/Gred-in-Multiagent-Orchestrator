@@ -16,8 +16,17 @@ class EphemeralRepoService:
         self.repo_mirrors_dir.mkdir(parents=True, exist_ok=True)
         self.purge_quarantine_dir.mkdir(parents=True, exist_ok=True)
 
+    def get_or_update_mirror(self, repo_url: str, mirror_id: str) -> Path:
+        """Provide or update a bare clone mirror."""
+        mirror_dir = self.repo_mirrors_dir / mirror_id
+        if not mirror_dir.exists():
+            GitService.init_mirror(self.repo_mirrors_dir, repo_url, mirror_dir)
+        else:
+            GitService.fetch_mirror(mirror_dir)
+        return mirror_dir
+
     def create_ephemeral_workspace(self, source_repo: Path, base_commit: str, branch_name: Optional[str] = None) -> Path:
-        """Create a decoupled local clone and checkout."""
+        """Create a decoupled local clone and checkout from a generic local source."""
         workspace_id = str(uuid.uuid4())
         target_dir = self.ephemeral_repos_dir / workspace_id
         
@@ -29,6 +38,12 @@ class EphemeralRepoService:
             GitService.create_ephemeral_branch(target_dir, branch_name, base_commit)
             
         return target_dir
+
+    def create_ephemeral_workspace_from_mirror(self, mirror_dir: Path, base_commit: str, branch_name: Optional[str] = None) -> Path:
+        """Create a decoupled local clone and checkout explicitly from a managed mirror."""
+        if not mirror_dir.is_relative_to(self.repo_mirrors_dir):
+            raise ValueError(f"Mirror must be located in {self.repo_mirrors_dir}")
+        return self.create_ephemeral_workspace(mirror_dir, base_commit, branch_name)
 
     def destroy_workspace(self, workspace_dir: Path) -> None:
         """Destroy/purge workspace."""
