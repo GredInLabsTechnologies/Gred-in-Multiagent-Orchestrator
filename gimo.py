@@ -852,6 +852,7 @@ def _interactive_chat(config: dict[str, Any]) -> None:
 
     # Main loop
     while True:
+        turn_interrupted = False
         try:
             user_input = renderer.get_user_input()
         except KeyboardInterrupt:
@@ -913,7 +914,6 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                             )
 
                         current_event_type = "message"
-                        _interrupted = False
                         renderer._generation_active = True
                         try:
                             for line in response.iter_lines():
@@ -1070,7 +1070,7 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                                     renderer.render_mood_indicator(mood)
 
                         except KeyboardInterrupt:
-                            _interrupted = True
+                            turn_interrupted = True
                             renderer.render_interrupted()
                             break  # Exit iter_lines stream immediately
                         finally:
@@ -1110,7 +1110,7 @@ def _interactive_chat(config: dict[str, Any]) -> None:
             renderer.render_error(f"Stream failed: {exc}")
             continue
 
-        if getattr(renderer, "_interrupted", False) or locals().get("_interrupted", False):
+        if turn_interrupted:
             continue
 
         # Render response

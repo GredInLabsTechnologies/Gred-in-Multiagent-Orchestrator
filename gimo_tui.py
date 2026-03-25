@@ -188,17 +188,12 @@ class GimoApp(App):
         
         if self._notice_timer:
             self._notice_timer.stop()
+            self._notice_timer = None
             
         if ttl > 0:
             def clear_notice():
                 lbl.update("   No active notices.")
-            self._notice_timer = self.set_timer(ttl, clear_notice)
-        if self._notice_timer:
-            self._notice_timer.stop()
-            
-        if ttl > 0:
-            def clear_notice():
-                lbl.update("   No active notices.")
+                self._notice_timer = None
             self._notice_timer = self.set_timer(ttl, clear_notice)
 
     def _set_input_state(self, enabled: bool):
