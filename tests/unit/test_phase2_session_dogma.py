@@ -35,6 +35,9 @@ def test_get_usage_explains_absence_if_not_authoritative(tmp_path):
     thread = ConversationService.create_thread(workspace_root="/tmp", title="Test")
     
     usage = ThreadSessionService.get_usage(thread.id)
+    assert "authoritative" not in usage, "Debe rechazar authoritative"
+    assert "reason" not in usage, "Debe rechazar reason"
+    assert "null" not in usage, "Debe rechazar nul o stubs"
     assert usage == {}
 
 def test_operator_status_reads_real_backend_sources_and_avoids_stubs(monkeypatch):
