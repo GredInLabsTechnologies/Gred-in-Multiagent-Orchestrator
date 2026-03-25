@@ -262,6 +262,8 @@ def _handle_chat_slash_command(
     *,
     workspace_root: str,
     thread_id: str,
+    current_usage: dict[str, Any] | None = None,
+    current_perm: list[str] | None = None,
 ) -> tuple[bool, str | None]:
     if not user_input.startswith("/"):
         return False, None
@@ -477,6 +479,123 @@ def _handle_chat_slash_command(
 
         console.print(Panel("\n".join(lines), title="Real-time Telemetry Status", border_style="magenta"))
 
+    # ── P0 new handlers ──────────────────────────────────────────────────────
+
+    def undo():
+        """git revert --no-edit HEAD — safe undo (assumes last commit is AI)."""
+        try:
+            result = _git_command(["revert", "--no-edit", "HEAD"])
+            if result.returncode == 0:
+                console.print(Panel(
+                    result.stdout.strip() or "Revert successful.",
+                    title="✓ /undo — git revert HEAD",
+                    border_style="green",
+                ))
+            else:
+                console.print(Panel(
+                    result.stderr.strip() or result.stdout.strip() or "Revert failed.",
+                    title="✗ /undo failed",
+                    border_style="red",
+                ))
+        except Exception as exc:
+            console.print(f"[red]Undo error: {exc}[/red]")
+
+    def clear_view():
+        """Clear-screen effect (local view only — no backend changes)."""
+        console.clear()
+        console.print("[dim]Chat cleared (thread and context intact).[/dim]")
+
+    def reset_context():
+        """Reset backend thread context after y/N confirmation."""
+        try:
+            answer = console.input("[bold yellow]¿Reiniciar contexto? (y/N): [/bold yellow]").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            console.print("[dim]Reset cancelado.[/dim]")
+            return
+        if answer not in {"y", "yes", "s", "si", "sí"}:
+            console.print("[dim]Reset cancelado.[/dim]")
+            return
+        sc, payload = _api_request(config, "POST", f"/ops/threads/{thread_id}/reset")
+        if sc in {200, 204}:
+            console.print("[green]✓ Contexto del thread reiniciado.[/green]")
+        else:
+            console.print(f"[red]Reset failed ({sc}): {payload}[/red]")
+
+    def show_tokens():
+        """Show token usage breakdown from last turn."""
+        usage = current_usage or {}
+        if not usage:
+            console.print("[dim]No hay datos de tokens para el turno actual.[/dim]")
+            return
+        lines = [
+            f"  Tokens entrada:   [cyan]{usage.get('input_tokens', 0):,}[/cyan]",
+            f"  Tokens salida:    [cyan]{usage.get('output_tokens', 0):,}[/cyan]",
+            f"  Total turno:      [bold]{usage.get('total_tokens', 0):,}[/bold]",
+            f"  Coste acumulado:  [green]${usage.get('cost_usd', 0.0):.5f}[/green]",
+        ]
+        ctx_pct = usage.get("context_window_pct")
+        if ctx_pct is not None:
+            bar_len = 20
+            fill = min(int(ctx_pct / 100 * bar_len), bar_len)
+            bar = "█" * fill + "░" * (bar_len - fill)
+            color = "red" if ctx_pct > 80 else "yellow" if ctx_pct > 60 else "green"
+            lines.append(f"  Ctx window:       [{color}]{bar}[/{color}] {ctx_pct:.1f}%")
+        console.print(Panel("\n".join(lines), title="📊 Token Usage", border_style="cyan"))
+
+    def show_diff():
+        """Fetch and render diff from /ops/files/diff."""
+        sc, payload = _api_request(config, "GET", "/ops/files/diff")
+        if sc != 200:
+            console.print(f"[red]Diff unavailable ({sc}): {payload}[/red]")
+            return
+        if isinstance(payload, dict):
+            diff_text = payload.get("diff") or payload.get("content") or str(payload)
+        else:
+            diff_text = str(payload)
+        if not diff_text.strip():
+            console.print("[dim]No hay diferencias activas.[/dim]")
+            return
+        console.print(Panel(diff_text, title="📄 /diff — workspace diff", border_style="yellow"))
+
+    def set_effort(effort_val: str):
+        """POST effort setting to the active thread config."""
+        sc, payload = _api_request(
+            config, "POST", f"/ops/threads/{thread_id}/config",
+            json_body={"effort": effort_val},
+        )
+        if sc in {200, 204}:
+            console.print(f"[green]✓ Esfuerzo del orquestador: [bold]{effort_val}[/bold][/green]")
+        else:
+            console.print(f"[red]Set effort failed ({sc}): {payload}[/red]")
+
+    def set_permissions(perm_val: str):
+        """Change HITL mode live and update in-session display."""
+        sc, payload = _api_request(
+            config, "POST", f"/ops/threads/{thread_id}/config",
+            json_body={"hitl_mode": perm_val},
+        )
+        if sc in {200, 204}:
+            if current_perm is not None:
+                current_perm.clear()
+                current_perm.append(perm_val)
+            console.print(f"[green]✓ Permisos HITL: [bold]perm:{perm_val}[/bold][/green]")
+        else:
+            console.print(f"[red]Set permissions failed ({sc}): {payload}[/red]")
+
+    def add_file(path_val: str):
+        """POST file path to active thread context."""
+        sc, payload = _api_request(
+            config, "POST", f"/ops/threads/{thread_id}/context/add",
+            json_body={"path": path_val},
+        )
+        if sc in {200, 201}:
+            console.print(f"[green]✓ Añadido al contexto: [bold]{path_val}[/bold][/green]")
+        else:
+            console.print(f"[red]Add file failed ({sc}): {payload}[/red]")
+
+    def invalid_arg(msg: str):
+        console.print(f"[yellow]⚠ {msg}[/yellow]")
+
     def unknown_command(cmd: str):
         console.print(f"[yellow]Unknown command: {cmd}. Use /help.[/yellow]")
 
@@ -490,6 +609,16 @@ def _handle_chat_slash_command(
         "list_models": list_models,
         "show_workers": show_workers,
         "show_status": show_status,
+        # P0 new
+        "undo": undo,
+        "clear_view": clear_view,
+        "reset_context": reset_context,
+        "show_tokens": show_tokens,
+        "show_diff": show_diff,
+        "set_effort": set_effort,
+        "set_permissions": set_permissions,
+        "add_file": add_file,
+        "invalid_arg": invalid_arg,
         "unknown_command": unknown_command,
     }
 
@@ -710,9 +839,17 @@ def _interactive_chat(config: dict[str, Any]) -> None:
     history_path = _history_dir() / f"{thread_id}.log"
     _ensure_project_dirs()
 
+    # State shared across turns for /tokens and /permissions
+    current_usage: dict[str, Any] = {}
+    current_perm: list[str] = ["suggest"]  # default HITL mode
+
     # Main loop
     while True:
-        user_input = renderer.get_user_input()
+        try:
+            user_input = renderer.get_user_input()
+        except KeyboardInterrupt:
+            renderer.render_interrupted()
+            continue
         if not user_input:
             continue
         if user_input.lower() in {"/exit", "/quit"}:
@@ -723,6 +860,8 @@ def _interactive_chat(config: dict[str, Any]) -> None:
             user_input,
             workspace_root=workspace_root,
             thread_id=thread_id,
+            current_usage=current_usage,
+            current_perm=current_perm,
         )
         if handled:
             if updated_model is not None:
@@ -766,116 +905,49 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                             )
 
                         current_event_type = "message"
-                        for line in response.iter_lines():
-                            if not line or line.startswith(":"):
-                                continue
+                        _interrupted = False
+                        renderer._generation_active = True
+                        try:
+                            for line in response.iter_lines():
+                                if not line or line.startswith(":"):
+                                    continue
 
-                            # Parse SSE format
-                            if line.startswith("event: "):
-                                current_event_type = line[7:].strip()
-                                continue
-                            if not line.startswith("data: "):
-                                continue
+                                # Parse SSE format
+                                if line.startswith("event: "):
+                                    current_event_type = line[7:].strip()
+                                    continue
+                                if not line.startswith("data: "):
+                                    continue
 
-                            raw_data = line[6:].strip()
-                            if not raw_data:
-                                continue
-
-                            try:
-                                data = json.loads(raw_data)
-                            except json.JSONDecodeError:
-                                continue
-
-                            evt = current_event_type
-
-                            if evt == "text_delta":
-                                # Accumulate for final render
-                                chat_response += data.get("content", "")
-
-                            elif evt == "tool_call_start":
-                                renderer.render_tool_call_start(
-                                    data.get("tool_name", "?"),
-                                    data.get("arguments", {}),
-                                    data.get("risk", "LOW"),
-                                )
-
-                            elif evt == "tool_approval_required":
-                                # HITL: ask user for approval
-                                approved = renderer.render_hitl_prompt(
-                                    data.get("tool_name", "?"),
-                                    data.get("arguments", {}),
-                                )
-                                # Submit approval to backend
-                                try:
-                                    client.post(
-                                        f"{base_url}/ops/threads/{thread_id}/approve-tool",
-                                        params={
-                                            "tool_call_id": data.get("tool_call_id", ""),
-                                            "approved": str(approved).lower(),
-                                        },
-                                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
-                                    )
-                                except Exception:
-                                    pass  # Best effort
-
-                            elif evt == "tool_call_end":
-                                renderer.render_tool_call_result(
-                                    data.get("tool_name", "?"),
-                                    data.get("status", "error"),
-                                    data.get("duration", 0.0),
-                                    data.get("risk", "LOW"),
-                                )
-
-                            elif evt == "done":
-                                chat_response = data.get("response", chat_response)
-                                usage = data.get("usage", {})
-
-                            elif evt == "error":
-                                renderer.render_error(data.get("message", "Unknown error"))
-
-                            # P2: conversational planning events
-                            elif evt == "user_question":
-                                question = data.get("question", "")
-                                options = data.get("options", [])
-                                context = data.get("context", "")
-                                renderer.render_user_question(question, options, context)
-
-                            elif evt == "plan_proposed":
-                                plan = data
-                                renderer.render_plan(plan)
-                                approval = renderer.get_plan_approval()
+                                raw_data = line[6:].strip()
+                                if not raw_data:
+                                    continue
 
                                 try:
-                                    client.post(
-                                        f"{base_url}/ops/threads/{thread_id}/plan/respond",
-                                        params={"action": approval},
-                                        json={"feedback": "User feedback from CLI"},
-                                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                                    data = json.loads(raw_data)
+                                except json.JSONDecodeError:
+                                    continue
+
+                                evt = current_event_type
+
+                                if evt == "text_delta":
+                                    # Accumulate for final render
+                                    chat_response += data.get("content", "")
+
+                                elif evt == "tool_call_start":
+                                    renderer.render_tool_call_start(
+                                        data.get("tool_name", "?"),
+                                        data.get("arguments", {}),
+                                        data.get("risk", "LOW"),
                                     )
 
-                                    if approval == "approve":
-                                        renderer.console.print("[green]\u2713 Plan approved. Execution started.[/green]")
-                                    elif approval == "reject":
-                                        renderer.console.print("[red]\u2717 Plan rejected. Agent will revise.[/red]")
-                                    else:
-                                        renderer.console.print("[yellow]Plan modification not yet implemented in CLI. Please approve or reject.[/yellow]")
-                                except Exception as e:
-                                    renderer.render_error(f"Failed to submit plan response: {e}")
-
-                            elif evt == "confirmation_required":
-                                tool_name = data.get("tool_name", "?")
-                                message = data.get("message", "")
-                                renderer.console.print()
-                                renderer.console.print(Panel(
-                                    f"{message}\n\nTool: [bold]{tool_name}[/bold]",
-                                    title="\u26a0 Confirmation Required",
-                                    border_style="yellow",
-                                ))
-                                try:
-                                    answer = renderer.console.input("[bold yellow]Approve? (y/N): [/bold yellow]").strip()
-                                    from cli_parsers import parse_yes_no
-                                    approved = parse_yes_no(answer)
-                                    
+                                elif evt == "tool_approval_required":
+                                    # HITL: ask user for approval
+                                    approved = renderer.render_hitl_prompt(
+                                        data.get("tool_name", "?"),
+                                        data.get("arguments", {}),
+                                    )
+                                    # Submit approval to backend
                                     try:
                                         client.post(
                                             f"{base_url}/ops/threads/{thread_id}/approve-tool",
@@ -887,15 +959,93 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                                         )
                                     except Exception:
                                         pass  # Best effort
-                                        
-                                    if not approved:
-                                        renderer.console.print("[dim]Confirmation denied. Agent will skip this action.[/dim]")
-                                except (EOFError, KeyboardInterrupt):
-                                    pass
 
-                            elif evt == "session_start":
-                                mood = data.get("mood", "neutral")
-                                renderer.render_mood_indicator(mood)
+                                elif evt == "tool_call_end":
+                                    renderer.render_tool_call_result(
+                                        data.get("tool_name", "?"),
+                                        data.get("status", "error"),
+                                        data.get("duration", 0.0),
+                                        data.get("risk", "LOW"),
+                                    )
+
+                                elif evt == "done":
+                                    chat_response = data.get("response", chat_response)
+                                    usage = data.get("usage", {})
+                                    current_usage.clear()
+                                    current_usage.update(usage)
+
+                                elif evt == "error":
+                                    renderer.render_error(data.get("message", "Unknown error"))
+
+                                # P2: conversational planning events
+                                elif evt == "user_question":
+                                    question = data.get("question", "")
+                                    options = data.get("options", [])
+                                    context = data.get("context", "")
+                                    renderer.render_user_question(question, options, context)
+
+                                elif evt == "plan_proposed":
+                                    plan = data
+                                    renderer.render_plan(plan)
+                                    approval = renderer.get_plan_approval()
+
+                                    try:
+                                        client.post(
+                                            f"{base_url}/ops/threads/{thread_id}/plan/respond",
+                                            params={"action": approval},
+                                            json={"feedback": "User feedback from CLI"},
+                                            headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                                        )
+
+                                        if approval == "approve":
+                                            renderer.console.print("[green]\u2713 Plan approved. Execution started.[/green]")
+                                        elif approval == "reject":
+                                            renderer.console.print("[red]\u2717 Plan rejected. Agent will revise.[/red]")
+                                        else:
+                                            renderer.console.print("[yellow]Plan modification not yet implemented in CLI. Please approve or reject.[/yellow]")
+                                    except Exception as e:
+                                        renderer.render_error(f"Failed to submit plan response: {e}")
+
+                                elif evt == "confirmation_required":
+                                    tool_name = data.get("tool_name", "?")
+                                    message = data.get("message", "")
+                                    renderer.console.print()
+                                    renderer.console.print(Panel(
+                                        f"{message}\n\nTool: [bold]{tool_name}[/bold]",
+                                        title="\u26a0 Confirmation Required",
+                                        border_style="yellow",
+                                    ))
+                                    try:
+                                        answer = renderer.console.input("[bold yellow]Approve? (y/N): [/bold yellow]").strip()
+                                        from cli_parsers import parse_yes_no
+                                        approved = parse_yes_no(answer)
+
+                                        try:
+                                            client.post(
+                                                f"{base_url}/ops/threads/{thread_id}/approve-tool",
+                                                params={
+                                                    "tool_call_id": data.get("tool_call_id", ""),
+                                                    "approved": str(approved).lower(),
+                                                },
+                                                headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                                            )
+                                        except Exception:
+                                            pass  # Best effort
+
+                                        if not approved:
+                                            renderer.console.print("[dim]Confirmation denied. Agent will skip this action.[/dim]")
+                                    except (EOFError, KeyboardInterrupt):
+                                        pass
+
+                                elif evt == "session_start":
+                                    mood = data.get("mood", "neutral")
+                                    renderer.render_mood_indicator(mood)
+
+                        except KeyboardInterrupt:
+                            _interrupted = True
+                            renderer.render_interrupted()
+                        finally:
+                            renderer._generation_active = False
 
         except (httpx.HTTPStatusError, httpx.ConnectError):
             # Fall back to sync POST
@@ -1018,135 +1168,159 @@ def init(
 def status(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
 ) -> None:
-    """Show local project state plus backend run status."""
-    table = Table(title="GIMO Status", show_header=False)
-    table.add_column("Property", style="cyan")
-    table.add_column("Value", style="magenta")
-    result_payload: dict[str, Any] = {
-        "workspace_initialized": False,
-        "backend_online": False,
-    }
+    """Comprehensive status panel: repo, backend, budget, active run, alerts."""
+    from concurrent.futures import ThreadPoolExecutor
 
+    result: dict[str, Any] = {}
+
+    # ── Git info ──────────────────────────────────────────────────────────────
+    repo_name = _project_root().name
+    branch_res = _git_command(["rev-parse", "--abbrev-ref", "HEAD"])
+    branch = branch_res.stdout.strip() if branch_res.returncode == 0 else "unknown"
+    dirty_res = _git_command(["status", "--porcelain"])
+    dirty_files = len([ln for ln in dirty_res.stdout.splitlines() if ln.strip()]) if dirty_res.returncode == 0 else 0
+    result.update({"repo": repo_name, "branch": branch, "dirty_files": dirty_files})
+
+    # ── Config ────────────────────────────────────────────────────────────────
     try:
         config = _load_config()
     except typer.Exit:
         config = {}
-        table.add_row("Workspace", "[red]Not initialized[/red]")
-    else:
-        repo_cfg = dict(config.get("repository") or {})
-        orch_cfg = dict(config.get("orchestrator") or {})
-        result_payload["workspace_initialized"] = True
-        result_payload["workspace"] = str(repo_cfg.get("name") or _project_root().name)
-        result_payload["preferred_model"] = str(orch_cfg.get("preferred_model") or "n/a")
-        result_payload["budget_limit_usd"] = orch_cfg.get("budget_limit_usd", "n/a")
-        table.add_row("Workspace", str(repo_cfg.get("name") or _project_root().name))
-        table.add_row("Preferred Model", str(orch_cfg.get("preferred_model") or "n/a"))
-        table.add_row("Budget Limit", f"${orch_cfg.get('budget_limit_usd', 'n/a')}")
 
     if not config:
+        lines = [
+            f"📁 [bold]Repo[/bold]: {repo_name}  branch: [cyan]{branch}[/cyan]",
+            "[red]⚠ Workspace not initialized. Run 'gimo init'.[/red]",
+        ]
         if json_output:
-            _emit_output(result_payload, json_output=True)
+            _emit_output(result, json_output=True)
             return
-        console.print(table)
+        console.print(Panel("\n".join(lines), title="GIMO Status", border_style="red"))
         return
 
-    try:
-        status_code, status_payload = _api_request(config, "GET", "/status")
-        runs_code, runs_payload = _api_request(config, "GET", "/ops/runs")
-    except Exception as exc:
-        result_payload["backend_error"] = str(exc)
-        table.add_row("Backend", f"[red]Offline[/red] ({exc})")
-        if json_output:
-            _emit_output(result_payload, json_output=True)
-            return
-        console.print(table)
-        return
+    orch_cfg = dict(config.get("orchestrator") or {})
+    budget_limit = float(orch_cfg.get("budget_limit_usd") or 0)
 
-    if status_code == 200 and isinstance(status_payload, dict):
-        result_payload["backend_online"] = True
-        result_payload["version"] = str(status_payload.get("version") or "unknown")
-        result_payload["uptime_seconds"] = status_payload.get("uptime_seconds", 0)
-        table.add_row("Backend", "[green]ONLINE[/green]")
-        table.add_row("Version", str(status_payload.get("version") or "unknown"))
-        table.add_row("Uptime", f"{status_payload.get('uptime_seconds', 0)}s")
-    else:
-        result_payload["backend_http_status"] = status_code
-        table.add_row("Backend", f"[red]HTTP {status_code}[/red]")
-
-    runs = runs_payload if runs_code == 200 and isinstance(runs_payload, list) else []
-    active_runs = [run for run in runs if str(run.get("status") or "") in ACTIVE_RUN_STATUSES]
-    latest = _latest_run_summary(runs)
-    result_payload["runs_total"] = len(runs)
-    result_payload["runs_active"] = len(active_runs)
-    result_payload["latest_run"] = latest
-
-    table.add_row("Runs (total)", str(len(runs)))
-    table.add_row("Runs (active)", str(len(active_runs)))
-    if latest:
-        table.add_row("Latest Run", f"{latest.get('id')} ({latest.get('status')})")
-
-    supplemental_endpoints = {
-        "drafts": "/ops/drafts",
-        "approved": "/ops/approved",
-        "health": "/health/deep",
-        "mastery": "/ops/mastery/status",
-        "realtime": "/ops/realtime/metrics",
-    }
-    supplemental: dict[str, Any] = {}
-
-    for key, path in supplemental_endpoints.items():
+    # ── Parallel API fetches ──────────────────────────────────────────────────
+    def _fetch(path: str) -> tuple[int, Any]:
         try:
-            endpoint_status, endpoint_payload = _api_request(config, "GET", path)
+            return _api_request(config, "GET", path)
         except Exception as exc:
-            supplemental[key] = {"status_code": None, "error": str(exc)}
-            continue
-        supplemental[key] = {"status_code": endpoint_status, "payload": endpoint_payload}
+            return -1, str(exc)
 
-    result_payload["supplemental"] = supplemental
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        f_health   = pool.submit(_fetch, "/health")
+        f_status   = pool.submit(_fetch, "/status")
+        f_runs     = pool.submit(_fetch, "/ops/runs")
+        f_prov     = pool.submit(_fetch, "/ops/provider")
+        f_threads  = pool.submit(_fetch, "/ops/threads")
+        f_forecast = pool.submit(_fetch, "/ops/forecast")
 
-    drafts_payload = supplemental.get("drafts", {}).get("payload") if isinstance(supplemental.get("drafts"), dict) else None
-    if supplemental.get("drafts", {}).get("status_code") == 200 and isinstance(drafts_payload, list):
-        result_payload["drafts_total"] = len(drafts_payload)
-        table.add_row("Drafts", str(len(drafts_payload)))
-        if drafts_payload:
-            table.add_row("Latest Draft", str(drafts_payload[0].get("id") or "unknown"))
+        hc, _   = f_health.result()
+        sc, sp  = f_status.result()
+        rc, rp  = f_runs.result()
+        pc, pp  = f_prov.result()
+        tc, tp  = f_threads.result()
+        fc, fp  = f_forecast.result()
 
-    approved_payload = supplemental.get("approved", {}).get("payload") if isinstance(supplemental.get("approved"), dict) else None
-    if supplemental.get("approved", {}).get("status_code") == 200 and isinstance(approved_payload, list):
-        result_payload["approved_total"] = len(approved_payload)
-        table.add_row("Approved", str(len(approved_payload)))
-        if approved_payload:
-            table.add_row("Latest Approved", str(approved_payload[0].get("id") or "unknown"))
+    # ── Backend ───────────────────────────────────────────────────────────────
+    backend_online = hc == 200
+    version = str(sp.get("version") or "unknown") if sc == 200 and isinstance(sp, dict) else "n/a"
+    result.update({"backend_online": backend_online, "version": version})
 
-    health_payload = supplemental.get("health", {}).get("payload") if isinstance(supplemental.get("health"), dict) else None
-    if supplemental.get("health", {}).get("status_code") == 200 and isinstance(health_payload, dict):
-        health_status = str(health_payload.get("status") or "unknown")
-        checks = dict(health_payload.get("checks") or {})
-        provider_health = checks.get("provider_health", "n/a")
-        table.add_row("Health", health_status)
-        table.add_row("Provider", str(provider_health))
+    # ── Provider / model ─────────────────────────────────────────────────────
+    provider_id, model_id = "unknown", "unknown"
+    if pc == 200 and isinstance(pp, dict):
+        provider_id = str(pp.get("orchestrator_provider") or pp.get("active") or "unknown")
+        model_id    = str(pp.get("orchestrator_model") or pp.get("model_id") or "unknown")
+    result.update({"provider": provider_id, "model": model_id})
 
-    mastery_payload = supplemental.get("mastery", {}).get("payload") if isinstance(supplemental.get("mastery"), dict) else None
-    if supplemental.get("mastery", {}).get("status_code") == 200 and isinstance(mastery_payload, dict):
-        table.add_row("Hardware", str(mastery_payload.get("hardware_state") or "unknown"))
-        savings = mastery_payload.get("total_savings_usd")
-        if savings is not None:
-            table.add_row("Savings (30d)", f"${float(savings):.2f}")
-        efficiency = mastery_payload.get("efficiency_score")
-        if efficiency is not None:
-            table.add_row("Efficiency", str(efficiency))
+    # ── Runs ─────────────────────────────────────────────────────────────────
+    runs = rp if rc == 200 and isinstance(rp, list) else []
+    latest_run = _latest_run_summary(runs)
+    result["latest_run"] = latest_run
 
-    realtime_payload = supplemental.get("realtime", {}).get("payload") if isinstance(supplemental.get("realtime"), dict) else None
-    if supplemental.get("realtime", {}).get("status_code") == 200 and isinstance(realtime_payload, dict):
-        if "published" in realtime_payload:
-            table.add_row("Events Published", str(realtime_payload.get("published")))
-        if "dropped" in realtime_payload:
-            table.add_row("Events Dropped", str(realtime_payload.get("dropped")))
+    # ── Last thread + ctx% ────────────────────────────────────────────────────
+    last_thread_id, last_thread_turn, last_ctx_pct = "n/a", "n/a", None
+    if tc == 200 and isinstance(tp, list) and tp:
+        t0 = tp[0]
+        last_thread_id   = str(t0.get("id") or "n/a")
+        last_thread_turn = str(t0.get("turn_count") or t0.get("message_count") or "?")
+        last_ctx_pct     = t0.get("context_window_pct") or t0.get("ctx_pct")
+
+    # ── Budget ────────────────────────────────────────────────────────────────
+    spend, rem_pct = 0.0, None
+    if fc == 200 and isinstance(fp, list):
+        for f in fp:
+            if f.get("scope") == "global":
+                spend   = float(f.get("current_spend") or 0)
+                rem_pct = f.get("remaining_pct")
+                break
+    result.update({"spend_usd": spend, "budget_limit_usd": budget_limit})
+
+    # ── Alerts ────────────────────────────────────────────────────────────────
+    alerts: list[str] = []
+    if not backend_online:
+        alerts.append("✗ Backend OFFLINE")
+    if rem_pct is not None and rem_pct < 20:
+        alerts.append(f"⚠ Budget crítico: {rem_pct:.1f}% restante")
+    result["alerts"] = alerts
 
     if json_output:
-        _emit_output(result_payload, json_output=True)
+        _emit_output(result, json_output=True)
         return
-    console.print(table)
+
+    # ── Rich panel ───────────────────────────────────────────────────────────
+    dirty_str   = f"  [yellow]({dirty_files} dirty)[/yellow]" if dirty_files else ""
+    backend_str = f"[green]ONLINE[/green] · v{version}" if backend_online else "[red]OFFLINE[/red]"
+
+    if budget_limit > 0:
+        bar_len = 20
+        fill = min(int((spend / budget_limit) * bar_len), bar_len)
+        bar = "█" * fill + "░" * (bar_len - fill)
+        from cli_policies import get_budget_color
+        bcolor = get_budget_color(rem_pct)
+        budget_str = f"[{bcolor}]{bar}[/{bcolor}] ${spend:.3f} / ${budget_limit:.2f}"
+    else:
+        budget_str = f"${spend:.3f} (sin límite)"
+
+    if latest_run:
+        _run_id = latest_run.get('id', '?')
+        _run_status = latest_run.get('status', '?')
+        run_str = f"{_run_id}  [dim italic]({_run_status})[/dim italic]"
+        stage = latest_run.get("stage")
+        if stage:
+            run_str += f" · {stage}"
+    else:
+        run_str = "[dim]ninguno[/dim]"
+
+    alerts_str = "  ".join(alerts) if alerts else "[dim]ninguna[/dim]"
+
+    # ctx% bar (optional — only shown when backend reports it)
+    if last_ctx_pct is not None:
+        ctx_bar_len = 20
+        ctx_fill = min(int(last_ctx_pct / 100 * ctx_bar_len), ctx_bar_len)
+        ctx_bar = "█" * ctx_fill + "░" * (ctx_bar_len - ctx_fill)
+        ctx_color = "red" if last_ctx_pct > 80 else "yellow" if last_ctx_pct > 60 else "green"
+        ctx_str: str | None = f"[{ctx_color}]{ctx_bar}[/{ctx_color}] {last_ctx_pct:.1f}%"
+    else:
+        ctx_str = None
+
+    panel_lines = [
+        f"📁 [bold]Repo[/bold]:          {repo_name} · [cyan]{branch}[/cyan]{dirty_str}",
+        f"🧠 [bold]Proveedor[/bold]:     [cyan]{provider_id}[/cyan] / {model_id}",
+        f"🔒 [bold]Permisos[/bold]:      perm:[yellow]{orch_cfg.get('hitl_mode', 'suggest')}[/yellow]",
+        f"🌐 [bold]Backend[/bold]:       {backend_str}",
+        f"▶  [bold]Run activo[/bold]:    {run_str}",
+        f"💰 [bold]Budget[/bold]:        {budget_str}",
+        f"💬 [bold]Último thread[/bold]: {last_thread_id}  turno {last_thread_turn}",
+    ]
+    if ctx_str:
+        panel_lines.append(f"📊 [bold]Ctx window[/bold]:    {ctx_str}")
+    panel_lines.append(f"🔔 [bold]Alertas[/bold]:       {alerts_str}")
+    console.print(Panel("\n".join(panel_lines), title="GIMO Status", border_style="cyan"))
+
+
 
 
 @app.command()

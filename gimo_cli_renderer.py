@@ -20,6 +20,9 @@ class ChatRenderer:
     def __init__(self, console: Optional[Console] = None):
         self.console = console or Console()
         self.telemetry_html: Optional[str] = None
+        # Flag set True while an SSE generation stream is active.
+        # Used by _interactive_chat to handle Ctrl+C non-destructively.
+        self._generation_active: bool = False
 
     def render_session_header(
         self,
@@ -40,6 +43,11 @@ class ChatRenderer:
     def render_thinking(self) -> Any:
         """Return a status context manager for the 'thinking' spinner."""
         return self.console.status("[dim]Thinking...[/dim]", spinner="dots")
+
+    def render_interrupted(self) -> None:
+        """Print non-destructive Ctrl+C message. Session continues."""
+        self.console.print()
+        self.console.print("[dim]Interrumpido. Continúa con tu mensaje.[/dim]")
 
     def render_tool_call(self, tool: Dict[str, Any]) -> None:
         name = tool.get("name", "unknown")

@@ -4,6 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
@@ -94,7 +95,8 @@ def test_run_uses_auto_run_and_saves_backend_payload(tmp_path, monkeypatch):
         "path": "/ops/drafts/d_123/approve",
         "params": {"auto_run": "true"},
     }
-    saved = json.loads((tmp_path / ".gimo" / "runs" / "d_123.json").read_text(encoding="utf-8"))
+    # File is keyed by run id (r_123), not plan id — this is the P0 contract
+    saved = json.loads((tmp_path / ".gimo" / "runs" / "r_123.json").read_text(encoding="utf-8"))
     assert saved["run"]["id"] == "r_123"
     assert saved["run"]["status"] == "done"
     assert "Run started." in result.stdout
@@ -105,6 +107,9 @@ def test_status_reports_backend_summary(tmp_path, monkeypatch):
 
     def _fake_api_request(config, method, path, *, params=None):
         del config, method, params
+        # P0 status command fetches these 6 endpoints in parallel
+        if path == "/health":
+            return 200, {"ok": True}
         if path == "/status":
             return 200, {"version": "9.9.9", "uptime_seconds": 42}
         if path == "/ops/runs":
@@ -112,16 +117,12 @@ def test_status_reports_backend_summary(tmp_path, monkeypatch):
                 {"id": "r_latest", "status": "running"},
                 {"id": "r_old", "status": "done"},
             ]
-        if path == "/ops/drafts":
-            return 200, [{"id": "d_latest"}]
-        if path == "/ops/approved":
-            return 200, [{"id": "a_latest"}]
-        if path == "/health/deep":
-            return 200, {"status": "ok", "checks": {"provider_health": True}}
-        if path == "/ops/mastery/status":
-            return 200, {"hardware_state": "green", "total_savings_usd": 12.5, "efficiency_score": 0.8}
-        if path == "/ops/realtime/metrics":
-            return 200, {"published": 9, "dropped": 1}
+        if path == "/ops/provider":
+            return 200, {"orchestrator_provider": "anthropic", "orchestrator_model": "claude-3-5"}
+        if path == "/ops/threads":
+            return 200, [{"id": "th_001", "turn_count": 7}]
+        if path == "/ops/forecast":
+            return 200, [{"scope": "global", "current_spend": 3.5, "limit": 10.0, "remaining_pct": 65.0}]
         raise AssertionError(f"Unexpected path: {path}")
 
     monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
@@ -131,10 +132,10 @@ def test_status_reports_backend_summary(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "ONLINE" in result.stdout
     assert "9.9.9" in result.stdout
-    assert "r_latest (running)" in result.stdout
-    assert "d_latest" in result.stdout
-    assert "a_latest" in result.stdout
-    assert "12.50" in result.stdout
+    assert "r_latest" in result.stdout
+    assert "running" in result.stdout
+    assert "anthropic" in result.stdout
+    assert "3.500" in result.stdout
 
 
 def test_diff_calls_backend_and_prints_output(tmp_path, monkeypatch):
@@ -173,7 +174,7 @@ def test_config_updates_local_yaml(tmp_path, monkeypatch):
     updated = yaml.safe_load((tmp_path / ".gimo" / "config.yaml").read_text(encoding="utf-8"))
     assert updated["api"]["base_url"] == "http://localhost:9999"
     assert updated["orchestrator"]["preferred_model"] == "gpt-5"
-    assert updated["orchestrator"]["budget_limit_usd"] == 25.0
+    assert updated["orchestrator"]["budget_limit_usd"] == pytest.approx(25.0)
     assert updated["orchestrator"]["verbose"] is True
 
 
@@ -205,20 +206,19 @@ def test_status_json_emits_machine_readable_payload(tmp_path, monkeypatch):
 
     def _fake_api_request(config, method, path, *, params=None):
         del config, method, params
+        # P0 status command fetches these 6 endpoints in parallel
+        if path == "/health":
+            return 200, {"ok": True}
         if path == "/status":
             return 200, {"version": "1.2.3", "uptime_seconds": 5}
         if path == "/ops/runs":
             return 200, [{"id": "r1", "status": "done"}]
-        if path == "/ops/drafts":
-            return 200, [{"id": "d1"}]
-        if path == "/ops/approved":
-            return 200, [{"id": "a1"}]
-        if path == "/health/deep":
-            return 200, {"status": "ok", "checks": {"provider_health": True}}
-        if path == "/ops/mastery/status":
-            return 200, {"hardware_state": "green", "total_savings_usd": 0.0, "efficiency_score": 1.0}
-        if path == "/ops/realtime/metrics":
-            return 200, {"published": 1, "dropped": 0}
+        if path == "/ops/provider":
+            return 200, {"orchestrator_provider": "openai", "orchestrator_model": "gpt-4o"}
+        if path == "/ops/threads":
+            return 200, [{"id": "th_x", "turn_count": 3}]
+        if path == "/ops/forecast":
+            return 200, [{"scope": "global", "current_spend": 1.5, "limit": 10.0, "remaining_pct": 85.0}]
         raise AssertionError(f"Unexpected path: {path}")
 
     monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
@@ -227,12 +227,15 @@ def test_status_json_emits_machine_readable_payload(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
+    # P0 JSON contract — keys emitted by the new status command
     assert payload["backend_online"] is True
     assert payload["version"] == "1.2.3"
     assert payload["latest_run"]["id"] == "r1"
-    assert payload["drafts_total"] == 1
-    assert payload["approved_total"] == 1
-    assert payload["supplemental"]["health"]["payload"]["status"] == "ok"
+    assert payload["repo"] is not None
+    assert payload["provider"] == "openai"
+    assert payload["model"] == "gpt-4o"
+    assert payload["spend_usd"] == pytest.approx(1.5)
+    assert payload["alerts"] == []
 
 
 def test_rollback_uses_safe_git_wrapper(tmp_path, monkeypatch):

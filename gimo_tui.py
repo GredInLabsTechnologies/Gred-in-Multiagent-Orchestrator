@@ -242,6 +242,45 @@ class GimoApp(App):
                 elif action == "workers":
                     self.update_topology()
                     self.call_from_thread(self._write_log, "[green]Detailed workers topology refreshed in sidebar.[/green]")
+                # ── P0 new actions ────────────────────────────────────────────
+                elif action == "undo":
+                    import subprocess as _sp
+                    res = _sp.run(["git", "revert", "--no-edit", "HEAD"], capture_output=True, text=True, check=False)
+                    if res.returncode == 0:
+                        self.call_from_thread(self._write_log, Panel(res.stdout.strip() or "Revert successful.", title="✓ /undo", border_style="green"))
+                    else:
+                        self.call_from_thread(self._write_log, Panel(res.stderr.strip() or "Revert failed.", title="✗ /undo failed", border_style="red"))
+                elif action == "reset":
+                    st, py = _api_request(self.config, "POST", f"/ops/threads/{self.thread_id}/reset")
+                    if st in {200, 204}:
+                        self.call_from_thread(self._write_log, "[green]✓ Contexto del thread reiniciado.[/green]")
+                    else:
+                        self.call_from_thread(self._write_log, f"[red]Reset failed ({st}): {py}[/red]")
+                elif action == "tokens":
+                    self.call_from_thread(self._write_log, "[dim]Token data available via /tokens in the CLI interactive chat.[/dim]")
+                elif action == "diff":
+                    st, py = _api_request(self.config, "GET", "/ops/files/diff")
+                    if st == 200:
+                        diff_text = py.get("diff") or py.get("content") or str(py) if isinstance(py, dict) else str(py)
+                        self.call_from_thread(self._write_log, Panel(diff_text or "[dim]No diff.[/dim]", title="📄 /diff", border_style="yellow"))
+                    else:
+                        self.call_from_thread(self._write_log, f"[red]Diff unavailable ({st}): {py}[/red]")
+                elif action.startswith("effort:"):
+                    val = action.split(":", 1)[1]
+                    st, py = _api_request(self.config, "POST", f"/ops/threads/{self.thread_id}/config", json_body={"effort": val})
+                    msg = f"[green]✓ Esfuerzo: {val}[/green]" if st in {200, 204} else f"[red]effort failed ({st}): {py}[/red]"
+                    self.call_from_thread(self._write_log, msg)
+                elif action.startswith("permissions:"):
+                    val = action.split(":", 1)[1]
+                    st, py = _api_request(self.config, "POST", f"/ops/threads/{self.thread_id}/config", json_body={"hitl_mode": val})
+                    msg = f"[green]✓ Permisos: perm:{val}[/green]" if st in {200, 204} else f"[red]permissions failed ({st}): {py}[/red]"
+                    self.call_from_thread(self._write_log, msg)
+                elif action.startswith("add:"):
+                    path_val = action.split(":", 1)[1]
+                    st, py = _api_request(self.config, "POST", f"/ops/threads/{self.thread_id}/context/add", json_body={"path": path_val})
+                    msg = f"[green]✓ Añadido: {path_val}[/green]" if st in {200, 201} else f"[red]add failed ({st}): {py}[/red]"
+                    self.call_from_thread(self._write_log, msg)
+
 
             callbacks = {
                 "show_help": show_help,
@@ -253,6 +292,16 @@ class GimoApp(App):
                 "handle_model": lambda arg: self._write_log("[yellow]Model switching is only supported via interactive chat or UI settings.[/yellow]"),
                 "show_workers": lambda: do_slash_fetch("workers"),
                 "show_status": lambda: do_slash_fetch("status"),
+                # ── P0 new commands ───────────────────────────────────────────
+                "undo": lambda: do_slash_fetch("undo"),
+                "clear_view": self.action_clear_log,
+                "reset_context": lambda: do_slash_fetch("reset"),
+                "show_tokens": lambda: do_slash_fetch("tokens"),
+                "show_diff": lambda: do_slash_fetch("diff"),
+                "set_effort": lambda val: do_slash_fetch(f"effort:{val}"),
+                "set_permissions": lambda val: do_slash_fetch(f"permissions:{val}"),
+                "add_file": lambda path: do_slash_fetch(f"add:{path}"),
+                "invalid_arg": lambda msg: self._write_log(f"[yellow]⚠ {msg}[/yellow]"),
                 "unknown_command": unknown_command,
             }
 
