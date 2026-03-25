@@ -209,6 +209,15 @@ class RunLogEntry(BaseModel):
     run_key: Optional[str] = None
 
 
+class PurgeReceipt(BaseModel):
+    """Phase 6B: Canonical proof of run state removal."""
+    run_id: str
+    purged_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    removed_categories: List[str] # e.g. ["logs", "events", "workspace"]
+    retained_metadata_hash: str
+    success: bool
+
+
 class StatusResponse(BaseModel):
     version: str
     uptime_seconds: float

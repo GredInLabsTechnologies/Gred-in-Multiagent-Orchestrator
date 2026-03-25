@@ -440,3 +440,19 @@ class RunMixin:
             except Exception:
                 continue
         return cleaned
+
+    @classmethod
+    def discard_run(cls, run_id: str) -> None:
+        """Phase 6B: Discard a run manually. Triggers immediate purge."""
+        from ..purge_service import PurgeService
+
+        run = cls.get_run(run_id)
+        if not run:
+            raise ValueError(f"Run {run_id} not found")
+
+        # Move to cancelled if not terminal
+        if run.status not in cls._TERMINAL_RUN_STATUSES:
+            cls.update_run_status(run_id, "cancelled", msg="Discarded by user")
+
+        # Trigger purge
+        PurgeService.purge_run(run_id)
