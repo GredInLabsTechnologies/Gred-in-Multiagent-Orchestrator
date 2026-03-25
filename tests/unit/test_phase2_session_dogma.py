@@ -50,21 +50,15 @@ def test_operator_status_reads_real_backend_sources_and_avoids_stubs(monkeypatch
     
     assert snapshot["branch"] == "feature/test-branch"
     
-    # Assert explicit non-authoritative objects instead of stubs
-    assert isinstance(snapshot["backend_status"], dict)
-    assert snapshot["backend_status"].get("authoritative") is False
-    
-    assert isinstance(snapshot["active_run"], dict)
-    assert snapshot["active_run"].get("authoritative") is False
+    # Verify that unintegrated Phase 3 fields are completely absent rather than mocked
+    assert "backend_status" not in snapshot
+    assert "active_run" not in snapshot
+    assert "budget_spend" not in snapshot
+    assert "budget_limit" not in snapshot
+    assert "context_percentage" not in snapshot
 
-    assert isinstance(snapshot["budget_spend"], dict)
-    assert snapshot["budget_spend"].get("authoritative") is False
-
-def test_notice_policy_budget_percentage_survives_dict_values():
-    notices = NoticePolicyService.evaluate_all({
-        "budget_spend": {"authoritative": False},
-        "budget_limit": {"authoritative": False}
-    })
+def test_notice_policy_budget_percentage_handles_missing_fields():
+    notices = NoticePolicyService.evaluate_all({})
     warning_codes = [n["code"] for n in notices]
     assert "budget_high" not in warning_codes
 

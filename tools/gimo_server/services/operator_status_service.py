@@ -54,13 +54,7 @@ class OperatorStatusService:
             "active_provider": active_provider,
             "active_model": active_model,
             "permission_mode": permission_mode,
-            "backend_status": {"authoritative": False, "reason": "Dynamic health checks not assigned to Phase 2 contracts"},
             "backend_version": __version__,
-            "active_run": {"authoritative": False, "reason": "Run monitoring not assigned to Phase 2 contracts"},
-            "active_stage": {"authoritative": False, "reason": "Stage tracking not assigned to Phase 2 contracts"},
-            "budget_spend": {"authoritative": False, "reason": "Budget tracking not assigned to Phase 2 contracts"},
-            "budget_limit": {"authoritative": False, "reason": "Budget tracking not assigned to Phase 2 contracts"},
-            "context_percentage": {"authoritative": False, "reason": "Context monitoring not assigned to Phase 2 contracts"},
             "last_thread": last_thread_id,
             "last_turn": last_turn_id,
         }
