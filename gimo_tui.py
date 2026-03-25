@@ -42,6 +42,7 @@ class GimoApp(App):
     BINDINGS = [
         Binding("ctrl+c,ctrl+q", "quit", "Quit Session", show=True),
         Binding("ctrl+l", "clear_log", "Clear Chat", show=True),
+        Binding("escape", "dismiss_notice", "Dismiss Notice", show=False),
     ]
     
     CSS = """
@@ -173,11 +174,25 @@ class GimoApp(App):
         evt_stream = self.query_one("#event-stream", Static)
         evt_stream.update(f"EVENT STREAM: {text}")
 
+    def action_dismiss_notice(self) -> None:
+        """Dismiss active notice on Escape."""
+        if self._notice_timer:
+            self._notice_timer.stop()
+            self._notice_timer = None
+        self.query_one("#notices-content", Static).update("   No active notices.")
+
     def show_notice(self, text: str, style: str = "yellow", ttl: int = 30):
         icon = "⚠" if style == "yellow" else "✗" if style == "red" else "ℹ"
         lbl = self.query_one("#notices-content", Static)
         lbl.update(f"[{style}]{icon} {text}[/{style}]")
         
+        if self._notice_timer:
+            self._notice_timer.stop()
+            
+        if ttl > 0:
+            def clear_notice():
+                lbl.update("   No active notices.")
+            self._notice_timer = self.set_timer(ttl, clear_notice)
         if self._notice_timer:
             self._notice_timer.stop()
             

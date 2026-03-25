@@ -43,7 +43,7 @@ def test_post_run_report_missing_data_uses_na():
     usage = {}
     run_data = {}
     
-    renderer.render_post_run_report(run_id=None, usage=usage, run_data=run_data)
+    renderer.render_post_run_report(run_id="dummy", usage=usage, run_data=run_data)
     output = s_out.getvalue()
     
     assert "Objetivo: n/a" in output

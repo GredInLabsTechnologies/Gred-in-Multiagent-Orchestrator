@@ -201,6 +201,9 @@ class ChatRenderer:
 
     def render_post_run_report(self, run_id: Optional[str], usage: dict, run_data: dict) -> None:
         """Render the standard post-run report."""
+        if not run_id and not run_data.get("tools_used") and not run_data.get("objective") and not run_data.get("goal"):
+            return
+
         goal = run_data.get("goal") or run_data.get("objective") or "n/a"
         
         # Tools

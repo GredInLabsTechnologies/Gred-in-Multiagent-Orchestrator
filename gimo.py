@@ -998,7 +998,8 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                                         renderer.render_notice(Notice("warning", f"Budget critical: ${cost:.2f}/${budget_limit:.2f}", time.time(), 30, False))
 
                                     run_data = data.get("run", {})
-                                    renderer.render_post_run_report(run_id=run_data.get("id"), usage=usage, run_data=run_data)
+                                    if run_data.get("id") or run_data.get("tools_used") or run_data.get("objective"):
+                                        renderer.render_post_run_report(run_id=run_data.get("id"), usage=usage, run_data=run_data)
 
 
                                 elif evt == "error":
@@ -1071,6 +1072,7 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                         except KeyboardInterrupt:
                             _interrupted = True
                             renderer.render_interrupted()
+                            break  # Exit iter_lines stream immediately
                         finally:
                             renderer._generation_active = False
 
@@ -1106,6 +1108,9 @@ def _interactive_chat(config: dict[str, Any]) -> None:
             continue
         except Exception as exc:
             renderer.render_error(f"Stream failed: {exc}")
+            continue
+
+        if getattr(renderer, "_interrupted", False) or locals().get("_interrupted", False):
             continue
 
         # Render response
@@ -1524,7 +1529,9 @@ def run(
 
 
 @app.command()
-def tui() -> None:
+def tui(
+    verbose: bool = typer.Option(False, "--verbose", help="Enable debug/verbose render mode"),
+) -> None:
     """Launch the experimental Textual UI."""
     try:
         config = _load_config()
@@ -1532,13 +1539,20 @@ def tui() -> None:
         _ensure_project_dirs()
         config = _load_config()
 
+    if "orchestrator" not in config:
+        config["orchestrator"] = {}
+    config["orchestrator"]["verbose"] = verbose or config["orchestrator"].get("verbose", False)
+
     from gimo_tui import GimoApp
     console.print("[dim]Launching TUI...[/dim]")
     app_tui = GimoApp(config=config, thread_id="tui_default")
+    app_tui.verbose = config["orchestrator"]["verbose"]
     app_tui.run()
 
 @app.command()
-def chat() -> None:
+def chat(
+    verbose: bool = typer.Option(False, "--verbose", help="Enable debug/verbose render mode"),
+) -> None:
     """Interactive agentic chat session with GIMO orchestrator."""
     try:
         config = _load_config()
@@ -1547,6 +1561,10 @@ def chat() -> None:
         if not _config_path().exists():
             _save_config(_default_config())
         config = _load_config()
+
+    if "orchestrator" not in config:
+        config["orchestrator"] = {}
+    config["orchestrator"]["verbose"] = verbose or config["orchestrator"].get("verbose", False)
 
     _interactive_chat(config)
 
