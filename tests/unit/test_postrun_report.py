@@ -55,3 +55,17 @@ def test_post_run_report_missing_data_uses_na():
     assert "Duración: n/a" in output
     assert "Rollback: n/a" in output
     assert "Alertas: ninguna" in output
+
+def test_postrun_report_skipped_when_no_evidence():
+    s_out = StringIO()
+    console = Console(file=s_out, force_terminal=False)
+    renderer = ChatRenderer(console=console)
+    
+    usage = {"total_tokens": 100}
+    run_data = {}  # No id, no tools_used, no objective
+    
+    # Should exit early and produce zero output
+    renderer.render_post_run_report(run_id=None, usage=usage, run_data=run_data)
+    
+    output = s_out.getvalue()
+    assert output == ""

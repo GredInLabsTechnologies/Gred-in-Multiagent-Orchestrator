@@ -1097,6 +1097,14 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                     renderer.render_tool_calls(tool_calls)
                 chat_response = payload.get("response", "")
                 usage = payload.get("usage", {})
+
+                run_data = payload.get("run", {})
+                if run_data.get("id") or run_data.get("tools_used") or run_data.get("objective"):
+                    renderer.render_post_run_report(run_id=run_data.get("id"), usage=usage, run_data=run_data)
+
+            except KeyboardInterrupt:
+                turn_interrupted = True
+                renderer.render_interrupted()
             except httpx.TimeoutException:
                 renderer.render_error("Request timed out. The LLM may need more time.")
                 continue
