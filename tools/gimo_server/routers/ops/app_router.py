@@ -1,9 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from typing import Annotated, List, Optional
 from pydantic import BaseModel
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.app_session_service import AppSessionService
+from tools.gimo_server.services.repo_recon_service import RepoReconService
+from tools.gimo_server.services.draft_validation_service import DraftValidationService
+from tools.gimo_server.services.context_request_service import ContextRequestService
+
+from tools.gimo_server.schemas.repo_recon import ReconEntry, FileContentResponse
+from tools.gimo_server.schemas.draft_validation import DraftCreateRequest, DraftValidationResponse
+from tools.gimo_server.schemas.context_request import ContextCreateRequest, ContextRequestEntry, ContextResolveRequest, ContextCancelRequest
 
 router = APIRouter(prefix="/app", tags=["ops.app"]) # Prefix /ops comes from ops_routes.py mount
 
@@ -43,15 +50,105 @@ async def select_repo(
         raise HTTPException(status_code=400, detail="Invalid repo_id or session")
     return {"status": "ok", "repo_id": data.repo_id}
 
-@router.post("/sessions/{id}/drafts")
+# --- P5.1 RECON SERVICE ---
+@router.get("/sessions/{id}/recon/list", response_model=List[ReconEntry])
+async def list_repo_files(
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    id: str,
+    path_handle: Optional[str] = Query(None)
+):
+    """P5.1 Recon: Lista archivos del repositorio vinculado usando handles opacos."""
+    try:
+        return RepoReconService.list_files(id, path_handle)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/sessions/{id}/recon/search")
+async def search_repo_files(
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    id: str,
+    q: str = Query(...)
+):
+    """P5.1 Recon: Busca contenido en el repositorio vinculado."""
+    try:
+        return RepoReconService.search(id, q)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/sessions/{id}/recon/read/{file_handle}", response_model=FileContentResponse)
+async def read_repo_file(
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    id: str,
+    file_handle: str
+):
+    """P5.1 Recon: Lee un archivo y genera un ReadProof persistente."""
+    try:
+        return RepoReconService.read_file(id, file_handle)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# --- P5.2 VALIDATION SERVICE ---
+@router.post("/sessions/{id}/drafts", response_model=DraftValidationResponse)
 async def create_draft(
     auth: Annotated[AuthContext, Depends(verify_token)],
     id: str,
-    payload: dict = Body(...)
+    payload: DraftCreateRequest
 ):
-    """P4 Honest Dummy: No implementado todavía."""
-    return {"status": "not_implemented", "msg": "Draft creation not yet available in Session surface"}
+    """P5.2 Validation: Valida el draft apoyándose en evidencia (ReadProofs) de Recon."""
+    try:
+        return DraftValidationService.validate_draft(id, payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
+# --- P5.3 CONTEXT REQUEST SERVICE ---
+@router.post("/sessions/{id}/context-requests", response_model=ContextRequestEntry)
+async def create_context_request(
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    id: str,
+    data: ContextCreateRequest
+):
+    """P5.3 Context: Crea una solicitud persistente de contexto adicional."""
+    try:
+        return ContextRequestService.create_request(id, data.description, data.metadata)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/sessions/{id}/context-requests", response_model=List[ContextRequestEntry])
+async def list_context_requests(
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    id: str,
+    status: Optional[str] = Query(None)
+):
+    """P5.3 Context: Lista solicitudes de contexto de la sesión."""
+    return ContextRequestService.list_requests(id, status)
+
+@router.post("/sessions/{id}/context-requests/{req_id}/resolve")
+async def resolve_context_request(
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    id: str,
+    req_id: str,
+    data: ContextResolveRequest
+):
+    """P5.3 Context: Marca una solicitud como resuelta."""
+    if ContextRequestService.resolve_request(id, req_id, data.evidence):
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="Request not found")
+
+@router.post("/sessions/{id}/context-requests/{req_id}/cancel")
+async def cancel_context_request(
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    id: str,
+    req_id: str,
+    data: ContextCancelRequest
+):
+    """P5.3 Context: Cancela una solicitud."""
+    if ContextRequestService.cancel_request(id, req_id, data.reason):
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="Request not found")
+
+# --- LEGACY / UNTOUCHED ---
 @router.post("/runs")
 async def create_run(
     auth: Annotated[AuthContext, Depends(verify_token)],
@@ -85,3 +182,4 @@ async def purge_session(
     if not AppSessionService.purge_session(id):
         raise HTTPException(status_code=404, detail="Session not found")
     return {"status": "ok", "deleted": id}
+

@@ -50,6 +50,16 @@ _ACTIONS_SAFE_PUBLIC_ENDPOINTS: tuple[tuple[str, str], ...] = (
     ("get", "/ops/app/sessions/{id}"),
     ("post", "/ops/app/sessions/{id}/repo/select"),
     ("post", "/ops/app/sessions/{id}/purge"),
+    # Phase 5A: Recon & Draft Semantics
+    ("get", "/ops/app/sessions/{id}/recon/list"),
+    ("get", "/ops/app/sessions/{id}/recon/search"),
+    ("get", "/ops/app/sessions/{id}/recon/read/{file_handle}"),
+    ("post", "/ops/app/sessions/{id}/drafts"),
+    # Phase 5A: Context Requests
+    ("post", "/ops/app/sessions/{id}/context-requests"),
+    ("get", "/ops/app/sessions/{id}/context-requests"),
+    ("post", "/ops/app/sessions/{id}/context-requests/{req_id}/resolve"),
+    ("post", "/ops/app/sessions/{id}/context-requests/{req_id}/cancel"),
 )
 
 @router.get("/openapi.json", responses={404: {"description": "Not found"}})
