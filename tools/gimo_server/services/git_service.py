@@ -359,3 +359,57 @@ class GitService:
         if code != 0:
             return False, err or out
         return True, out
+
+    @staticmethod
+    def current_head(base_dir: Path) -> str:
+        return GitService.get_head_commit(base_dir)
+
+    @staticmethod
+    def clean_repo_check(base_dir: Path) -> bool:
+        return GitService.is_worktree_clean(base_dir)
+
+    @staticmethod
+    def clone_local(base_dir: Path, source_repo: Path, target_dir: Path) -> None:
+        src = str(source_repo.resolve())
+        tgt = str(target_dir.resolve())
+        code, out, err = GitService._run_git(base_dir, ["clone", "--local", src, tgt])
+        if code != 0:
+            raise RuntimeError(f"Git clone local error: {err or out}")
+
+    @staticmethod
+    def fetch_mirror(mirror_dir: Path, source_url: str) -> None:
+        code, out, err = GitService._run_git(mirror_dir, ["fetch", source_url, "+refs/heads/*:refs/heads/*", "--prune"])
+        if code != 0:
+            raise RuntimeError(f"Git fetch mirror error: {err or out}")
+
+    @staticmethod
+    def checkout_commit(base_dir: Path, commit_hash: str) -> None:
+        commit = _sanitize_git_ref(commit_hash)
+        code, out, err = GitService._run_git(base_dir, ["checkout", commit])
+        if code != 0:
+            raise RuntimeError(f"Git checkout commit error: {err or out}")
+
+    @staticmethod
+    def create_ephemeral_branch(base_dir: Path, branch_name: str, base_commit: str) -> None:
+        branch = _sanitize_git_ref(branch_name)
+        commit = _sanitize_git_ref(base_commit)
+        code, out, err = GitService._run_git(base_dir, ["checkout", "-B", branch, commit])
+        if code != 0:
+            raise RuntimeError(f"Git create ephemeral branch error: {err or out}")
+
+    @staticmethod
+    def bundle_diff(base_dir: Path, output_file: Path, base_commit: str, head_commit: str) -> None:
+        base = _sanitize_git_ref(base_commit)
+        head = _sanitize_git_ref(head_commit)
+        out_path = str(output_file.resolve())
+        code, out, err = GitService._run_git(base_dir, ["bundle", "create", out_path, f"{base}..{head}"])
+        if code != 0:
+            raise RuntimeError(f"Git bundle error: {err or out}")
+
+    @staticmethod
+    def apply_bundle(base_dir: Path, bundle_file: Path) -> None:
+        bundle_path = str(bundle_file.resolve())
+        code, out, err = GitService._run_git(base_dir, ["pull", bundle_path])
+        if code != 0:
+            raise RuntimeError(f"Git apply bundle error: {err or out}")
+

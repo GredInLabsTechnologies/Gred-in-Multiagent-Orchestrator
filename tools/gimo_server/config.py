@@ -76,6 +76,10 @@ class Settings:
     license_recheck_hours: int
     license_allow_debug_bypass: bool
     worktrees_dir: Path
+    ephemeral_repos_dir: Path
+    repo_mirrors_dir: Path
+    app_sessions_dir: Path
+    purge_quarantine_dir: Path
     gimo_web_url: str
     gimo_internal_key: str
     # Cold Room (air-gapped) support
@@ -191,6 +195,10 @@ def _build_settings() -> Settings:
     audit_log_backup_count = int(os.environ.get("ORCH_AUDIT_LOG_BACKUP_COUNT", "5"))
     ops_data_dir = repo_root_dir / ".orch_data" / "ops"
     worktrees_dir = repo_root_dir / ".orch_data" / "worktrees"
+    ephemeral_repos_dir = repo_root_dir / ".orch_data" / "ephemeral_repos"
+    repo_mirrors_dir = repo_root_dir / ".orch_data" / "repo_mirrors"
+    app_sessions_dir = repo_root_dir / ".orch_data" / "app_sessions"
+    purge_quarantine_dir = repo_root_dir / ".orch_data" / "purge_quarantine"
     ops_run_ttl = int(os.environ.get("ORCH_OPS_RUN_TTL", "86400"))
     debug = os.environ.get("DEBUG", "false").lower() in ("true", "1", "yes")
     log_level = os.environ.get("LOG_LEVEL", "DEBUG" if debug else "INFO").upper()
@@ -245,6 +253,10 @@ def _build_settings() -> Settings:
             "ORCH_LICENSE_ALLOW_DEBUG_BYPASS", "false"
         ).lower() in ("true", "1", "yes"),
         worktrees_dir=worktrees_dir,
+        ephemeral_repos_dir=ephemeral_repos_dir,
+        repo_mirrors_dir=repo_mirrors_dir,
+        app_sessions_dir=app_sessions_dir,
+        purge_quarantine_dir=purge_quarantine_dir,
         gimo_web_url=os.environ.get("GIMO_WEB_URL", "https://gimo-web.vercel.app"),
         gimo_internal_key=os.environ.get("GIMO_INTERNAL_KEY", ""),
         cold_room_enabled=os.environ.get("ORCH_COLD_ROOM_ENABLED", "false").lower() in ("true", "1", "yes"),
@@ -335,6 +347,10 @@ GICS_SOCKET_PATH = _SETTINGS.gics_socket_path
 GICS_TOKEN_PATH = _SETTINGS.gics_token_path
 DATA_DIR = _SETTINGS.data_dir
 WORKTREES_DIR = _SETTINGS.worktrees_dir
+EPHEMERAL_REPOS_DIR = _SETTINGS.ephemeral_repos_dir
+REPO_MIRRORS_DIR = _SETTINGS.repo_mirrors_dir
+APP_SESSIONS_DIR = _SETTINGS.app_sessions_dir
+PURGE_QUARANTINE_DIR = _SETTINGS.purge_quarantine_dir
 DEBUG = _SETTINGS.debug
 LOG_LEVEL = _SETTINGS.log_level
 GIMO_WEB_URL = _SETTINGS.gimo_web_url
