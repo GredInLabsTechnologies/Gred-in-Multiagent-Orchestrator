@@ -35,7 +35,7 @@ def test_get_usage_explains_absence_if_not_authoritative(tmp_path):
     thread = ConversationService.create_thread(workspace_root="/tmp", title="Test")
     
     usage = ThreadSessionService.get_usage(thread.id)
-    assert usage.get("authoritative") is False
+    assert usage == {}
 
 def test_operator_status_reads_real_backend_sources_and_avoids_stubs(monkeypatch):
     from tools.gimo_server.services.git_service import GitService

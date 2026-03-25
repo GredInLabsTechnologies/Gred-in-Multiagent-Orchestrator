@@ -8,16 +8,12 @@ class NoticePolicyService:
     def evaluate_all(cls, context_state: Dict[str, Any]) -> List[Dict[str, Any]]:
         notices = []
         
-        ctx_val = context_state.get("context_percentage")
-        ctx_pct = 0.0
-        if isinstance(ctx_val, (int, float)):
-            ctx_pct = float(ctx_val)
-            
-        if ctx_pct > 70.0:
+        ctx_pct = context_state.get("context_percentage")
+        if isinstance(ctx_pct, (int, float)) and ctx_pct > 70.0:
             notices.append({
                 "level": "warning",
                 "code": "ctx_high",
-                "message": f"Context usage is high ({ctx_pct}%)"
+                "message": f"Context usage is high ({float(ctx_pct)}%)"
             })
             
         budget_pct = context_state.get("budget_percentage")
@@ -27,25 +23,25 @@ class NoticePolicyService:
             if isinstance(spend, (int, float)) and isinstance(limit, (int, float)) and limit > 0:
                 budget_pct = (float(spend) / float(limit)) * 100.0
             else:
-                budget_pct = 0.0
+                budget_pct = None
                 
-        if budget_pct > 80.0:
+        if budget_pct is not None and budget_pct > 80.0:
             notices.append({
                 "level": "warning",
                 "code": "budget_high",
-                "message": f"Budget usage is near limit ({round(budget_pct, 1)}%)"
+                "message": f"Budget usage is near limit ({float(budget_pct):.1f}%)"
             })
             
-        if context_state.get("new_version_available"):
+        if context_state.get("new_version_available") is True:
             notices.append({"level": "info", "code": "new_version", "message": "New version available"})
             
-        if context_state.get("stream_down"):
+        if context_state.get("stream_down") is True:
             notices.append({"level": "error", "code": "stream_down", "message": "Stream is down"})
             
-        if context_state.get("purge_failed"):
+        if context_state.get("purge_failed") is True:
             notices.append({"level": "error", "code": "purge_failed", "message": "Purge failed"})
             
-        if context_state.get("merge_base_drift"):
+        if context_state.get("merge_base_drift") is True:
             notices.append({"level": "warning", "code": "merge_base_drift", "message": "Merge base drift detected"})
 
         return notices

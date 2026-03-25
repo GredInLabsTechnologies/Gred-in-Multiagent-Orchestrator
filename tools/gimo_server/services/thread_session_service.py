@@ -48,12 +48,5 @@ class ThreadSessionService:
             return None
         usage = thread.metadata.get("usage")
         if usage is None:
-            return {
-                "authoritative": False,
-                "reason": "No usage data explicitly persisted in this thread by the agentic loop",
-                "prompt_tokens": None,
-                "completion_tokens": None,
-                "total_tokens": None,
-                "cost_usd": None
-            }
+            return {}
         return usage
