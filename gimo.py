@@ -524,9 +524,14 @@ def _handle_chat_slash_command(
 
     def show_tokens():
         """Show token usage breakdown from last turn."""
-        usage = current_usage or {}
+        st, payload = _api_request(config, "GET", f"/ops/threads/{thread_id}/usage")
+        if st in {200, 204} and isinstance(payload, dict):
+            usage = payload
+        else:
+            usage = current_usage or {}
+            
         if not usage:
-            console.print("[dim]No hay datos de tokens para el turno actual.[/dim]")
+            console.print("[dim]No hay datos de tokens disponibles.[/dim]")
             return
         lines = [
             f"  Tokens entrada:   [cyan]{usage.get('input_tokens', 0):,}[/cyan]",
@@ -1220,21 +1225,15 @@ def status(
 
     result: dict[str, Any] = {}
 
-    # ── Git info ──────────────────────────────────────────────────────────────
-    repo_name = _project_root().name
-    branch_res = _git_command(["rev-parse", "--abbrev-ref", "HEAD"])
-    branch = branch_res.stdout.strip() if branch_res.returncode == 0 else "unknown"
-    dirty_res = _git_command(["status", "--porcelain"])
-    dirty_files = len([ln for ln in dirty_res.stdout.splitlines() if ln.strip()]) if dirty_res.returncode == 0 else 0
-    result.update({"repo": repo_name, "branch": branch, "dirty_files": dirty_files})
-
-    # ── Config ────────────────────────────────────────────────────────────────
     try:
         config = _load_config()
     except typer.Exit:
         config = {}
 
     if not config:
+        repo_name = _project_root().name
+        branch_res = _git_command(["rev-parse", "--abbrev-ref", "HEAD"])
+        branch = branch_res.stdout.strip() if branch_res.returncode == 0 else "unknown"
         lines = [
             f"📁 [bold]Repo[/bold]: {repo_name}  branch: [cyan]{branch}[/cyan]",
             "[red]⚠ Workspace not initialized. Run 'gimo init'.[/red]",
@@ -1255,63 +1254,60 @@ def status(
         except Exception as exc:
             return -1, str(exc)
 
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:
         f_health   = pool.submit(_fetch, "/health")
-        f_status   = pool.submit(_fetch, "/status")
-        f_runs     = pool.submit(_fetch, "/ops/runs")
-        f_prov     = pool.submit(_fetch, "/ops/provider")
-        f_threads  = pool.submit(_fetch, "/ops/threads")
-        f_forecast = pool.submit(_fetch, "/ops/forecast")
+        f_status   = pool.submit(_fetch, "/ops/operator/status")
 
         hc, _   = f_health.result()
         sc, sp  = f_status.result()
-        rc, rp  = f_runs.result()
-        pc, pp  = f_prov.result()
-        tc, tp  = f_threads.result()
-        fc, fp  = f_forecast.result()
 
     # ── Backend ───────────────────────────────────────────────────────────────
     backend_online = hc == 200
-    version = str(sp.get("version") or "unknown") if sc == 200 and isinstance(sp, dict) else "n/a"
-    result.update({"backend_online": backend_online, "version": version})
 
-    # ── Provider / model ─────────────────────────────────────────────────────
-    provider_id, model_id = "unknown", "unknown"
-    if pc == 200 and isinstance(pp, dict):
-        provider_id = str(pp.get("orchestrator_provider") or pp.get("active") or "unknown")
-        model_id    = str(pp.get("orchestrator_model") or pp.get("model_id") or "unknown")
-    result.update({"provider": provider_id, "model": model_id})
-
-    # ── Runs ─────────────────────────────────────────────────────────────────
-    runs = rp if rc == 200 and isinstance(rp, list) else []
-    latest_run = _latest_run_summary(runs)
-    result["latest_run"] = latest_run
-
-    # ── Last thread + ctx% ────────────────────────────────────────────────────
-    last_thread_id, last_thread_turn, last_ctx_pct = "n/a", "n/a", None
-    if tc == 200 and isinstance(tp, list) and tp:
-        t0 = tp[0]
-        last_thread_id   = str(t0.get("id") or "n/a")
-        last_thread_turn = str(t0.get("turn_count") or t0.get("message_count") or "?")
-        last_ctx_pct     = t0.get("context_window_pct") or t0.get("ctx_pct")
-
-    # ── Budget ────────────────────────────────────────────────────────────────
-    spend, rem_pct = 0.0, None
-    if fc == 200 and isinstance(fp, list):
-        for f in fp:
-            if f.get("scope") == "global":
-                spend   = float(f.get("current_spend") or 0)
-                rem_pct = f.get("remaining_pct")
-                break
-    result.update({"spend_usd": spend, "budget_limit_usd": budget_limit})
-
-    # ── Alerts ────────────────────────────────────────────────────────────────
-    alerts: list[str] = []
+    if sc == 200 and isinstance(sp, dict):
+        repo_name = str(sp.get("repo") or "unknown")
+        branch = str(sp.get("branch") or "unknown")
+        dirty_files = len(sp.get("dirty_files") or [])
+        provider_id = str(sp.get("active_provider") or "unknown")
+        model_id = str(sp.get("active_model") or "unknown")
+        version = str(sp.get("backend_version") or "unknown")
+        last_thread_id = str(sp.get("last_thread") or "n/a")
+        last_thread_turn = str(sp.get("last_turn") or "n/a")
+        alerts = sp.get("alerts") or []
+        if not isinstance(alerts, list):
+            alerts = []
+    else:
+        # Fallback local
+        repo_name = _project_root().name
+        branch_res = _git_command(["rev-parse", "--abbrev-ref", "HEAD"])
+        branch = branch_res.stdout.strip() if branch_res.returncode == 0 else "unknown"
+        dirty_res = _git_command(["status", "--porcelain"])
+        dirty_files = len([ln for ln in dirty_res.stdout.splitlines() if ln.strip()]) if dirty_res.returncode == 0 else 0
+        provider_id, model_id, version, last_thread_id, last_thread_turn = "unknown", "unknown", "n/a", "n/a", "n/a"
+        alerts = []
+        
     if not backend_online:
         alerts.append("✗ Backend OFFLINE")
-    if rem_pct is not None and rem_pct < 20:
-        alerts.append(f"⚠ Budget crítico: {rem_pct:.1f}% restante")
-    result["alerts"] = alerts
+
+    # The canonical snapshot doesn't include transient LLM run states or spend_usd directly yet
+    # We populate defaults for json contract.
+    latest_run = None
+    spend = 0.0
+    rem_pct = None
+
+    result.update({
+        "repo": repo_name,
+        "branch": branch,
+        "dirty_files": dirty_files,
+        "backend_online": backend_online,
+        "version": version,
+        "provider": provider_id,
+        "model": model_id,
+        "latest_run": latest_run,
+        "spend_usd": spend,
+        "budget_limit_usd": budget_limit,
+        "alerts": alerts,
+    })
 
     if json_output:
         _emit_output(result, json_output=True)
@@ -1331,27 +1327,8 @@ def status(
     else:
         budget_str = f"${spend:.3f} (sin límite)"
 
-    if latest_run:
-        _run_id = latest_run.get('id', '?')
-        _run_status = latest_run.get('status', '?')
-        run_str = f"{_run_id}  [dim italic]({_run_status})[/dim italic]"
-        stage = latest_run.get("stage")
-        if stage:
-            run_str += f" · {stage}"
-    else:
-        run_str = "[dim]ninguno[/dim]"
-
+    run_str = "[dim]ninguno[/dim]"
     alerts_str = "  ".join(alerts) if alerts else "[dim]ninguna[/dim]"
-
-    # ctx% bar (optional — only shown when backend reports it)
-    if last_ctx_pct is not None:
-        ctx_bar_len = 20
-        ctx_fill = min(int(last_ctx_pct / 100 * ctx_bar_len), ctx_bar_len)
-        ctx_bar = "█" * ctx_fill + "░" * (ctx_bar_len - ctx_fill)
-        ctx_color = "red" if last_ctx_pct > 80 else "yellow" if last_ctx_pct > 60 else "green"
-        ctx_str: str | None = f"[{ctx_color}]{ctx_bar}[/{ctx_color}] {last_ctx_pct:.1f}%"
-    else:
-        ctx_str = None
 
     panel_lines = [
         f"📁 [bold]Repo[/bold]:          {repo_name} · [cyan]{branch}[/cyan]{dirty_str}",
@@ -1361,10 +1338,8 @@ def status(
         f"▶  [bold]Run activo[/bold]:    {run_str}",
         f"💰 [bold]Budget[/bold]:        {budget_str}",
         f"💬 [bold]Último thread[/bold]: {last_thread_id}  turno {last_thread_turn}",
+        f"🔔 [bold]Alertas[/bold]:       {alerts_str}",
     ]
-    if ctx_str:
-        panel_lines.append(f"📊 [bold]Ctx window[/bold]:    {ctx_str}")
-    panel_lines.append(f"🔔 [bold]Alertas[/bold]:       {alerts_str}")
     console.print(Panel("\n".join(panel_lines), title="GIMO Status", border_style="cyan"))
 
 

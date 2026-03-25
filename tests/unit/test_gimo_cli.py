@@ -107,22 +107,20 @@ def test_status_reports_backend_summary(tmp_path, monkeypatch):
 
     def _fake_api_request(config, method, path, *, params=None):
         del config, method, params
-        # P0 status command fetches these 6 endpoints in parallel
         if path == "/health":
             return 200, {"ok": True}
-        if path == "/status":
-            return 200, {"version": "9.9.9", "uptime_seconds": 42}
-        if path == "/ops/runs":
-            return 200, [
-                {"id": "r_latest", "status": "running"},
-                {"id": "r_old", "status": "done"},
-            ]
-        if path == "/ops/provider":
-            return 200, {"orchestrator_provider": "anthropic", "orchestrator_model": "claude-3-5"}
-        if path == "/ops/threads":
-            return 200, [{"id": "th_001", "turn_count": 7}]
-        if path == "/ops/forecast":
-            return 200, [{"scope": "global", "current_spend": 3.5, "limit": 10.0, "remaining_pct": 65.0}]
+        if path == "/ops/operator/status":
+            return 200, {
+                "repo": "some_repo",
+                "branch": "main",
+                "dirty_files": [],
+                "active_provider": "anthropic",
+                "active_model": "claude-3-5",
+                "backend_version": "9.9.9",
+                "last_thread": "th_001",
+                "last_turn": "trn_7",
+                "alerts": ["Alert 1"]
+            }
         raise AssertionError(f"Unexpected path: {path}")
 
     monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
@@ -132,10 +130,8 @@ def test_status_reports_backend_summary(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "ONLINE" in result.stdout
     assert "9.9.9" in result.stdout
-    assert "r_latest" in result.stdout
-    assert "running" in result.stdout
     assert "anthropic" in result.stdout
-    assert "3.500" in result.stdout
+    assert "Alert 1" in result.stdout
 
 
 def test_diff_calls_backend_and_prints_output(tmp_path, monkeypatch):
@@ -206,19 +202,20 @@ def test_status_json_emits_machine_readable_payload(tmp_path, monkeypatch):
 
     def _fake_api_request(config, method, path, *, params=None):
         del config, method, params
-        # P0 status command fetches these 6 endpoints in parallel
         if path == "/health":
             return 200, {"ok": True}
-        if path == "/status":
-            return 200, {"version": "1.2.3", "uptime_seconds": 5}
-        if path == "/ops/runs":
-            return 200, [{"id": "r1", "status": "done"}]
-        if path == "/ops/provider":
-            return 200, {"orchestrator_provider": "openai", "orchestrator_model": "gpt-4o"}
-        if path == "/ops/threads":
-            return 200, [{"id": "th_x", "turn_count": 3}]
-        if path == "/ops/forecast":
-            return 200, [{"scope": "global", "current_spend": 1.5, "limit": 10.0, "remaining_pct": 85.0}]
+        if path == "/ops/operator/status":
+            return 200, {
+                "repo": "some_repo",
+                "branch": "main",
+                "dirty_files": [],
+                "active_provider": "openai",
+                "active_model": "gpt-4o",
+                "backend_version": "1.2.3",
+                "last_thread": "th_x",
+                "last_turn": "trn_1",
+                "alerts": []
+            }
         raise AssertionError(f"Unexpected path: {path}")
 
     monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
@@ -227,14 +224,11 @@ def test_status_json_emits_machine_readable_payload(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    # P0 JSON contract — keys emitted by the new status command
     assert payload["backend_online"] is True
     assert payload["version"] == "1.2.3"
-    assert payload["latest_run"]["id"] == "r1"
-    assert payload["repo"] is not None
+    assert payload["repo"] == "some_repo"
     assert payload["provider"] == "openai"
     assert payload["model"] == "gpt-4o"
-    assert payload["spend_usd"] == pytest.approx(1.5)
     assert payload["alerts"] == []
 
 
