@@ -482,9 +482,15 @@ def create_app() -> FastAPI:
 
     # Mount FastMCP SSE Server
     try:
-        from tools.gimo_server.mcp_server import mcp
-        app.mount("/mcp", mcp.sse_app())
-        logger.info("Universal MCP Server mounted at /mcp [LEGACY] entry point for ChatGPT Apps")
+        from tools.gimo_server.mcp_server import mcp as legacy_mcp
+        if legacy_mcp:
+            app.mount("/mcp", legacy_mcp.sse_app())
+            logger.info("Universal MCP Server mounted at /mcp [LEGACY] entry point for ChatGPT Apps")
+        
+        # Phase 4: official App façade
+        from tools.gimo_server.app_mcp.server import mcp as app_mcp
+        app.mount("/mcp/app", app_mcp.sse_app())
+        logger.info("Official App façade MCP Server mounted at /mcp/app")
     except Exception as e:
         logger.error(f"Failed to mount FastMCP Server: {e}")
 
