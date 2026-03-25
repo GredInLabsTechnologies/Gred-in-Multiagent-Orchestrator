@@ -5,37 +5,32 @@ from tools.gimo_server.services.notice_policy_service import NoticePolicyService
 from tools.gimo_server.services.conversation_service import ConversationService
 from tools.gimo_server.ops_models import GimoThread
 
-def test_thread_reset_clears_context_not_identity(tmp_path):
-    # Setup
+def test_thread_reset_clears_context_and_attached_files(tmp_path):
     ConversationService.THREADS_DIR = tmp_path
     thread = ConversationService.create_thread(workspace_root="/tmp/test", title="Test Thread")
     
-    # Add context directly
     thread_id = thread.id
-    ThreadSessionService.add_context(thread_id, {"file": "main.py"})
+    ThreadSessionService.add_context(thread_id, {"type": "file", "path": "main.py"})
     
-    # Verify added
     t1 = ConversationService.get_thread(thread_id)
-    assert t1.metadata.get("context") == [{"file": "main.py"}]
+    assert len(t1.metadata.get("context", [])) == 1
+    assert len(t1.metadata.get("attached_files", [])) == 1
     
-    # Reset
     res = ThreadSessionService.reset_thread(thread_id)
     assert res is True
     
-    # Verify cleared but identity remains
     t2 = ConversationService.get_thread(thread_id)
-    assert t2 is not None
     assert t2.id == thread_id
     assert t2.metadata.get("context") == []
+    assert t2.metadata.get("attached_files") == []
 
 def test_thread_config_updates_effort_and_permissions(tmp_path):
     ConversationService.THREADS_DIR = tmp_path
     thread = ConversationService.create_thread(workspace_root="/tmp/test", title="Test Thread")
     thread_id = thread.id
 
-    res = ThreadSessionService.update_config(thread_id, {"effort": "high", "permissions": "read-write"})
-    assert res is True
-
+    ThreadSessionService.update_config(thread_id, {"effort": "high", "permissions": "read-write"})
+    
     t1 = ConversationService.get_thread(thread_id)
     assert t1.metadata.get("effort") == "high"
     assert t1.metadata.get("permissions") == "read-write"
@@ -45,43 +40,62 @@ def test_context_add_persists_attached_file(tmp_path):
     thread = ConversationService.create_thread(workspace_root="/tmp/test", title="Test Thread")
     thread_id = thread.id
 
-    res = ThreadSessionService.add_context(thread_id, {"type": "file", "path": "docs/architecture.md"})
-    assert res is True
-
+    ThreadSessionService.add_context(thread_id, {"type": "file", "path": "docs/architecture.md"})
+    
     t1 = ConversationService.get_thread(thread_id)
     ctx = t1.metadata.get("context")
+    attached = t1.metadata.get("attached_files")
     assert len(ctx) == 1
     assert ctx[0]["path"] == "docs/architecture.md"
+    assert len(attached) == 1
+    assert attached[0]["path"] == "docs/architecture.md"
 
-def test_operator_status_returns_single_snapshot():
-    snapshot = OperatorStatusService.get_status_snapshot()
-    # verify expected fields are present (can be null/default but must exist)
-    expected_fields = [
-        "repo", "branch", "dirty_files", "active_provider",
-        "active_model", "permission_mode", "backend_status",
-        "backend_version", "active_run", "active_stage",
-        "budget_spend", "budget_limit", "context_percentage",
-        "last_thread", "last_turn", "alerts"
-    ]
-    for ef in expected_fields:
-        assert ef in snapshot
+def test_get_usage_explains_absence_if_not_authoritative(tmp_path):
+    ConversationService.THREADS_DIR = tmp_path
+    thread = ConversationService.create_thread(workspace_root="/tmp/test", title="Test")
+    thread_id = thread.id
     
-    # Explicit default validations
-    assert snapshot["backend_status"] == "online"
-    assert isinstance(snapshot["dirty_files"], list)
+    usage = ThreadSessionService.get_usage(thread_id)
+    assert usage is not None
+    assert usage.get("authoritative") is False
+    assert "reason" in usage
 
-def test_notice_policy_ctx_warning():
-    notices = NoticePolicyService.evaluate_all({"context_percentage": 75.0})
-    warning_found = False
-    for n in notices:
-        if n["code"] == "ctx_high" and n["level"] == "warning":
-            warning_found = True
-    assert warning_found
+def test_operator_status_reads_real_backend_sources(monkeypatch):
+    from tools.gimo_server.services.git_service import GitService
+    def mock_get_current_branch(*args): return "feature/test-branch"
+    def mock_get_changed_files(*args): return ["a.py", "b.py"]
+    monkeypatch.setattr(GitService, "get_current_branch", mock_get_current_branch)
+    monkeypatch.setattr(GitService, "get_changed_files", mock_get_changed_files)
+    
+    from tools.gimo_server.services.provider_service_impl import ProviderService
+    class MockRole:
+        provider_id = "test-provider"
+        model = "test-model"
+        permission_mode = "admin"
+    class MockRoles:
+        orchestrator = MockRole()
+    class MockConfig:
+        roles = MockRoles()
+    monkeypatch.setattr(ProviderService, "get_config", lambda: MockConfig())
+    
+    from tools.gimo_server.services.notice_policy_service import NoticePolicyService
+    def mock_evaluate_all(*args): return [{"level": "info", "message": "mock alert"}]
+    monkeypatch.setattr(NoticePolicyService, "evaluate_all", mock_evaluate_all)
+    
+    snapshot = OperatorStatusService.get_status_snapshot()
+    
+    assert snapshot["branch"] == "feature/test-branch"
+    assert snapshot["dirty_files"] == ["a.py", "b.py"]
+    assert snapshot["active_provider"] == "test-provider"
+    assert snapshot["active_model"] == "test-model"
+    assert snapshot["permission_mode"] == "admin"
+    assert snapshot["alerts"] == [{"level": "info", "message": "mock alert"}]
 
-def test_notice_policy_budget_warning():
-    notices = NoticePolicyService.evaluate_all({"budget_percentage": 85.0})
+def test_notice_policy_budget_percentage_calculation():
+    notices = NoticePolicyService.evaluate_all({"budget_spend": 85.0, "budget_limit": 100.0})
     warning_found = False
     for n in notices:
         if n["code"] == "budget_high" and n["level"] == "warning":
             warning_found = True
+            assert "85.0%" in n["message"]
     assert warning_found

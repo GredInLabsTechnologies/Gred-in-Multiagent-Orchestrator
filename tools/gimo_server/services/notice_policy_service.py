@@ -4,20 +4,11 @@ from typing import Any, Dict, List
 logger = logging.getLogger("orchestrator.services.notice_policy")
 
 class NoticePolicyService:
-    """
-    Evaluates policy rules to produce backend notice objects.
-    Produces reusable rule evaluations without hardcoding client UI concepts.
-    """
-    
     @classmethod
     def evaluate_all(cls, context_state: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Evaluates current system state against policy rules.
-        """
         notices = []
         
-        # warning: ctx > 70%
-        ctx_pct = context_state.get("context_percentage", 0.0)
+        ctx_pct = context_state.get("context_percentage") or 0.0
         if ctx_pct > 70.0:
             notices.append({
                 "level": "warning",
@@ -25,18 +16,22 @@ class NoticePolicyService:
                 "message": f"Context usage is high ({ctx_pct}%)"
             })
             
-        # warning: budget > 80%
-        budget_pct = context_state.get("budget_percentage", 0.0)
+        budget_pct = context_state.get("budget_percentage")
+        if budget_pct is None:
+            spend = context_state.get("budget_spend")
+            limit = context_state.get("budget_limit")
+            if spend is not None and limit and limit > 0:
+                budget_pct = (float(spend) / float(limit)) * 100.0
+            else:
+                budget_pct = 0.0
+                
         if budget_pct > 80.0:
             notices.append({
                 "level": "warning",
                 "code": "budget_high",
-                "message": f"Budget usage is near limit ({budget_pct}%)"
+                "message": f"Budget usage is near limit ({round(budget_pct, 1)}%)"
             })
             
-        # Optional dummy evaluations for the remaining contract points which will be emitted
-        # when their state triggers actually exist in context_state.
-        
         if context_state.get("new_version_available"):
             notices.append({"level": "info", "code": "new_version", "message": "New version available"})
             
