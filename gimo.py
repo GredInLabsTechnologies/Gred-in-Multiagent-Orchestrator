@@ -264,6 +264,7 @@ def _handle_chat_slash_command(
     thread_id: str,
     current_usage: dict[str, Any] | None = None,
     current_perm: list[str] | None = None,
+    renderer: Any = None,
 ) -> tuple[bool, str | None]:
     if not user_input.startswith("/"):
         return False, None
@@ -596,6 +597,11 @@ def _handle_chat_slash_command(
     def invalid_arg(msg: str):
         console.print(f"[yellow]⚠ {msg}[/yellow]")
 
+    def toggle_debug():
+        if renderer is not None:
+            renderer.verbose = not renderer.verbose
+            console.print(f"[dim]Debug mode {'enabled' if renderer.verbose else 'disabled'}[/dim]")
+
     def unknown_command(cmd: str):
         console.print(f"[yellow]Unknown command: {cmd}. Use /help.[/yellow]")
 
@@ -618,6 +624,7 @@ def _handle_chat_slash_command(
         "set_effort": set_effort,
         "set_permissions": set_permissions,
         "add_file": add_file,
+        "toggle_debug": toggle_debug,
         "invalid_arg": invalid_arg,
         "unknown_command": unknown_command,
     }
@@ -798,7 +805,7 @@ def _interactive_chat(config: dict[str, Any]) -> None:
     """Run the interactive agentic chat session."""
     from gimo_cli_renderer import ChatRenderer
 
-    renderer = ChatRenderer(console)
+    renderer = ChatRenderer(console, verbose=config.get("orchestrator", {}).get("verbose", False))
     workspace_root = str(_project_root())
 
     # Preflight
@@ -862,6 +869,7 @@ def _interactive_chat(config: dict[str, Any]) -> None:
             thread_id=thread_id,
             current_usage=current_usage,
             current_perm=current_perm,
+            renderer=renderer,
         )
         if handled:
             if updated_model is not None:
@@ -929,6 +937,7 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                                     continue
 
                                 evt = current_event_type
+                                renderer.render_sse_raw(evt, raw_data)
 
                                 if evt == "text_delta":
                                     # Accumulate for final render
@@ -973,6 +982,24 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                                     usage = data.get("usage", {})
                                     current_usage.clear()
                                     current_usage.update(usage)
+
+                                    # Emit warnings for ctx window and budget
+                                    ctx_pct = usage.get("context_window_pct", 0)
+                                    if ctx_pct > 70:
+                                        from cli_commands import Notice
+                                        import time
+                                        renderer.render_notice(Notice("warning", f"Context window high: {ctx_pct:.1f}%", time.time(), 30, False))
+
+                                    cost = usage.get("cost_usd", 0)
+                                    budget_limit = float(config.get("orchestrator", {}).get("budget_limit_usd") or 0)
+                                    if budget_limit > 0 and (cost / budget_limit) > 0.8:
+                                        from cli_commands import Notice
+                                        import time
+                                        renderer.render_notice(Notice("warning", f"Budget critical: ${cost:.2f}/${budget_limit:.2f}", time.time(), 30, False))
+
+                                    run_data = data.get("run", {})
+                                    renderer.render_post_run_report(run_id=run_data.get("id"), usage=usage, run_data=run_data)
+
 
                                 elif evt == "error":
                                     renderer.render_error(data.get("message", "Unknown error"))
@@ -1091,7 +1118,10 @@ def _interactive_chat(config: dict[str, Any]) -> None:
 
 
 @app.callback()
-def main(ctx: typer.Context) -> None:
+def main(
+    ctx: typer.Context,
+    verbose: bool = typer.Option(False, "--verbose", help="Enable debug/verbose render mode"),
+) -> None:
     """GIMO: Generalized Intelligent Multi-agent Orchestrator.
 
     Run without a subcommand to start an interactive agentic chat session.
@@ -1108,6 +1138,10 @@ def main(ctx: typer.Context) -> None:
         if not _config_path().exists():
             _save_config(_default_config())
         config = _load_config()
+
+    if "orchestrator" not in config:
+        config["orchestrator"] = {}
+    config["orchestrator"]["verbose"] = verbose or config["orchestrator"].get("verbose", False)
 
     _interactive_chat(config)
 

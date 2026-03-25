@@ -17,12 +17,13 @@ from rich.text import Text
 class ChatRenderer:
     """Renders chat session visuals to the terminal."""
 
-    def __init__(self, console: Optional[Console] = None):
+    def __init__(self, console: Optional[Console] = None, verbose: bool = False):
         self.console = console or Console()
         self.telemetry_html: Optional[str] = None
         # Flag set True while an SSE generation stream is active.
         # Used by _interactive_chat to handle Ctrl+C non-destructively.
         self._generation_active: bool = False
+        self.verbose = verbose
 
     def render_session_header(
         self,
@@ -128,12 +129,19 @@ class ChatRenderer:
         arg_parts = []
         for key, val in (args or {}).items():
             val_str = str(val)
-            if len(val_str) > 40:
+            if not self.verbose and len(val_str) > 40:
                 val_str = val_str[:37] + "..."
             arg_parts.append(f"{key}={val_str}")
-        arg_summary = " ".join(arg_parts[:3])
+        
+        if not self.verbose:
+            arg_summary = " ".join(arg_parts[:3])
+            suffix = "[dim]...[/dim]"
+        else:
+            arg_summary = " ".join(arg_parts)
+            suffix = f"\n    [dim italic]{json.dumps(args, ensure_ascii=False)}[/dim italic]"
+
         self.console.print(
-            f"  [dim]\u25b8[/dim] {tool_name} {arg_summary}  [{risk_color}]{risk}[/{risk_color}] [dim]...[/dim]"
+            f"  [dim]\u25b8[/dim] {tool_name} {arg_summary}  [{risk_color}]{risk}[/{risk_color}] {suffix}"
         )
 
     def render_tool_call_result(self, tool_name: str, status: str, duration: float, risk: str) -> None:
@@ -144,7 +152,11 @@ class ChatRenderer:
             symbol = "[red]\u2298 DENIED[/red]"
         else:
             symbol = "[red]\u2717[/red]"
-        self.console.print(f"    {symbol} [dim]{duration:.1f}s[/dim]")
+        
+        if self.verbose:
+            self.console.print(f"    {symbol} [dim]{tool_name} completed in {duration:.1f}s[/dim]")
+        else:
+            self.console.print(f"    {symbol} [dim]{duration:.1f}s[/dim]")
 
     def render_hitl_prompt(self, tool_name: str, args: dict) -> bool:
         """Ask user for HITL approval. Returns True if approved."""
@@ -167,6 +179,73 @@ class ChatRenderer:
         """Render text content as it arrives during streaming."""
         if text:
             self.console.print(Markdown(text))
+
+    def render_sse_raw(self, event: str, raw_data: str) -> None:
+        """Render raw SSE events in verbose mode."""
+        if self.verbose:
+            preview = raw_data[:150] + "..." if len(raw_data) > 150 else raw_data
+            self.console.print(f"  [dim blue]SSE Event:[/dim blue] [dim]{event}[/dim] -> [dim italic]{preview}[/dim italic]")
+
+    def render_notice(self, notice: "Notice") -> None:
+        """Render a Notice inline."""
+        if notice.level == "error":
+            style = "red bold"
+            icon = "✗"
+        elif notice.level == "warning":
+            style = "yellow"
+            icon = "⚠"
+        else:
+            style = "blue"
+            icon = "ℹ"
+        self.console.print(f"[{style}]{icon} {notice.message}[/{style}]")
+
+    def render_post_run_report(self, run_id: Optional[str], usage: dict, run_data: dict) -> None:
+        """Render the standard post-run report."""
+        goal = run_data.get("goal") or run_data.get("objective") or "n/a"
+        
+        # Tools
+        tools_list = run_data.get("tools_used", [])
+        tools_str = str(len(tools_list)) if isinstance(tools_list, list) else "n/a"
+        
+        # Files
+        files = run_data.get("modified_files", [])
+        files_str = f"{len(files)} tocados" if hasattr(files, "__len__") else "n/a"
+        
+        # Diff
+        diff_str = "n/a"
+        if "lines_added" in run_data and "lines_removed" in run_data:
+            diff_str = f"+{run_data['lines_added']} -{run_data['lines_removed']} líneas"
+            
+        # Cost & Duration
+        cost = usage.get("cost_usd") if usage else None
+        cost_str = f"${cost:.4f}" if cost is not None else "n/a"
+        
+        dur = run_data.get("duration")
+        dur_str = f"{dur:.1f}s" if isinstance(dur, (int, float)) else "n/a"
+        
+        # Tests
+        tests = run_data.get("tests", {})
+        tests_str = f"{tests.get('passed', 0)}/{tests.get('total', 0)} ✓" if tests else "n/a"
+        
+        # Rollback
+        rollback = run_data.get("rollback_plan", [])
+        rollback_str = rollback[0] if isinstance(rollback, list) and rollback else "n/a"
+        
+        # Alerts
+        alerts = run_data.get("alerts", [])
+        alerts_str = ", ".join(alerts) if alerts else "ninguna"
+
+        lines = [
+            f"✓ Objetivo: {goal}",
+            f"  Ficheros: {files_str}  |  Tools: {tools_str}  |  Tests: {tests_str}",
+            f"  Diff: {diff_str}   |  Coste: {cost_str}  |  Duración: {dur_str}",
+            f"  Rollback: {rollback_str}",
+            f"  Alertas: {alerts_str}",
+        ]
+        
+        self.console.print()
+        self.console.print(Panel("\n".join(lines), title="Post-run Report", border_style="green"))
+
 
     def get_user_input(self) -> str:
         """Prompt user for input with slash command autocompletion."""

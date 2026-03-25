@@ -23,6 +23,11 @@ class EconomyWidget(Static):
     def compose(self) -> ComposeResult:
         yield Static("   Fetching telemetry...", classes="content-area", id="eco-content")
 
+class NoticesWidget(Static):
+    """Renders temporary system notices."""
+    def compose(self) -> ComposeResult:
+        yield Static("   No active notices.", classes="content-area", id="notices-content")
+
 class ChatLogWidget(RichLog):
     """Renders the chat history cleanly."""
     pass
@@ -49,20 +54,26 @@ class GimoApp(App):
         margin-bottom: 1;
     }
     
-    GraphWidget, EconomyWidget {
+    GraphWidget, EconomyWidget, NoticesWidget {
         height: 100%;
         border: heavy $background;
         background: $boost;
     }
     
     GraphWidget {
-        width: 75%;
+        width: 50%;
         border-title-color: $accent;
     }
     
     EconomyWidget {
         width: 25%;
         border-title-color: $success;
+        margin-left: 1;
+    }
+
+    NoticesWidget {
+        width: 25%;
+        border-title-color: $warning;
         margin-left: 1;
     }
 
@@ -116,12 +127,15 @@ class GimoApp(App):
         self.config = config or {}
         self.thread_id = thread_id
         self.pending_approval_data: Optional[Dict[str, Any]] = None
+        self.verbose: bool = False
+        self._notice_timer = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True, icon="🖧")
         with Horizontal(id="top-zone"):
             yield GraphWidget()
             yield EconomyWidget()
+            yield NoticesWidget()
         with Vertical(id="middle-zone"):
             yield ChatLogWidget(id=CHAT_LOG_ID[1:], markup=True, wrap=True)
             with Container(id="chat-input-box"):
@@ -133,6 +147,7 @@ class GimoApp(App):
     def on_mount(self) -> None:
         self.query_one(GraphWidget).border_title = "🌐 Graph Engine Topology"
         self.query_one(EconomyWidget).border_title = "💰 Telemetry & Quotas"
+        self.query_one(NoticesWidget).border_title = "🔔 System Notices"
         self.query_one("#middle-zone").border_title = f"💬 Workspace (Thread: {self.thread_id})"
 
         log = self.query_one(CHAT_LOG_ID, ChatLogWidget)
@@ -157,6 +172,19 @@ class GimoApp(App):
     def _write_event(self, text: str):
         evt_stream = self.query_one("#event-stream", Static)
         evt_stream.update(f"EVENT STREAM: {text}")
+
+    def show_notice(self, text: str, style: str = "yellow", ttl: int = 30):
+        icon = "⚠" if style == "yellow" else "✗" if style == "red" else "ℹ"
+        lbl = self.query_one("#notices-content", Static)
+        lbl.update(f"[{style}]{icon} {text}[/{style}]")
+        
+        if self._notice_timer:
+            self._notice_timer.stop()
+            
+        if ttl > 0:
+            def clear_notice():
+                lbl.update("   No active notices.")
+            self._notice_timer = self.set_timer(ttl, clear_notice)
 
     def _set_input_state(self, enabled: bool):
         """Locks or unlocks the chat input box depending on orchestrator state."""
@@ -280,6 +308,9 @@ class GimoApp(App):
                     st, py = _api_request(self.config, "POST", f"/ops/threads/{self.thread_id}/context/add", json_body={"path": path_val})
                     msg = f"[green]✓ Añadido: {path_val}[/green]" if st in {200, 201} else f"[red]add failed ({st}): {py}[/red]"
                     self.call_from_thread(self._write_log, msg)
+                elif action == "debug":
+                    self.verbose = not self.verbose
+                    self.call_from_thread(self._write_log, f"[dim]Debug mode {'enabled' if self.verbose else 'disabled'}[/dim]")
 
 
             callbacks = {
@@ -301,6 +332,7 @@ class GimoApp(App):
                 "set_effort": lambda val: do_slash_fetch(f"effort:{val}"),
                 "set_permissions": lambda val: do_slash_fetch(f"permissions:{val}"),
                 "add_file": lambda path: do_slash_fetch(f"add:{path}"),
+                "toggle_debug": lambda: do_slash_fetch("debug"),
                 "invalid_arg": lambda msg: self._write_log(f"[yellow]⚠ {msg}[/yellow]"),
                 "unknown_command": unknown_command,
             }
@@ -390,6 +422,12 @@ class GimoApp(App):
             self.call_from_thread(self._write_log, self._stream_buffer)
             self._stream_buffer = ""
 
+        if self.verbose and evt != "text_delta":
+            import json
+            raw_str = json.dumps(data, ensure_ascii=False)
+            preview = raw_str[:120] + "..." if len(raw_str) > 120 else raw_str
+            self.call_from_thread(self._write_log, f"  [dim blue]SSE Event:[/dim blue] [dim]{evt}[/dim] -> [dim italic]{preview}[/dim italic]")
+
         if evt == "tool_call_start":
             tool_name = data.get("tool_name", "?")
             args = str(data.get("arguments", {}))[:60]
@@ -400,7 +438,12 @@ class GimoApp(App):
                 risk_col = "yellow"
             else:
                 risk_col = "green"
-            self.call_from_thread(self._write_log, f"\n  [dim]▸ [bold]{tool_name}[/bold] {args}... [{risk_col}]{risk}[/{risk_col}][/dim]")
+                
+            suffix = "[dim]...[/dim]"
+            if self.verbose:
+                suffix = f"\n    [dim italic]{json.dumps(data.get('arguments', {}), ensure_ascii=False)}[/dim italic]"
+
+            self.call_from_thread(self._write_log, f"\n  [dim]▸ [bold]{tool_name}[/bold] {args}... [{risk_col}]{risk}[/{risk_col}] {suffix}")
             self.call_from_thread(self._write_event, f"Active Tool: {tool_name}")
             
         elif evt == "tool_approval_required":
@@ -416,6 +459,16 @@ class GimoApp(App):
         elif evt == "done":
             self.call_from_thread(self._write_event, "Response complete. Awaiting input.")
             self.call_from_thread(self._set_input_state, True)
+            
+            usage = data.get("usage", {})
+            ctx_pct = usage.get("context_window_pct", 0)
+            if ctx_pct > 70:
+                self.call_from_thread(self.show_notice, f"Context window high: {ctx_pct:.1f}%", "yellow", 30)
+                
+            cost = usage.get("cost_usd", 0)
+            budget_limit = float(self.config.get("orchestrator", {}).get("budget_limit_usd") or 0)
+            if budget_limit > 0 and (cost / budget_limit) > 0.8:
+                self.call_from_thread(self.show_notice, f"Budget critical: ${cost:.2f}/${budget_limit:.2f}", "red", 0)
             
         elif evt == "error":
             self.call_from_thread(self._write_log, f"\n[bold red]Orchestrator Error:[/bold red] {data.get('message', 'Unknown')}\n")

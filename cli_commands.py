@@ -1,4 +1,14 @@
-from typing import Any, Callable
+from typing import Any, Callable, Optional
+from dataclasses import dataclass
+import time
+
+@dataclass
+class Notice:
+    level: str  # "info", "warning", "error"
+    message: str
+    created_at: float
+    ttl_seconds: Optional[int]
+    sticky: bool
 
 class SlashCommand:
     def __init__(self, name: str, help_text: str, usage: str, aliases: tuple[str, ...] = ()):
@@ -25,6 +35,7 @@ COMMAND_REGISTRY: list[SlashCommand] = [
     SlashCommand("/effort", "Set orchestrator effort level: low | high | max", "/effort <low|high|max>"),
     SlashCommand("/permissions", "Change HITL mode live: suggest | auto-edit | full-auto", "/permissions <suggest|auto-edit|full-auto>"),
     SlashCommand("/add", "Add a file to the active thread context", "/add <path>"),
+    SlashCommand("/debug", "Toggle debug/verbose mode for current session", "/debug"),
     # ── Session control ───────────────────────────────────────────────────────
     SlashCommand("/exit", "End the session", "/exit", aliases=("/quit",)),
 ]
@@ -123,6 +134,9 @@ def dispatch_slash_command(
                 if not path_val:
                     return True, callbacks["invalid_arg"]("/add requires a file path argument")
                 return True, callbacks["add_file"](path_val)
+
+            if cmd_name == "/debug":
+                return True, callbacks["toggle_debug"]()
 
             # Fallthrough for registered but unhandled commands
             callbacks["unknown_command"](cmd_name)
