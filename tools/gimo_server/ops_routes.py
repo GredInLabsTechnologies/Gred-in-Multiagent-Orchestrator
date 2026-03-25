@@ -4,6 +4,8 @@ from fastapi.responses import StreamingResponse
 import asyncio
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
+from tools.gimo_server.services.operator_status_service import OperatorStatusService
+from tools.gimo_server.routers.ops.common import _require_role
 from .routers.ops import (
     plan_router, run_router, eval_router, trust_router, config_router, observability_router, mastery_router, skills_router, custom_plan_router, conversation_router, hitl_router,
     provider_auth_router, catalog_router, tools_router, policy_router, dependencies_router,
@@ -114,6 +116,15 @@ async def ops_event_stream(request: Request):
             NotificationService.unsubscribe(queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/operator/status")
+async def get_operator_status(auth: Annotated[AuthContext, Depends(verify_token)]):
+    """
+    P2: Returns a single backend-authored snapshot for operator status.
+    """
+    _require_role(auth, "operator")
+    return OperatorStatusService.get_status_snapshot()
 
 
 @router.get("/notifications/stream")

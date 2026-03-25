@@ -8,6 +8,7 @@ from ...services.agentic_loop_service import AgenticLoopService, ThreadExecution
 from ...security import verify_token
 from ...security.auth import AuthContext
 from .common import _require_role
+from ...services.thread_session_service import ThreadSessionService
 
 router = APIRouter(prefix="/threads", tags=["conversation"])
 
@@ -343,3 +344,55 @@ async def respond_to_plan(
 
     else:
         raise HTTPException(status_code=400, detail=f"Invalid action: {action}. Must be 'approve', 'reject', or 'modify'.")
+
+# ── P2: Canonical Thread/Session Contracts ────────────────────────────────────
+
+@router.post("/{thread_id}/reset")
+async def reset_thread(
+    thread_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)]
+):
+    """P2: Resets thread context without destroying thread identity."""
+    _require_role(auth, "operator")
+    success = ThreadSessionService.reset_thread(thread_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {"status": "ok"}
+
+@router.post("/{thread_id}/config")
+async def config_thread(
+    thread_id: str,
+    config_data: dict,
+    auth: Annotated[AuthContext, Depends(verify_token)]
+):
+    """P2: Updates thread session configuration like effort and permission modes."""
+    _require_role(auth, "operator")
+    success = ThreadSessionService.update_config(thread_id, config_data)
+    if not success:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {"status": "ok"}
+
+@router.post("/{thread_id}/context/add")
+async def add_context(
+    thread_id: str,
+    context_data: dict,
+    auth: Annotated[AuthContext, Depends(verify_token)]
+):
+    """P2: Appends context elements (e.g. files) to the thread."""
+    _require_role(auth, "operator")
+    success = ThreadSessionService.add_context(thread_id, context_data)
+    if not success:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {"status": "ok"}
+
+@router.get("/{thread_id}/usage")
+async def get_usage(
+    thread_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)]
+):
+    """P2: Returns an aggregated usage snapshot for the thread."""
+    _require_role(auth, "operator")
+    usage = ThreadSessionService.get_usage(thread_id)
+    if usage is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return usage
