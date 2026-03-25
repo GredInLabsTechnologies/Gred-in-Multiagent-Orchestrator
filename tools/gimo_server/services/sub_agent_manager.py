@@ -101,16 +101,22 @@ class SubAgentManager:
             max_tokens=constraints.get("maxTokens", 2048)
         )
         
-        # Create isolated worktree
-        cls._ensure_worktrees_dir()
-        worktree_path = WORKTREES_DIR / sub_id
-        try:
-            # We add worktree relative to REPO_ROOT_DIR
-            GitService.add_worktree(REPO_ROOT_DIR, worktree_path)
-            logger.info(f"Created isolated worktree at {worktree_path}")
-        except Exception as e:
-            logger.error(f"Failed to create worktree for sub-agent {sub_id}: {e}")
-            worktree_path = None
+        workspace_path_str = getattr(request, 'workspace_path', None) or (request.get('workspace_path') if isinstance(request, dict) else None)
+        
+        if workspace_path_str:
+            worktree_path = Path(workspace_path_str)
+            logger.info(f"Using provisioned workspace for sub-agent {sub_id} at {worktree_path}")
+        else:
+            # [LEGACY] Create isolated worktree directly from source repo
+            cls._ensure_worktrees_dir()
+            worktree_path = WORKTREES_DIR / sub_id
+            try:
+                # We add worktree relative to REPO_ROOT_DIR
+                GitService.add_worktree(REPO_ROOT_DIR, worktree_path)
+                logger.info(f"Created legacy isolated worktree at {worktree_path}")
+            except Exception as e:
+                logger.error(f"Failed to create worktree for sub-agent {sub_id}: {e}")
+                worktree_path = None
 
         agent = SubAgent(
             id=sub_id,
@@ -176,8 +182,12 @@ class SubAgentManager:
             
             if agent.worktreePath:
                 try:
-                    GitService.remove_worktree(REPO_ROOT_DIR, Path(agent.worktreePath))
-                    logger.info(f"Removed isolated worktree for sub-agent {sub_id}")
+                    # Only remove if it's a legacy worktree managed by us
+                    if Path(agent.worktreePath).is_relative_to(WORKTREES_DIR):
+                        GitService.remove_worktree(REPO_ROOT_DIR, Path(agent.worktreePath))
+                        logger.info(f"Removed legacy isolated worktree for sub-agent {sub_id}")
+                    else:
+                        logger.info(f"Sub-agent {sub_id} terminated, leaving provisioned workspace {agent.worktreePath} intact for EphemeralRepoService to manage")
                 except Exception as e:
                     logger.error(f"Failed to remove worktree for sub-agent {sub_id}: {e}")
             

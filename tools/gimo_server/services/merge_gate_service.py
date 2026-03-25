@@ -128,6 +128,7 @@ class MergeGateService:
         repo_id = str(run.repo_id or repo_context.get("repo_id") or repo_context.get("target_branch") or "default")
         source_ref = str(context.get("source_ref") or "HEAD")
         target_ref = str(repo_context.get("target_branch") or "main")
+        workspace_path = context.get("workspace_path")
 
         if not cls._validate_policy(run_id, context, run):
             return True
@@ -162,7 +163,7 @@ class MergeGateService:
 
         try:
             await asyncio.wait_for(
-                cls._pipeline(run_id, repo_id=repo_id, source_ref=source_ref, target_ref=target_ref),
+                cls._pipeline(run_id, repo_id=repo_id, source_ref=source_ref, target_ref=target_ref, provided_workspace=workspace_path),
                 timeout=cls.PIPELINE_TIMEOUT_SECONDS,
             )
             return True
@@ -221,15 +222,19 @@ class MergeGateService:
             GitService.remove_worktree(repo_root, sandbox_path)
 
     @classmethod
-    async def _pipeline(cls, run_id: str, *, repo_id: str, source_ref: str, target_ref: str) -> None:
+    async def _pipeline(cls, run_id: str, *, repo_id: str, source_ref: str, target_ref: str, provided_workspace: str = None) -> None:
         del repo_id
-        OpsService.set_run_stage(run_id, "gate_worktree", msg="Phase7: creating sandbox worktree")
-
-        try:
-            base_dir = cls._create_sandbox_worktree(run_id, source_ref)
-        except Exception as exc:
-            OpsService.update_run_status(run_id, "WORKTREE_CORRUPTED", msg=f"sandbox worktree create failed: {exc}")
-            return
+        
+        if provided_workspace:
+            OpsService.set_run_stage(run_id, "gate_worktree", msg="Phase7: using provisioned sandbox workspace")
+            base_dir = Path(provided_workspace)
+        else:
+            OpsService.set_run_stage(run_id, "gate_worktree", msg="Phase7: creating legacy sandbox worktree")
+            try:
+                base_dir = cls._create_sandbox_worktree(run_id, source_ref)
+            except Exception as exc:
+                OpsService.update_run_status(run_id, "WORKTREE_CORRUPTED", msg=f"sandbox worktree create failed: {exc}")
+                return
 
         try:
             OpsService.set_run_stage(run_id, "gate_tests", msg="Phase7: running tests in sandbox")
@@ -275,7 +280,8 @@ class MergeGateService:
                 else:
                     OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg=f"rollback failed: {exc}")
         finally:
-            try:
-                cls._cleanup_sandbox_worktree(run_id)
-            except Exception as exc:
-                OpsService.append_log(run_id, level="WARN", msg=f"sandbox cleanup failed: {exc}")
+            if not provided_workspace:
+                try:
+                    cls._cleanup_sandbox_worktree(run_id)
+                except Exception as exc:
+                    OpsService.append_log(run_id, level="WARN", msg=f"sandbox cleanup failed: {exc}")
