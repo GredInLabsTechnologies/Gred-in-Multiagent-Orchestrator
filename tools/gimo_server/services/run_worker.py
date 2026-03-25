@@ -740,28 +740,17 @@ class RunWorker:
         # Start with exact allowed_paths
         selected_rel_paths = set(allowed_paths[:max_files])
         
-        # If we have space, add same-directory neighbors of the primary allowed path
-        if len(selected_rel_paths) < max_files and allowed_paths:
-            primary = Path(allowed_paths[0])
-            parent = primary.parent
-            try:
-                abs_parent = (repo_root / parent).resolve()
-                if abs_parent.exists() and abs_parent.is_dir():
-                    for entry in abs_parent.iterdir():
-                        if entry.is_file() and not entry.name.startswith("."):
-                            rel_entry = str(entry.relative_to(repo_root)).replace("\\", "/")
-                            if rel_entry not in selected_rel_paths:
-                                selected_rel_paths.add(rel_entry)
-                                if len(selected_rel_paths) >= max_files:
-                                    break
-            except Exception:
-                pass
-
         # Build context objects (Path-aware and symbol-aware would require parsing, 
         # but here we implement the evidence-based boundary).
         context_items = []
         for rel_path in sorted(list(selected_rel_paths)):
-            abs_path = repo_root / rel_path
+            try:
+                abs_path = (repo_root / rel_path).resolve()
+                # Strict containment check
+                abs_path.relative_to(repo_root.resolve())
+            except (ValueError, Exception):
+                continue
+
             if abs_path.exists() and abs_path.is_file():
                 try:
                     # Simple symbol-aware proxy: check for function/class definitions

@@ -175,7 +175,7 @@ async def test_agentic_loop_pauses_on_context_request(tmp_path):
 
 @pytest.mark.asyncio
 async def test_agentic_loop_resumes_after_resolution(tmp_path):
-    from tools.gimo_server.services.agentic_loop_service import AgenticLoopService
+    from tools.gimo_server.services.agentic_loop_service import AgenticLoopService, AgenticResult
     from tools.gimo_server.services.context_request_service import ContextRequestService
     from tools.gimo_server.services.conversation_service import ConversationService
     from tools.gimo_server.services.app_session_service import AppSessionService
@@ -207,23 +207,196 @@ async def test_agentic_loop_resumes_after_resolution(tmp_path):
             # 4. Resolve the request
             ContextRequestService.resolve_request(sid, request["id"], "Here is the info: API key is XYZ")
             
-            # 5. Resume the session
-            mock_run_result = MagicMock()
-            mock_run_result.status = "completed"
+            # 5. Resume the session (Hardened: Mock only adapter, not the loop)
+            mock_adapter = MagicMock(spec=ProviderAdapter)
+            async def mock_chat(*args, **kwargs):
+                return {"role": "assistant", "content": "Got it, thanks!", "usage": {"total_tokens": 50}}
+            mock_adapter.chat_with_tools = MagicMock(side_effect=mock_chat)
             
-            with patch.object(AgenticLoopService, "_run_loop", return_value=mock_run_result):
-                with patch("tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter", return_value=(MagicMock(spec=ProviderAdapter), "p1", "m1")):
-                    res = await AgenticLoopService.resume_session(sid, workspace_root=str(tmp_path))
-                    
-                    assert res.status == "completed"
-                    
-                    # Verify tool result was injected
-                    updated_thread = ConversationService.get_thread(sid)
-                    tool_results = [item for turn in updated_thread.turns for item in turn.items if item.type == "tool_result"]
-                    assert len(tool_results) >= 1
-                    assert "API key is XYZ" in tool_results[0].content
-                    assert tool_results[0].metadata["call_id"] == "call_123"
-                    
-                    # Verify request was marked as archived in the session after resumption
-                    final_session = AppSessionService.get_session(sid)
-                    assert final_session["context_requests"][request["id"]]["status"] == "archived"
+            with patch("tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter", return_value=(mock_adapter, "p1", "m1")):
+                res = await AgenticLoopService.resume_session(sid, workspace_root=str(tmp_path))
+                
+                assert "Got it" in res.response
+                
+                # Verify tool result was injected
+                updated_thread = ConversationService.get_thread(sid)
+                tool_results = [item for turn in updated_thread.turns for item in turn.items if item.type == "tool_result"]
+                assert len(tool_results) >= 1
+                assert "API key is XYZ" in tool_results[0].content
+                assert tool_results[0].metadata["call_id"] == "call_123"
+                
+                # Verify request was marked as archived in the session after resumption
+                final_session = AppSessionService.get_session(sid)
+                assert final_session["context_requests"][request["id"]]["status"] == "archived"
+
+@pytest.mark.asyncio
+async def test_run_worker_rejects_malformed_validated_task_spec(mock_ops_service):
+    # Missing required fields
+    appr = OpsApproved(id="appr_3", draft_id="d_3", content="test", prompt="test")
+    _persist_approved_stub(appr)
+    run = mock_ops_service.create_run(appr.id)
+    run.validated_task_spec = {
+        "base_commit": "HEAD",
+        # Missing repo_handle and others
+    }
+    mock_ops_service._persist_run(run)
+    
+    worker = RunWorker()
+    await worker._execute_run(run.id)
+    
+    updated_run = mock_ops_service.get_run(run.id)
+    assert updated_run.status == "error"
+    assert any("Malformed TaskSpec" in entry["msg"] for entry in updated_run.log)
+
+@pytest.mark.asyncio
+async def test_worker_context_never_exceeds_max_files(mock_ops_service, tmp_path):
+    repo_dir = tmp_path / "repo_max"
+    repo_dir.mkdir()
+    allowed = []
+    for i in range(10):
+        f = repo_dir / f"file{i}.py"
+        f.write_text(f"def func{i}(): pass")
+        allowed.append(f"file{i}.py")
+        
+    worker = RunWorker()
+    context = worker._build_worker_context(
+        task={"allowed_paths": allowed},
+        repo_root=repo_dir,
+        max_files=5
+    )
+    
+    assert len(context) <= 5
+    # Strict allowed_paths only (P5.4 fix verification)
+    assert all(f["path"] in allowed[:5] for f in context)
+
+@pytest.mark.asyncio
+async def test_allowed_paths_survives_engine_context_merge(mock_ops_service, tmp_path):
+    repo_dir = tmp_path / "repo_merge"
+    repo_dir.mkdir()
+    (repo_dir / "target.py").write_text("print('hello')")
+    
+    with patch.object(AppSessionService, 'get_path_from_handle', return_value=str(repo_dir)):
+        appr = OpsApproved(id="appr_4", draft_id="d_4", content="test", prompt="test")
+        _persist_approved_stub(appr)
+        
+        run = mock_ops_service.create_run(appr.id)
+        run.validated_task_spec = {
+            "base_commit": "HEAD",
+            "repo_handle": "h1",
+            "allowed_paths": ["target.py"],
+            "acceptance_criteria": [],
+            "evidence_hash": "abc",
+            "context_pack_id": "cp1",
+            "worker_model": "m1",
+            "requires_manual_merge": True
+        }
+        mock_ops_service._persist_run(run)
+        
+        worker = RunWorker()
+        with patch("tools.gimo_server.services.engine_service.EngineService.execute_run") as mock_exec:
+            await worker._execute_run(run.id)
+            
+            # Check session state before engine call
+            final_run = mock_ops_service.get_run(run.id)
+            assert final_run.child_context["allowed_paths"] == ["target.py"]
+
+@pytest.mark.asyncio
+async def test_run_stream_propagates_session_id():
+    from tools.gimo_server.services.agentic_loop_service import AgenticLoopService, AgenticResult
+    from tools.gimo_server.services.conversation_service import ConversationService
+    from tools.gimo_server.providers.base import ProviderAdapter
+    
+    mock_adapter = MagicMock(spec=ProviderAdapter)
+    
+    with patch.object(AgenticLoopService, "reserve_thread_execution", return_value={"owner_id": "o1"}):
+        with patch.object(AgenticLoopService, "release_thread_execution"):
+            with patch.object(AgenticLoopService, "_start_thread_execution_heartbeat", return_value=(asyncio.Event(), MagicMock())):
+                with patch.object(AgenticLoopService, "_stop_heartbeat"):
+                    with patch.object(ConversationService, "get_thread", return_value=MagicMock(mood="neutral", turns=[])):
+                        with patch.object(ConversationService, "add_turn", return_value=MagicMock(id="t1")):
+                            with patch.object(ConversationService, "append_item"):
+                                with patch("tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter", return_value=(mock_adapter, "p1", "m1")):
+                                    with patch.object(AgenticLoopService, "_run_loop") as mock_run_loop:
+                                        mock_run_loop.return_value = asyncio.Future()
+                                        mock_run_loop.return_value.set_result(AgenticResult(response="ok"))
+                                        
+                                        gen = AgenticLoopService.run_stream(
+                                            thread_id="t1",
+                                            user_message="hi",
+                                            workspace_root="/tmp",
+                                            session_id="SESS_PROPS"
+                                        )
+                                        async for _ in gen: pass
+                                        
+                                        # Verify session_id propagation
+                                        args, kwargs = mock_run_loop.call_args
+                                        assert kwargs["session_id"] == "SESS_PROPS"
+
+@pytest.mark.asyncio
+async def test_agentic_loop_does_not_delegate_free_recon_to_worker(mock_ops_service):
+    # Worker must reject if ValidatedTaskSpec is missing (no auto-recon)
+    appr = OpsApproved(id="appr_5", draft_id="d_5", content="test", prompt="test")
+    _persist_approved_stub(appr)
+    run = mock_ops_service.create_run(appr.id)
+    # No validated_task_spec
+    
+    worker = RunWorker()
+    await worker._execute_run(run.id)
+    
+    updated_run = mock_ops_service.get_run(run.id)
+    assert updated_run.status == "error"
+    assert any("Recon required" in entry["msg"] for entry in updated_run.log)
+
+@pytest.mark.asyncio
+async def test_execution_without_repo_context_pack_is_rejected_or_blocked(mock_ops_service):
+    # If repo_handle cannot be resolved, block.
+    appr = OpsApproved(id="appr_6", draft_id="d_6", content="test", prompt="test")
+    _persist_approved_stub(appr)
+    
+    run = mock_ops_service.create_run(appr.id)
+    run.validated_task_spec = {
+        "base_commit": "HEAD",
+        "repo_handle": "INVALID_HANDLE",
+        "allowed_paths": ["f1.py"],
+        "acceptance_criteria": [],
+        "evidence_hash": "abc",
+        "context_pack_id": "cp1",
+        "worker_model": "m1",
+        "requires_manual_merge": True
+    }
+    mock_ops_service._persist_run(run)
+    
+    with patch.object(AppSessionService, 'get_path_from_handle', return_value=None):
+        worker = RunWorker()
+        await worker._execute_run(run.id)
+        
+        updated_run = mock_ops_service.get_run(run.id)
+        assert updated_run.status == "error"
+        assert any("repo_handle to path" in entry["msg"] for entry in updated_run.log)
+
+@pytest.mark.asyncio
+async def test_execution_with_out_of_scope_path_is_rejected(mock_ops_service, tmp_path):
+    repo_dir = tmp_path / "repo_scope"
+    repo_dir.mkdir()
+    
+    worker = RunWorker()
+    # build_worker_context uses rel_path, if it escapes it returns empty/error or is blocked.
+    context = worker._build_worker_context(
+        task={"allowed_paths": ["../secret.txt"]},
+        repo_root=repo_dir
+    )
+    assert len(context) == 0
+
+@pytest.mark.asyncio
+async def test_keyword_only_match_does_not_unlock_global_context(mock_ops_service, tmp_path):
+    repo_dir = tmp_path / "repo_keyword"
+    repo_dir.mkdir()
+    (repo_dir / "other.py").write_text("secret")
+    
+    worker = RunWorker()
+    context = worker._build_worker_context(
+        task={"allowed_paths": ["non_existent.py"]},
+        repo_root=repo_dir
+    )
+    assert len(context) == 0
+    assert not any(f["path"] == "other.py" for f in context)
