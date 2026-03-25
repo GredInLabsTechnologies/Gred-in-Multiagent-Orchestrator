@@ -381,7 +381,42 @@ async def lifespan(app: FastAPI):
 
 
 def _is_actions_safe_request(request: Request, actions_safe_targets: set) -> bool:
-    return (request.method.upper(), request.url.path) in actions_safe_targets
+    """Checks if a request matches one of the 'Actions-Safe' public contract endpoints.
+    
+    Supports template segments like {id} or {run_id}.
+    Requires exact method and exact number of path segments.
+    """
+    method = request.method.upper()
+    path = request.url.path
+    
+    # Fast path: exact match (static endpoints)
+    if (method, path) in actions_safe_targets:
+        return True
+
+    # Slow path: segment-based matching for dynamic paths
+    path_segments = [s for s in path.split("/") if s]
+    
+    for target_method, target_template in actions_safe_targets:
+        if target_method != method:
+            continue
+        if "{" not in target_template:
+            continue
+            
+        target_segments = [s for s in target_template.split("/") if s]
+        if len(path_segments) != len(target_segments):
+            continue
+            
+        match = True
+        for ps, ts in zip(path_segments, target_segments):
+            if ts.startswith("{") and ts.endswith("}"):
+                continue # Parametrized segment (wildcard)
+            if ps != ts:
+                match = False
+                break
+        if match:
+            return True
+            
+    return False
 
 def _register_core_exception_handlers(app: FastAPI, actions_safe_targets: set):
     @app.exception_handler(RequestValidationError)

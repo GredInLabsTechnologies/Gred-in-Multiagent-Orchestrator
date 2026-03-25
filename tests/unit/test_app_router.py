@@ -56,3 +56,52 @@ def test_repo_selection_with_handles(test_client):
     assert res.json()["status"] == "not_implemented"
     
     app.dependency_overrides.clear()
+
+def test_actions_safe_logic_hardened():
+    """P4H-4: Prueba directamente el guard de _is_actions_safe_request con paths dinámicos."""
+    from tools.gimo_server.main import _is_actions_safe_request
+    from unittest.mock import MagicMock
+    
+    # Replicamos el contrato de ops_routes
+    actions_safe_targets = {
+        ("POST", "/ops/app/sessions"),
+        ("GET", "/ops/app/sessions/{id}"),
+        ("POST", "/ops/app/sessions/{id}/repo/select"),
+        ("POST", "/ops/app/sessions/{id}/purge"),
+    }
+    
+    # Casos Positivos
+    for method, path in [
+        ("POST", "/ops/app/sessions"),
+        ("GET", "/ops/app/sessions/any-session-id"),
+        ("POST", "/ops/app/sessions/sess_123/repo/select"),
+        ("POST", "/ops/app/sessions/abc/purge"),
+    ]:
+        req = MagicMock()
+        req.method = method
+        req.url.path = path
+        assert _is_actions_safe_request(req, actions_safe_targets), f"Debería ser safe: {method} {path}"
+    
+    # Casos Negativos: Método incorrecto
+    req = MagicMock()
+    req.method = "DELETE"
+    req.url.path = "/ops/app/sessions/abc/purge"
+    assert not _is_actions_safe_request(req, actions_safe_targets)
+    
+    # Casos Negativos: Número de segmentos (más)
+    req = MagicMock()
+    req.method = "GET"
+    req.url.path = "/ops/app/sessions/abc/extra"
+    assert not _is_actions_safe_request(req, actions_safe_targets)
+    
+    # Casos Negativos: Número de segmentos (menos)
+    req = MagicMock()
+    req.method = "POST"
+    req.url.path = "/ops/app/sessions/repo/select" # Falta el {id}
+    assert not _is_actions_safe_request(req, actions_safe_targets)
+    
+    # Casos Negativos: Prefijo incorrecto
+    req = MagicMock()
+    req.method = "GET"
+    req.url.path = "/ops/other/sessions/abc"
+    assert not _is_actions_safe_request(req, actions_safe_targets)
