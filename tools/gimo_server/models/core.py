@@ -109,6 +109,7 @@ class OpsRun(BaseModel):
     child_context: Optional[Dict[str, Any]] = None
     spawn_depth: int = 0          # Fractal depth (0 = root orchestrator)
     model_tier: Optional[int] = None  # quality_tier of the model assigned to this run
+    validated_task_spec: Optional[Dict[str, Any]] = None # Phase 5B: Required for execution
 
 class ExecutorReport(BaseModel):
     run_id: str

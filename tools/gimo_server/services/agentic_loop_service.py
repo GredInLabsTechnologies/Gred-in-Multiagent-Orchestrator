@@ -570,9 +570,10 @@ class AgenticLoopService:
         emit: EventEmitter | None = None,
         persist_conversation: bool = False,
         allow_hitl: bool = False,
+        session_id: str | None = None,
     ) -> AgenticResult:
         emit_event = emit or cls._noop_emit
-        executor = ToolExecutor(workspace_root=workspace_root, token=token, mood=mood)
+        executor = ToolExecutor(workspace_root=workspace_root, token=token, mood=mood, session_id=session_id)
         total_usage: Dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         all_tool_logs: List[Dict[str, Any]] = []
         final_response = ""
@@ -859,6 +860,25 @@ class AgenticLoopService:
                     stop_loop = True
                     break
 
+                if result_status == "context_request_pending":
+                    if persist_conversation and thread_id and orch_turn:
+                        ConversationService.append_item(
+                            thread_id,
+                            orch_turn.id,
+                            GimoItem(
+                                type="text",
+                                content=f"[CONTEXT REQUEST] {result_message}",
+                                status="completed",
+                                metadata={"context_request": result_data},
+                            ),
+                        )
+                    await emit_event("context_request_pending", result_data)
+                    final_response = f"Execution paused: {result_message}"
+                    finish_reason = "context_request_pending"
+                    stop_loop = True
+                    break
+
+
                 tool_result_content = cls._build_tool_result_content(result_message, result_data)
                 messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": tool_result_content})
 
@@ -951,6 +971,7 @@ class AgenticLoopService:
         user_message: str,
         workspace_root: str,
         token: str = "system",
+        session_id: str | None = None,
     ) -> AgenticResult:
         adapter, provider_id, model = _resolve_orchestrator_adapter()
         thread = ConversationService.get_thread(thread_id)
@@ -997,6 +1018,7 @@ class AgenticLoopService:
             thread=thread,
             persist_conversation=True,
             allow_hitl=True,
+            session_id=session_id,
         )
 
     @classmethod
@@ -1006,6 +1028,7 @@ class AgenticLoopService:
         user_message: str,
         workspace_root: str,
         token: str = "system",
+        session_id: str | None = None,
     ) -> AgenticResult:
         reservation = cls.reserve_thread_execution(thread_id)
         owner_id = str(reservation.get("owner_id") or "")
@@ -1016,6 +1039,7 @@ class AgenticLoopService:
                 user_message=user_message,
                 workspace_root=workspace_root,
                 token=token,
+                session_id=session_id,
             )
         finally:
             await cls._stop_heartbeat(stop_event, heartbeat_task)
@@ -1028,6 +1052,7 @@ class AgenticLoopService:
         user_message: str,
         workspace_root: str,
         token: str = "system",
+        session_id: str | None = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         adapter, provider_id, model = _resolve_orchestrator_adapter()
         thread = ConversationService.get_thread(thread_id)
@@ -1086,6 +1111,7 @@ class AgenticLoopService:
                     emit=emit,
                     persist_conversation=True,
                     allow_hitl=True,
+            session_id=session_id,
                 )
             except Exception as exc:
                 logger.exception("Streaming agentic loop failed")
@@ -1110,6 +1136,7 @@ class AgenticLoopService:
         user_message: str,
         workspace_root: str,
         token: str = "system",
+        session_id: str | None = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         reservation = cls.reserve_thread_execution(thread_id)
         owner_id = str(reservation.get("owner_id") or "")

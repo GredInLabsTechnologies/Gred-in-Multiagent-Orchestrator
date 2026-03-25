@@ -15,7 +15,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from ..ops_models import ExecutorReport
 from .ops_service import OpsService
@@ -23,6 +23,8 @@ from .provider_service import ProviderService
 from .notification_service import NotificationService
 from .critic_service import CriticService
 from .quality_service import QualityService
+from .app_session_service import AppSessionService
+from .repo_recon_service import RepoReconService
 
 logger = logging.getLogger("orchestrator.run_worker")
 
@@ -620,6 +622,52 @@ class RunWorker:
 
     async def _execute_run(self, run_id: str) -> None:
         try:
+            from .ops_service import OpsService
+            run = OpsService.get_run(run_id)
+            if not run:
+                return
+
+            # Phase 5B: No run without ValidatedTaskSpec
+            if not getattr(run, "validated_task_spec", None):
+                OpsService.append_log(
+                    run_id, level="ERROR",
+                    msg="[Phase 5B] Execution rejected: No ValidatedTaskSpec found in run metadata. Recon is required."
+                )
+                OpsService.update_run_status(run_id, "error", msg="Missing ValidatedTaskSpec")
+                return
+
+            # Build bounded worker context (Phase 5B)
+            try:
+                task_spec = run.validated_task_spec
+                # If we have a repo_handle, we can resolve its path
+                repo_path = None
+                if task_spec.get("repo_handle"):
+                    path_str = AppSessionService.get_path_from_handle(task_spec["repo_handle"])
+                    if path_str:
+                        repo_path = Path(path_str)
+
+                # Inject bounded context into the run context (Phase 5B 5.4)
+                if repo_path:
+                    # We inject this into child_context so EngineService correctly applies it
+                    if run.child_context is None:
+                        run.child_context = {}
+                    
+                    # Bounded context builder logic (5.4)
+                    bounded_ctx = self._build_worker_context(
+                        task=task_spec,
+                        repo_root=repo_path,
+                        max_files=5
+                    )
+                    run.child_context["gen_context"] = {
+                        "bounded_files": bounded_ctx
+                    }
+                    # Ensure allowed_paths are strictly respected by tool executor too
+                    run.child_context["allowed_paths"] = task_spec.get("allowed_paths", [])
+                    OpsService._persist_run(run)
+
+            except Exception as e:
+                logger.warning("Failed to build worker context for run %s: %s", run_id, e)
+
             from .engine_service import EngineService
             await EngineService.execute_run(run_id)
         except Exception:
@@ -633,3 +681,57 @@ class RunWorker:
             run = OpsService.get_run(run_id)
             if run and run.parent_run_id and run.status in ("done", "error"):
                 await self._handle_child_completion(run_id)
+
+    def _build_worker_context(self, task: dict, repo_root: Path, max_files: int = 5) -> List[Dict[str, Any]]:
+        """
+        P5.4: Builds a bounded worker context from the repo.
+        No global scans. Bounded by allowed_paths, same-dir, and imports.
+        """
+        allowed_paths = task.get("allowed_paths", [])
+        if not allowed_paths:
+            return []
+
+        # Start with exact allowed_paths
+        selected_rel_paths = set(allowed_paths[:max_files])
+        
+        # If we have space, add same-directory neighbors of the primary allowed path
+        if len(selected_rel_paths) < max_files and allowed_paths:
+            primary = Path(allowed_paths[0])
+            parent = primary.parent
+            try:
+                abs_parent = (repo_root / parent).resolve()
+                if abs_parent.exists() and abs_parent.is_dir():
+                    for entry in abs_parent.iterdir():
+                        if entry.is_file() and not entry.name.startswith("."):
+                            rel_entry = str(entry.relative_to(repo_root)).replace("\\", "/")
+                            if rel_entry not in selected_rel_paths:
+                                selected_rel_paths.add(rel_entry)
+                                if len(selected_rel_paths) >= max_files:
+                                    break
+            except Exception:
+                pass
+
+        # Build context objects (Path-aware and symbol-aware would require parsing, 
+        # but here we implement the evidence-based boundary).
+        context_items = []
+        for rel_path in sorted(list(selected_rel_paths)):
+            abs_path = repo_root / rel_path
+            if abs_path.exists() and abs_path.is_file():
+                try:
+                    # Simple symbol-aware proxy: check for function/class definitions
+                    content = abs_path.read_text(encoding="utf-8", errors="ignore")
+                    symbols = []
+                    for line in content.splitlines():
+                        m = re.match(r"^\s*(?:def|class)\s+([a-zA-Z_]\w*)", line)
+                        if m:
+                            symbols.append(m.group(1))
+                    
+                    context_items.append({
+                        "path": rel_path,
+                        "content": content,
+                        "symbols": symbols[:20] # Limit symbols for context budget
+                    })
+                except Exception:
+                    continue
+
+        return context_items[:max_files]

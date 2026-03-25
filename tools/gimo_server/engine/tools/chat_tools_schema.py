@@ -301,20 +301,25 @@ CHAT_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "web_search",
+            "name": "request_context",
             "description": (
-                "Search the web for technical information, documentation, or best practices. "
-                "Use this when you need up-to-date information beyond your training data."
+                "Request additional context from the operator when reconnaissance "
+                "is insufficient or a specific detail is missing to proceed safely. "
+                "The loop will pause until the context is provided."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
+                    "description": {
                         "type": "string",
-                        "description": "The search query.",
+                        "description": "What context is missing and why it is needed.",
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "description": "Optional structured metadata about the request.",
                     },
                 },
-                "required": ["query"],
+                "required": ["description"],
             },
         },
     },

@@ -35,11 +35,13 @@ class ToolExecutor:
         policy: Optional[Dict[str, Any]] = None,
         token: str = "SYSTEM",
         mood: str = "neutral",
+        session_id: Optional[str] = None,
     ):
         self.workspace_root = os.path.abspath(workspace_root)
         self.policy = policy or {}
         self.token = token
         self.mood = mood
+        self.session_id = session_id
         self._mood_profile: Optional[MoodProfile] = None
         try:
             self._mood_profile = get_mood_profile(mood)
@@ -512,6 +514,34 @@ class ToolExecutor:
             f"Proposed plan: {title}",
             {"title": title, "objective": objective, "tasks": tasks},
         )
+
+    async def handle_request_context(self, args: Dict[str, Any]) -> ToolExecutionResult:
+        description = args.get("description")
+        if not description:
+            return ToolExecutionResult("error", "Missing 'description' argument")
+        
+        if not self.session_id:
+            return ToolExecutionResult(
+                "error", 
+                "Context requests require an active App session. "
+                "The current thread is not associated with a session."
+            )
+        
+        try:
+            from ...services.context_request_service import ContextRequestService
+            request = ContextRequestService.create_request(
+                self.session_id, 
+                description, 
+                args.get("metadata")
+            )
+            return ToolExecutionResult(
+                "context_request_pending",
+                f"Context request created: {description}",
+                {"request_id": request["id"], "description": description}
+            )
+        except Exception as exc:
+            logger.exception("Error creating context request")
+            return ToolExecutionResult("error", f"Failed to create context request: {exc}")
 
     async def handle_web_search(self, args: Dict[str, Any]) -> ToolExecutionResult:
         query = args.get("query")
