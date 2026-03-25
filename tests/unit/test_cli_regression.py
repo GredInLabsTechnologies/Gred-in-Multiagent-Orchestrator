@@ -157,3 +157,55 @@ def test_run_artifact_persistence(mock_runs_dir, mock_write_json):
             args, kwargs = mock_write_json.call_args
             assert 'plan-123_' in str(args[0])
             assert 'run-999.json' not in str(args[0])
+
+def test_handle_chat_slash_command_permissions(monkeypatch):
+    import gimo
+    config = {}
+    
+    captured = {}
+    def _fake_api_request(cfg, method, path, *, params=None, json_body=None):
+        captured["method"] = method
+        captured["path"] = path
+        captured["json_body"] = json_body
+        return 200, {"ok": True}
+        
+    monkeypatch.setattr(gimo, "_api_request", _fake_api_request)
+    
+    handled, res = gimo._handle_chat_slash_command(
+        config, "/permissions auto-edit", workspace_root="/fake/root", thread_id="t123"
+    )
+    assert handled is True
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/ops/threads/t123/config"
+    assert captured["json_body"] == {"permissions": "auto-edit"}
+
+def test_tui_update_topology_uses_operator_status(monkeypatch):
+    from gimo_tui import GimoApp
+    app = GimoApp()
+    
+    captured_paths = []
+    
+    def _fake_api_request(cfg, method, path, *, params=None, json_body=None):
+        captured_paths.append(path)
+        if path == "/ops/operator/status":
+            return 200, {
+                "repo": "some_repo",
+                "branch": "main",
+                "active_provider": "openai",
+                "active_model": "gpt-4o"
+            }
+        return 404, {}
+
+    monkeypatch.setattr("gimo_tui._api_request", _fake_api_request)
+    
+    app._update_graph_widget = MagicMock()
+    app.call_from_thread = lambda cb, *args, **kwargs: cb(*args, **kwargs)
+    app._refresh_topology_logic()
+    
+    assert "/ops/operator/status" in captured_paths
+    assert "/ops/provider" not in captured_paths
+    app._update_graph_widget.assert_called()
+    call_arg = app._update_graph_widget.call_args[0][0]
+    assert "some_repo" in str(call_arg)
+    assert "openai" in str(call_arg)
+

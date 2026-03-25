@@ -578,7 +578,7 @@ def _handle_chat_slash_command(
         """Change HITL mode live and update in-session display."""
         sc, payload = _api_request(
             config, "POST", f"/ops/threads/{thread_id}/config",
-            json_body={"hitl_mode": perm_val},
+            json_body={"permissions": perm_val},
         )
         if sc in {200, 204}:
             if current_perm is not None:

@@ -255,9 +255,27 @@ class GimoApp(App):
             @work(thread=True)
             def do_slash_fetch(action: str):
                 if action == "status":
-                    self.update_telemetry()
-                    self.update_topology()
-                    self.call_from_thread(self._write_log, "[green]Requested status refresh.[/green]")
+                    st, py = _api_request(self.config, "GET", "/ops/operator/status")
+                    if st == 200 and isinstance(py, dict):
+                        repo = py.get("repo", "?")
+                        branch = py.get("branch", "?")
+                        prov = py.get("active_provider", "?")
+                        mod = py.get("active_model", "?")
+                        l_thread = py.get("last_thread", "?")
+                        l_turn = py.get("last_turn", "?")
+                        alerts = py.get("alerts", [])
+                        alerts_str = ", ".join(alerts) if alerts else "ninguna"
+                        lines = [
+                            f"📁 Repo: {repo} ({branch})",
+                            f"🧠 Provider: {prov} / {mod}",
+                            f"💬 Thread: {l_thread} (turn {l_turn})",
+                            f"🔔 Alerts: {alerts_str}"
+                        ]
+                        self.call_from_thread(self._write_log, Panel("\n".join(lines), title="Real-time Status", border_style="magenta"))
+                        self.update_telemetry()
+                        self.update_topology()
+                    else:
+                        self.call_from_thread(self._write_log, f"[red]Status check failed ({st})[/red]")
                 elif action == "provider_list":
                     st, py = _api_request(self.config, "GET", "/ops/provider")
                     if st == 200 and isinstance(py, dict):
@@ -295,7 +313,7 @@ class GimoApp(App):
                     else:
                         self.call_from_thread(self._write_log, f"[red]Reset failed ({st}): {py}[/red]")
                 elif action == "tokens":
-                    self.call_from_thread(self._write_log, "[dim]Token data available via /tokens in the CLI interactive chat.[/dim]")
+                    self.call_from_thread(self._write_log, "[dim]Token data available via /tokens in the CLI interactive chat o consultable vía logs en background.[/dim]")
                 elif action == "diff":
                     st, py = _api_request(self.config, "GET", "/ops/files/diff")
                     if st == 200:
@@ -310,7 +328,7 @@ class GimoApp(App):
                     self.call_from_thread(self._write_log, msg)
                 elif action.startswith("permissions:"):
                     val = action.split(":", 1)[1]
-                    st, py = _api_request(self.config, "POST", f"/ops/threads/{self.thread_id}/config", json_body={"hitl_mode": val})
+                    st, py = _api_request(self.config, "POST", f"/ops/threads/{self.thread_id}/config", json_body={"permissions": val})
                     msg = f"[green]✓ Permisos: perm:{val}[/green]" if st in {200, 204} else f"[red]permissions failed ({st}): {py}[/red]"
                     self.call_from_thread(self._write_log, msg)
                 elif action.startswith("add:"):
@@ -525,7 +543,11 @@ class GimoApp(App):
 
     @work(thread=True)
     def update_telemetry(self):
-        """Fetch global budget/usage stats robustly."""
+        """Fetch global budget/usage stats robustly (async wrapper)."""
+        self._refresh_telemetry_logic()
+
+    def _refresh_telemetry_logic(self):
+        """The actual logic for fetching telemetry, separated from @work machinery."""
         try:
             status, payload = _api_request(self.config, "GET", "/ops/forecast")
             if status == 200 and isinstance(payload, list):
@@ -556,23 +578,30 @@ class GimoApp(App):
 
     @work(thread=True)
     def update_topology(self):
-        """Fetch worker pool to show Graph topology robustly."""
+        """Fetch status and show canonical topology robustly (async wrapper)."""
+        self._refresh_topology_logic()
+
+    def _refresh_topology_logic(self):
+        """The actual logic for fetching topology, separated from @work machinery."""
         try:
-            status, payload = _api_request(self.config, "GET", "/ops/provider")
+            status, payload = _api_request(self.config, "GET", "/ops/operator/status")
             if status == 200 and isinstance(payload, dict):
-                providers = payload.get("providers", {})
-                lines = []
-                for pid, pdata in providers.items():
-                    roles = pdata.get("role_bindings", [])
-                    role_str = roles[0].upper() if roles else "GENERIC WORKER"
-                    ptype = str(pdata.get("provider_type", "unknown")).upper()
-                    lines.append(f"🟢 [bold cyan]{pid}[/bold cyan] [dim]({role_str} - {ptype})[/dim]")
+                repo = payload.get("repo", "?")
+                branch = payload.get("branch", "?")
+                provider = payload.get("active_provider", "?")
+                model = payload.get("active_model", "?")
                 
-                self.call_from_thread(self._update_graph_widget, "\n".join(lines) if lines else "[dim]No active workers allocated.[/dim]")
+                text = (
+                    f"📁 Repo: [bold]{repo}[/bold] ({branch})\n"
+                    f"🧠 Orchestrator: [cyan]{provider}[/cyan]\n"
+                    f"   Model: [dim]{model}[/dim]"
+                )
+                self.call_from_thread(self._update_graph_widget, text)
             else:
                 self.call_from_thread(self._update_graph_widget, "[yellow]Topology bridge disconnected.[/yellow]")
         except Exception as e:
             self.call_from_thread(self._update_graph_widget, f"[red]Topology Error: {e}[/red]")
+
 
     def _update_graph_widget(self, text: str):
         lbl = self.query_one("#graph-content", Static)
