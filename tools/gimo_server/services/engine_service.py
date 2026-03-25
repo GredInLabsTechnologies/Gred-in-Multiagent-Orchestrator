@@ -88,6 +88,7 @@ _CONTEXT_FIELD_REGISTRY: Dict[str, ContextPolicy] = {
     "ace_max_passes":     ContextPolicy.CHILD_OVERRIDABLE,  # bounded in llm_execute.py
     "gen_context":        ContextPolicy.CHILD_OVERRIDABLE,
     "max_spawn_depth":    ContextPolicy.CHILD_OVERRIDABLE,
+    "allowed_paths":      ContextPolicy.CHILD_OVERRIDABLE,
 
     # ── Child-exclusive fields ─────────────────────────────────────────────────
     # Valid only when set by the child itself. These are stripped from the

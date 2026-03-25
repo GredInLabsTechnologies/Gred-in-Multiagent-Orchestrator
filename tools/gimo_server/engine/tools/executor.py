@@ -71,10 +71,11 @@ class ToolExecutor:
 
     def _is_path_allowed(self, full_path: str) -> bool:
         allowed_paths: list[str] = []
-        if hasattr(self.policy, "allowed_paths"):
-            allowed_paths = list(getattr(self.policy, "allowed_paths") or [])
-        elif isinstance(self.policy, dict):
+        if isinstance(self.policy, dict):
             allowed_paths = list(self.policy.get("allowed_paths") or [])
+        elif hasattr(self.policy, "allowed_paths"):
+            allowed_paths = list(getattr(self.policy, "allowed_paths") or [])
+            
         if not allowed_paths or "*" in allowed_paths:
             return True
 

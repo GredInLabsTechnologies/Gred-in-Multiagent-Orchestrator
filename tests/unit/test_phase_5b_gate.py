@@ -69,9 +69,14 @@ async def test_worker_context_is_scoped_by_task_spec(mock_ops_service, tmp_path)
         
         run = mock_ops_service.create_run(appr.id)
         run.validated_task_spec = {
-            "evidence_hash": "h1",
+            "base_commit": "HEAD",
+            "repo_handle": "h_repo",
             "allowed_paths": ["file1.py"],
-            "repo_handle": "h_repo"
+            "acceptance_criteria": ["test passes"],
+            "evidence_hash": "h1",
+            "context_pack_id": "cp_1",
+            "worker_model": "gpt-4",
+            "requires_manual_merge": True
         }
         mock_ops_service._persist_run(run)
         
@@ -167,3 +172,58 @@ async def test_agentic_loop_pauses_on_context_request(tmp_path):
         
         assert result.finish_reason == "context_request_pending"
         assert "Execution paused" in result.response
+
+@pytest.mark.asyncio
+async def test_agentic_loop_resumes_after_resolution(tmp_path):
+    from tools.gimo_server.services.agentic_loop_service import AgenticLoopService
+    from tools.gimo_server.services.context_request_service import ContextRequestService
+    from tools.gimo_server.services.conversation_service import ConversationService
+    from tools.gimo_server.services.app_session_service import AppSessionService
+    from tools.gimo_server.providers.base import ProviderAdapter
+    from tools.gimo_server.config import get_settings
+    
+    session_id = f"s_{os.getpid()}_{id(tmp_path)}"
+    
+    # 0. Setup Paths
+    sessions_dir = tmp_path / "sessions"
+    threads_dir = tmp_path / "threads"
+    sessions_dir.mkdir()
+    threads_dir.mkdir()
+    
+    with patch.object(AppSessionService, "_get_sessions_dir", return_value=sessions_dir):
+        with patch.object(ConversationService, "THREADS_DIR", threads_dir):
+            # 1. Create a "real" session
+            session = AppSessionService.create_session()
+            sid = session["id"]
+            
+            # 2. Setup thread store for this sid
+            from tools.gimo_server.ops_models import GimoThread
+            thread = GimoThread(id=sid, workspace_root=str(tmp_path), title="Test")
+            ConversationService.save_thread(thread)
+        
+            # 3. Create a pending request
+            request = ContextRequestService.create_request(sid, "Need more info", {"call_id": "call_123"})
+            
+            # 4. Resolve the request
+            ContextRequestService.resolve_request(sid, request["id"], "Here is the info: API key is XYZ")
+            
+            # 5. Resume the session
+            mock_run_result = MagicMock()
+            mock_run_result.status = "completed"
+            
+            with patch.object(AgenticLoopService, "_run_loop", return_value=mock_run_result):
+                with patch("tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter", return_value=(MagicMock(spec=ProviderAdapter), "p1", "m1")):
+                    res = await AgenticLoopService.resume_session(sid, workspace_root=str(tmp_path))
+                    
+                    assert res.status == "completed"
+                    
+                    # Verify tool result was injected
+                    updated_thread = ConversationService.get_thread(sid)
+                    tool_results = [item for turn in updated_thread.turns for item in turn.items if item.type == "tool_result"]
+                    assert len(tool_results) >= 1
+                    assert "API key is XYZ" in tool_results[0].content
+                    assert tool_results[0].metadata["call_id"] == "call_123"
+                    
+                    # Verify request was marked as archived in the session after resumption
+                    final_session = AppSessionService.get_session(sid)
+                    assert final_session["context_requests"][request["id"]]["status"] == "archived"

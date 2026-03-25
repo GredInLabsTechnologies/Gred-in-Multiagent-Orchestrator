@@ -78,6 +78,29 @@ class ContextRequestService:
         return cls.update_request_status(session_id, request_id, "resolved", result=evidence)
 
     @classmethod
+    def get_resolved_requests(cls, session_id: str) -> List[Dict[str, Any]]:
+        """Returns all resolved requests that haven't been archived yet."""
+        return cls.list_requests(session_id, "resolved")
+
+    @classmethod
+    def archive_resolved_requests(cls, session_id: str):
+        """Moves resolved requests to archived status."""
+        resolved = cls.get_resolved_requests(session_id)
+        for r in resolved:
+            cls.update_request_status(session_id, r["id"], "archived")
+
+    @classmethod
+    def get_request_history(cls, session_id: str) -> List[Dict[str, Any]]:
+        """Returns all requests (active and archived) for the session."""
+        return cls.list_requests(session_id)
+
+    @classmethod
+    def get_active_requests(cls, session_id: str) -> List[Dict[str, Any]]:
+        """Returns pending or resolved requests."""
+        all_reqs = cls.list_requests(session_id)
+        return [r for r in all_reqs if r["status"] in ("pending", "resolved")]
+
+    @classmethod
     def cancel_request(cls, session_id: str, request_id: str, reason: str) -> bool:
         """Cancels a context request."""
         return cls.update_request_status(session_id, request_id, "cancelled", result=reason)

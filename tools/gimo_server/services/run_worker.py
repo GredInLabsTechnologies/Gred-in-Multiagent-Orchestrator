@@ -620,6 +620,29 @@ class RunWorker:
             self._running_ids.add(fresh.id)
             asyncio.create_task(self._execute_run(fresh.id))
 
+    def _validate_task_spec(self, spec: Any) -> tuple[bool, str]:
+        """Strict validation of the Phase 5B task specification."""
+        if not isinstance(spec, dict):
+            return False, "TaskSpec must be a dictionary"
+            
+        required = [
+            "base_commit", "repo_handle", "allowed_paths", 
+            "acceptance_criteria", "evidence_hash", "context_pack_id", 
+            "worker_model", "requires_manual_merge"
+        ]
+        missing = [f for f in required if f not in spec]
+        if missing:
+            return False, f"Missing required fields: {', '.join(missing)}"
+            
+        # Specific constraints
+        if not spec.get("allowed_paths"):
+            return False, "allowed_paths cannot be empty for bounded execution"
+            
+        if spec.get("requires_manual_merge") is not True:
+            return False, "requires_manual_merge must be True in Phase 5B"
+            
+        return True, ""
+
     async def _execute_run(self, run_id: str) -> None:
         try:
             from .ops_service import OpsService
@@ -628,45 +651,68 @@ class RunWorker:
                 return
 
             # Phase 5B: No run without ValidatedTaskSpec
-            if not getattr(run, "validated_task_spec", None):
-                OpsService.append_log(
-                    run_id, level="ERROR",
-                    msg="[Phase 5B] Execution rejected: No ValidatedTaskSpec found in run metadata. Recon is required."
-                )
+            task_spec = getattr(run, "validated_task_spec", None)
+            if not task_spec:
+                msg = "[Phase 5B] Execution rejected: No ValidatedTaskSpec found. Recon required."
+                OpsService.append_log(run_id, level="ERROR", msg=msg)
                 OpsService.update_run_status(run_id, "error", msg="Missing ValidatedTaskSpec")
+                return
+
+            # Strict validation (B2)
+            valid, err = self._validate_task_spec(task_spec)
+            if not valid:
+                msg = f"[Phase 5B] Execution rejected: Malformed TaskSpec - {err}"
+                OpsService.append_log(run_id, level="ERROR", msg=msg)
+                OpsService.update_run_status(run_id, "error", msg=f"Invalid TaskSpec: {err}")
                 return
 
             # Build bounded worker context (Phase 5B)
             try:
-                task_spec = run.validated_task_spec
                 # If we have a repo_handle, we can resolve its path
                 repo_path = None
-                if task_spec.get("repo_handle"):
-                    path_str = AppSessionService.get_path_from_handle(task_spec["repo_handle"])
+                handle = task_spec.get("repo_handle")
+                if handle:
+                    path_str = AppSessionService.get_path_from_handle(handle)
                     if path_str:
                         repo_path = Path(path_str)
 
+                if not repo_path:
+                    msg = "[Phase 5B] Execution rejected: Could not resolve repo_handle to path."
+                    OpsService.append_log(run_id, level="ERROR", msg=msg)
+                    OpsService.update_run_status(run_id, "error", msg="Repo resolution failed")
+                    return
+
                 # Inject bounded context into the run context (Phase 5B 5.4)
-                if repo_path:
-                    # We inject this into child_context so EngineService correctly applies it
-                    if run.child_context is None:
-                        run.child_context = {}
-                    
-                    # Bounded context builder logic (5.4)
-                    bounded_ctx = self._build_worker_context(
-                        task=task_spec,
-                        repo_root=repo_path,
-                        max_files=5
-                    )
-                    run.child_context["gen_context"] = {
-                        "bounded_files": bounded_ctx
-                    }
-                    # Ensure allowed_paths are strictly respected by tool executor too
-                    run.child_context["allowed_paths"] = task_spec.get("allowed_paths", [])
-                    OpsService._persist_run(run)
+                if run.child_context is None:
+                    run.child_context = {}
+                
+                # Bounded context builder logic (5.4)
+                bounded_files = self._build_worker_context(
+                    task=task_spec,
+                    repo_root=repo_path,
+                    max_files=5
+                )
+                
+                # B2 Fail-Closed: If bounded context construction fails or is empty, block.
+                if not bounded_files:
+                    msg = "[Phase 5B] Execution rejected: Failed to construct bounded context (no files found)."
+                    OpsService.append_log(run_id, level="ERROR", msg=msg)
+                    OpsService.update_run_status(run_id, "error", msg="Bounded context empty")
+                    return
+
+                run.child_context["gen_context"] = {
+                    "bounded_files": bounded_files
+                }
+                # Ensure allowed_paths are strictly respected by tool executor too
+                run.child_context["allowed_paths"] = task_spec.get("allowed_paths", [])
+                OpsService._persist_run(run)
 
             except Exception as e:
-                logger.warning("Failed to build worker context for run %s: %s", run_id, e)
+                msg = f"[Phase 5B] Bounded context failure: {str(e)}"
+                logger.error(msg)
+                OpsService.append_log(run_id, level="ERROR", msg=msg)
+                OpsService.update_run_status(run_id, "error", msg="Context construction failure")
+                return
 
             from .engine_service import EngineService
             await EngineService.execute_run(run_id)

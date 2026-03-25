@@ -1147,8 +1147,95 @@ class AgenticLoopService:
                 user_message=user_message,
                 workspace_root=workspace_root,
                 token=token,
+                session_id=session_id,
             ):
                 yield event
+        finally:
+            await cls._stop_heartbeat(stop_event, heartbeat_task)
+            cls.release_thread_execution(thread_id, owner_id)
+
+    @classmethod
+    async def resume_session(
+        cls,
+        session_id: str,
+        workspace_root: str,
+        token: str = "system",
+        emit: EventEmitter | None = None,
+    ) -> AgenticResult:
+        """Resumes a paused execution after context requests are resolved.
+        
+        This method is the canonical entry point for Phase 5B resume logic.
+        """
+        from .context_request_service import ContextRequestService
+        resolved_list = ContextRequestService.get_resolved_requests(session_id)
+        if not resolved_list:
+            return AgenticResult(response="No resolved requests found for this session.", finish_reason="error")
+
+        thread_id = session_id  # In multi-surface App, session_id is used as thread_id
+        thread = ConversationService.get_thread(thread_id)
+        if not thread:
+            return AgenticResult(response=f"Thread {thread_id} not found.", finish_reason="error")
+
+        # Mark thread as executing
+        try:
+            reservation = cls.reserve_thread_execution(thread_id)
+            owner_id = str(reservation.get("owner_id") or "")
+        except ThreadExecutionBusyError:
+            return AgenticResult(response="Session is already being resumed elsewhere.", finish_reason="error")
+
+        stop_event, heartbeat_task = cls._start_thread_execution_heartbeat(thread_id, owner_id)
+
+        try:
+            # Inject resolved contexts as TOOL RESULTS
+            turn = ConversationService.add_turn(thread_id, agent_id="system")
+            if not turn:
+                 return AgenticResult(response="Failed to add recovery turn", finish_reason="error")
+                 
+            for req in resolved_list:
+                call_id = req.get("metadata", {}).get("call_id", f"call_{req['id'][:8]}")
+                content = f"[CONTEXT RESOLVED]: {req.get('result', 'No information provided.')}"
+                if req.get("payload"):
+                    content += f"\nData: {json.dumps(req['payload'], indent=2)}"
+                
+                ConversationService.append_item(
+                    thread_id, turn.id,
+                    GimoItem(
+                        type="tool_result",
+                        content=content,
+                        status="completed",
+                        metadata={"call_id": call_id, "tool_name": "request_context"}
+                    )
+                )
+                # Archive so it's only used once
+                ContextRequestService.update_request_status(session_id, req["id"], "archived")
+
+            # Reload thread to get merged messages for the LLM
+            thread = ConversationService.get_thread(thread_id)
+            mood = getattr(thread, "mood", "neutral")
+            mood_profile = get_mood_profile(mood)
+            system_prompt = cls._build_system_prompt(workspace_root, mood_profile)
+            messages = _build_messages_from_thread(thread.turns, system_prompt)
+
+            adapter, provider_id, model = _resolve_orchestrator_adapter()
+            return await cls._run_loop(
+                adapter=adapter,
+                provider_id=provider_id,
+                model=model,
+                workspace_root=workspace_root,
+                token=token,
+                mood=mood,
+                mood_profile=mood_profile,
+                messages=messages,
+                max_turns=10,
+                temperature=mood_profile.temperature,
+                tools=CHAT_TOOLS,
+                task_key="resume",
+                thread_id=thread_id,
+                thread=thread,
+                emit=emit,
+                persist_conversation=True,
+                session_id=session_id,
+            )
         finally:
             await cls._stop_heartbeat(stop_event, heartbeat_task)
             cls.release_thread_execution(thread_id, owner_id)

@@ -56,8 +56,16 @@ class FileWrite(ExecutionStage):
         if isinstance(llm_resp, dict):
             tool_calls = llm_resp.get("tool_calls", [])
         
-        # 2. Setup executor with policy
-        policy = RuntimePolicyService.load_policy_config()
+        # 2. Setup executor with policy (Per-run allowed_paths takes precedence)
+        policy = input.context.get("gen_context", {}).get("policy") or {}
+        if not policy:
+            # Fallback to field registry merge or direct context
+            allowed = input.context.get("allowed_paths")
+            if allowed:
+                policy = {"allowed_paths": allowed}
+            else:
+                from ...services.runtime_policy_service import RuntimePolicyService
+                policy = RuntimePolicyService.load_policy_config()
 
         workspace_root = input.context.get("workspace_root", ".")
         executor = ToolExecutor(workspace_root=workspace_root, policy=policy)
