@@ -202,6 +202,7 @@ class MergeGateService:
 
     @classmethod
     def _create_sandbox_worktree(cls, run_id: str, source_ref: str) -> Path:
+        # [LEGACY] Creation of sandbox worktrees directly over the source repo will be replaced in Phase 1.
         settings = get_settings()
         repo_root = Path(settings.repo_root_dir)
         sandbox_path = cls._sandbox_worktree_path(run_id)

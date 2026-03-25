@@ -15,7 +15,10 @@ logger = logging.getLogger("orchestrator.sub_agent_manager")
 INVENTORY_FILE = WORKTREES_DIR.parent / "runtime" / "sub_agents.json"
 
 class SubAgentManager:
-    """Gestiona el ciclo de vida, spawn y estado de agentes secundarios."""
+    """Gestiona el ciclo de vida, spawn y estado de agentes secundarios.
+    
+    **Model discovery authority only. Not the future worktree authority.**
+    """
     _sub_agents: Dict[str, SubAgent] = {}
     _synced_models: set[str] = set()
 

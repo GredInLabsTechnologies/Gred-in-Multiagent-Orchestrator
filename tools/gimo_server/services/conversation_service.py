@@ -16,7 +16,10 @@ logger = logging.getLogger("orchestrator.services.conversation")
 _MutationResultT = TypeVar("_MutationResultT")
 
 class ConversationService:
-    """Service for managing GIMO conversation threads, turns, and items."""
+    """Service for managing GIMO conversation threads, turns, and items.
+    
+    **Authority of threads.**
+    """
 
     THREADS_DIR: Path = OPS_DATA_DIR / "threads"
     _locks_guard = threading.Lock()

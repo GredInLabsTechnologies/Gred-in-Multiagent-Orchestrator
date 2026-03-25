@@ -315,7 +315,7 @@ class RunWorker:
             if agent.get("id"):
                 from .sub_agent_manager import SubAgentManager
                 sa = SubAgentManager.get_sub_agent(agent.get("id"))
-                if sa and sa.worktreePath:
+                if sa and sa.worktreePath: # [TRANSITIONAL/OBSOLETE] Worktree-based sub-agent paths
                     base_path = Path(sa.worktreePath)
                     OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Using isolated worktree at {base_path}")
 
@@ -513,6 +513,7 @@ class RunWorker:
         )
 
     async def _handle_legacy_execution(self, run_id: str, prompt: str, intent_effective: str, path_scope: list[str]) -> None:
+        # [TRANSITIONAL/OBSOLETE] Worktree-based execution directly over source to be replaced in Phase 1.
         try:
             resp = await asyncio.wait_for(
                 ProviderService.static_generate_phase6_strategy(

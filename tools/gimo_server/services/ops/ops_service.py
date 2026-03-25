@@ -19,6 +19,8 @@ class OpsService(
     OpsServiceBase,
 ):
     """Composite OpsService assembled from domain mixins.
+    
+    **Authority of drafts, approved, runs, and locks.**
 
     Method resolution order ensures that ``cls`` in every mixin
     resolves to this final class, which carries all class variables

@@ -193,7 +193,10 @@ def _resolve_orchestrator_adapter() -> tuple[ProviderAdapter, str, str]:
 
 
 class AgenticLoopService:
-    """Runs the agentic loop: LLM -> tool_calls -> execute -> repeat."""
+    """Runs the agentic loop: LLM -> tool_calls -> execute -> repeat.
+    
+    **Authority of the conversational frontier loop.**
+    """
 
     THREAD_LOCK_SCOPE = "thread_execution"
     THREAD_LOCK_TTL_SECONDS = 120

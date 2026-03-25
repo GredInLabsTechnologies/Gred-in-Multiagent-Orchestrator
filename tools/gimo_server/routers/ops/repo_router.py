@@ -167,7 +167,7 @@ def get_active_repo(
     }
 
 
-@router.post("/open")
+@router.post("/open") # [LEGACY/OPERATOR]
 def open_repo(
     path: str = Query(...),
     auth: AuthContext = Depends(require_read),
@@ -183,7 +183,7 @@ def open_repo(
     return {"status": "success", "message": "Repo signaled for opening (server-agnostic)"}
 
 
-@router.post("/select")
+@router.post("/select") # [LEGACY/OPERATOR]
 def select_repo(
     path: str = Query(...),
     request: Request = None,

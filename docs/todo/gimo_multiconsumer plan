@@ -1,0 +1,946 @@
+[GOAL]
+
+Definir el plan maestro final, unificado y por fases para implementar a la vez:
+
+GIMO + ChatGPT Apps
+GIMO CLI/TUI cockpit
+todo ello bajo una sola verdad: GIMO es multi-superficie.
+
+No son productos excluyentes.
+Son clientes distintos del mismo sistema soberano.
+
+[INPUT DATA]
+
+Estado real del repo, ya verificado:
+
+GIMO ya es un sistema con backend FastAPI, UI web, OPS file-backed, MCP general y rutas modulares. main.py monta /mcp, routers OPS y storage de drafts/approved/runs/threads
+El sistema ya tiene conversación, threads, proofs, streaming e HITL sobre /ops/threads/*, con ConversationService y AgenticLoopService operativos
+OpsService ya está bien modularizado por mixins (DraftMixin, RunMixin, LockMixin, etc.), así que no hay que reinventar OPS
+El problema estructural gordo sigue vivo: subagentes y merge gate aún dependen de git worktree del repo fuente
+El MCP actual es generalista; sirve para bridge, no como façade endurecida específica para ChatGPT Apps
+El CLI ya tiene bastante material: gimo.py implementa chat interactivo, slash commands, status, diff, rollback, Ctrl+C no destructivo, verbose y post-run report; no parte de cero
+cli_commands.py ya centraliza COMMAND_REGISTRY; esto hay que preservarlo como autoridad única de comandos terminales
+gimo_tui.py ya existe y reutiliza _api_request y dispatch_slash_command, pero su layout y contrato aún no son el cockpit final aprobado
+gimo_cli_renderer.py ya soporta notices, post-run report, raw SSE en verbose y _generation_active; hay base reutilizable
+run_worker.py hoy todavía resuelve ejecución y escritura con lógica heredada y hasta puede usar worktreePath de subagente; además es el lugar natural para meter el contexto quirúrgico P2, pero necesita cirugía seria
+
+[OPERATIONS]
+
+He unificado ambos planes en un solo programa con estas reglas:
+
+GIMO Core manda.
+Frontend web, CLI/TUI, API, MCPs y ChatGPT Apps son superficies cliente.
+No se implementa una arquitectura “App-céntrica”.
+No se duplica lógica entre CLI, TUI y App.
+El orden está pensado para minimizar los fallos típicos de Gemini:
+scope creep,
+claims antes que evidencia,
+cerrar tareas a medias,
+dejar drift entre clientes.
+
+[VERIFICATION]
+
+Este plan está acotado para que otro agente lo ejecute sin inventarse media arquitectura:
+
+define orden estricto
+define dependencias
+define archivos
+define endpoints
+define gates
+define criterios de salida
+define tests mínimos
+define no-goals
+define riesgos
+define qué ya existe y qué no tocar a lo loco
+
+[RESULT]
+
+Plan maestro final — GIMO multi-superficie
+0) Modelo de producto congelado
+Definición oficial
+
+GIMO es una plataforma soberana multi-superficie.
+
+Superficies oficiales
+Frontend web
+CLI/TUI como cliente terminal
+API
+MCPs
+ChatGPT Apps
+Regla absoluta
+
+Toda la lógica de dominio vive en:
+
+backend
+servicios
+contratos canónicos
+
+Nunca en:
+
+UI web
+CLI
+TUI
+façade App
+MCP específico
+1) Decisiones congeladas
+No negociables
+CLI/TUI y ChatGPT Apps no son excluyentes.
+ChatGPT Apps no reemplaza CLI/TUI.
+CLI y TUI son dos modos del mismo cliente terminal.
+No se ejecuta sobre el repo fuente.
+No se escribe sin ValidatedTaskSpec.
+Ollama no hace recon global del repo.
+El recon global lo hace la autoridad frontier del core.
+Merge manual siempre.
+Purge real siempre tras merge/discard.
+Una sola lógica de dominio; varias fachadas cliente.
+2) Arquitectura objetivo final
+                         ┌──────────────────────────┐
+                         │        GIMO Core         │
+                         │                          │
+                         │ ThreadSessionAuthority   │
+                         │ RepoReconAuthority       │
+                         │ DraftValidationAuthority │
+                         │ EphemeralRepoAuthority   │
+                         │ WorkerAuthority          │
+                         │ ReviewMergeAuthority     │
+                         │ PurgeAuthority           │
+                         │ OperatorStatusAuthority  │
+                         │ NoticePolicyAuthority    │
+                         └────────────┬─────────────┘
+                                      │
+             ┌────────────────────────┼────────────────────────┐
+             │                        │                        │
+      ┌──────▼──────┐         ┌──────▼──────┐         ┌──────▼──────┐
+      │ API canónica│         │ MCP general │         │ App MCP     │
+      │ /ops/*      │         │ IDE/agents  │         │ /mcp/app    │
+      └──────┬──────┘         └─────────────┘         └──────┬──────┘
+             │                                               │
+   ┌─────────┼───────────┬──────────────┐          ┌─────────▼─────────┐
+   │         │           │              │          │ ChatGPT Apps      │
+┌──▼──┐  ┌───▼───┐   ┌───▼───┐      ┌───▼───┐      │ widgets/resources │
+│ Web │  │ CLI   │   │ TUI   │      │ Others│      └───────────────────┘
+└─────┘  └───────┘   └───────┘      └───────┘
+3) Orden maestro de implementación
+Orden duro
+
+Fase 0 → 1 → 2 → 3 → 4 → 5 → 6
+
+No saltar fases.
+No hacer TUI final antes de tener contratos backend.
+No hacer App façade final antes de aislar ejecución.
+
+4) Fase 0 — Congelación de contratos y limpieza de autoridad
+Objetivo
+
+Establecer el terreno para que Gemini no derive ni cierre tareas falsas.
+
+Alcance
+congelar contratos existentes reutilizables
+marcar legacy vs canónico
+definir archivos y rutas que son autoridad
+Tareas exactas
+0.1 Documentar oficialmente la topología multi-superficie
+
+Crear/actualizar:
+
+docs/SYSTEM.md
+docs/API.md
+docs/CLIENT_SURFACES.md nuevo
+
+Contenido:
+
+GIMO Core
+superficies
+qué es canónico
+qué es legacy
+qué cliente consume qué
+0.2 Marcar autoridades
+ConversationService = autoridad de threads
+AgenticLoopService = autoridad del loop frontier conversacional
+OpsService = autoridad de drafts/approved/runs/locks
+GitService = primitivas git, no diseño final de aislamiento
+SubAgentManager = discovery de modelos, no autoridad de worktree futuro
+0.3 Etiquetar legacy
+
+Marcar como legacy o transitional:
+
+/mcp general para App entry
+/ops/openapi.json filtered-actions
+repo selection por path
+worktree-based execution
+merge gate sandbox sobre repo fuente
+Entregables
+docs actualizados
+lista de contratos congelados
+lista de zonas legacy
+Gate de salida
+
+No se toca código de ejecución todavía.
+Solo se autoriza pasar a Fase 1 si la topología oficial queda escrita.
+
+5) Fase 1 — Aislamiento de ejecución: cortar la dependencia del repo fuente
+Objetivo
+
+Eliminar la raíz del problema: la ejecución no puede seguir colgando del repo fuente.
+
+Alcance
+introducir EphemeralRepoAuthority
+empezar a retirar git worktree del flujo operativo
+mantener el resto del sistema funcionando
+Tareas exactas
+1.1 Extender config
+
+Modificar:
+
+tools/gimo_server/config.py
+
+Añadir:
+
+ephemeral_repos_dir
+repo_mirrors_dir
+app_sessions_dir
+purge_quarantine_dir
+
+No borrar worktrees_dir todavía. Marcarlo transitional.
+
+1.2 Crear EphemeralRepoService
+
+Crear:
+
+tools/gimo_server/services/ephemeral_repo_service.py
+
+Responsabilidades:
+
+mirror bare opcional
+clone desacoplado
+checkout a base_commit
+crear branch efímera
+freeze
+diff snapshot
+destroy/purge
+1.3 Endurecer GitService
+
+Modificar:
+
+tools/gimo_server/services/git_service.py
+
+Añadir primitivas:
+
+clone_local()
+fetch_mirror()
+checkout_commit()
+create_ephemeral_branch()
+bundle_diff()
+apply_bundle()
+clean_repo_check()
+current_head()
+1.4 Cortar dependencia de SubAgentManager
+
+Modificar:
+
+tools/gimo_server/services/sub_agent_manager.py
+
+Regla nueva:
+
+discovery de modelos Ollama se queda
+creación de workspace ya no usa GitService.add_worktree(REPO_ROOT_DIR, ...)
+el worker recibe ephemeral_repo_id o workspace_path ya provisionado por EphemeralRepoAuthority
+1.5 Refactor de MergeGateService
+
+Modificar:
+
+tools/gimo_server/services/merge_gate_service.py
+
+Regla nueva:
+
+no crear sandbox worktree desde repo fuente para flujo nuevo
+aceptar ephemeral_repo_id
+operar sobre bundle/preview/retest/merge staging
+Entregables
+servicio de repo efímero
+flujo de creación/destrucción
+SubAgentManager sin worktree-from-source
+MergeGateService preparado para flujo nuevo
+Tests obligatorios
+test_ephemeral_repo_created_outside_source_repo
+test_subagent_no_longer_creates_source_worktree
+test_merge_gate_does_not_require_source_worktree
+test_ephemeral_repo_destroy_removes_workspace
+Gate de salida
+
+No puede quedar ningún camino nuevo de ejecución que dependa del repo fuente como workspace.
+
+6) Fase 2 — Contratos canónicos compartidos por todas las superficies
+Objetivo
+
+Que web, CLI/TUI, App y futuros clientes lean el mismo estado y cambien el mismo estado.
+
+Alcance
+status agregado
+config de thread
+reset de thread
+context add
+usage snapshot
+notice policy base
+Tareas exactas
+2.1 Crear ThreadSessionService
+
+Crear o refactor:
+
+tools/gimo_server/services/thread_session_service.py
+
+Debe centralizar:
+
+reset
+config update
+context add/remove
+usage snapshot
+permission mode
+effort
+debug/focus state si se decide persistir
+2.2 Extender conversation_router.py
+
+Añadir rutas canónicas:
+
+POST /ops/threads/{thread_id}/reset
+POST /ops/threads/{thread_id}/config
+POST /ops/threads/{thread_id}/context/add
+GET /ops/threads/{thread_id}/usage
+
+Hoy el router inspeccionado no las formaliza ahí, y el CLI ya las necesita conceptualmente
+
+2.3 Crear OperatorStatusService
+
+Crear:
+
+tools/gimo_server/services/operator_status_service.py
+
+Exponer:
+
+GET /ops/operator/status
+
+Debe devolver en un payload único:
+
+repo
+branch
+dirty files
+active provider/model
+permission mode
+backend status/version
+active run/stage
+budget spend/limit
+context %
+last thread/turn
+alerts
+2.4 Crear NoticePolicyService
+
+Crear:
+
+tools/gimo_server/services/notice_policy_service.py
+
+Reglas mínimas:
+
+info: nueva versión
+warning: ctx > 70%
+warning: budget > 80%
+error: stream caído
+error: purge failed
+warning: merge base drift
+Entregables
+contratos backend de sesión/thread
+operator/status
+política de notices reutilizable
+Tests obligatorios
+test_thread_reset_clears_context_not_identity
+test_thread_config_updates_effort_and_permissions
+test_context_add_persists_attached_file
+test_operator_status_returns_single_snapshot
+test_notice_policy_ctx_warning
+test_notice_policy_budget_warning
+Gate de salida
+
+A partir de aquí, ningún cliente compone status o semánticas de thread por su cuenta.
+
+7) Fase 3 — Consolidación CLI/TUI sobre contratos canónicos
+Objetivo
+
+Cerrar el plan terminal sin drift y sin reimplementar backend en cliente.
+
+Alcance
+slash commands definitivos
+status consumiendo snapshot backend
+notices estables
+focus/debug reales
+post-run report normalizado
+TUI aún no final, pero ya montado sobre contratos buenos
+Tareas exactas
+3.1 Mantener cli_commands.py como única autoridad de comandos
+
+Modificar solo si hace falta:
+
+cli_commands.py
+
+Reglas:
+
+todo comando registrado ahí
+toda validación léxica ahí
+gimo.py y gimo_tui.py solo conectan callbacks/render
+
+Esto ya va bien orientado, no romperlo
+
+3.2 Limpiar gimo.py
+
+Modificar:
+
+gimo.py
+
+Cambios:
+
+gimo status deja de fanoutear 6 endpoints; llama a /ops/operator/status
+/tokens usa GET /ops/threads/{id}/usage
+/effort, /permissions, /add, /reset usan contratos ya oficiales
+post-run report usa payload backend normalizado, no best effort
+Ctrl+C no destructivo se deja sin ambigüedades:
+cortar stream
+no cerrar thread
+mensaje claro
+solo /exit y /quit salen
+3.3 Endurecer gimo_cli_renderer.py
+
+Modificar:
+
+gimo_cli_renderer.py
+
+Cerrar:
+
+render_notice()
+render_post_run_report()
+header con perm:
+focus/debug render contract
+3.4 Ajustar gimo_tui.py
+
+Modificar:
+
+gimo_tui.py
+
+Objetivo de esta fase:
+
+no layout final todavía
+sí eliminar drift
+consumir operator/status
+notices desde NoticePolicyService
+slash commands por cli_commands.py
+no meter lógica de backend inline
+Entregables
+CLI sólido y limpio
+TUI coherente con backend
+cero fan-out artesanal para status crítico
+Tests obligatorios
+tests/unit/test_slash_commands.py
+tests/unit/test_ctrl_c_behavior.py
+ampliar test_gimo_cli.py
+ampliar test_cli_regression.py
+
+Escenarios:
+
+/reset pide confirmación y reinicia backend
+/permissions persiste perm
+/effort persiste
+/add adjunta fichero
+Ctrl+C no mata sesión
+status usa snapshot backend único
+Gate de salida
+
+CLI/TUI quedan operativos sobre contratos definitivos, no sobre heurísticas cliente.
+
+8) Fase 4 — ChatGPT Apps como nueva superficie oficial
+Objetivo
+
+Añadir App sin contaminar el core ni reutilizar mal el MCP general.
+
+Alcance
+façade App endurecida
+AppSession
+resources/widgets mínimos
+IDs opacos
+cero paths host
+cero git crudo
+Tareas exactas
+4.1 Crear App façade
+
+Crear:
+
+tools/gimo_server/app_mcp/server.py
+tools/gimo_server/app_mcp/tools.py
+tools/gimo_server/app_mcp/resources.py
+
+Montar en:
+
+main.py → app.mount("/mcp/app", app_mcp.sse_app())
+
+No tocar /mcp general salvo marcarlo legacy/general-purpose
+
+4.2 Crear AppSessionService
+
+Crear:
+
+tools/gimo_server/services/app_session_service.py
+
+Responsabilidades:
+
+session create/close
+repo bind por handle opaco
+active recon job
+active context pack
+active draft/run binding
+4.3 Añadir app_router.py
+
+Crear:
+
+tools/gimo_server/routers/ops/app_router.py
+
+Endpoints:
+
+POST /ops/app/sessions
+GET /ops/app/sessions/{id}
+POST /ops/app/sessions/{id}/repo/select
+POST /ops/app/sessions/{id}/recon/jobs
+POST /ops/app/sessions/{id}/drafts
+POST /ops/app/runs
+GET /ops/app/runs/{id}/review
+POST /ops/app/runs/{id}/discard
+POST /ops/app/sessions/{id}/purge
+4.4 Diseñar resources/widgets mínimos
+
+Resources:
+
+session overview
+validated spec
+review summary
+diff
+logs
+context requests
+Entregables
+nueva surface App
+App session model
+tools/resources mínimos
+integración con core
+Tests obligatorios
+test_app_surface_no_host_paths
+test_app_repo_selection_uses_handles_not_paths
+test_app_session_lifecycle
+test_app_review_bundle_access
+Gate de salida
+
+ChatGPT Apps ya existe como cliente oficial, pero aún sin pipeline completo de recon/validation/context escalation.
+
+9) Fase 5 — Recon frontier, validación y contexto quirúrgico
+Objetivo
+
+Conectar el pensamiento fuerte del sistema con ejecución acotada.
+
+Alcance
+recon job
+read proofs
+context pack
+validated task spec
+context request
+worker context injection quirúrgico
+Tareas exactas
+5.1 Crear RepoReconService
+
+Crear:
+
+tools/gimo_server/services/repo_recon_service.py
+
+Responsabilidades:
+
+list/search/read controlado
+pruebas de lectura (ReadProof)
+resumen estructural
+file handles opacos
+repo context extraction
+5.2 Crear DraftValidationService
+
+Crear:
+
+tools/gimo_server/services/draft_validation_service.py
+
+Debe producir:
+
+RepoContextPack
+ValidatedTaskSpec
+
+Campos obligatorios:
+
+base_commit
+repo_handle
+allowed_paths
+acceptance_criteria
+evidence_hash
+context_pack_id
+worker_model
+requires_manual_merge=true
+5.3 Crear ContextRequestService
+
+Crear:
+
+tools/gimo_server/services/context_request_service.py
+
+Flujo:
+
+worker pide más contexto
+core bloquea ejecución
+frontier resuelve
+nuevo delta de contexto
+reemisión de spec si toca
+5.4 Modificar run_worker.py
+
+Modificar:
+
+tools/gimo_server/services/run_worker.py
+
+Introducir:
+
+_build_worker_context(task, repo_index, max_files=5)
+
+Reglas:
+
+símbolos
+imports
+clases
+proximidad de rutas
+nada de keyword matching idiota
+nada de contenido completo si no hace falta
+
+run_worker.py es el lugar correcto, pero hay que limpiar primero su acoplamiento heredado
+
+5.5 Integrar con AgenticLoopService
+
+Modificar:
+
+tools/gimo_server/services/agentic_loop_service.py
+
+Separar paletas:
+
+recon tools frontier
+execution tools bounded
+App tools
+terminal/operator tools
+Entregables
+recon formal
+evidencia formal
+spec formal
+contexto quirúrgico
+escalado formal
+Tests obligatorios
+test_recon_generates_read_proofs
+test_validated_task_requires_evidence_hash
+test_no_run_without_validated_task_spec
+test_worker_context_is_scoped_and_symbol_aware
+test_context_request_pauses_and_resumes_run
+Gate de salida
+
+A partir de aquí, ningún worker local ejecuta con recon libre.
+
+10) Fase 6 — Review / Merge / Discard / Purge cross-surface
+Objetivo
+
+Cerrar el ciclo operacional completo para todas las superficies.
+
+Alcance
+review bundle
+retest
+merge preview
+manual merge
+discard
+purge real
+purge receipt
+Tareas exactas
+6.1 Crear ReviewMergeService
+
+Crear:
+
+tools/gimo_server/services/review_merge_service.py
+
+Debe producir:
+
+changed files
+diff
+logs
+tests
+lint/typecheck
+evidence chain
+merge preview
+base drift detection
+6.2 Redefinir merge final
+
+Regla:
+
+tocar repo fuente solo en el acto final
+con lock
+con commit_before
+con comprobación de drift
+con rollback claro
+6.3 Crear PurgeService
+
+Crear:
+
+tools/gimo_server/services/purge_service.py
+
+Doble fase:
+
+logical purge
+physical purge
+
+Persistencia final mínima:
+
+ids
+hashes
+outcome
+timestamps
+commit refs
+contadores
+modelo usado
+6.4 Integrar review en todas las superficies
+web
+CLI/TUI
+App
+
+Misma lógica:
+
+review
+retest
+merge
+discard
+purge
+Entregables
+ciclo cerrado real
+purge real
+auditoría mínima no reconstructiva
+Tests obligatorios
+test_review_bundle_contains_diff_logs_tests
+test_merge_preview_detects_base_drift
+test_manual_merge_only
+test_discard_triggers_purge
+test_purge_removes_reconstructive_state
+test_purge_receipt_persisted
+test_source_repo_untouched_until_final_merge
+Gate de salida
+
+La operación entera puede iniciarse desde una superficie y cerrarse desde otra sin inconsistencia.
+
+11) Fase 7 — TUI final y consolidación de paridad multi-superficie
+Objetivo
+
+Rematar la experiencia terminal y cerrar la migración.
+
+Alcance
+layout TUI final
+paridad de lifecycle con App y web
+deprecaciones limpias
+Tareas exactas
+7.1 Refactor completo de gimo_tui.py
+
+Implementar layout aprobado:
+
+Header fijo:
+repo · branch · model · perm · budget · ctx
+zona superior:
+graph 75%
+economy/sidebar 25%
+notices debajo
+chat
+input compacto
+stream de eventos
+estados de nodo alineados con frontend
+7.2 Normalizar modos
+Focus
+Debug
+
+Mis semánticas recomendadas:
+
+Focus: respuesta + tool summary + notices + post-run
+Debug: SSE raw + timings + payloads + topology + notices
+7.3 Deprecaciones
+
+Marcar:
+
+/ops/openapi.json actions-safe como legacy integration
+/mcp general como general bridge, no façade App
+rutas de selección por path como operator/admin legacy
+worktree-based execution como obsolete
+Entregables
+TUI cockpit final
+multi-superficie consolidado
+documentación final
+legacy marcado
+Tests obligatorios
+test_tui_header_reads_operator_status
+test_tui_notices_respect_policy
+test_tui_graph_updates_from_plan_proposed
+test_cli_and_tui_share_permission_state
+test_app_cli_tui_can_read_same_run_state
+Gate de salida
+
+GIMO queda oficialmente consolidado como plataforma multi-superficie.
+
+12) Dependencias entre fases
+Dependencia fuerte
+Fase 1 antes que 5 y 6
+Fase 2 antes que 3, 4 y 7
+Fase 5 antes que 6
+Fase 6 antes que cierre definitivo de App y TUI
+Dependencia flexible
+Fase 3 y 4 pueden solaparse parcialmente una vez cerrada la Fase 2
+13) Archivo por archivo: mapa de trabajo
+Backend
+
+Modificar:
+
+tools/gimo_server/main.py
+tools/gimo_server/config.py
+tools/gimo_server/services/git_service.py
+tools/gimo_server/services/sub_agent_manager.py
+tools/gimo_server/services/merge_gate_service.py
+tools/gimo_server/services/run_worker.py
+tools/gimo_server/services/agentic_loop_service.py
+tools/gimo_server/routers/ops/conversation_router.py
+tools/gimo_server/ops_routes.py
+
+Crear:
+
+services/ephemeral_repo_service.py
+services/thread_session_service.py
+services/operator_status_service.py
+services/notice_policy_service.py
+services/repo_recon_service.py
+services/draft_validation_service.py
+services/context_request_service.py
+services/review_merge_service.py
+services/purge_service.py
+services/app_session_service.py
+routers/ops/app_router.py
+app_mcp/server.py
+app_mcp/tools.py
+app_mcp/resources.py
+Terminal client
+
+Modificar:
+
+cli_commands.py
+gimo.py
+gimo_cli_renderer.py
+gimo_tui.py
+Tests
+
+Modificar/crear:
+
+tests/unit/test_gimo_cli.py
+tests/unit/test_cli_regression.py
+tests/unit/test_slash_commands.py
+tests/unit/test_ctrl_c_behavior.py
+tests/unit/test_operator_status.py
+tests/unit/test_notice_policy.py
+tests/e2e/test_ephemeral_repo_flow.py
+tests/e2e/test_cross_surface_run_lifecycle.py
+tests/e2e/test_purge_receipt.py
+14) Criterios de aceptación globales
+
+El programa completo solo está terminado si se cumple todo:
+
+GIMO funciona como plataforma multi-superficie.
+ChatGPT Apps es cliente oficial, no parche.
+CLI/TUI es cliente oficial, no parche.
+No existe ejecución sobre repo fuente.
+No existe escritura sin ValidatedTaskSpec.
+El worker local no hace recon global.
+status es backend-driven y compartido.
+Notices comparten política.
+Ctrl+C en CLI es no destructivo y probado.
+TUI refleja lifecycle real.
+Merge siempre manual.
+Purge real tras cierre.
+No queda estado reconstructivo app-facing tras merge/discard.
+No hay duplicación de lógica importante entre superficies.
+15) Reglas operativas para Gemini
+
+Esto es lo más importante si quieres que no la lie.
+
+Regla 1
+
+Una fase = un objetivo = un gate.
+No mezclar Fase 1 con Fase 5 “porque ya que estamos”.
+
+Regla 2
+
+No declarar DONE sin test del gate de esa fase.
+
+Regla 3
+
+No crear endpoints nuevos si el mismo objetivo puede resolverse ampliando uno canónico ya planificado.
+
+Regla 4
+
+No duplicar semántica cliente.
+
+slash commands → cli_commands.py
+status → backend snapshot
+notices → policy central
+thread state → backend
+Regla 5
+
+No tocar el repo fuente en ninguna implementación provisional.
+
+Regla 6
+
+No cerrar una fase con stubs cosméticos.
+Si la fase habla de purge, tiene que purgar de verdad.
+Si habla de status, tiene que salir del backend.
+Si habla de TUI, tiene que leer estado real.
+
+Regla 7
+
+Cada PR o bloque debe indicar explícitamente:
+
+archivos tocados
+endpoints tocados
+invariantes preservados
+tests añadidos
+riesgos introducidos
+16) Secuencia práctica recomendada de ejecución real
+Sprint 1
+Fase 0 completa
+Fase 1.1 a 1.3
+Sprint 2
+Fase 1.4 y 1.5
+Fase 2 completa
+Sprint 3
+Fase 3 completa
+Fase 4.1 y 4.2
+Sprint 4
+Fase 4.3 y 4.4
+Fase 5.1 a 5.3
+Sprint 5
+Fase 5.4 y 5.5
+Fase 6.1 y 6.2
+Sprint 6
+Fase 6.3 y 6.4
+Fase 7 completa
+17) No-goals explícitos
+
+No hacer:
+
+un frontend nuevo como condición
+una arquitectura paralela para App
+otro storage paralelo a OPS
+otro sistema de threads paralelo
+un TUI bonito desconectado del core
+un CLI que compute status por su cuenta a largo plazo
+una App con paths host o git crudo
+cualquier atajo que vuelva a meter worktrees del repo fuente como base
+
+[STATUS]
+
+Este es el plan completo y final por fases, ya unificado, multi-superficie y acotado para que otro agente no improvise.

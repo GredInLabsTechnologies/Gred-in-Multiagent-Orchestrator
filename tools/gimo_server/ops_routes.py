@@ -50,7 +50,7 @@ async def get_filtered_openapi(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
 ):
-    """Return a filtered OpenAPI spec with only actions-safe endpoints.
+    """[LEGACY] integration. Return a filtered OpenAPI spec with only actions-safe endpoints.
 
     Useful for ChatGPT Actions import — excludes admin-only endpoints
     like /ops/provider, /ops/generate, PUT /ops/plan, etc.

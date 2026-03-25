@@ -31,7 +31,7 @@ All endpoints require `Authorization: Bearer <ORCH_TOKEN>`.
 - `POST|GET /ops/runs`, `GET|POST /ops/runs/{id}[/cancel]`: Run execution state.
 - `GET|PUT /ops/provider` & `POST /ops/generate`: Provider configuration and LLM generation.
 - `GET|PUT /ops/config`: General OPS config.
-- `GET /ops/openapi.json`: OpenAPI schema for integrations.
+- `GET /ops/openapi.json`: [LEGACY] OpenAPI schema for integrations.
 
 ## 4. Multi-Agent API (UI / Orchestrator)
 - `GET /ui/agent/{agent_id}/quality`: Quality metrics.

@@ -12,7 +12,7 @@ This document defines **what GIMO is today** (not a roadmap). If something confl
 
 ## 0) Product definition
 
-**GIMO (Gred in Multiagent Orchestrator)** is a token-protected FastAPI service + UI that provides a safe, auditable, and human-in-the-loop control plane for running LLM-driven operational workflows.
+**GIMO (Gred in Multiagent Orchestrator)** is a multi-surface sovereign platform (Web, CLI/TUI, API, MCPs, ChatGPT Apps) powered by a token-protected FastAPI service that provides a safe, auditable, and human-in-the-loop control plane for running LLM-driven operational workflows. See [CLIENT_SURFACES.md](CLIENT_SURFACES.md) for the official topology.
 
 Core principles:
 
