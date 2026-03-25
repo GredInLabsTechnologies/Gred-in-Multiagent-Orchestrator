@@ -135,229 +135,26 @@ class RunWorker:
         run = OpsService.get_run(run_id)
         return run is not None and run.status in ("pending", "running", "awaiting_subagents", "awaiting_review")
 
+    # --- LEGACY PATHS REMOVED (OBSOLETE) ---
     @staticmethod
     def _extract_target_path(text: str) -> Optional[str]:
-        """Extract a full target file path (TARGET_FILE: ...) or a filename.
-
-        Handles:
-        - Explicit TARGET_FILE directive (highest priority)
-        - Windows absolute paths  (C:/... or C:\\...)
-        - Relative paths with directory components (docs/DISEÑO_CALCULADORA.md)
-        - Unicode filenames (e.g. names with Ñ, accents, etc.)
-        - Quoted or bare filenames as fallback
-        """
-        import re
-
-        # Priority 1: Explicit TARGET_FILE directive
-        m = re.search(r"TARGET_FILE:\s*(\S+)", text)
-        if m:
-            return m.group(1).strip()
-
-        # Priority 2: Windows absolute path
-        m = re.search(r"([A-Za-z]:[/\\][^\s\"']+\.\w{1,5})", text)
-        if m:
-            return m.group(1).strip()
-
-        # Priority 3: Relative path with at least one directory component
-        # Matches e.g. "docs/DISEÑO_CALCULADORA.md" or "src/foo/bar.py"
-        # Uses \S to allow Unicode characters in the path.
-        m = re.search(r"(\S+/[^\s\"']+\.\w{1,5})", text)
-        if m:
-            candidate = m.group(1).strip().strip("'\",")
-            if "." in candidate.split("/")[-1]:  # last segment has extension
-                return candidate
-
-        # Priority 4: Quoted filename (with Unicode support via \S)
-        m = re.search(r"['\"]([^\s\"']+\.\w{1,5})['\"]", text)
-        if m:
-            return m.group(1)
-
-        # Priority 5: Bare filename after action keyword (Unicode-aware)
-        m = re.search(
-            r"(?:create|crear|write|escribir|generar|generate|file|archivo|llamado|named?)"
-            r"\s+['\"]?(\S+\.\w{1,5})",
-            text,
-            re.IGNORECASE,
-        )
-        if m:
-            return m.group(1).strip("'\",")
-
+        """OBSOLETE: Use EngineService and tools."""
         return None
 
     async def _execute_file_task(
         self,
-        run_id: str,
-        task_id: str,
-        title: str,
-        description: str,
-        system_prompt: str,
-        model: str,
-        base_path: Optional[Path] = None,
-        intent_effective: str = "",
-        path_scope: Optional[list[str]] = None,
+        *args, **kwargs
     ) -> bool:
-        """
-        Execute a file-write task via LLM. Returns True if handled.
+        """OBSOLETE: Replaced by ToolExecutor/EngineService."""
+        return False
 
-        Strategy:
-        1. Extract target path from description or system_prompt
-        2. Always call the LLM to generate the file content
-        3. Write via FileService
-        """
-        from .file_service import FileService
-        from ..config import get_settings
-        import re
+    async def _process_task(self, *args, **kwargs) -> None:
+        """OBSOLETE: Replaced by ToolExecutor/EngineService."""
+        pass
 
-        combined_text = f"{title} {description} {system_prompt}"
-        target = self._extract_target_path(combined_text)
-
-        if not target:
-            OpsService.append_log(
-                run_id, level="WARN",
-                msg=f"Task {task_id}: Detected file op but couldn't extract target path. Skipping."
-            )
-            return False
-
-        # Determine full path: absolute path or relative to repo root
-        target_path = Path(target)
-        if not target_path.is_absolute():
-            settings = get_settings()
-            repo_root = base_path or settings.repo_root_dir
-            target_path = repo_root / target
-
-        # Workspace bounds check: reject paths that escape the repo root
-        try:
-            resolved_target = target_path.resolve()
-            resolved_root = Path(str(base_path or get_settings().repo_root_dir)).resolve()
-            resolved_target.relative_to(resolved_root)
-            target_path = resolved_target
-        except ValueError:
-            OpsService.append_log(
-                run_id, level="ERROR",
-                msg=f"Task {task_id}: Path traversal rejected — '{target}' escapes workspace."
-            )
-            return False
-
-        OpsService.append_log(
-            run_id, level="INFO",
-            msg=f"Task {task_id}: File target → {target_path} (model: {model})"
-        )
-
-        # Always call the LLM to generate the file content
-        try:
-            OpsService.append_log(
-                run_id, level="INFO",
-                msg=f"Task {task_id}: Calling LLM ({model}) to generate file content..."
-            )
-            generation_prompt = (
-                f"{system_prompt}\n\n"
-                f"Generate ONLY the raw file content for '{target_path.name}'. "
-                f"Do not include explanations, markdown fences, or anything else — "
-                f"just the exact content that should be written to the file."
-            )
-            llm_resp = await asyncio.wait_for(
-                ProviderService.static_generate_phase6_strategy(
-                    prompt=generation_prompt,
-                    context={"mode": "worker_file_gen", "model": model},
-                    intent_effective=intent_effective,
-                    path_scope=list(path_scope or []),
-                ),
-                timeout=DEFAULT_RUN_TIMEOUT,
-            )
-            content = llm_resp.get("content", "").strip()
-            llm_model_used = llm_resp.get("model", model)
-            # Clean markdown code fences if the LLM wrapped it
-            if content.startswith("```"):
-                content = re.sub(r"```\w*\n?", "", content).strip()
-
-            OpsService.append_log(
-                run_id, level="INFO",
-                msg=f"Task {task_id}: LLM ({llm_model_used}) generated content ({len(content)} chars)"
-            )
-        except Exception as e:
-            OpsService.append_log(
-                run_id, level="ERROR",
-                msg=f"Task {task_id}: LLM generation failed: {e}"
-            )
-            return False
-
-        # Write the file
-        try:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            FileService.write_file(target_path, content, f"gimo_worker_{llm_model_used}")
-            OpsService.append_log(
-                run_id, level="INFO",
-                msg=f"Task {task_id}: ✅ File written → {target_path}"
-            )
-            return True
-        except Exception as write_err:
-            OpsService.append_log(
-                run_id, level="ERROR",
-                msg=f"Task {task_id}: ❌ File write failed: {write_err}"
-            )
-            return False
-
-    async def _process_task(self, run_id: str, task: dict, intent_effective: str, path_scope: list[str]) -> None:
-        tid = task.get("id", "??")
-        title = task.get("title", "")
-        desc = task.get("description", "")
-        combined = f"{title} {desc}".lower()
-        agent = task.get("agent_assignee", {})
-        agent_model = agent.get("model", "qwen2.5-coder:3b")
-        agent_prompt = agent.get("system_prompt", "")
-
-        OpsService.append_log(run_id, level="INFO", msg=f"Executing Task {tid}: {title}")
-
-        if any(kw in combined for kw in ["orchestr", "coordinat", "lead", "monitor"]):
-            OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Orchestrator role — delegation noted.")
-            return
-
-        if any(kw in combined for kw in ["escribir", "write", "crear", "create", "generar", "generate", ".bat", ".txt", ".py", ".sh", ".md", ".yaml", ".json", "docs/", "doc/"]):
-            base_path = None
-            if agent.get("id"):
-                from .sub_agent_manager import SubAgentManager
-                sa = SubAgentManager.get_sub_agent(agent.get("id"))
-                if sa and sa.worktreePath: # [TRANSITIONAL/OBSOLETE] Worktree-based sub-agent paths
-                    base_path = Path(sa.worktreePath)
-                    OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Using isolated worktree at {base_path}")
-
-            file_result = await self._execute_file_task(
-                run_id, tid, title, desc, agent_prompt, agent_model,
-                base_path=base_path,
-                intent_effective=intent_effective,
-                path_scope=path_scope,
-            )
-            if file_result:
-                return
-
-        if agent_prompt:
-            try:
-                OpsService.append_log(run_id, level="INFO", msg=f"Task {tid}: Sending to LLM ({agent_model})...")
-                llm_resp = await asyncio.wait_for(
-                    ProviderService.static_generate_phase6_strategy(
-                        prompt=agent_prompt,
-                        context={"mode": "worker_execute", "model": agent_model},
-                        intent_effective=intent_effective,
-                        path_scope=path_scope,
-                    ),
-                    timeout=DEFAULT_RUN_TIMEOUT,
-                )
-                result_content = llm_resp.get("content", "")[:500]
-                OpsService.append_log(run_id, level="INFO", msg=f"Task {tid} LLM result: {result_content}")
-            except Exception as llm_err:
-                OpsService.append_log(run_id, level="WARN", msg=f"Task {tid} LLM call failed: {llm_err}")
-        else:
-            OpsService.append_log(run_id, level="INFO", msg=f"Task {tid} (Simulation): Success.")
-
-    async def _execute_structured_plan(self, run_id: str, plan_data: dict, intent_effective: str, path_scope: list[str]) -> None:
-        OpsService.append_log(run_id, level="INFO", msg="Detected structured plan. Executing steps...")
-        for task in plan_data.get("tasks", []):
-            await self._process_task(run_id, task, intent_effective, path_scope)
-
-        report = self._build_executor_report(run_id, output_text="Structured plan executed", run_result={})
-        OpsService.append_log(run_id, level="INFO", msg=f"ExecutorReport: {report.model_dump_json()}")
-
-        OpsService.update_run_status(run_id, "done", msg="Structured plan execution completed")
+    async def _execute_structured_plan(self, *args, **kwargs) -> None:
+        """OBSOLETE: Replaced by EngineService."""
+        pass
 
     async def _critic_with_retry(
         self,
@@ -514,58 +311,9 @@ class RunWorker:
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
-    async def _handle_legacy_execution(self, run_id: str, prompt: str, intent_effective: str, path_scope: list[str]) -> None:
-        # [TRANSITIONAL/OBSOLETE] Worktree-based execution directly over source to be replaced in Phase 1.
-        try:
-            resp = await asyncio.wait_for(
-                ProviderService.static_generate_phase6_strategy(
-                    prompt=prompt,
-                    context={"mode": "execute"},
-                    intent_effective=intent_effective,
-                    path_scope=path_scope,
-                ),
-                timeout=DEFAULT_RUN_TIMEOUT,
-            )
-            provider_name = resp.get("provider", "unknown")
-            result = resp.get("content", "")
-
-            critic_ok, result, resp = await self._critic_with_retry(
-                run_id=run_id,
-                output_text=str(result),
-                base_prompt=prompt,
-                intent_effective=intent_effective,
-                path_scope=path_scope,
-                requested_model=str(resp.get("final_model_used") or resp.get("model") or ""),
-                initial_raw=resp,
-            )
-            if not critic_ok:
-                OpsService.update_run_status(run_id, "error", msg="Critic rejected output")
-                return
-
-            OpsService.append_log(
-                run_id,
-                level="INFO",
-                msg=(
-                    "Model strategy: "
-                    f"attempted={resp.get('model_attempted','')} "
-                    f"failure_reason={resp.get('failure_reason','')} "
-                    f"final_model={resp.get('final_model_used', resp.get('model',''))} "
-                    f"fallback_used={bool(resp.get('fallback_used', False))}"
-                ),
-            )
-            OpsService.append_log(run_id, level="INFO", msg=f"Provider: {provider_name}")
-            OpsService.append_log(run_id, level="INFO", msg=f"Result:\n{result[:2000]}")
-
-            report = self._build_executor_report(run_id, output_text=str(result), run_result=resp)
-            # Validator enforces rollback_plan non-empty
-            ExecutorReport.model_validate(report.model_dump())
-            OpsService.append_log(run_id, level="INFO", msg=f"ExecutorReport: {report.model_dump_json()}")
-
-            OpsService.update_run_status(run_id, "done", msg="Execution completed")
-        except asyncio.TimeoutError:
-            OpsService.update_run_status(run_id, "error", msg="Execution timed out")
-        except Exception as exc:
-            OpsService.update_run_status(run_id, "error", msg=f"Provider error: {str(exc)[:200]}")
+    async def _handle_legacy_execution(self, *args, **kwargs) -> None:
+        """OBSOLETE: Replaced by ToolExecutor/EngineService."""
+        pass
 
     async def _handle_child_completion(self, child_run_id: str) -> None:
         """Called when a child run finishes. Decrements parent counter and wakes if zero."""
@@ -621,27 +369,20 @@ class RunWorker:
             asyncio.create_task(self._execute_run(fresh.id))
 
     def _validate_task_spec(self, spec: Any) -> tuple[bool, str]:
-        """Strict validation of the Phase 5B task specification."""
+        """Strict validation of the Phase 5B task specification using Pydantic."""
+        from ..schemas.draft_validation import ValidatedTaskSpec
         if not isinstance(spec, dict):
             return False, "TaskSpec must be a dictionary"
-            
-        required = [
-            "base_commit", "repo_handle", "allowed_paths", 
-            "acceptance_criteria", "evidence_hash", "context_pack_id", 
-            "worker_model", "requires_manual_merge"
-        ]
-        missing = [f for f in required if f not in spec]
-        if missing:
-            return False, f"Missing required fields: {', '.join(missing)}"
-            
-        # Specific constraints
-        if not spec.get("allowed_paths"):
-            return False, "allowed_paths cannot be empty for bounded execution"
-            
-        if spec.get("requires_manual_merge") is not True:
-            return False, "requires_manual_merge must be True in Phase 5B"
-            
-        return True, ""
+        try:
+            ValidatedTaskSpec.model_validate(spec)
+            # Extra Phase 5B constraints
+            if not spec.get("allowed_paths"):
+                return False, "allowed_paths cannot be empty for bounded execution"
+            if spec.get("requires_manual_merge") is not True:
+                return False, "requires_manual_merge must be True in Phase 5"
+            return True, ""
+        except Exception as e:
+            return False, f"Schema validation failed: {str(e)}"
 
     async def _execute_run(self, run_id: str) -> None:
         try:
@@ -732,31 +473,69 @@ class RunWorker:
         """
         P5.4: Builds a bounded worker context from the repo.
         No global scans. Bounded by allowed_paths, same-dir, and imports.
+        Hard cap of 10 files.
         """
+        # Hard cap (GIMO B4)
+        MAX_FILES_HARD_CAP = 10
+        limit = min(max_files, MAX_FILES_HARD_CAP)
+        
         allowed_paths = task.get("allowed_paths", [])
         if not allowed_paths:
             return []
 
         # Start with exact allowed_paths
-        selected_rel_paths = set(allowed_paths[:max_files])
+        selected_rel_paths = set(allowed_paths[:limit])
         
-        # Build context objects (Path-aware and symbol-aware would require parsing, 
-        # but here we implement the evidence-based boundary).
+        # B4: Adjacency enrichment (same-dir files)
+        # Only enrich for seed files that actually exist.
+        enriched = set(selected_rel_paths)
+        if len(enriched) < limit:
+            for path_str in list(selected_rel_paths):
+                if len(enriched) >= limit:
+                    break
+                try:
+                    # B4: Strict seeding. Only enrich if the seed file is verified on disk.
+                    abs_seed = (repo_root / path_str).resolve()
+                    # Ensure it is within repo
+                    abs_seed.relative_to(repo_root.resolve())
+                    if not abs_seed.exists() or not abs_seed.is_file():
+                        continue
+
+                    p = Path(path_str)
+                    parent = p.parent
+                    full_parent = (repo_root / parent).resolve()
+                    # Ensure parent is inside repo
+                    full_parent.relative_to(repo_root.resolve())
+                    
+                    if full_parent.is_dir():
+                        for neighbor in sorted(list(full_parent.iterdir())):
+                            if len(enriched) >= limit:
+                                break
+                            if neighbor.is_file() and not neighbor.name.startswith("."):
+                                rel_neighbor = str(neighbor.relative_to(repo_root)).replace("\\", "/")
+                                enriched.add(rel_neighbor)
+                except Exception:
+                    continue
+
+        # Convert back to list and sort for determinism
+        final_rel_paths = sorted(list(enriched))[:limit]
+        
         context_items = []
-        for rel_path in sorted(list(selected_rel_paths)):
+        for rel_path in final_rel_paths:
             try:
                 abs_path = (repo_root / rel_path).resolve()
-                # Strict containment check
+                # B2/B4: Strict containment check
                 abs_path.relative_to(repo_root.resolve())
             except (ValueError, Exception):
                 continue
 
             if abs_path.exists() and abs_path.is_file():
                 try:
-                    # Simple symbol-aware proxy: check for function/class definitions
                     content = abs_path.read_text(encoding="utf-8", errors="ignore")
                     symbols = []
-                    for line in content.splitlines():
+                    # Simple symbol extraction (first 500 lines only)
+                    lines = content.splitlines()
+                    for line in lines[:500]:
                         m = re.match(r"^\s*(?:def|class)\s+([a-zA-Z_]\w*)", line)
                         if m:
                             symbols.append(m.group(1))
@@ -764,9 +543,9 @@ class RunWorker:
                     context_items.append({
                         "path": rel_path,
                         "content": content,
-                        "symbols": symbols[:20] # Limit symbols for context budget
+                        "symbols": symbols[:20] 
                     })
                 except Exception:
                     continue
 
-        return context_items[:max_files]
+        return context_items

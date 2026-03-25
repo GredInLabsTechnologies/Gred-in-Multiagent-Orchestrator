@@ -31,9 +31,19 @@ class DraftValidationService:
             raise ValueError("Session has no repository selected.")
             
         # 1. Extraction of evidence hash (deterministic representation of recon state)
-        # For simplicity in 5A, we hash the sorted proof IDs
-        proof_ids = sorted([p["proof_id"] for p in read_proofs])
-        evidence_content = "|".join(proof_ids)
+        # B2: Deterministic hash built from real evidence content, using stable ordering.
+        # We use artifact_handle and kind for a stable, unique sort key.
+        sorted_proofs = sorted(read_proofs, key=lambda p: (p.get("artifact_handle", ""), p.get("kind", "")))
+        evidence_parts = []
+        for p in sorted_proofs:
+            # We use artifact_handle, kind, content_hash (evidence_hash), and base_commit.
+            # This ensures that the task spec is bound to the exact state of recorded discovery.
+            part = f"{p.get('artifact_handle')}:{p.get('kind')}:{p.get('evidence_hash')}:{p.get('base_commit')}"
+            evidence_parts.append(part)
+        evidence_content = "|".join(evidence_parts)
+        if not evidence_content:
+             # B2 Fail-Closed: Evidence set must contain content.
+             raise ValueError("Draft validation failed: Reconnaissance evidence content is missing or empty.")
         evidence_hash = hashlib.sha256(evidence_content.encode("utf-8")).hexdigest()
         
         # 2. Preparation of Allowed Paths (never wildcard by default)
