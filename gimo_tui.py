@@ -13,20 +13,32 @@ from rich.panel import Panel
 # Re-use critical logic from gimo 
 from gimo import _api_settings, _resolve_token, _api_request
 
+# Constants to avoid literal duplication
+CHAT_LOG_ID = "#chat-log"
+NOTICES_CONTENT_ID = "#notices-content"
+GRAPH_CONTENT_ID = "#graph-content"
+ECO_CONTENT_ID = "#eco-content"
+NO_NOTICES_MSG = "   No active notices."
+
+class GimoHeader(Static):
+    """Fixed header: repo | branch | model | perm | budget | ctx"""
+    def compose(self) -> ComposeResult:
+        yield Static("REPO: - | BRANCH: - | MODEL: - | PERM: - | BUDGET: - | CTX: -", id="header-text")
+
 class GraphWidget(Static):
     """Renders the agentic swarm topology."""
     def compose(self) -> ComposeResult:
-        yield Static("   Loading topology...", classes="content-area", id="graph-content")
+        yield Static("   Loading topology...", classes="content-area", id=GRAPH_CONTENT_ID[1:])
 
 class EconomyWidget(Static):
     """Renders the token usage and limits."""
     def compose(self) -> ComposeResult:
-        yield Static("   Fetching telemetry...", classes="content-area", id="eco-content")
+        yield Static("   Fetching telemetry...", classes="content-area", id=ECO_CONTENT_ID[1:])
 
 class NoticesWidget(Static):
-    """Renders temporary system notices."""
+    """Renders temporary system notices from canonical policy."""
     def compose(self) -> ComposeResult:
-        yield Static("   No active notices.", classes="content-area", id="notices-content")
+        yield Static(NO_NOTICES_MSG, classes="content-area", id=NOTICES_CONTENT_ID[1:])
 
 class ChatLogWidget(RichLog):
     """Renders the chat history cleanly."""
@@ -40,9 +52,10 @@ class GimoApp(App):
     TITLE = "GIMO Orchestrator"
     
     BINDINGS = [
-        Binding("ctrl+c,ctrl+q", "quit", "Quit Session", show=True),
+        Binding("ctrl+c", "quit", "Quit Session", show=True),
         Binding("ctrl+l", "clear_log", "Clear Chat", show=True),
         Binding("escape", "dismiss_notice", "Dismiss Notice", show=False),
+        Binding("f5", "refresh_all", "Refresh Status", show=True),
     ]
     
     CSS = """
@@ -50,32 +63,45 @@ class GimoApp(App):
         background: $surface;
     }
     
+    GimoHeader {
+        dock: top;
+        height: 1;
+        background: $primary;
+        color: $text;
+        text-align: center;
+        content-align: center middle;
+        text-style: bold;
+    }
+
     #top-zone {
-        height: 35%;
+        height: 12;
         margin-bottom: 1;
     }
     
-    GraphWidget, EconomyWidget, NoticesWidget {
-        height: 100%;
+    GraphWidget {
+        width: 60%;
         border: heavy $background;
         background: $boost;
-    }
-    
-    GraphWidget {
-        width: 50%;
         border-title-color: $accent;
     }
     
-    EconomyWidget {
-        width: 25%;
-        border-title-color: $success;
+    #sidebar {
+        width: 40%;
+    }
+
+    EconomyWidget, NoticesWidget {
+        height: 50%;
+        border: heavy $background;
+        background: $boost;
         margin-left: 1;
+    }
+    
+    EconomyWidget {
+        border-title-color: $success;
     }
 
     NoticesWidget {
-        width: 25%;
         border-title-color: $warning;
-        margin-left: 1;
     }
 
     .content-area {
@@ -130,13 +156,25 @@ class GimoApp(App):
         self.pending_approval_data: Optional[Dict[str, Any]] = None
         self.verbose: bool = False
         self._notice_timer = None
+        self._stream_buffer: str = ""
+
+    def _safe_call(self, callback, *args, **kwargs):
+        """Thread-safe call that doesn't crash if loop is not running."""
+        try:
+            if self._loop and self._loop.is_running():
+                self.call_from_thread(callback, *args, **kwargs)
+            else:
+                callback(*args, **kwargs)
+        except RuntimeError:
+            callback(*args, **kwargs)
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True, icon="🖧")
+        yield GimoHeader()
         with Horizontal(id="top-zone"):
             yield GraphWidget()
-            yield EconomyWidget()
-            yield NoticesWidget()
+            with Vertical(id="sidebar"):
+                yield EconomyWidget()
+                yield NoticesWidget()
         with Vertical(id="middle-zone"):
             yield ChatLogWidget(id=CHAT_LOG_ID[1:], markup=True, wrap=True)
             with Container(id="chat-input-box"):
@@ -148,7 +186,7 @@ class GimoApp(App):
     def on_mount(self) -> None:
         self.query_one(GraphWidget).border_title = "🌐 Graph Engine Topology"
         self.query_one(EconomyWidget).border_title = "💰 Telemetry & Quotas"
-        self.query_one(NoticesWidget).border_title = "🔔 System Notices"
+        self.query_one(NoticesWidget).border_title = "🔔 Canonical Notices"
         self.query_one("#middle-zone").border_title = f"💬 Workspace (Thread: {self.thread_id})"
 
         log = self.query_one(CHAT_LOG_ID, ChatLogWidget)
@@ -157,10 +195,17 @@ class GimoApp(App):
         # Start background polling loops (daemon-like)
         self.set_interval(4.0, self.update_telemetry)
         self.set_interval(5.0, self.update_topology)
+        self.set_interval(10.0, self.update_notices)
         
         # Initial fetch
         self.update_telemetry()
         self.update_topology()
+        self.update_notices()
+
+    def action_refresh_all(self):
+        self.update_telemetry()
+        self.update_topology()
+        self.update_notices()
 
     def action_clear_log(self) -> None:
         """Clear the chat log via hotkey."""
@@ -447,60 +492,78 @@ class GimoApp(App):
             
         # Flush buffer before any distinct UI element
         if self._stream_buffer:
-            self.call_from_thread(self._write_log, self._stream_buffer)
+            self._safe_call(self._write_log, self._stream_buffer)
             self._stream_buffer = ""
 
+        # DEBUG MODE: Raw SSE/events
         if self.verbose and evt != "text_delta":
-            import json
-            raw_str = json.dumps(data, ensure_ascii=False)
-            preview = raw_str[:120] + "..." if len(raw_str) > 120 else raw_str
-            self.call_from_thread(self._write_log, f"  [dim blue]SSE Event:[/dim blue] [dim]{evt}[/dim] -> [dim italic]{preview}[/dim italic]")
+            raw_str = str(json.dumps(data, ensure_ascii=False))
+            preview = raw_str[:121] + "..." if len(raw_str) > 120 else raw_str
+            self._safe_call(self._write_log, f"  [dim blue]SSE Event:[/dim blue] [dim]{evt}[/dim] -> [dim italic]{preview}[/dim italic]")
 
         if evt == "tool_call_start":
             tool_name = data.get("tool_name", "?")
-            args = str(data.get("arguments", {}))[:60]
-            risk = data.get("risk", "LOW")
-            if risk == "HIGH":
-                risk_col = "red"
-            elif risk == "MEDIUM":
-                risk_col = "yellow"
+            args = data.get("arguments", {})
+            
+            # FOCUS MODE: Concise tool summary
+            if not self.verbose:
+                items = list(args.items())
+                slice_items = items[:3]
+                arg_summary = " ".join([f"{k}={str(v)[:20]}" for k, v in slice_items])
+                self._safe_call(self._write_log, f"\n  [dim]▸[/dim] [bold]{tool_name}[/bold] {arg_summary}...")
             else:
-                risk_col = "green"
-                
-            suffix = "[dim]...[/dim]"
-            if self.verbose:
-                suffix = f"\n    [dim italic]{json.dumps(data.get('arguments', {}), ensure_ascii=False)}[/dim italic]"
-
-            self.call_from_thread(self._write_log, f"\n  [dim]▸ [bold]{tool_name}[/bold] {args}... [{risk_col}]{risk}[/{risk_col}] {suffix}")
-            self.call_from_thread(self._write_event, f"Active Tool: {tool_name}")
+                # DEBUG MODE: Payloads/Topology
+                self._safe_call(self._write_log, f"\n  [dim]▸ [bold]{tool_name}[/bold] {json.dumps(args, ensure_ascii=False)}")
+            
+            self._safe_call(self._write_event, f"Active Tool: {tool_name}")
             
         elif evt == "tool_approval_required":
-            self.call_from_thread(self._require_approval, data)
+            self._safe_call(self._require_approval, data)
             
         elif evt == "tool_call_end":
             status = data.get("status", "error")
             duration = data.get("duration", 0.0)
             symbol = "[bold green]✓[/bold green]" if status == "success" else "[bold red]✗[/bold red]"
-            self.call_from_thread(self._write_log, f"    {symbol} [dim]{duration:.1f}s[/dim]\n")
-            self.call_from_thread(self._write_event, f"Processed Tool: {status}")
+            
+            # FOCUS/DEBUG: timings
+            self._safe_call(self._write_log, f"    {symbol} [dim]{duration:.1f}s[/dim]\n")
+            self._safe_call(self._write_event, f"Processed Tool: {status}")
             
         elif evt == "done":
-            self.call_from_thread(self._write_event, "Response complete. Awaiting input.")
-            self.call_from_thread(self._set_input_state, True)
+            self._safe_call(self._write_event, "Response complete. Awaiting input.")
+            self._safe_call(self._set_input_state, True)
             
             usage = data.get("usage", {})
+            run_data = data.get("run_report", {})
+            
+            # FOCUS MODE: Post-run report
+            if not self.verbose and (run_data or usage):
+                self._safe_call(self._render_tui_post_run_report, run_data, usage)
+                
+            # Notices from usage/done
             ctx_pct = usage.get("context_window_pct", 0)
             if ctx_pct > 70:
-                self.call_from_thread(self.show_notice, f"Context window high: {ctx_pct:.1f}%", "yellow", 30)
+                self._safe_call(self.show_notice, f"Context window high: {ctx_pct:.1f}%", "yellow", 30)
                 
-            cost = usage.get("cost_usd", 0)
-            budget_limit = float(self.config.get("orchestrator", {}).get("budget_limit_usd") or 0)
-            if budget_limit > 0 and (cost / budget_limit) > 0.8:
-                self.call_from_thread(self.show_notice, f"Budget critical: ${cost:.2f}/${budget_limit:.2f}", "red", 0)
-            
         elif evt == "error":
-            self.call_from_thread(self._write_log, f"\n[bold red]Orchestrator Error:[/bold red] {data.get('message', 'Unknown')}\n")
-            self.call_from_thread(self._set_input_state, True)
+            self._safe_call(self._write_log, f"\n[bold red]Orchestrator Error:[/bold red] {data.get('message', 'Unknown')}\n")
+            self._safe_call(self._set_input_state, True)
+
+    def _render_tui_post_run_report(self, run_data: dict, usage: dict):
+        """Render a compact version of the CLI post-run report in the TUI log."""
+        goal = run_data.get("goal") or "n/a"
+        tools = len(run_data.get("tools_used", [])) if "tools_used" in run_data else 0
+        diff = len(run_data.get("modified_files", [])) if "modified_files" in run_data else 0
+        cost = usage.get("cost_usd", 0.0)
+        dur = run_data.get("duration", 0.0)
+        
+        report = (
+            f"[bold green]✓ Task Complete[/bold green]\n"
+            f"  Goal: {goal}\n"
+            f"  Changes: {diff} files, {tools} tools\n"
+            f"  Cost: ${cost:.4f}  |  Duration: {dur:.1f}s"
+        )
+        self._write_log(Panel(report, border_style="green", padding=(0,1)))
 
     def _require_approval(self, data: dict):
         tool_name = data.get("tool_name", "?")
@@ -531,15 +594,11 @@ class GimoApp(App):
                     headers=headers
                 )
                 if res.status_code != 200:
-                    self.call_from_thread(self._write_log, f"[bold red]Approval failed (HTTP {res.status_code})[/bold red]")
+                    self._safe_call(self._write_log, f"[bold red]Approval failed (HTTP {res.status_code})[/bold red]")
         except Exception as e:
-            self.call_from_thread(self._write_log, f"[bold red]Approval network error:[/bold red] {e}")
+            self._safe_call(self._write_log, f"[bold red]Approval network error:[/bold red] {e}")
         finally:
-            # We must wait for the orchestrator to resume streaming, but the stream is already killed by the pause.
-            # In a real setup, hitting approve might require a new POST /chat to resume.
-            # But according to GIMO design, the SSE stream resumes or requires polling. 
-            # We unlock input so user doesn't get stuck.
-            self.call_from_thread(self._set_input_state, True)
+            self._safe_call(self._set_input_state, True)
 
     @work(thread=True)
     def update_telemetry(self):
@@ -554,11 +613,11 @@ class GimoApp(App):
                 for f in payload:
                     if f.get("scope") == "global":
                         text = self._format_telemetry(f)
-                        self.call_from_thread(self._update_eco_widget, text)
+                        self._safe_call(self._update_eco_widget, text)
                         return
-            self.call_from_thread(self._update_eco_widget, "Telemetry unavailable.")
+            self._safe_call(self._update_eco_widget, "Telemetry unavailable.")
         except Exception as e:
-            self.call_from_thread(self._update_eco_widget, f"[red]Telemetry Error: {e}[/red]")
+            self._safe_call(self._update_eco_widget, f"[red]Telemetry Error: {e}[/red]")
 
     def _format_telemetry(self, f: dict) -> str:
         spend = f.get("current_spend", 0.0)
@@ -590,25 +649,60 @@ class GimoApp(App):
                 branch = payload.get("branch", "?")
                 provider = payload.get("active_provider", "?")
                 model = payload.get("active_model", "?")
+                perm = payload.get("permissions", "suggest")
+                budget = payload.get("budget_status", "ok")
+                ctx = payload.get("context_status", "0%")
                 
+                # Update Header (Invariant: tui_header_reads_operator_status)
+                msg = f"REPO: {repo} | BRANCH: {branch} | MODEL: {model} | PERM: {perm} | BUDGET: {budget} | CTX: {ctx}"
+                self._safe_call(self._update_header, msg)
+                
+                # Update Graph
                 text = (
                     f"📁 Repo: [bold]{repo}[/bold] ({branch})\n"
                     f"🧠 Orchestrator: [cyan]{provider}[/cyan]\n"
                     f"   Model: [dim]{model}[/dim]"
                 )
-                self.call_from_thread(self._update_graph_widget, text)
+                self._safe_call(self._update_graph_widget, text)
             else:
-                self.call_from_thread(self._update_graph_widget, "[yellow]Topology bridge disconnected.[/yellow]")
+                self._safe_call(self._update_graph_widget, "[yellow]Topology bridge disconnected.[/yellow]")
         except Exception as e:
-            self.call_from_thread(self._update_graph_widget, f"[red]Topology Error: {e}[/red]")
+            self._safe_call(self._update_graph_widget, f"[red]Topology Error: {e}[/red]")
 
+    def _update_header(self, text: str):
+        self.query_one("#header-text", Static).update(text)
+
+    @work(thread=True)
+    def update_notices(self):
+        """Fetch canonical notices (Invariant: tui_notices_respect_policy)."""
+        try:
+            status, payload = _api_request(self.config, "GET", "/ops/notices")
+            if status == 200 and isinstance(payload, list):
+                if not payload:
+                    self._safe_call(self._update_notices_widget, NO_NOTICES_MSG)
+                else:
+                    lines = []
+                    for n in payload:
+                        lvl = n.get("level", "info")
+                        msg = n.get("message", "")
+                        icon = "⚠" if lvl == "warning" else "✗" if lvl == "error" else "ℹ"
+                        color = "yellow" if lvl == "warning" else "red" if lvl == "error" else "blue"
+                        lines.append(f"[{color}]{icon} {msg}[/{color}]")
+                    self._safe_call(self._update_notices_widget, "\n".join(lines))
+            else:
+                self._safe_call(self._update_notices_widget, "   Notice policy unreachable.")
+        except Exception as e:
+            self._safe_call(self._update_notices_widget, f"[red]Notices Error: {e}[/red]")
+
+    def _update_notices_widget(self, text: str):
+        self.query_one(NOTICES_CONTENT_ID, Static).update(text)
 
     def _update_graph_widget(self, text: str):
-        lbl = self.query_one("#graph-content", Static)
+        lbl = self.query_one(GRAPH_CONTENT_ID, Static)
         lbl.update(text)
 
     def _update_eco_widget(self, text: str):
-        lbl = self.query_one("#eco-content", Static)
+        lbl = self.query_one(ECO_CONTENT_ID, Static)
         lbl.update(text)
 
 if __name__ == "__main__":
