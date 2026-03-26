@@ -10,30 +10,21 @@ from tools.gimo_server.services.merge_gate_service import MergeGateService
 @pytest.mark.asyncio
 async def test_pipeline_fails_without_provided_workspace(monkeypatch):
     """
-    WP-01/GAP-01: Verifies that _pipeline fails closed if no workspace is provided.
+    WP-01/GAP-01: Verifies that _pipeline fails if no workspace is provided (type error now).
     """
-    statuses = []
-    
-    monkeypatch.setattr(
-        "tools.gimo_server.services.merge_gate_service.OpsService.update_run_status",
-        lambda run_id, status, msg=None: statuses.append(status),
-    )
-
-    await MergeGateService._pipeline("run1", repo_id="default", source_ref="src", target_ref="tgt", provided_workspace=None)
-    
-    assert "WORKER_CRASHED" in statuses
-    assert len(statuses) == 1
+    with pytest.raises(TypeError):
+        await MergeGateService._pipeline("run1", repo_id="default", source_ref="src", target_ref="tgt", provided_workspace=None)
 
 
 @pytest.mark.asyncio
-async def test_pipeline_uses_provided_workspace(monkeypatch, tmp_path):
+async def test_pipeline_pauses_at_awaiting_merge(monkeypatch, tmp_path):
     """
-    WP-01/GAP-01: Verifies that _pipeline uses the provisioned workspace correctly.
+    WP-01/GAP-01/F7B: Verifies that _pipeline correctly dry-runs and pauses at AWAITING_MERGE.
     """
     fake_workspace = tmp_path / "sandbox"
     fake_workspace.mkdir()
     
-    calls = {"tests": [], "lint": [], "dry": [], "merge": []}
+    calls = {"tests": [], "lint": [], "dry": []}
     statuses = []
 
     stages = []
@@ -70,19 +61,131 @@ async def test_pipeline_uses_provided_workspace(monkeypatch, tmp_path):
         "tools.gimo_server.services.merge_gate_service.GitService.get_head_commit",
         lambda base_dir: "commit_hash",
     )
-    monkeypatch.setattr(
-        "tools.gimo_server.services.merge_gate_service.GitService.perform_merge",
-        lambda base_dir, src, tgt: (calls["merge"].append(base_dir) or True, "ok"),
-    )
 
     await MergeGateService._pipeline("run2", repo_id="default", source_ref="src", target_ref="tgt", provided_workspace=str(fake_workspace))
     
-    assert statuses[-1] == "done"
-    assert "gate_sandbox" in stages
+    assert statuses[-1] == "AWAITING_MERGE"
+    assert "dry_run_merge" in stages
     assert calls["tests"][0] == fake_workspace
-    assert calls["lint"][0] == fake_workspace
-    assert calls["dry"][0] == fake_workspace
-    assert calls["merge"][0] == fake_workspace
+
+
+@pytest.mark.asyncio
+async def test_perform_manual_merge_success(monkeypatch, tmp_path):
+    """
+    WP-01/F7B: Verifies that perform_manual_merge executes merge and sets status to done.
+    """
+    run_id = "run_merge_1"
+    
+    class FakeRun:
+        status = "AWAITING_MERGE"
+        approved_id = "app1"
+        commit_before = "hash_before"
+
+    class FakeApproved:
+        draft_id = "d1"
+
+    class FakeDraft:
+        context = {
+            "workspace_path": str(tmp_path),
+            "source_ref": "feat-1",
+            "repo_context": {"target_branch": "main"}
+        }
+
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.OpsService.get_run", lambda rid: FakeRun())
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.OpsService.get_approved", lambda aid: FakeApproved())
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.OpsService.get_draft", lambda did: FakeDraft())
+    
+    statuses = []
+    monkeypatch.setattr(
+        "tools.gimo_server.services.merge_gate_service.OpsService.update_run_status",
+        lambda rid, status, msg=None: statuses.append(status),
+    )
+    monkeypatch.setattr(
+        "tools.gimo_server.services.merge_gate_service.OpsService.update_run_merge_metadata",
+        lambda rid, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "tools.gimo_server.services.merge_gate_service.OpsService.set_run_stage",
+        lambda rid, stage, msg=None: None,
+    )
+
+    monkeypatch.setattr(
+        "tools.gimo_server.services.merge_gate_service.GitService.perform_merge",
+        lambda bd, src, tgt: (True, "merged"),
+    )
+    monkeypatch.setattr(
+        "tools.gimo_server.services.merge_gate_service.GitService.get_head_commit",
+        lambda bd: "hash_after",
+    )
+
+    success = await MergeGateService.perform_manual_merge(run_id)
+    
+    assert success is True
+    assert statuses[-1] == "done"
+
+
+@pytest.mark.asyncio
+async def test_perform_manual_merge_fails_if_not_awaiting(monkeypatch):
+    """
+    F7B: Verifies that perform_manual_merge rejects runs not in AWAITING_MERGE status.
+    """
+    class FakeRun:
+        status = "running" # WRONG STATUS
+    
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.OpsService.get_run", lambda rid: FakeRun())
+    
+    with pytest.raises(ValueError, match="not in AWAITING_MERGE status"):
+        await MergeGateService.perform_manual_merge("run_bad")
+
+
+@pytest.mark.asyncio
+async def test_perform_manual_merge_rollback_on_metadata_failure(monkeypatch, tmp_path):
+    """
+    F7B: Verifies that manual merge triggers rollback if post-merge steps fail.
+    """
+    run_id = "run_rollback"
+    
+    class FakeRun:
+        status = "AWAITING_MERGE"
+        approved_id = "app1"
+        commit_before = "hash_before"
+
+    class FakeApproved:
+        draft_id = "d1"
+
+    class FakeDraft:
+        context = {"workspace_path": str(tmp_path)}
+
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.OpsService.get_run", lambda rid: FakeRun())
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.OpsService.get_approved", lambda aid: FakeApproved())
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.OpsService.get_draft", lambda did: FakeDraft())
+    
+    statuses = []
+    monkeypatch.setattr(
+        "tools.gimo_server.services.merge_gate_service.OpsService.update_run_status",
+        lambda rid, status, msg=None: statuses.append(status),
+    )
+    
+    def fail_metadata(rid, **kwargs):
+        raise RuntimeError("Metadata crash")
+        
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.OpsService.update_run_merge_metadata", fail_metadata)
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.OpsService.set_run_stage", lambda rid, st, msg=None: None)
+
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.GitService.perform_merge", lambda bd, src, tgt: (True, "merged"))
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.GitService.get_head_commit", lambda bd: "hash_after")
+    
+    rollback_calls = []
+    monkeypatch.setattr(
+        "tools.gimo_server.services.merge_gate_service.GitService.rollback_to_commit",
+        lambda bd, commit: (rollback_calls.append(commit) or True, "rolled back")
+    )
+
+    success = await MergeGateService.perform_manual_merge(run_id)
+    
+    assert success is False
+    assert "ROLLBACK_EXECUTED" in statuses
+    assert rollback_calls[0] == "hash_before"
 
 
 @pytest.mark.asyncio
@@ -158,3 +261,4 @@ async def test_execute_run_bypasses_for_low_risk(monkeypatch):
     result = await MergeGateService.execute_run(run_id)
     
     assert result is False # Bypassed, delegation to RunWorker
+

@@ -359,6 +359,24 @@ class GimoApp(App):
                 elif action == "debug":
                     self.verbose = not self.verbose
                     self.call_from_thread(self._write_log, f"[dim]Debug mode {'enabled' if self.verbose else 'disabled'}[/dim]")
+                elif action.startswith("merge:"):
+                    run_id = action.split(":", 1)[1]
+                    if not run_id:
+                        # Infer from status
+                        st, py = _api_request(self.config, "GET", "/ops/operator/status")
+                        if st == 200: 
+                            run_id = py.get("active_run_id")
+                    
+                    if not run_id:
+                        self.call_from_thread(self._write_log, "[yellow]No active run found to merge.[/yellow]")
+                        return
+
+                    st, py = _api_request(self.config, "POST", f"/ops/runs/{run_id}/merge")
+                    if st == 200:
+                        self.call_from_thread(self._write_log, f"[green]✓ Run {run_id} merged successfully.[/green]")
+                        self.update_status()
+                    else:
+                        self.call_from_thread(self._write_log, f"[red]Merge failed ({st}): {py}[/red]")
 
 
             callbacks = {
@@ -381,6 +399,7 @@ class GimoApp(App):
                 "set_permissions": lambda val: do_slash_fetch(f"permissions:{val}"),
                 "add_file": lambda path: do_slash_fetch(f"add:{path}"),
                 "toggle_debug": lambda: do_slash_fetch("debug"),
+                "merge_run": lambda run_id: do_slash_fetch(f"merge:{run_id}"),
                 "invalid_arg": lambda msg: self._write_log(f"[yellow]⚠ {msg}[/yellow]"),
                 "unknown_command": unknown_command,
             }

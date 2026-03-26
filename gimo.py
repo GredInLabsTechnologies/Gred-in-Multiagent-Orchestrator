@@ -600,6 +600,39 @@ def _handle_chat_slash_command(
             renderer.verbose = not renderer.verbose
             console.print(f"[dim]Debug mode {'enabled' if renderer.verbose else 'disabled'}[/dim]")
 
+    def merge_run(arg: str):
+        """Authoritative manual merge for a run."""
+        run_id = arg.strip()
+        if not run_id:
+            # Try to infer from status
+            st, py = _api_request(config, "GET", "/ops/operator/status")
+            if st == 200 and isinstance(py, dict):
+                run_id = py.get("active_run_id")
+                if not run_id:
+                    console.print("[yellow]No run_id provided and no active run found to merge.[/yellow]")
+                    return
+                if py.get("active_run_status") != "AWAITING_MERGE":
+                    console.print(f"[yellow]Active run {run_id} is in status '{py.get('active_run_status')}', not AWAITING_MERGE.[/yellow]")
+                    return
+            else:
+                console.print(f"[red]Failed to fetch status to infer run_id ({st}).[/red]")
+                return
+
+        with console.status(f"[bold green]Triggering manual merge for {run_id}..."):
+            sc, payload = _api_request(config, "POST", f"/ops/runs/{run_id}/merge")
+        
+        if sc == 200:
+            status = payload.get("status", "unknown")
+            color = "green" if status == "done" else "red"
+            console.print(Panel(
+                f"Run ID: [bold]{run_id}[/bold]\nStatus: [{color}]{status}[/bold]\nMessage: {payload.get('message', 'n/a')}",
+                title="✓ /merge successful",
+                border_style=color,
+            ))
+        else:
+            msg = payload if isinstance(payload, str) else payload.get("detail", str(payload))
+            console.print(f"[red]Merge failed ({sc}): {msg}[/red]")
+
     def unknown_command(cmd: str):
         console.print(f"[yellow]Unknown command: {cmd}. Use /help.[/yellow]")
 
@@ -623,6 +656,7 @@ def _handle_chat_slash_command(
         "set_permissions": set_permissions,
         "add_file": add_file,
         "toggle_debug": toggle_debug,
+        "merge_run": merge_run,
         "invalid_arg": invalid_arg,
         "unknown_command": unknown_command,
     }
@@ -1489,17 +1523,48 @@ def run(
         )
         return
 
+@app.command()
+def merge(
+    run_id: str = typer.Argument(..., help="Run ID in AWAITING_MERGE status to finalize."),
+    wait: bool = typer.Option(True, "--wait/--no-wait", help="Poll the run until it reaches a terminal status."),
+    poll_interval: float = typer.Option(DEFAULT_POLL_INTERVAL_SECONDS, "--poll-interval", min=0.1, help="Polling interval in seconds."),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """Perform authoritative manual merge for a run that passed dry-run gates."""
+    config = _load_config()
+    
+    with console.status(f"[bold green]Triggering manual merge for {run_id}..."):
+        status_code, payload = _api_request(
+            config,
+            "POST",
+            f"/ops/runs/{run_id}/merge",
+        )
+
+    if status_code != 200:
+        message = payload if isinstance(payload, str) else payload.get("detail", str(payload))
+        console.print(f"[red]Merge failed ({status_code}): {message}[/red]")
+        raise typer.Exit(1)
+
+    final_run = payload
+    if wait:
+        final_run = _poll_run(
+            config,
+            run_id,
+            poll_interval_seconds=poll_interval,
+            announce=not json_output,
+        )
+
+    if json_output:
+        _emit_output(final_run, json_output=True)
+        return
+
+    status = final_run.get("status", "unknown")
+    color = "green" if status == "done" else "red"
     console.print(
         Panel(
-            "\n".join(
-                [
-                    "[bold yellow]Draft approved but not executed.[/bold yellow]",
-                    f"Draft ID: [bold]{plan_id}[/bold]",
-                    f"Approved ID: {approved.get('id', 'unknown')}",
-                ]
-            ),
-            title="GIMO Approval",
-            border_style="yellow",
+            f"Run ID: [bold]{run_id}[/bold]\nStatus: [{color}]{status}[/bold]\nMessage: {final_run.get('message', 'n/a')}",
+            title="GIMO Manual Merge",
+            border_style=color,
         )
     )
 

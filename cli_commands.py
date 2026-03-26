@@ -36,6 +36,7 @@ COMMAND_REGISTRY: list[SlashCommand] = [
     SlashCommand("/permissions", "Change HITL mode live: suggest | auto-edit | full-auto", "/permissions <suggest|auto-edit|full-auto>"),
     SlashCommand("/add", "Add a file to the active thread context", "/add <path>"),
     SlashCommand("/debug", "Toggle debug/verbose mode for current session", "/debug"),
+    SlashCommand("/merge", "Finalize manual merge for a run in AWAITING_MERGE status", "/merge [run_id]"),
     # ── Session control ───────────────────────────────────────────────────────
     SlashCommand("/exit", "End the session", "/exit", aliases=("/quit",)),
 ]
@@ -137,6 +138,9 @@ def dispatch_slash_command(
 
             if cmd_name == "/debug":
                 return True, callbacks["toggle_debug"]()
+
+            if cmd_name == "/merge":
+                return True, callbacks["merge_run"](arg_str)
 
             # Fallthrough for registered but unhandled commands
             callbacks["unknown_command"](cmd_name)

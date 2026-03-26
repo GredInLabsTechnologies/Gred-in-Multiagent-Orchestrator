@@ -1,10 +1,10 @@
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from pathlib import Path
 from ..version import __version__
 from ..config import get_settings
 from .git_service import GitService
-from .provider_service_impl import ProviderServiceImpl
+from .provider_service_impl import ProviderService
 from .notice_policy_service import NoticePolicyService
 from .conversation_service import ConversationService
 from .storage_service import StorageService
@@ -26,28 +26,42 @@ class OperatorStatusService:
         dirty_files = len(GitService.get_changed_files(base_dir))
         
         # 2. Provider State
-        ps = ProviderServiceImpl(storage=StorageService())
+        ps = ProviderService(storage=StorageService())
         active_provider = ps.get_active_provider_id()
         active_model = ps.get_active_model_id()
         
-        # 3. Session & Permissions State
+        # 3. Session & Permissions State (Strict Honesty - no heuristics)
         last_thread_id = ConversationService.get_last_active_thread_id()
         last_turn_id = None
-        permissions = "suggest"
+        permissions = None  # Removed hardcoded "suggest"
         ctx_pct = None
 
         if last_thread_id:
             t = ConversationService.get_thread(last_thread_id)
             if t:
                 last_turn_id = t.turns[-1].id if t.turns else None
-                permissions = t.metadata.get("permissions") or "suggest"
+                # Derived from metadata if present
+                permissions = t.metadata.get("permissions")
+                
+                # Usage reporting - authoritative only
                 usage = t.metadata.get("usage")
                 if isinstance(usage, dict):
-                    used, limit = usage.get("total_tokens"), usage.get("max_context_tokens")
+                    used = usage.get("total_tokens")
+                    limit = usage.get("max_context_tokens")
                     if used is not None and limit:
                         ctx_pct = min(100.0, (used / limit) * 100.0)
 
-        # 4. Budget State
+        # 4. Run State
+        active_run_id = None
+        active_run_status = None
+        # We look for the newest run that's in an active lifecycle (running or awaiting_merge)
+        active_runs = [r for r in OpsService.list_runs() if r.status not in ("done", "error", "cancelled")]
+        if active_runs:
+            latest = active_runs[-1]
+            active_run_id = latest.id
+            active_run_status = latest.status
+
+        # 5. Budget State
         budget_pct = 100.0
         try:
             forecast_svc = BudgetForecastService(storage=StorageService())
@@ -57,7 +71,7 @@ class OperatorStatusService:
         except Exception:
             pass
 
-        # 5. Snapshot Finalization
+        # 6. Snapshot Finalization
         snapshot = {
             "repo": str(base_dir.name) if base_dir.exists() else None,
             "branch": branch,
@@ -72,6 +86,8 @@ class OperatorStatusService:
             "backend_version": __version__,
             "last_thread": last_thread_id,
             "last_turn": last_turn_id,
+            "active_run_id": active_run_id,
+            "active_run_status": active_run_status,
         }
         
         snapshot["alerts"] = NoticePolicyService.evaluate_all(snapshot)

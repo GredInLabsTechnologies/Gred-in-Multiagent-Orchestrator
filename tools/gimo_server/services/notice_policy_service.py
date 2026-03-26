@@ -44,4 +44,12 @@ class NoticePolicyService:
         if context_state.get("merge_base_drift") is True:
             notices.append({"level": "warning", "code": "merge_base_drift", "message": "Merge base drift detected"})
 
+        if context_state.get("active_run_status") == "AWAITING_MERGE":
+            run_id = context_state.get("active_run_id", "?")
+            notices.append({
+                "level": "info",
+                "code": "awaiting_merge",
+                "message": f"Run {run_id} is AWAITING_MERGE. Use /merge to finalize."
+            })
+
         return notices
