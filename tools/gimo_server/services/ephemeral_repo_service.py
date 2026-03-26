@@ -25,10 +25,19 @@ class EphemeralRepoService:
             GitService.fetch_mirror(mirror_dir)
         return mirror_dir
 
-    def create_ephemeral_workspace(self, source_repo: Path, base_commit: str, branch_name: Optional[str] = None) -> Path:
+    def create_ephemeral_workspace(
+        self,
+        source_repo: Path,
+        base_commit: str,
+        branch_name: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+    ) -> Path:
         """Create a decoupled local clone and checkout from a generic local source."""
-        workspace_id = str(uuid.uuid4())
-        target_dir = self.ephemeral_repos_dir / workspace_id
+        workspace_name = workspace_id or str(uuid.uuid4())
+        target_dir = self.ephemeral_repos_dir / workspace_name
+
+        if target_dir.exists():
+            self.destroy_workspace(target_dir)
         
         # We need a base dir for the command when cloning, we can use the source_repo's parent
         GitService.clone_local(source_repo.parent, source_repo, target_dir)
@@ -39,11 +48,22 @@ class EphemeralRepoService:
             
         return target_dir
 
-    def create_ephemeral_workspace_from_mirror(self, mirror_dir: Path, base_commit: str, branch_name: Optional[str] = None) -> Path:
+    def create_ephemeral_workspace_from_mirror(
+        self,
+        mirror_dir: Path,
+        base_commit: str,
+        branch_name: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+    ) -> Path:
         """Create a decoupled local clone and checkout explicitly from a managed mirror."""
         if not mirror_dir.is_relative_to(self.repo_mirrors_dir):
             raise ValueError(f"Mirror must be located in {self.repo_mirrors_dir}")
-        return self.create_ephemeral_workspace(mirror_dir, base_commit, branch_name)
+        return self.create_ephemeral_workspace(
+            mirror_dir,
+            base_commit,
+            branch_name,
+            workspace_id=workspace_id,
+        )
 
     def destroy_workspace(self, workspace_dir: Path) -> None:
         """Destroy/purge workspace."""
@@ -58,4 +78,3 @@ class EphemeralRepoService:
                 except Exception:
                     pass
             shutil.rmtree(workspace_dir, onerror=remove_readonly)
-

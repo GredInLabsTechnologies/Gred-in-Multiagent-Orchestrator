@@ -1,94 +1,131 @@
+from __future__ import annotations
+
 import logging
-from typing import Any, Dict, Optional
 from pathlib import Path
-from ..version import __version__
+from typing import Any
+
 from ..config import get_settings
-from .git_service import GitService
-from .provider_service_impl import ProviderService
-from .notice_policy_service import NoticePolicyService
-from .conversation_service import ConversationService
-from .storage_service import StorageService
-from .ops_service import OpsService
+from ..version import __version__
 from .budget_forecast_service import BudgetForecastService
+from .conversation_service import ConversationService
+from .git_service import GitService
+from .notice_policy_service import NoticePolicyService
+from .ops_service import OpsService
+from .provider_service_impl import ProviderService
+from .storage_service import StorageService
 
 logger = logging.getLogger("orchestrator.services.operator_status")
 
+
 class OperatorStatusService:
+    _TERMINAL_RUN_STATUSES = {"done", "error", "cancelled"}
+
     @classmethod
-    def get_status_snapshot(cls) -> Dict[str, Any]:
-        """Provides a complete system status snapshot (Single Source of Truth)."""
+    def _repo_root(cls) -> Path:
         settings = get_settings()
-        base_dir = Path(settings.workspace_root)
-        
-        # 1. Git State
-        branch_res = GitService._run_git(base_dir, ["rev-parse", "--abbrev-ref", "HEAD"])
-        branch = branch_res[1].strip() if branch_res[0] == 0 else "unknown"
-        dirty_files = len(GitService.get_changed_files(base_dir))
-        
-        # 2. Provider State
-        ps = ProviderService(storage=StorageService())
-        active_provider = ps.get_active_provider_id()
-        active_model = ps.get_active_model_id()
-        
-        # 3. Session & Permissions State (Strict Honesty - no heuristics)
-        last_thread_id = ConversationService.get_last_active_thread_id()
-        last_turn_id = None
-        permissions = None  # Removed hardcoded "suggest"
+        return Path(settings.repo_root_dir)
+
+    @classmethod
+    def _provider_snapshot(cls) -> tuple[str | None, str | None]:
+        cfg = ProviderService.get_config()
+        if not cfg:
+            return None, None
+
+        roles = getattr(cfg, "roles", None)
+        orchestrator = getattr(roles, "orchestrator", None) if roles else None
+        if orchestrator:
+            return orchestrator.provider_id, orchestrator.model
+        return getattr(cfg, "orchestrator_provider", None) or getattr(cfg, "active", None), getattr(
+            cfg,
+            "orchestrator_model",
+            None,
+        ) or getattr(cfg, "model_id", None)
+
+    @classmethod
+    def _thread_snapshot(cls) -> tuple[str | None, str | None, str | None, float | None]:
+        threads = ConversationService.list_threads()
+        if not threads:
+            return None, None, None, None
+
+        thread = threads[0]
+        metadata = thread.metadata if isinstance(thread.metadata, dict) else {}
+        last_turn_id = thread.turns[-1].id if thread.turns else None
+        permissions = metadata.get("permissions")
+
         ctx_pct = None
+        usage = metadata.get("usage")
+        if isinstance(usage, dict):
+            used = usage.get("total_tokens")
+            limit = usage.get("max_context_tokens")
+            if isinstance(used, (int, float)) and isinstance(limit, (int, float)) and limit > 0:
+                ctx_pct = min(100.0, (float(used) / float(limit)) * 100.0)
 
-        if last_thread_id:
-            t = ConversationService.get_thread(last_thread_id)
-            if t:
-                last_turn_id = t.turns[-1].id if t.turns else None
-                # Derived from metadata if present
-                permissions = t.metadata.get("permissions")
-                
-                # Usage reporting - authoritative only
-                usage = t.metadata.get("usage")
-                if isinstance(usage, dict):
-                    used = usage.get("total_tokens")
-                    limit = usage.get("max_context_tokens")
-                    if used is not None and limit:
-                        ctx_pct = min(100.0, (used / limit) * 100.0)
+        return thread.id, last_turn_id, permissions, ctx_pct
 
-        # 4. Run State
-        active_run_id = None
-        active_run_status = None
-        # We look for the newest run that's in an active lifecycle (running or awaiting_merge)
-        active_runs = [r for r in OpsService.list_runs() if r.status not in ("done", "error", "cancelled")]
-        if active_runs:
-            latest = active_runs[-1]
-            active_run_id = latest.id
-            active_run_status = latest.status
+    @classmethod
+    def _active_run_snapshot(cls) -> tuple[str | None, str | None]:
+        for run in OpsService.list_runs():
+            status = str(run.status or "")
+            if status in cls._TERMINAL_RUN_STATUSES:
+                continue
+            return run.id, status
+        return None, None
 
-        # 5. Budget State
-        budget_pct = 100.0
+    @classmethod
+    def _budget_snapshot(cls) -> tuple[float | None, str | None]:
         try:
-            forecast_svc = BudgetForecastService(storage=StorageService())
             ops_cfg = OpsService.get_config()
-            f = forecast_svc._calculate_forecast("global", ops_cfg.economy.global_budget_usd, ops_cfg.economy.alert_thresholds)
-            if f: budget_pct = f.remaining_pct
+            forecast = BudgetForecastService(storage=StorageService())._calculate_forecast(
+                "global",
+                ops_cfg.economy.global_budget_usd,
+                ops_cfg.economy.alert_thresholds,
+            )
         except Exception:
-            pass
+            logger.exception("Failed to compute budget snapshot")
+            return None, None
 
-        # 6. Snapshot Finalization
-        snapshot = {
-            "repo": str(base_dir.name) if base_dir.exists() else None,
+        if not forecast:
+            return None, None
+
+        remaining_pct = float(forecast.remaining_pct)
+        return remaining_pct, ("ok" if remaining_pct > 20.0 else "low")
+
+    @classmethod
+    def get_status_snapshot(cls) -> dict[str, Any]:
+        """Return the canonical backend-authored operator status snapshot."""
+        repo_root = cls._repo_root()
+        branch = GitService.get_current_branch(repo_root)
+        dirty_files = GitService.get_changed_files(repo_root)
+
+        active_provider, active_model = cls._provider_snapshot()
+        last_thread_id, last_turn_id, permissions, context_percentage = cls._thread_snapshot()
+        active_run_id, active_run_status = cls._active_run_snapshot()
+        budget_percentage, budget_status = cls._budget_snapshot()
+
+        snapshot: dict[str, Any] = {
+            "repo": repo_root.name if repo_root.exists() else None,
             "branch": branch,
             "dirty_files": dirty_files,
             "active_provider": active_provider,
             "active_model": active_model,
-            "permissions": permissions,
-            "budget_percentage": budget_pct,
-            "context_percentage": ctx_pct,
-            "budget_status": "ok" if (budget_pct and budget_pct > 20) else (None if budget_pct is None else "low"),
-            "context_status": f"{int(ctx_pct)}%" if ctx_pct is not None else None,
             "backend_version": __version__,
-            "last_thread": last_thread_id,
-            "last_turn": last_turn_id,
-            "active_run_id": active_run_id,
-            "active_run_status": active_run_status,
         }
-        
+
+        if permissions is not None:
+            snapshot["permissions"] = permissions
+        if last_thread_id is not None:
+            snapshot["last_thread"] = last_thread_id
+        if last_turn_id is not None:
+            snapshot["last_turn"] = last_turn_id
+        if context_percentage is not None:
+            snapshot["context_percentage"] = context_percentage
+            snapshot["context_status"] = f"{int(context_percentage)}%"
+        if active_run_id is not None:
+            snapshot["active_run_id"] = active_run_id
+            snapshot["active_run_status"] = active_run_status
+        if budget_percentage is not None:
+            snapshot["budget_percentage"] = budget_percentage
+            snapshot["budget_status"] = budget_status
+
         snapshot["alerts"] = NoticePolicyService.evaluate_all(snapshot)
         return snapshot

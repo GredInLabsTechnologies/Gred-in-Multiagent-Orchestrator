@@ -14,11 +14,12 @@ All endpoints require `Authorization: Bearer <ORCH_TOKEN>`.
 - `GET /ui/service/status` | `POST /ui/service/restart` | `POST /ui/service/stop`: Service control.
 
 ## 2. File & Repo Operations
-- `GET /ui/repos`: List repositories.
-- `GET /ui/repos/active`: Get active repository.
-- `POST /ui/repos/open?path=<path>`: Open repo.
-- `POST /ui/repos/select?path=<path>`: Select active repo.
-- `POST /ui/repos/vitaminize?path=<path>`: Init GIMO config in repo.
+- `GET /ops/repos`: Canonical repo listing for clients.
+- `GET /ops/repos/active`: Canonical active-repo snapshot.
+- `POST /ops/repos/open?path=<path>`: [LEGACY] Open repo by host path.
+- `POST /ops/repos/select?path=<path>`: [LEGACY] Select active repo by host path.
+- `POST /ops/repos/vitaminize?path=<path>`: Operator vitaminize flow.
+- `GET /ui/repos*`: [LEGACY UI] Compatibility surface, not the canonical client contract.
 - `GET /tree?path=.&max_depth=3`: Get directory tree.
 - `GET /file?path=<path>&start_line=1&end_line=500`: Read file content (uses `.orch_snapshots/`).
 - `GET /search?q=<query>&ext=<ext>`: Search files.
@@ -38,6 +39,15 @@ All endpoints require `Authorization: Bearer <ORCH_TOKEN>`.
 - `/mcp`: **[LEGACY]** General-purpose MCP bridge.
 - `/ops/operator/status`: Canonical backend status for TUI/CLI parity.
 - `/ops/notices`: Canonical notification feed for all surfaces.
+- `POST /ops/app/sessions`: Create App session.
+- `GET /ops/app/sessions/{id}`: Read App session state.
+- `POST /ops/app/sessions/{id}/repo/select`: Bind opaque repo handle to App session.
+- `GET /ops/app/sessions/{id}/recon/*`: App reconnaissance over opaque handles only.
+- `POST /ops/app/sessions/{id}/drafts`: Create validated App draft from recon evidence.
+- `POST /ops/app/sessions/{id}/context-requests`: Create/list/resolve/cancel App context requests.
+- `GET /ops/app/runs/{run_id}/review`: Canonical review bundle + merge preview.
+- `POST /ops/app/runs/{run_id}/discard`: Discard run and purge reconstructive state.
+- `POST /ops/app/sessions/{id}/purge`: Remove App session state.
 
 ## 4. Multi-Agent API (UI / Orchestrator)
 - `GET /ui/agent/{agent_id}/quality`: Quality metrics.
@@ -83,13 +93,20 @@ All endpoints require `Authorization: Bearer <ORCH_TOKEN>`.
 - `GET /ops/skills`: List available skills.
 - `POST /ops/skills`: Register skill.
 - `GET /ops/skills/{id}`: Get skill detail.
-- `GET /ops/conversations`: List conversations.
-- `POST /ops/conversations`: Create conversation.
-- `GET /ops/conversations/{id}`: Get conversation detail.
-- `POST /ops/conversations/{id}/message`: Send message.
+- `GET /ops/threads`: Canonical thread listing.
+- `POST /ops/threads`: Create thread.
+- `GET /ops/threads/{id}`: Get thread detail.
+- `POST /ops/threads/{id}/messages`: Append user message.
+- `POST /ops/threads/{id}/chat`: Agentic chat response.
+- `POST /ops/threads/{id}/chat/stream`: Agentic chat SSE stream.
+- `POST /ops/threads/{id}/reset`: Reset thread context without changing identity.
+- `POST /ops/threads/{id}/config`: Persist effort/permissions session config.
+- `POST /ops/threads/{id}/context/add`: Persist attached context items.
+- `GET /ops/threads/{id}/usage`: Read authoritative thread usage snapshot.
 
 ## 10. Operations & Day-2
-- **Backend**: FastAPI running on `127.0.0.1:9325`. Start with `GIMO_DEV_LAUNCHER.cmd`.
+- **Launcher**: `gimo.cmd` is the official dev launcher (`gimo`, `gimo up`, `gimo down`, `gimo doctor`, `gimo bootstrap`).
+- **Backend**: FastAPI running on `127.0.0.1:9325`.
 - **GIMO Web**: Next.js on `localhost:3000`. Deploy via Vercel.
 - **Audit Logging**: `logs/orchestrator_audit.log` (rotates, redacts secrets).
 - **Panic Mode**: Triggered by invalid tokens or exceptions. Cleared via `/ui/security/resolve`.

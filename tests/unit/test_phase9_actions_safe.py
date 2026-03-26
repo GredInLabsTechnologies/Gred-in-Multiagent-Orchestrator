@@ -25,7 +25,17 @@ def test_phase9_filtered_openapi_exposes_only_allowed_contract(test_client):
             "/ops/runs/{run_id}/preview",
             "/ops/repos",
             "/ops/repos/active",
-            "/ops/repos/select",
+            "/ops/app/sessions",
+            "/ops/app/sessions/{id}",
+            "/ops/app/sessions/{id}/repo/select",
+            "/ops/app/sessions/{id}/purge",
+            "/ops/app/sessions/{id}/recon/list",
+            "/ops/app/sessions/{id}/recon/search",
+            "/ops/app/sessions/{id}/recon/read/{file_handle}",
+            "/ops/app/sessions/{id}/drafts",
+            "/ops/app/sessions/{id}/context-requests",
+            "/ops/app/sessions/{id}/context-requests/{req_id}/resolve",
+            "/ops/app/sessions/{id}/context-requests/{req_id}/cancel",
         }
 
         assert set(paths["/ops/drafts"].keys()) == {"post"}
@@ -34,7 +44,17 @@ def test_phase9_filtered_openapi_exposes_only_allowed_contract(test_client):
         assert set(paths["/ops/runs/{run_id}/preview"].keys()) == {"get"}
         assert set(paths["/ops/repos"].keys()) == {"get"}
         assert set(paths["/ops/repos/active"].keys()) == {"get"}
-        assert set(paths["/ops/repos/select"].keys()) == {"post"}
+        assert set(paths["/ops/app/sessions"].keys()) == {"post"}
+        assert set(paths["/ops/app/sessions/{id}"].keys()) == {"get"}
+        assert set(paths["/ops/app/sessions/{id}/repo/select"].keys()) == {"post"}
+        assert set(paths["/ops/app/sessions/{id}/purge"].keys()) == {"post"}
+        assert set(paths["/ops/app/sessions/{id}/recon/list"].keys()) == {"get"}
+        assert set(paths["/ops/app/sessions/{id}/recon/search"].keys()) == {"get"}
+        assert set(paths["/ops/app/sessions/{id}/recon/read/{file_handle}"].keys()) == {"get"}
+        assert set(paths["/ops/app/sessions/{id}/drafts"].keys()) == {"post"}
+        assert set(paths["/ops/app/sessions/{id}/context-requests"].keys()) == {"get", "post"}
+        assert set(paths["/ops/app/sessions/{id}/context-requests/{req_id}/resolve"].keys()) == {"post"}
+        assert set(paths["/ops/app/sessions/{id}/context-requests/{req_id}/cancel"].keys()) == {"post"}
     finally:
         app.dependency_overrides.clear()
 
@@ -53,6 +73,7 @@ def test_phase9_filtered_openapi_excludes_internal_and_admin_routes(test_client)
             "/ops/provider",
             "/ops/runs",
             "/ops/repos/open",
+            "/ops/repos/select",
             "/ops/repos/vitaminize",
             "/ops/service/restart",
             "/ops/workflows/execute",

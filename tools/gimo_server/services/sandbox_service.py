@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import logging
-import shutil
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..config import WORKTREES_DIR
+from ..config import WORKTREES_DIR, get_settings
+from .ephemeral_repo_service import EphemeralRepoService
 from .git_service import GitService
 
 logger = logging.getLogger("orchestrator.services.sandbox_service")
@@ -22,14 +22,24 @@ class SandboxHandle:
 
 
 class SandboxService:
-    """Service to manage isolated git worktrees for agent execution."""
+    """Provision isolated execution sandboxes without mutating the source repo."""
 
+    # Transitional constant kept for legacy cleanup paths and existing tests.
     BASE_WORKTREE_PATH = WORKTREES_DIR
 
     @classmethod
-    def _worktree_path(cls, run_id: str) -> Path:
+    def _workspace_id(cls, run_id: str) -> str:
         digest = hashlib.sha256(run_id.encode("utf-8", errors="ignore")).hexdigest()[:16]
-        return cls.BASE_WORKTREE_PATH / digest
+        return digest
+
+    @classmethod
+    def _worktree_path(cls, run_id: str) -> Path:
+        return cls.BASE_WORKTREE_PATH / cls._workspace_id(run_id)
+
+    @classmethod
+    def _workspace_path(cls, run_id: str) -> Path:
+        settings = get_settings()
+        return settings.ephemeral_repos_dir / cls._workspace_id(run_id)
 
     @classmethod
     def _branch_name(cls, run_id: str) -> str:
@@ -37,21 +47,30 @@ class SandboxService:
         return f"gimo_{digest}"
 
     @classmethod
+    def _ephemeral_repo_service(cls) -> EphemeralRepoService:
+        settings = get_settings()
+        return EphemeralRepoService(
+            settings.ephemeral_repos_dir,
+            settings.repo_mirrors_dir,
+            settings.purge_quarantine_dir,
+        )
+
+    @classmethod
     def create_worktree_handle(cls, run_id: str, repo_path: str, base_ref: str = "main") -> SandboxHandle:
-        cls.BASE_WORKTREE_PATH.mkdir(parents=True, exist_ok=True)
-        repo_root = Path(repo_path)
-        worktree_path = cls._worktree_path(run_id)
+        repo_root = Path(repo_path).resolve()
         branch_name = cls._branch_name(run_id)
-
-        if worktree_path.exists():
-            shutil.rmtree(worktree_path, ignore_errors=True)
-
-        GitService.create_worktree(repo_root, worktree_path, branch_name=branch_name, base_ref=base_ref)
-        logger.info("Sandbox created for %s at %s", run_id, worktree_path)
+        service = cls._ephemeral_repo_service()
+        workspace_path = service.create_ephemeral_workspace(
+            repo_root,
+            base_ref,
+            branch_name=branch_name,
+            workspace_id=cls._workspace_id(run_id),
+        )
+        logger.info("Sandbox created for %s at %s [ephemeral clone]", run_id, workspace_path)
         return SandboxHandle(
             run_id=run_id,
             repo_path=str(repo_root),
-            worktree_path=worktree_path,
+            worktree_path=workspace_path,
             branch_name=branch_name,
             base_ref=base_ref,
         )
@@ -59,10 +78,24 @@ class SandboxService:
     @classmethod
     def cleanup_worktree(cls, handle: SandboxHandle) -> bool:
         try:
-            GitService.remove_worktree(Path(handle.repo_path), handle.worktree_path)
-            GitService.delete_branch(Path(handle.repo_path), handle.branch_name)
-            logger.info("Sandbox %s cleaned up successfully.", handle.run_id)
-            return True
+            settings = get_settings()
+            workspace_path = handle.worktree_path.resolve()
+            ephemeral_root = settings.ephemeral_repos_dir.resolve()
+
+            if workspace_path.is_relative_to(ephemeral_root):
+                cls._ephemeral_repo_service().destroy_workspace(workspace_path)
+                logger.info("Sandbox %s cleaned up successfully [ephemeral clone].", handle.run_id)
+                return True
+
+            legacy_root = cls.BASE_WORKTREE_PATH.resolve()
+            if workspace_path.is_relative_to(legacy_root):
+                GitService.remove_worktree(Path(handle.repo_path), workspace_path)
+                GitService.delete_branch(Path(handle.repo_path), handle.branch_name)
+                logger.info("Sandbox %s cleaned up successfully [legacy worktree].", handle.run_id)
+                return True
+
+            logger.warning("Refusing to cleanup unknown sandbox path for %s: %s", handle.run_id, workspace_path)
+            return False
         except Exception as exc:
             logger.error("Failed to cleanup worktree %s: %s", handle.run_id, exc)
             return False
@@ -76,7 +109,7 @@ class SandboxService:
         handle = SandboxHandle(
             run_id=run_id,
             repo_path=repo_path,
-            worktree_path=cls._worktree_path(run_id),
+            worktree_path=cls._workspace_path(run_id),
             branch_name=cls._branch_name(run_id),
             base_ref="main",
         )

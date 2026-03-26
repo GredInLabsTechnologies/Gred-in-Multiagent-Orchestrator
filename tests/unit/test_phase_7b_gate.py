@@ -91,7 +91,7 @@ async def test_notice_policy_backend_authored():
     """
     # Mock a high budget context
     context = {
-        "budget_percentage": 85.0,
+        "budget_percentage": 15.0,
         "context_percentage": 75.0,
         "merge_base_drift": True
     }

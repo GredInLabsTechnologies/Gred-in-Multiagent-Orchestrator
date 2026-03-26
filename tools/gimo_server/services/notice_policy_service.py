@@ -16,20 +16,21 @@ class NoticePolicyService:
                 "message": f"Context usage is high ({float(ctx_pct)}%)"
             })
             
-        budget_pct = context_state.get("budget_percentage")
-        if not isinstance(budget_pct, (int, float)):
+        remaining_budget_pct = context_state.get("budget_percentage")
+        if not isinstance(remaining_budget_pct, (int, float)):
             spend = context_state.get("budget_spend")
             limit = context_state.get("budget_limit")
             if isinstance(spend, (int, float)) and isinstance(limit, (int, float)) and limit > 0:
-                budget_pct = (float(spend) / float(limit)) * 100.0
+                remaining_budget_pct = max(0.0, 100.0 - ((float(spend) / float(limit)) * 100.0))
             else:
-                budget_pct = None
-                
-        if budget_pct is not None and budget_pct > 80.0:
+                remaining_budget_pct = None
+
+        if isinstance(remaining_budget_pct, (int, float)) and remaining_budget_pct <= 20.0:
+            used_budget_pct = 100.0 - float(remaining_budget_pct)
             notices.append({
                 "level": "warning",
                 "code": "budget_high",
-                "message": f"Budget usage is near limit ({float(budget_pct):.1f}%)"
+                "message": f"Budget usage is near limit ({used_budget_pct:.1f}% used)"
             })
             
         if context_state.get("new_version_available") is True:

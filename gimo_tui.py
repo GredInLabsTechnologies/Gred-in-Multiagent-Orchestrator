@@ -646,6 +646,47 @@ class GimoApp(App):
         except Exception as e:
             self._safe_call(self._update_graph_widget, f"[red]Status Error: {e}[/red]")
 
+    def _refresh_topology_logic(self):
+        """Backward-compatible topology refresh entry point for tests and legacy callers."""
+        try:
+            status, payload = _api_request(self.config, "GET", "/ops/operator/status")
+            if status != 200 or not isinstance(payload, dict):
+                self._safe_call(self._update_graph_widget, "[yellow]Status bridge disconnected.[/yellow]")
+                return
+
+            repo = payload.get("repo", "?")
+            branch = payload.get("branch", "?")
+            provider = payload.get("active_provider", "?")
+            model = payload.get("active_model", "?")
+            text = (
+                f"ðŸ“ Repo: [bold]{repo}[/bold] ({branch})\n"
+                f"ðŸ§  Orchestrator: [cyan]{provider}[/cyan]\n"
+                f"   Model: [dim]{model}[/dim]"
+            )
+            self._safe_call(self._update_graph_widget, text)
+        except Exception as e:
+            self._safe_call(self._update_graph_widget, f"[red]Status Error: {e}[/red]")
+
+    @work(thread=True)
+    def update_notices(self):
+        """Backward-compatible notice refresh that consumes the canonical backend notice feed."""
+        try:
+            status, payload = _api_request(self.config, "GET", "/ops/notices")
+            if status != 200 or not isinstance(payload, list) or not payload:
+                self._safe_call(self._update_notices_widget, NO_NOTICES_MSG)
+                return
+
+            lines = []
+            for notice in payload:
+                lvl = notice.get("level", "info")
+                msg = notice.get("message", "")
+                icon = "âš " if lvl == "warning" else "âœ—" if lvl == "error" else "â„¹"
+                color = "yellow" if lvl == "warning" else "red" if lvl == "error" else "blue"
+                lines.append(f"[{color}]{icon} {msg}[/{color}]")
+            self._safe_call(self._update_notices_widget, "\n".join(lines))
+        except Exception as e:
+            self._safe_call(self._update_notices_widget, f"[red]Notice Error: {e}[/red]")
+
     def _update_header(self, text: str):
         self.query_one("#header-text", Static).update(text)
 

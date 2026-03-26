@@ -231,13 +231,16 @@ class CustomPlanService:
         if ops_service is not None:
             ops_service.recover_stale_execution_lock(cls.PLAN_LOCK_SCOPE, plan_id)
             try:
-                return ops_service.acquire_execution_lock(
+                reservation = ops_service.acquire_execution_lock(
                     cls.PLAN_LOCK_SCOPE,
                     plan_id,
                     owner_id,
                     ttl_seconds=cls.PLAN_LOCK_TTL_SECONDS,
                     metadata={"plan_id": plan_id},
                 )
+                with cls._execution_lock:
+                    cls._active_plan_executions[plan_id] = owner_id
+                return reservation
             except RuntimeError as exc:
                 raise PlanExecutionBusyError(str(exc)) from exc
 
@@ -257,14 +260,15 @@ class CustomPlanService:
     @classmethod
     def release_plan_execution(cls, plan_id: str, owner_id: str | None = None) -> None:
         ops_service = cls._get_ops_service()
-        if ops_service is not None and owner_id:
-            ops_service.release_execution_lock(cls.PLAN_LOCK_SCOPE, plan_id, owner_id)
-            return
-
         with cls._execution_lock:
-            active_owner = cls._active_plan_executions.get(plan_id)
-            if owner_id is None or active_owner == owner_id:
+            tracked_owner = cls._active_plan_executions.get(plan_id)
+            resolved_owner = owner_id or tracked_owner
+            if owner_id is None or tracked_owner == resolved_owner:
                 cls._active_plan_executions.pop(plan_id, None)
+
+        if ops_service is not None and resolved_owner:
+            ops_service.release_execution_lock(cls.PLAN_LOCK_SCOPE, plan_id, resolved_owner)
+            return
 
     @classmethod
     def heartbeat_plan_execution(cls, plan_id: str, owner_id: str) -> Dict[str, Any] | None:

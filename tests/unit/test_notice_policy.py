@@ -6,8 +6,8 @@ def test_notice_policy_ctx_high():
     codes = [n["code"] for n in notices]
     assert "ctx_high" in codes
 
-def test_notice_policy_budget_high_by_percentage():
-    notices = NoticePolicyService.evaluate_all({"budget_percentage": 85.0})
+def test_notice_policy_budget_high_by_remaining_percentage():
+    notices = NoticePolicyService.evaluate_all({"budget_percentage": 15.0})
     codes = [n["code"] for n in notices]
     assert "budget_high" in codes
 
