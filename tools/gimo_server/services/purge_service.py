@@ -45,39 +45,49 @@ class PurgeService:
                 workspace_path_str = run.validated_task_spec.get("workspace_path")
             
             if workspace_path_str:
-                workspace_path = Path(workspace_path_str)
+                workspace_path = Path(workspace_path_str).resolve()
                 settings = get_settings()
                 repo_root = Path(settings.repo_root_dir).resolve()
                 
                 # B2 Security: Never purge the main repo root
-                if workspace_path.exists() and workspace_path.resolve() != repo_root:
+                if workspace_path == repo_root:
+                    raise RuntimeError(f"Refusing to purge workspace because it matches repo_root: {workspace_path}")
+
+                if workspace_path.exists():
                     try:
                         # Use GitService to remove worktree if it is one
                         GitService.remove_worktree(repo_root, workspace_path)
+                        if workspace_path.exists():
+                             # If still exists, attempt hard removal
+                             shutil.rmtree(workspace_path, ignore_errors=False)
                         removed_categories.append("workspace")
                     except Exception as e:
-                        logger.warning(f"GitService.remove_worktree failed for {workspace_path}: {e}")
-                        # Fallback for non-git workspaces or failed git command
+                        logger.error(f"Failed to remove workspace {workspace_path}: {e}")
+                        # Final check for failure
                         if workspace_path.exists():
-                            shutil.rmtree(workspace_path, ignore_errors=True)
-                            removed_categories.append("workspace_fs")
-                elif workspace_path.resolve() == repo_root:
-                    logger.warning(f"Refusing to purge workspace because it matches repo_root: {workspace_path}")
+                             raise RuntimeError(f"Failed to remove workspace {workspace_path}: {str(e)}")
 
             # 2. Remove Events
             events_path = OpsService._run_events_path(run_id)
             if events_path.exists():
-                events_path.unlink()
-                removed_categories.append("events")
+                try:
+                    events_path.unlink()
+                    removed_categories.append("events")
+                except Exception as e:
+                    raise RuntimeError(f"Failed to unlink events: {e}")
 
             # 3. Remove Logs
             logs_path = OpsService._run_log_path(run_id)
             if logs_path.exists():
-                logs_path.unlink()
-                removed_categories.append("logs")
+                try:
+                    logs_path.unlink()
+                    removed_categories.append("logs")
+                except Exception as e:
+                    raise RuntimeError(f"Failed to unlink logs: {e}")
 
             # 4. Retain minimal metadata only (IDs, hashes, outcome, timestamps, commit refs, model identifier)
-            # survivor fields: run_id, outcome/status, timestamps, relevant commit refs, evidence/purge hash, model identifier
+            # survivor fields: id, approved_id, status, commit refs, timestamps, risk score, model identifier, purge markers
+            # NO: validated_task_spec, log, child_context, etc.
             retained_data = {
                 "id": run.id,
                 "approved_id": run.approved_id,
@@ -93,12 +103,15 @@ class PurgeService:
             }
             
             # Evidence hash of retained metadata
-            metadata_str = json.dumps(retained_data, sort_keys=True)
+            metadata_str = json.dumps(retained_data, sort_keys=True, indent=2)
             retained_hash = hashlib.sha256(metadata_str.encode("utf-8")).hexdigest()
             
             # Persist minimal metadata (destructive overwrite)
             run_path = OpsService._run_path(run_id)
-            run_path.write_text(json.dumps(retained_data, indent=2), encoding="utf-8")
+            try:
+                run_path.write_text(json.dumps(retained_data, indent=2), encoding="utf-8")
+            except Exception as e:
+                raise RuntimeError(f"Failed to persist terminal metadata: {e}")
             
             # 5. Persist Purge Receipt
             receipt = PurgeReceipt(
@@ -107,7 +120,10 @@ class PurgeService:
                 retained_metadata_hash=retained_hash,
                 success=True
             )
-            cls._persist_receipt(receipt)
+            try:
+                cls._persist_receipt(receipt)
+            except Exception as e:
+                raise RuntimeError(f"Failed to persist purge receipt: {e}")
             
             return receipt
 
