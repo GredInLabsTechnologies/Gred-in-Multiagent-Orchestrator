@@ -2146,16 +2146,28 @@ def repos_select(
     path: str = typer.Argument(..., help="Repository path to select."),
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
-    """Select a repository as active workspace."""
-    config = _load_config()
-    status_code, payload = _api_request(config, "POST", "/ops/repos/select", params={"path": path})
+    """Legacy host-path selection is not part of the canonical terminal flow."""
+    _load_config()
+    requested = str(Path(path).resolve())
+    canonical_message = (
+        "Legacy host-path repo selection has been removed from the canonical terminal flow. "
+        "Use the current workspace contract instead: change into the target repository and run "
+        "'gimo init', then start threads from that workspace."
+    )
+    payload = {
+        "status": "legacy_removed",
+        "requested_path": requested,
+        "detail": canonical_message,
+        "canonical_flow": {
+            "workspace_root": str(_project_root()),
+            "command": "gimo init",
+        },
+    }
     if json_output:
-        _emit_output({"status_code": status_code, "result": payload}, json_output=True)
-        return
-    if status_code == 200:
-        console.print(f"[green]Repository selected: {path}[/green]")
-    else:
-        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        _emit_output(payload, json_output=True)
+        raise typer.Exit(1)
+    console.print(f"[red]{canonical_message}[/red]")
+    raise typer.Exit(1)
 
 
 # --- threads ---

@@ -233,6 +233,20 @@ def test_open_repo_fail_not_found(client, tmp_path):
         assert response.status_code == 404
 
 
+def test_open_repo_operator_forbidden(tmp_path):
+    def override_operator():
+        return AuthContext(token="operator-token", role="operator")
+
+    app.dependency_overrides[verify_token] = override_operator
+    client = TestClient(app, raise_server_exceptions=False)
+    with patch("tools.gimo_server.routers.ops.repo_router.REPO_ROOT_DIR", tmp_path):
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        response = client.post(f"/ops/repos/open?path={repo}")
+        assert response.status_code == 403
+    app.dependency_overrides.clear()
+
+
 def test_select_repo_success(client, tmp_path):
     with patch("tools.gimo_server.routers.ops.repo_router.REPO_ROOT_DIR", tmp_path):
         repo = tmp_path / "myrepo"
@@ -249,7 +263,7 @@ def test_select_repo_success(client, tmp_path):
                     assert response.json()["active_repo"] == str(repo.resolve())
 
 
-def test_select_repo_actions_blocked_when_override_active(tmp_path):
+def test_select_repo_actions_forbidden(tmp_path):
     def override_actions():
         return AuthContext(token="actions-token", role="actions")
 
@@ -258,13 +272,9 @@ def test_select_repo_actions_blocked_when_override_active(tmp_path):
     with patch("tools.gimo_server.routers.ops.repo_router.REPO_ROOT_DIR", tmp_path):
         repo = tmp_path / "myrepo"
         repo.mkdir()
-        with patch(
-            "tools.gimo_server.routers.ops.repo_router.RepoOverrideService.get_active_override",
-            return_value={"repo_id": str(repo), "etag": '"etag1"', "expires_at": "2099-01-01T00:00:00Z"},
-        ):
-            response = client.post(f"/ops/repos/select?path={repo}")
-            assert response.status_code == 403
-            assert response.json()["detail"] == "REPO_OVERRIDE_ACTIVE"
+        response = client.post(f"/ops/repos/select?path={repo}")
+        assert response.status_code == 403
+        assert response.json()["detail"] == "admin role or higher required"
     app.dependency_overrides.clear()
 
 
@@ -306,6 +316,20 @@ def test_select_repo_fail_not_found(client, tmp_path):
     with patch("tools.gimo_server.routers.ops.repo_router.REPO_ROOT_DIR", tmp_path):
         response = client.post(f"/ops/repos/select?path={tmp_path / 'nonexistent'}")
         assert response.status_code == 404
+
+
+def test_select_repo_operator_forbidden(tmp_path):
+    def override_operator():
+        return AuthContext(token="operator-token", role="operator")
+
+    app.dependency_overrides[verify_token] = override_operator
+    client = TestClient(app, raise_server_exceptions=False)
+    with patch("tools.gimo_server.routers.ops.repo_router.REPO_ROOT_DIR", tmp_path):
+        repo = tmp_path / "myrepo"
+        repo.mkdir()
+        response = client.post(f"/ops/repos/select?path={repo}")
+        assert response.status_code == 403
+    app.dependency_overrides.clear()
 
 
 def test_get_security_events(client):

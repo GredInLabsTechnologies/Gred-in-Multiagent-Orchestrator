@@ -17,7 +17,7 @@ from ...security import (
 from ...security.auth import AuthContext
 from ...services.repo_service import RepoService
 from ...services.repo_override_service import RepoOverrideService
-from ..ops.common import require_read, require_operator
+from ..ops.common import require_admin, require_read, require_operator
 
 router = APIRouter(prefix="/ops/repos", tags=["repos"])
 
@@ -167,14 +167,14 @@ def get_active_repo(
     }
 
 
-@router.post("/open") # [LEGACY/OPERATOR]
+@router.post("/open") # [LEGACY/ADMIN_ONLY]
 def open_repo(
     path: str = Query(...),
-    auth: AuthContext = Depends(require_read),
+    auth: AuthContext = Depends(require_admin),
     _rl: None = Depends(check_rate_limit),
 ):
-    """[LEGACY] Open repo by local filesystem path. 
-    Preferred method: session-based repo selection.
+    """[LEGACY][ADMIN ONLY] Open repo by local filesystem path.
+    Canonical client flows must not bind repos via host paths.
     """
     repo_path = Path(path).resolve()
     if not _is_path_within_base(repo_path, REPO_ROOT_DIR):
@@ -186,26 +186,21 @@ def open_repo(
     return {"status": "success", "message": "Repo signaled for opening (server-agnostic)"}
 
 
-@router.post("/select") # [LEGACY/OPERATOR]
+@router.post("/select") # [LEGACY/ADMIN_ONLY]
 def select_repo(
     path: str = Query(...),
     request: Request = None,
-    auth: AuthContext = Depends(require_read),
+    auth: AuthContext = Depends(require_admin),
     _rl: None = Depends(check_rate_limit),
 ):
-    """[LEGACY] Select active repo by local filesystem path.
-    Preferred method: session-based repo selection via /ops/app/sessions.
+    """[LEGACY][ADMIN ONLY] Select active repo by local filesystem path.
+    Canonical client flows must not bind repos via host paths.
     """
     repo_path = Path(path).resolve()
     if not _is_path_within_base(repo_path, REPO_ROOT_DIR) and not _is_registered_repo_path(repo_path):
         raise HTTPException(status_code=400, detail="Repo outside of allowed base")
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail="Repo not found")
-
-    override = RepoOverrideService.get_active_override()
-    if auth.role == "actions" and override:
-        audit_log("REPO_OVERRIDE", "BLOCK_ACTIONS", str(repo_path), operation="repo_override_blocked_actions", actor=auth.token)
-        raise HTTPException(status_code=403, detail="REPO_OVERRIDE_ACTIVE")
 
     if_match_etag = request.headers.get("if-match") if request else None
     try:

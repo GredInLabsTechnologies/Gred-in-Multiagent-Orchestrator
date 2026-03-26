@@ -232,6 +232,42 @@ def test_status_json_emits_machine_readable_payload(tmp_path, monkeypatch):
     assert payload["alerts"] == []
 
 
+def test_repos_select_is_removed_from_canonical_terminal_flow(tmp_path, monkeypatch):
+    _seed_config(tmp_path, monkeypatch)
+    requested = tmp_path / "other-repo"
+    requested.mkdir()
+
+    def _fail_api_request(*_args, **_kwargs):
+        raise AssertionError("legacy /ops/repos/select must not be called")
+
+    monkeypatch.setattr(gimo_cli, "_api_request", _fail_api_request)
+
+    result = runner.invoke(gimo_cli.app, ["repos", "select", str(requested)], color=False)
+
+    assert result.exit_code == 1
+    assert "Legacy host-path repo selection has been removed" in result.stdout
+    assert "gimo init" in result.stdout
+
+
+def test_repos_select_json_reports_canonical_replacement(tmp_path, monkeypatch):
+    _seed_config(tmp_path, monkeypatch)
+    requested = tmp_path / "other-repo"
+    requested.mkdir()
+
+    def _fail_api_request(*_args, **_kwargs):
+        raise AssertionError("legacy /ops/repos/select must not be called")
+
+    monkeypatch.setattr(gimo_cli, "_api_request", _fail_api_request)
+
+    result = runner.invoke(gimo_cli.app, ["repos", "select", str(requested), "--json"], color=False)
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "legacy_removed"
+    assert payload["requested_path"] == str(requested.resolve())
+    assert payload["canonical_flow"]["command"] == "gimo init"
+
+
 def test_rollback_uses_safe_git_wrapper(tmp_path, monkeypatch):
     _seed_config(tmp_path, monkeypatch)
     calls: list[list[str]] = []
