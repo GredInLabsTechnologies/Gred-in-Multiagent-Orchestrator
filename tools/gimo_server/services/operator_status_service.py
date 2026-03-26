@@ -38,7 +38,7 @@ class OperatorStatusService:
 
         # Telemetry (Calculated dynamically or retrieved from authoritative services)
         # Phase 7B: Ensure thin clients don't need to compute these.
-        budget_pct = 0.0
+        budget_pct = None
         try:
             from .budget_forecast_service import BudgetForecastService
             from .storage_service import StorageService
@@ -51,9 +51,9 @@ class OperatorStatusService:
                 if f:
                     budget_pct = f.remaining_pct
         except Exception:
-            budget_pct = 95.0 # Fallback for dev/unconfigured
+            pass
 
-        ctx_pct = 0.0
+        ctx_pct = None
         try:
             # We derive context from the last thread if available
             if last_thread_id:
@@ -64,7 +64,7 @@ class OperatorStatusService:
                     used = len(t.turns) * 1000
                     ctx_pct = min(100.0, (used / max_ctx) * 100.0)
         except Exception:
-            ctx_pct = 5.0 # Fallback
+            pass
 
         snapshot = {
             "repo": str(base_dir.name) if base_dir.exists() else None,
@@ -72,11 +72,11 @@ class OperatorStatusService:
             "dirty_files": dirty_files,
             "active_provider": active_provider,
             "active_model": active_model,
-            "permissions": "suggest", # Canonical default
+            "permissions": "suggest", # Canonical default (authoritative)
             "budget_percentage": budget_pct,
             "context_percentage": ctx_pct,
-            "budget_status": "ok" if budget_pct > 20 else "low",
-            "context_status": f"{int(ctx_pct)}%",
+            "budget_status": "ok" if (budget_pct and budget_pct > 20) else (None if budget_pct is None else "low"),
+            "context_status": f"{int(ctx_pct)}%" if ctx_pct is not None else None,
             "backend_version": __version__,
             "last_thread": last_thread_id,
             "last_turn": last_turn_id,

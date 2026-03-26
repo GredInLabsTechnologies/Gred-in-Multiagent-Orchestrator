@@ -7,6 +7,30 @@ from tools.gimo_server.services.sub_agent_manager import SubAgentManager
 from tools.gimo_server.services.run_worker import RunWorker
 from tools.gimo_server.services.operator_status_service import OperatorStatusService
 from tools.gimo_server.services.notice_policy_service import NoticePolicyService
+from tools.gimo_server.services.merge_gate_service import MergeGateService
+
+@pytest.mark.asyncio
+async def test_merge_gate_refuses_no_workspace():
+    """
+    WP-01/GAP-01: Verifies that MergeGateService refuses execution if no workspace is provided.
+    """
+    run_id = "test-run-fail"
+    with patch("tools.gimo_server.services.ops_service.OpsService.get_run") as mock_get_run, \
+         patch("tools.gimo_server.services.ops_service.OpsService.get_approved") as mock_get_approved, \
+         patch("tools.gimo_server.services.ops_service.OpsService.get_draft") as mock_get_draft, \
+         patch("tools.gimo_server.services.ops_service.OpsService.update_run_status") as mock_status, \
+         patch("tools.gimo_server.services.ops_service.OpsService.append_log") as mock_log:
+        
+        mock_get_run.return_value = MagicMock(approved_id="app1", risk_score=10.0, policy_decision_id="p1", repo_id="default")
+        mock_get_approved.return_value = MagicMock(draft_id="d1")
+        mock_get_draft.return_value = MagicMock(context={"intent_effective": "CODE_PATCH", "workspace_path": None})
+        
+        await MergeGateService.execute_run(run_id)
+        
+        # Should be WORKER_CRASHED due to missing workspace
+        msg = "Missing canonical workspace_path; sandbox worktree fallback is disabled."
+        mock_status.assert_any_call(run_id, "WORKER_CRASHED", msg=msg)
+
 
 @pytest.mark.asyncio
 async def test_sub_agent_refuses_root_worktree_fallback():

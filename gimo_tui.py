@@ -515,10 +515,7 @@ class GimoApp(App):
             if not self.verbose and (run_data or usage):
                 self._safe_call(self._render_tui_post_run_report, run_data, usage)
                 
-            # Notices from usage/done
-            ctx_pct = usage.get("context_window_pct", 0)
-            if ctx_pct > 70:
-                self._safe_call(self.show_notice, f"Context window high: {ctx_pct:.1f}%", "yellow", 30)
+            # Notices are now handled authoritatively via update_status/snapshot.
                 
         elif evt == "error":
             self._safe_call(self._write_log, f"\n[bold red]Orchestrator Error:[/bold red] {data.get('message', 'Unknown')}\n")

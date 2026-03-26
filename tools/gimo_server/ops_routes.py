@@ -142,6 +142,18 @@ async def get_operator_status(auth: Annotated[AuthContext, Depends(verify_token)
     return OperatorStatusService.get_status_snapshot()
 
 
+@router.get("/notices")
+async def get_notices(auth: Annotated[AuthContext, Depends(verify_token)]):
+    """
+    F2: returns a canonical backend-authored notice feed for all surfaces.
+    """
+    _require_role(auth, "operator")
+    from tools.gimo_server.services.notice_policy_service import NoticePolicyService
+    # Evaluation is backend-authored based on the authoritative status snapshot.
+    status = OperatorStatusService.get_status_snapshot()
+    return NoticePolicyService.evaluate_all(status)
+
+
 @router.get("/notifications/stream")
 async def ops_notifications_event_stream(request: Request):
     """Backward-compatible SSE endpoint alias for legacy UI clients."""

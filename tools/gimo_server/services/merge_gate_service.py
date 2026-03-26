@@ -151,6 +151,13 @@ class MergeGateService:
             )
             return False
 
+        # In Phase 7: provisioned canonical workspace is mandatory for high-risk git operations.
+        if not workspace_path:
+            msg = "Missing canonical workspace_path; sandbox worktree fallback is disabled."
+            OpsService.append_log(run_id, level="ERROR", msg=msg)
+            OpsService.update_run_status(run_id, "WORKER_CRASHED", msg=msg)
+            return True
+
         OpsService.recover_stale_lock(repo_id)
         try:
             lock_payload = OpsService.acquire_merge_lock(repo_id, run_id, ttl_seconds=cls.LOCK_TTL_SECONDS)
@@ -195,46 +202,17 @@ class MergeGateService:
                 OpsService.append_log(run_id, level="WARN", msg="Heartbeat failed; lock may be stale")
                 break
 
-
     @classmethod
-    def _sandbox_worktree_path(cls, run_id: str) -> Path:
-        settings = get_settings()
-        return Path(settings.ops_data_dir) / "worktrees" / run_id
-
-    @classmethod
-    def _create_sandbox_worktree(cls, run_id: str, source_ref: str) -> Path:
-        # [LEGACY] Creation of sandbox worktrees directly over the source repo will be replaced in Phase 1.
-        settings = get_settings()
-        repo_root = Path(settings.repo_root_dir)
-        sandbox_path = cls._sandbox_worktree_path(run_id)
-        sandbox_path.parent.mkdir(parents=True, exist_ok=True)
-        if sandbox_path.exists():
-            GitService.remove_worktree(repo_root, sandbox_path)
-        GitService.add_worktree(repo_root, sandbox_path, branch=source_ref)
-        return sandbox_path
-
-    @classmethod
-    def _cleanup_sandbox_worktree(cls, run_id: str) -> None:
-        settings = get_settings()
-        repo_root = Path(settings.repo_root_dir)
-        sandbox_path = cls._sandbox_worktree_path(run_id)
-        if sandbox_path.exists():
-            GitService.remove_worktree(repo_root, sandbox_path)
-
-    @classmethod
-    async def _pipeline(cls, run_id: str, *, repo_id: str, source_ref: str, target_ref: str, provided_workspace: str = None) -> None:
+    async def _pipeline(cls, run_id: str, *, repo_id: str, source_ref: str, target_ref: str, provided_workspace: str | None = None) -> None:
         del repo_id
         
-        if provided_workspace:
-            OpsService.set_run_stage(run_id, "gate_worktree", msg="Phase7: using provisioned sandbox workspace")
-            base_dir = Path(provided_workspace)
-        else:
-            OpsService.set_run_stage(run_id, "gate_worktree", msg="Phase7: creating legacy sandbox worktree")
-            try:
-                base_dir = cls._create_sandbox_worktree(run_id, source_ref)
-            except Exception as exc:
-                OpsService.update_run_status(run_id, "WORKTREE_CORRUPTED", msg=f"sandbox worktree create failed: {exc}")
-                return
+        if not provided_workspace:
+            msg = "Pipeline failsafe: no provided_workspace is available for merge pipeline execution."
+            OpsService.update_run_status(run_id, "WORKER_CRASHED", msg=msg)
+            return
+
+        OpsService.set_run_stage(run_id, "gate_worktree", msg="Phase7: using provisioned sandbox workspace")
+        base_dir = Path(provided_workspace)
 
         try:
             OpsService.set_run_stage(run_id, "gate_tests", msg="Phase7: running tests in sandbox")
@@ -280,8 +258,4 @@ class MergeGateService:
                 else:
                     OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg=f"rollback failed: {exc}")
         finally:
-            if not provided_workspace:
-                try:
-                    cls._cleanup_sandbox_worktree(run_id)
-                except Exception as exc:
-                    OpsService.append_log(run_id, level="WARN", msg=f"sandbox cleanup failed: {exc}")
+            pass
