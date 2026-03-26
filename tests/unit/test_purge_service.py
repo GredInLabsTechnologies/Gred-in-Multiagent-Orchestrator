@@ -98,16 +98,32 @@ def test_purge_fails_closed_on_unlink_error(mock_run):
                         PurgeService.purge_run("r_test_purge")
                     assert "Failed to unlink events" in str(excinfo.value)
 
-def test_purge_receipt_behavioral(mock_run):
+def test_purge_receipt_behavioral(mock_run, tmp_path):
+    # Behavioral proof: Purge receipt must be generated and persisted physically
+    # Mocking OPS_DIR to a temporary path
+    temp_ops_dir = tmp_path / "ops"
+    temp_ops_dir.mkdir()
+    
     with patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run):
-        with patch("tools.gimo_server.services.ops_service.OpsService._run_events_path", return_value=Path("events.jsonl")):
-            with patch("tools.gimo_server.services.ops_service.OpsService._run_log_path", return_value=Path("logs.jsonl")):
-                with patch("tools.gimo_server.services.ops_service.OpsService._run_path", return_value=Path("run.json")):
-                    with patch("pathlib.Path.exists", return_value=False):
-                        with patch("pathlib.Path.write_text"):
-                             with patch("tools.gimo_server.services.purge_service.PurgeService._persist_receipt") as mock_persist:
-                                receipt = PurgeService.purge_run("r_test_purge")
-                                assert receipt.success
-                                assert receipt.run_id == "r_test_purge"
-                                assert isinstance(receipt.retained_metadata_hash, str)
-                                mock_persist.assert_called_once()
+        with patch("tools.gimo_server.services.ops_service.OpsService._run_events_path", return_value=temp_ops_dir / "events.jsonl"):
+            with patch("tools.gimo_server.services.ops_service.OpsService._run_log_path", return_value=temp_ops_dir / "logs.jsonl"):
+                with patch("tools.gimo_server.services.ops_service.OpsService._run_path", return_value=temp_ops_dir / "run.json"):
+                    with patch("tools.gimo_server.services.ops_service.OpsService.OPS_DIR", temp_ops_dir):
+                        # Ensure run.json exists so write_text doesn't fail if it's supposed to be there
+                        (temp_ops_dir / "run.json").write_text("{}", encoding="utf-8")
+                        
+                        receipt = PurgeService.purge_run("r_test_purge")
+                        
+                        assert receipt.success
+                        assert receipt.run_id == "r_test_purge"
+                        
+                        # Verify physical file persistence
+                        receipt_file = temp_ops_dir / "purge_receipts" / f"purge_{receipt.run_id}.json"
+                        assert receipt_file.exists(), f"Receipt file should exist at {receipt_file}"
+                        
+                        # Verify file content
+                        saved_receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+                        assert saved_receipt["run_id"] == "r_test_purge"
+                        assert saved_receipt["success"] is True
+                        assert "retained_metadata_hash" in saved_receipt
+                        assert isinstance(saved_receipt["removed_categories"], list)

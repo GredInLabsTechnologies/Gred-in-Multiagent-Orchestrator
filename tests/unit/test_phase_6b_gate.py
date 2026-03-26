@@ -18,22 +18,33 @@ def create_mock_run(run_id):
         risk_score=0.1
     )
 
-def test_invariant_purge_receipt_persisted():
-    # Behavioral proof: Purge receipt must be generated and persisted
+def test_invariant_purge_receipt_persisted(tmp_path):
+    # Behavioral proof: Purge receipt must be physically persisted in OPS_DIR
     mock_run = create_mock_run("r_receipt_test")
+    temp_ops_dir = tmp_path / "ops"
+    temp_ops_dir.mkdir()
     
     with patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run):
-        with patch("tools.gimo_server.services.ops_service.OpsService._run_events_path", return_value=Path("events.jsonl")):
-            with patch("tools.gimo_server.services.ops_service.OpsService._run_log_path", return_value=Path("logs.jsonl")):
-                with patch("tools.gimo_server.services.ops_service.OpsService._run_path", return_value=Path("run.json")):
-                    with patch("pathlib.Path.exists", return_value=False):
-                        with patch("pathlib.Path.write_text"):
-                            with patch("tools.gimo_server.services.purge_service.PurgeService._persist_receipt") as mock_persist:
-                                receipt = PurgeService.purge_run("r_receipt_test")
-                                assert receipt.success
-                                mock_persist.assert_called_once()
-                                # Verify receipt carries the hash
-                                assert receipt.retained_metadata_hash is not None
+        with patch("tools.gimo_server.services.ops_service.OpsService._run_events_path", return_value=temp_ops_dir / "events.jsonl"):
+            with patch("tools.gimo_server.services.ops_service.OpsService._run_log_path", return_value=temp_ops_dir / "logs.jsonl"):
+                with patch("tools.gimo_server.services.ops_service.OpsService._run_path", return_value=temp_ops_dir / "run.json"):
+                    with patch("tools.gimo_server.services.ops_service.OpsService.OPS_DIR", temp_ops_dir):
+                        # Ensure run.json exists so write_text doesn't fail
+                        (temp_ops_dir / "run.json").write_text("{}", encoding="utf-8")
+                        
+                        receipt = PurgeService.purge_run("r_receipt_test")
+                        assert receipt.success
+                        
+                        # Verify real receipt file existence
+                        receipt_path = temp_ops_dir / "purge_receipts" / f"purge_{receipt.run_id}.json"
+                        assert receipt_path.exists(), f"Purge receipt not found at {receipt_path}"
+                        
+                        # Verify content integrity
+                        content = json.loads(receipt_path.read_text(encoding="utf-8"))
+                        assert content["run_id"] == "r_receipt_test"
+                        assert content["success"] is True
+                        assert "retained_metadata_hash" in content
+                        assert "removed_categories" in content
 
 def test_invariant_minimal_terminal_metadata_only():
     # Proves reconstructive fields are removed and terminal metadata is minimal
