@@ -51,7 +51,7 @@ class OpsServiceBase:
     _DRAFT_GLOB = "d_*.json"
     _APPROVED_GLOB = "a_*.json"
     _RUN_LOG_TAIL = 200
-    _ACTIVE_RUN_STATUSES = {"pending", "running", "awaiting_subagents", "MERGE_LOCKED", "WORKER_CRASHED_RECOVERABLE"}
+    _ACTIVE_RUN_STATUSES = {"pending", "running", "awaiting_subagents", "MERGE_LOCKED", "WORKER_CRASHED_RECOVERABLE", "AWAITING_MERGE"}
     _TERMINAL_RUN_STATUSES = {"done", "error", "cancelled", "ROLLBACK_EXECUTED", "RISK_SCORE_TOO_HIGH", "BASELINE_TAMPER_DETECTED", "PIPELINE_TIMEOUT", "WORKTREE_CORRUPTED"}
 
     VALID_TRANSITIONS: Dict[str, set[str]] = {
@@ -80,6 +80,7 @@ class OpsServiceBase:
         "MERGE_LOCKED": {"running", "error", "cancelled", "MERGE_CONFLICT"},
         "MERGE_CONFLICT": {"pending", "error", "cancelled"},
         "HUMAN_APPROVAL_REQUIRED": {"running", "cancelled", "error"},
+        "AWAITING_MERGE": {"done", "error", "cancelled"},
         "WORKER_CRASHED_RECOVERABLE": {"pending", "error", "cancelled"},
     }
 

@@ -409,6 +409,39 @@ async def cancel_run(
     audit_log("OPS", f"/ops/runs/{run_id}/cancel", run.id, operation="WRITE", actor=actor)
     return run
 
+@router.post(
+    "/runs/{run_id}/merge",
+    response_model=OpsRun,
+    responses={
+        404: {"description": RUN_NOT_FOUND},
+        400: {"description": "Run is not in AWAITING_MERGE status"},
+        409: {"description": "Manual merge failed"}
+    }
+)
+async def perform_manual_merge(
+    run_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    from tools.gimo_server.services.merge_gate_service import MergeGateService
+    
+    run = OpsService.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
+    if run.status != "AWAITING_MERGE":
+        raise HTTPException(status_code=400, detail="Run is not in AWAITING_MERGE status")
+    
+    success = await MergeGateService.perform_manual_merge(run_id)
+    updated_run = OpsService.get_run(run_id)
+    
+    if not success:
+        # The service updates status to MERGE_CONFLICT or ROLLBACK_EXECUTED
+        raise HTTPException(status_code=409, detail="Manual merge failed")
+        
+    audit_log("OPS", f"/ops/runs/{run_id}/merge", run_id, operation="WRITE", actor=_actor_label(auth))
+    return updated_run
+
 @router.post("/workflows/execute")
 async def execute_workflow(
     request: Request,

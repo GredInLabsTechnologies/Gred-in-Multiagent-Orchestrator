@@ -29,6 +29,7 @@ OpsRunStatus = Literal[
     "ROLLBACK_EXECUTED",
     "WORKER_CRASHED_RECOVERABLE",
     "HUMAN_APPROVAL_REQUIRED",
+    "AWAITING_MERGE",
 ]
 
 class OpsCreateRunRequest(BaseModel):

@@ -236,26 +236,54 @@ class MergeGateService:
                 OpsService.update_run_status(run_id, "MERGE_CONFLICT", msg="dry-run merge conflict")
                 return
 
-            OpsService.set_run_stage(run_id, "merge_real", msg="Phase7: performing merge in sandbox")
+            # Phase 7B: Seperated final manual merge contract.
+            # Stop here and transition to AWAITING_MERGE.
             commit_before = GitService.get_head_commit(base_dir)
             OpsService.update_run_merge_metadata(run_id, commit_before=commit_before)
-            ok_merge, merge_out = GitService.perform_merge(base_dir, source_ref, target_ref)
-            OpsService.append_log(run_id, level="INFO", msg=f"merge_tail={merge_out[-1000:]}")
-            if not ok_merge:
-                OpsService.update_run_status(run_id, "MERGE_CONFLICT", msg="merge failed")
-                return
-
-            try:
-                commit_after = GitService.get_head_commit(base_dir)
-                OpsService.update_run_merge_metadata(run_id, commit_after=commit_after)
-                OpsService.update_run_status(run_id, "done", msg="merge pipeline completed")
-            except Exception as exc:
-                # post-merge failure => rollback determinista
-                ok_rb, rb_out = GitService.rollback_to_commit(base_dir, commit_before)
-                OpsService.append_log(run_id, level="WARN", msg=f"rollback_tail={rb_out[-1000:]}")
-                if ok_rb:
-                    OpsService.update_run_status(run_id, "ROLLBACK_EXECUTED", msg=f"rollback after post-merge failure: {exc}")
-                else:
-                    OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg=f"rollback failed: {exc}")
+            OpsService.update_run_status(run_id, "AWAITING_MERGE", msg="Gate passed; awaiting manual merge command.")
         finally:
             pass
+
+    @classmethod
+    async def perform_manual_merge(cls, run_id: str) -> bool:
+        """Executes the final merge_real step for a run in AWAITING_MERGE status."""
+        run = OpsService.get_run(run_id)
+        if not run or run.status != "AWAITING_MERGE":
+            raise ValueError(f"Run {run_id} is not in AWAITING_MERGE status")
+
+        approved = OpsService.get_approved(run.approved_id)
+        draft = OpsService.get_draft(approved.draft_id)
+        context = dict((draft.context if draft else {}) or {})
+        workspace_path = context.get("workspace_path")
+        repo_context = dict(context.get("repo_context") or {})
+        source_ref = str(context.get("source_ref") or "HEAD")
+        target_ref = str(repo_context.get("target_branch") or "main")
+
+        if not workspace_path:
+            raise RuntimeError("Missing workspace_path for manual merge")
+
+        base_dir = Path(workspace_path)
+        commit_before = run.commit_before or GitService.get_head_commit(base_dir)
+
+        OpsService.set_run_stage(run_id, "merge_real", msg="Phase7: performing authoritative manual merge")
+        ok_merge, merge_out = GitService.perform_merge(base_dir, source_ref, target_ref)
+        OpsService.append_log(run_id, level="INFO", msg=f"merge_tail={merge_out[-1000:]}")
+        
+        if not ok_merge:
+            OpsService.update_run_status(run_id, "MERGE_CONFLICT", msg="manual merge failed")
+            return False
+
+        try:
+            commit_after = GitService.get_head_commit(base_dir)
+            OpsService.update_run_merge_metadata(run_id, commit_after=commit_after)
+            OpsService.update_run_status(run_id, "done", msg="manual merge completed successfully")
+            return True
+        except Exception as exc:
+            # post-merge failure => rollback
+            ok_rb, rb_out = GitService.rollback_to_commit(base_dir, commit_before)
+            OpsService.append_log(run_id, level="WARN", msg=f"rollback_tail={rb_out[-1000:]}")
+            if ok_rb:
+                OpsService.update_run_status(run_id, "ROLLBACK_EXECUTED", msg=f"rollback after manual merge error: {exc}")
+            else:
+                OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg=f"rollback failed: {exc}")
+            return False

@@ -1326,7 +1326,7 @@ def status(
     panel_lines = [
         f"📁 [bold]Repo[/bold]:          {repo_name} · [cyan]{branch}[/cyan]{dirty_str}",
         f"🧠 [bold]Proveedor[/bold]:     [cyan]{provider_id}[/cyan] / {model_id}",
-        f"🔒 [bold]Permisos[/bold]:      perm:[yellow]{orch_cfg.get('hitl_mode', 'suggest')}[/yellow]",
+        f"🔒 [bold]Permisos[/bold]:      perm:[yellow]{sp.get('permissions', 'suggest')}[/yellow]",
         f"🌐 [bold]Backend[/bold]:       {backend_str}",
         f"▶  [bold]Run activo[/bold]:    {run_str}",
         f"💰 [bold]Budget[/bold]:        {budget_str}",
