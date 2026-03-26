@@ -149,9 +149,9 @@ def test_append_only_state_and_materialized_read():
     assert materialized.stage == "stage-1"
 
 
-def test_sub_agent_reconcile_cleans_orphans(tmp_path, monkeypatch):
-    """Orphan worktrees are cleaned and ghost entries removed on startup."""
-    from tools.gimo_server.services.sub_agent_manager import SubAgentManager, INVENTORY_FILE
+def test_sub_agent_reconcile_ignores_worktree_dirs_and_prunes_missing_workspaces(tmp_path, monkeypatch):
+    """Startup reconcile is keyed to provisioned workspace paths, not worktree directories."""
+    from tools.gimo_server.services.sub_agent_manager import SubAgentManager
 
     worktrees_dir = tmp_path / "worktrees"
     worktrees_dir.mkdir()
@@ -163,15 +163,21 @@ def test_sub_agent_reconcile_cleans_orphans(tmp_path, monkeypatch):
     runtime_dir = tmp_path / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     inv_file = runtime_dir / "sub_agents.json"
+    kept_workspace = tmp_path / "ephemeral" / "kept_xyz"
+    kept_workspace.mkdir(parents=True, exist_ok=True)
     inv_file.write_text(json.dumps({
+        "kept_xyz": {
+            "id": "kept_xyz", "parentId": "system", "name": "Kept",
+            "model": "test", "status": "idle", "worktreePath": str(kept_workspace),
+            "config": {"model": "test", "temperature": 0.7, "max_tokens": 2048},
+        },
         "ghost_xyz": {
             "id": "ghost_xyz", "parentId": "system", "name": "Ghost",
-            "model": "test", "status": "idle", "worktreePath": str(worktrees_dir / "ghost_xyz"),
+            "model": "test", "status": "idle", "worktreePath": str(tmp_path / "ephemeral" / "ghost_xyz"),
             "config": {"model": "test", "temperature": 0.7, "max_tokens": 2048},
         }
     }))
 
-    monkeypatch.setattr("tools.gimo_server.services.sub_agent_manager.WORKTREES_DIR", worktrees_dir)
     monkeypatch.setattr("tools.gimo_server.services.sub_agent_manager.INVENTORY_FILE", inv_file)
 
     async def _noop_sync():
@@ -182,7 +188,8 @@ def test_sub_agent_reconcile_cleans_orphans(tmp_path, monkeypatch):
 
     asyncio.run(SubAgentManager.startup_reconcile())
 
-    assert not orphan.exists()
+    assert orphan.exists()
+    assert "kept_xyz" in SubAgentManager._sub_agents
     assert "ghost_xyz" not in SubAgentManager._sub_agents
 
 

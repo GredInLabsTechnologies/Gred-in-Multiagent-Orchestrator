@@ -1,6 +1,5 @@
 import pytest
-import asyncio
-from typing import Dict, Any
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,13 +9,6 @@ from tools.gimo_server.services.sandbox_service import SandboxService
 
 @pytest.mark.asyncio
 async def test_subagent_no_longer_creates_source_worktree(monkeypatch, tmp_path):
-    worktrees_added = []
-    
-    def _add_worktree(repo_root, worktree_path, branch=None):
-        worktrees_added.append(worktree_path)
-
-    monkeypatch.setattr("tools.gimo_server.services.sub_agent_manager.GitService.add_worktree", _add_worktree)
-    monkeypatch.setattr("tools.gimo_server.services.sub_agent_manager.WORKTREES_DIR", tmp_path / "worktrees")
     monkeypatch.setattr("tools.gimo_server.services.sub_agent_manager.SubAgentManager._persist", lambda: None)
     
     # 1. New flow with provisioned workspace
@@ -25,13 +17,11 @@ async def test_subagent_no_longer_creates_source_worktree(monkeypatch, tmp_path)
     
     agent = await SubAgentManager.create_sub_agent("parent_123", request)
     assert agent.worktreePath == str(Path(provisioned_workspace))
-    assert len(worktrees_added) == 0, "add_worktree should not be called when workspace_path is provided"
 
     # 2. Missing workspace is rejected instead of falling back to source worktrees
     legacy_request = SimpleNamespace(modelPreference="test_model", constraints={})
     with pytest.raises(ValueError, match="workspace_path is required"):
         await SubAgentManager.create_sub_agent("parent_123", legacy_request)
-    assert len(worktrees_added) == 0, "legacy add_worktree fallback must stay disabled"
 
 
 @pytest.mark.asyncio
@@ -100,9 +90,6 @@ def test_sandbox_service_uses_ephemeral_workspace_instead_of_source_worktree(mon
     created = []
     destroyed = []
 
-    def _fail_legacy(*_args, **_kwargs):
-        raise AssertionError("legacy source-repo worktree APIs should not be used")
-
     def _create_workspace(self, source_repo_path, base_commit, branch_name=None, workspace_id=None):
         created.append((Path(source_repo_path), base_commit, branch_name, workspace_id))
         workspace = settings.ephemeral_repos_dir / str(workspace_id)
@@ -121,9 +108,6 @@ def test_sandbox_service_uses_ephemeral_workspace_instead_of_source_worktree(mon
         "tools.gimo_server.services.sandbox_service.EphemeralRepoService.destroy_workspace",
         _destroy_workspace,
     )
-    monkeypatch.setattr("tools.gimo_server.services.sandbox_service.GitService.create_worktree", _fail_legacy)
-    monkeypatch.setattr("tools.gimo_server.services.sandbox_service.GitService.remove_worktree", _fail_legacy)
-    monkeypatch.setattr("tools.gimo_server.services.sandbox_service.GitService.delete_branch", _fail_legacy)
 
     handle = SandboxService.create_worktree_handle("run123", str(source_repo), base_ref="HEAD")
 
@@ -139,3 +123,112 @@ def test_sandbox_service_uses_ephemeral_workspace_instead_of_source_worktree(mon
 
     assert SandboxService.cleanup_worktree(handle) is True
     assert destroyed == [handle.worktree_path]
+
+
+def test_sandbox_service_refuses_legacy_cleanup_path(monkeypatch, tmp_path):
+    source_repo = tmp_path / "repo"
+    source_repo.mkdir()
+
+    settings = SimpleNamespace(
+        ephemeral_repos_dir=tmp_path / "ephemeral",
+        repo_mirrors_dir=tmp_path / "mirrors",
+        purge_quarantine_dir=tmp_path / "quarantine",
+    )
+
+    destroyed = []
+
+    def _destroy_workspace(self, workspace_path):
+        destroyed.append(Path(workspace_path))
+
+    monkeypatch.setattr("tools.gimo_server.services.sandbox_service.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "tools.gimo_server.services.sandbox_service.EphemeralRepoService.destroy_workspace",
+        _destroy_workspace,
+    )
+
+    legacy_path = tmp_path / "legacy_worktrees" / "run123"
+    legacy_path.mkdir(parents=True)
+    handle = SimpleNamespace(
+        run_id="run123",
+        repo_path=str(source_repo),
+        worktree_path=legacy_path,
+        branch_name="gimo_legacy",
+        base_ref="HEAD",
+    )
+
+    assert SandboxService.cleanup_worktree(handle) is False
+    assert destroyed == []
+
+
+@pytest.mark.asyncio
+async def test_subagent_reconcile_uses_workspace_paths_instead_of_worktree_inventory(monkeypatch, tmp_path):
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    inventory_file = runtime_dir / "sub_agents.json"
+
+    existing_workspace = tmp_path / "ephemeral" / "kept"
+    existing_workspace.mkdir(parents=True)
+    stray_legacy_dir = tmp_path / "worktrees" / "orphan_legacy"
+    stray_legacy_dir.mkdir(parents=True)
+
+    inventory_file.write_text(
+        json.dumps(
+            {
+                "kept": {
+                    "id": "kept",
+                    "parentId": "system",
+                    "name": "Kept",
+                    "model": "test",
+                    "status": "idle",
+                    "worktreePath": str(existing_workspace),
+                    "config": {"model": "test", "temperature": 0.7, "max_tokens": 2048},
+                },
+                "ghost": {
+                    "id": "ghost",
+                    "parentId": "system",
+                    "name": "Ghost",
+                    "model": "test",
+                    "status": "idle",
+                    "worktreePath": str(tmp_path / "ephemeral" / "missing"),
+                    "config": {"model": "test", "temperature": 0.7, "max_tokens": 2048},
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    async def _noop_sync():
+        return None
+
+    monkeypatch.setattr("tools.gimo_server.services.sub_agent_manager.INVENTORY_FILE", inventory_file)
+    monkeypatch.setattr(SubAgentManager, "sync_with_ollama", classmethod(lambda cls: _noop_sync()))
+    SubAgentManager._sub_agents = {}
+
+    await SubAgentManager.startup_reconcile()
+
+    assert "kept" in SubAgentManager._sub_agents
+    assert "ghost" not in SubAgentManager._sub_agents
+    assert stray_legacy_dir.exists(), "startup reconcile must not treat worktree directories as canonical inventory"
+
+
+@pytest.mark.asyncio
+async def test_subagent_termination_does_not_remove_workspace(monkeypatch, tmp_path):
+    workspace = tmp_path / "ephemeral" / "subagent"
+    workspace.mkdir(parents=True)
+
+    persisted = []
+
+    monkeypatch.setattr("tools.gimo_server.services.sub_agent_manager.SubAgentManager._persist", lambda: persisted.append(True))
+    SubAgentManager._sub_agents = {}
+
+    agent = await SubAgentManager.create_sub_agent(
+        "parent_123",
+        SimpleNamespace(workspace_path=str(workspace), modelPreference="test_model", constraints={}),
+    )
+
+    await SubAgentManager.terminate_sub_agent(agent.id)
+
+    assert workspace.exists()
+    assert SubAgentManager._sub_agents[agent.id].status == "terminated"
+    assert persisted, "termination should still persist inventory changes"

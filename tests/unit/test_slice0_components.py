@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
 
 from tools.gimo_server.services.context_indexer import ContextIndexer
@@ -78,8 +79,10 @@ async def test_router_pm_parsing_markdown_json():
 # --- SandboxService Tests ---
 
 def test_sandbox_service_paths():
-    """Verify SandboxService uses the correct base path."""
-    assert SandboxService.BASE_WORKTREE_PATH.name == "worktrees"
+    """Verify SandboxService derives canonical sandbox paths from the ephemeral workspace root."""
+    settings = SimpleNamespace(ephemeral_repos_dir=Path("/tmp/ephemeral-root"))
+    with patch("tools.gimo_server.services.sandbox_service.get_settings", return_value=settings):
+        assert SandboxService._workspace_path("run-123") == settings.ephemeral_repos_dir / SandboxService._workspace_id("run-123")
 
 # --- Orchestrator Flow Tests (Basic import and sanity) ---
 

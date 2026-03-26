@@ -5,9 +5,8 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..config import WORKTREES_DIR, get_settings
+from ..config import get_settings
 from .ephemeral_repo_service import EphemeralRepoService
-from .git_service import GitService
 
 logger = logging.getLogger("orchestrator.services.sandbox_service")
 
@@ -24,17 +23,10 @@ class SandboxHandle:
 class SandboxService:
     """Provision isolated execution sandboxes without mutating the source repo."""
 
-    # Transitional constant kept for legacy cleanup paths and existing tests.
-    BASE_WORKTREE_PATH = WORKTREES_DIR
-
     @classmethod
     def _workspace_id(cls, run_id: str) -> str:
         digest = hashlib.sha256(run_id.encode("utf-8", errors="ignore")).hexdigest()[:16]
         return digest
-
-    @classmethod
-    def _worktree_path(cls, run_id: str) -> Path:
-        return cls.BASE_WORKTREE_PATH / cls._workspace_id(run_id)
 
     @classmethod
     def _workspace_path(cls, run_id: str) -> Path:
@@ -82,20 +74,17 @@ class SandboxService:
             workspace_path = handle.worktree_path.resolve()
             ephemeral_root = settings.ephemeral_repos_dir.resolve()
 
-            if workspace_path.is_relative_to(ephemeral_root):
-                cls._ephemeral_repo_service().destroy_workspace(workspace_path)
-                logger.info("Sandbox %s cleaned up successfully [ephemeral clone].", handle.run_id)
-                return True
+            if not workspace_path.is_relative_to(ephemeral_root):
+                logger.warning(
+                    "Refusing to cleanup non-canonical sandbox path for %s: %s",
+                    handle.run_id,
+                    workspace_path,
+                )
+                return False
 
-            legacy_root = cls.BASE_WORKTREE_PATH.resolve()
-            if workspace_path.is_relative_to(legacy_root):
-                GitService.remove_worktree(Path(handle.repo_path), workspace_path)
-                GitService.delete_branch(Path(handle.repo_path), handle.branch_name)
-                logger.info("Sandbox %s cleaned up successfully [legacy worktree].", handle.run_id)
-                return True
-
-            logger.warning("Refusing to cleanup unknown sandbox path for %s: %s", handle.run_id, workspace_path)
-            return False
+            cls._ephemeral_repo_service().destroy_workspace(workspace_path)
+            logger.info("Sandbox %s cleaned up successfully [ephemeral clone].", handle.run_id)
+            return True
         except Exception as exc:
             logger.error("Failed to cleanup worktree %s: %s", handle.run_id, exc)
             return False

@@ -1,30 +1,30 @@
 import json
-import shutil
 import uuid
 import logging
 from typing import Dict, List, Optional
 from pathlib import Path
 from tools.gimo_server.models import SubAgent, SubAgentConfig
 from tools.gimo_server.services.provider_service import ProviderService
-from tools.gimo_server.services.git_service import GitService
-from tools.gimo_server.config import WORKTREES_DIR, REPO_ROOT_DIR
+from tools.gimo_server.config import get_settings
 from tools.gimo_server.services.provider_catalog_service import ProviderCatalogService
 
 logger = logging.getLogger("orchestrator.sub_agent_manager")
 
-INVENTORY_FILE = WORKTREES_DIR.parent / "runtime" / "sub_agents.json"
+INVENTORY_FILE = get_settings().ops_data_dir.parent / "runtime" / "sub_agents.json"
 
 class SubAgentManager:
     """Gestiona el ciclo de vida, spawn y estado de agentes secundarios.
     
-    **Model discovery authority only. Not the future worktree authority.**
+    **Model discovery authority only. Provisioned workspace lifecycle stays external.**
     """
     _sub_agents: Dict[str, SubAgent] = {}
     _synced_models: set[str] = set()
 
     @classmethod
-    def _ensure_worktrees_dir(cls):
-        WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
+    def _workspace_exists(cls, workspace_path: str | None) -> bool:
+        if not workspace_path:
+            return True
+        return Path(workspace_path).exists()
 
     @classmethod
     def _load_inventory(cls) -> Dict[str, SubAgent]:
@@ -58,34 +58,28 @@ class SubAgentManager:
 
     @classmethod
     async def startup_reconcile(cls):
-        """Reconcile persisted inventory with actual disk state on startup."""
+        """Reconcile persisted inventory with provisioned workspace state on startup."""
         stored = cls._load_inventory()
-        disk_worktrees = set()
-        if WORKTREES_DIR.exists():
-            disk_worktrees = {p.name for p in WORKTREES_DIR.iterdir() if p.is_dir()}
-        stored_ids = set(stored.keys())
+        reconciled = {}
+        removed_missing_workspaces = 0
 
-        # GC orphan worktrees (on disk but not in inventory)
-        for orphan in disk_worktrees - stored_ids:
-            orphan_path = WORKTREES_DIR / orphan
-            try:
-                shutil.rmtree(orphan_path, ignore_errors=True)
-                logger.info("Cleaned orphan worktree: %s", orphan)
-            except Exception as e:
-                logger.warning("Failed to clean orphan worktree %s: %s", orphan, e)
+        for agent_id, agent in stored.items():
+            if not cls._workspace_exists(getattr(agent, "worktreePath", None)):
+                removed_missing_workspaces += 1
+                logger.info("Removed sub-agent with missing provisioned workspace: %s", agent_id)
+                continue
+            reconciled[agent_id] = agent
 
-        # Remove ghost entries (in inventory but not on disk)
-        for ghost in stored_ids - disk_worktrees:
-            agent = stored.get(ghost)
-            if agent and getattr(agent, 'worktreePath', None):
-                del stored[ghost]
-                logger.info("Removed ghost sub-agent: %s", ghost)
-
-        cls._sub_agents = stored
+        cls._sub_agents = reconciled
         cls._persist()
         await cls.sync_with_ollama()
-        logger.info("SubAgent reconcile complete: %d agents, %d worktrees",
-                     len(cls._sub_agents), len(disk_worktrees & stored_ids))
+        tracked_workspaces = sum(1 for agent in cls._sub_agents.values() if getattr(agent, "worktreePath", None))
+        logger.info(
+            "SubAgent reconcile complete: %d agents, %d provisioned workspaces, %d removed missing workspaces",
+            len(cls._sub_agents),
+            tracked_workspaces,
+            removed_missing_workspaces,
+        )
 
     @classmethod
     async def create_sub_agent(cls, parent_id: str, request) -> SubAgent:
@@ -172,15 +166,11 @@ class SubAgentManager:
             agent.status = "terminated"
             
             if agent.worktreePath:
-                try:
-                    # Only remove if it's a legacy worktree managed by us
-                    if Path(agent.worktreePath).is_relative_to(WORKTREES_DIR):
-                        GitService.remove_worktree(REPO_ROOT_DIR, Path(agent.worktreePath))
-                        logger.info(f"Removed legacy isolated worktree for sub-agent {sub_id}")
-                    else:
-                        logger.info(f"Sub-agent {sub_id} terminated, leaving provisioned workspace {agent.worktreePath} intact for EphemeralRepoService to manage")
-                except Exception as e:
-                    logger.error(f"Failed to remove worktree for sub-agent {sub_id}: {e}")
+                logger.info(
+                    "Sub-agent %s terminated; provisioned workspace lifecycle remains external: %s",
+                    sub_id,
+                    agent.worktreePath,
+                )
             
             logger.info(f"Terminated sub-agent {sub_id}")
             cls._persist()
