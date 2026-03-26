@@ -174,39 +174,32 @@ def _api_request(
 
 
 def _get_telemetry_toolbar(config: dict[str, Any]) -> str:
-    """Fetches the latest global budget forecast and returns formatted HTML for prompt_toolkit toolbar."""
-    status, payload = _api_request(config, "GET", "/ops/forecast")
-    if status == 200 and isinstance(payload, list):
-        for f in payload:
-            if f.get("scope") == "global":
-                spend = f.get("current_spend", 0.0)
-                limit = f.get("limit")
-                rem_pct = f.get("remaining_pct")
-                
-                alerts = []
-                if rem_pct is not None and rem_pct < 20:
-                    alerts.append(f"<ansired>⚠️ Low budget ({rem_pct:.1f}% left)</ansired>")
-                
-                # Fetch eco mode status quickly for alerts
-                mode = "off"
-                cfg_st, cfg_py = _api_request(config, "GET", "/ops/config/economy")
-                if cfg_st == 200 and isinstance(cfg_py, dict):
-                    mode = cfg_py.get("eco_mode", {}).get("mode", "off")
-                    if mode != "off":
-                        alerts.append(f"<ansiyellow>🌿 Eco Mode: {mode.upper()}</ansiyellow>")
-                        
-                alerts_line = " | ".join(alerts) if alerts else "<ansigray>No active alerts</ansigray>"
-                
-                if limit is not None:
-                    color = get_budget_color(rem_pct)
-                    if color == "red": color = "ansired"
-                    elif color == "yellow": color = "ansiyellow"
-                    else: color = "ansigreen"
-                    telemetry_line = f" 💰 Spent: <b>${spend:.4f}</b> / ${limit:.2f} | <{color}>{rem_pct:.1f}% remaining</{color}> "
-                else:
-                    telemetry_line = f" 💰 Spent: <b>${spend:.4f}</b> (No limit set) "
-                    
-                return f"{telemetry_line}\n 🔔 ALERTS: {alerts_line} "
+    """Fetches the latest authoritative status snapshot and returns formatted HTML for prompt_toolkit toolbar."""
+    status, payload = _api_request(config, "GET", "/ops/operator/status")
+    if status == 200 and isinstance(payload, dict):
+        spend_pct = 100.0 - payload.get("budget_percentage", 100.0)
+        rem_pct = payload.get("budget_percentage", 100.0)
+        ctx_status = payload.get("context_status", "0%")
+        
+        alerts = []
+        for n in payload.get("alerts", []):
+            lvl = n.get("level", "info")
+            msg = n.get("message", "")
+            if lvl == "warning":
+                alerts.append(f"<ansiyellow>⚠️ {msg}</ansiyellow>")
+            elif lvl == "error":
+                alerts.append(f"<ansired>✗ {msg}</ansired>")
+        
+        alerts_line = " | ".join(alerts) if alerts else "<ansigray>No active alerts</ansigray>"
+        
+        color = get_budget_color(rem_pct)
+        if color == "red": color = "ansired"
+        elif color == "yellow": color = "ansiyellow"
+        else: color = "ansigreen"
+        
+        telemetry_line = f" 💰 Budget: <{color}>{100-rem_pct:.1f}% used</{color}> | 🧠 Context: <b>{ctx_status}</b> "
+        return f"{telemetry_line}\n 🔔 ALERTS: {alerts_line} "
+        
     return " 💰 Telemetry unavailable \n 🔔 ALERTS: <ansigray>None</ansigray> "
 
 def _provider_config_request(config: dict[str, Any]) -> tuple[int, Any]:
@@ -447,38 +440,32 @@ def _handle_chat_slash_command(
             console.print(f"[red]Failed to fetch worker pool ({status_code}).[/red]")
 
     def show_status():
-        ok, err = _preflight_check(config)
-        provider_id, model_id = _chat_provider_summary(config)
-        
-        from concurrent.futures import ThreadPoolExecutor
-        def fetch_eco(): return _api_request(config, "GET", "/ops/config/economy")
-        def fetch_claude(): return _api_request(config, "GET", "/ops/connectors/claude/auth-status")
-        
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            f_eco = executor.submit(fetch_eco)
-            f_cl = executor.submit(fetch_claude)
-            st_eco, eco_py = f_eco.result()
-            st_cl, cl_py = f_cl.result()
-            
-        lines = []
-        lines.append(f"🟢 [bold]System[/bold]: {'Healthy' if ok else f'[red]Degraded ({err})[/red]'}")
-        lines.append(f"🧠 [bold]Active Orchestrator[/bold]: [cyan]{provider_id}[/cyan] ({model_id})")
-        lines.append(f"📁 [bold]Workspace[/bold]: [dim]{workspace_root}[/dim]")
-        
-        if st_eco == 200 and isinstance(eco_py, dict):
-            budget = eco_py.get("global_budget_usd")
-            mode = eco_py.get("eco_mode", {}).get("mode", "off")
-            limits_text = f"${budget}" if budget is not None else "No limits"
-            lines.append(f"💰 [bold]Economy[/bold]: Global Budget: [green]{limits_text}[/green] | EcoMode: [yellow]{mode.upper()}[/yellow]")
-        
-        if st_cl == 200 and isinstance(cl_py, dict):
-            if cl_py.get("authenticated"):
-                plan = cl_py.get("plan", "Unknown")
-                lines.append(f"⚡ [bold]Claude Quota[/bold]: Authenticated (Tier: [magenta]{plan}[/magenta])")
-            else:
-                lines.append(f"⚡ [bold]Claude Quota[/bold]: [dim]Not authenticated[/dim]")
+        status, py = _api_request(config, "GET", "/ops/operator/status")
+        if status != 200 or not isinstance(py, dict):
+            console.print(f"[red]Failed to fetch authoritative status ({status}).[/red]")
+            return
 
-        console.print(Panel("\n".join(lines), title="Real-time Telemetry Status", border_style="magenta"))
+        lines = []
+        lines.append(f"🟢 [bold]System[/bold]: Healthy (v{py.get('backend_version', '?')})")
+        lines.append(f"🧠 [bold]Active Orchestrator[/bold]: [cyan]{py.get('active_provider', '?')}[/cyan] ({py.get('active_model', '?')})")
+        lines.append(f"📁 [bold]Workspace[/bold]: [dim]{workspace_root}[/dim] (Branch: {py.get('branch', '?')})")
+        
+        budget_pct = py.get("budget_percentage", 100.0)
+        budget_status = py.get("budget_status", "ok")
+        lines.append(f"💰 [bold]Economy[/bold]: Budget: [green]{budget_status.upper()}[/green] ({budget_pct:.1f}% remaining)")
+        
+        ctx_status = py.get("context_status", "0%")
+        lines.append(f"⚡ [bold]Context[/bold]: Usage: [magenta]{ctx_status}[/magenta]")
+
+        alerts = py.get("alerts", [])
+        if alerts:
+            lines.append(f"🔔 [bold]Alerts[/bold]: {len(alerts)} items active")
+            for n in alerts:
+                lvl = n.get("level", "info")
+                color = "yellow" if lvl == "warning" else "red" if lvl == "error" else "blue"
+                lines.append(f"   - [{color}]{n.get('message')}[/{color}]")
+
+        console.print(Panel("\n".join(lines), title="Authoritative System Snapshot", border_style="magenta"))
 
     # ── P0 new handlers ──────────────────────────────────────────────────────
 

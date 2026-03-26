@@ -193,19 +193,13 @@ class GimoApp(App):
         log.write(f"[dim italic]Secure session initialized at {self.thread_id}[/dim italic]")
         
         # Start background polling loops (daemon-like)
-        self.set_interval(4.0, self.update_telemetry)
-        self.set_interval(5.0, self.update_topology)
-        self.set_interval(10.0, self.update_notices)
+        self.set_interval(5.0, self.update_status)
         
         # Initial fetch
-        self.update_telemetry()
-        self.update_topology()
-        self.update_notices()
+        self.update_status()
 
     def action_refresh_all(self):
-        self.update_telemetry()
-        self.update_topology()
-        self.update_notices()
+        self.update_status()
 
     def action_clear_log(self) -> None:
         """Clear the chat log via hotkey."""
@@ -300,27 +294,8 @@ class GimoApp(App):
             @work(thread=True)
             def do_slash_fetch(action: str):
                 if action == "status":
-                    st, py = _api_request(self.config, "GET", "/ops/operator/status")
-                    if st == 200 and isinstance(py, dict):
-                        repo = py.get("repo", "?")
-                        branch = py.get("branch", "?")
-                        prov = py.get("active_provider", "?")
-                        mod = py.get("active_model", "?")
-                        l_thread = py.get("last_thread", "?")
-                        l_turn = py.get("last_turn", "?")
-                        alerts = py.get("alerts", [])
-                        alerts_str = ", ".join(alerts) if alerts else "ninguna"
-                        lines = [
-                            f"📁 Repo: {repo} ({branch})",
-                            f"🧠 Provider: {prov} / {mod}",
-                            f"💬 Thread: {l_thread} (turn {l_turn})",
-                            f"🔔 Alerts: {alerts_str}"
-                        ]
-                        self.call_from_thread(self._write_log, Panel("\n".join(lines), title="Real-time Status", border_style="magenta"))
-                        self.update_telemetry()
-                        self.update_topology()
-                    else:
-                        self.call_from_thread(self._write_log, f"[red]Status check failed ({st})[/red]")
+                    self.update_status()
+                    self.call_from_thread(self._write_log, "[green]Status refreshed.[/green]")
                 elif action == "provider_list":
                     st, py = _api_request(self.config, "GET", "/ops/provider")
                     if st == 200 and isinstance(py, dict):
@@ -341,7 +316,7 @@ class GimoApp(App):
                     else:
                         self.call_from_thread(self._write_log, f"[red]Failed to fetch models: {py}[/red]")
                 elif action == "workers":
-                    self.update_topology()
+                    self.update_status()
                     self.call_from_thread(self._write_log, "[green]Detailed workers topology refreshed in sidebar.[/green]")
                 # ── P0 new actions ────────────────────────────────────────────
                 elif action == "undo":
@@ -601,47 +576,8 @@ class GimoApp(App):
             self._safe_call(self._set_input_state, True)
 
     @work(thread=True)
-    def update_telemetry(self):
-        """Fetch global budget/usage stats robustly (async wrapper)."""
-        self._refresh_telemetry_logic()
-
-    def _refresh_telemetry_logic(self):
-        """The actual logic for fetching telemetry, separated from @work machinery."""
-        try:
-            status, payload = _api_request(self.config, "GET", "/ops/forecast")
-            if status == 200 and isinstance(payload, list):
-                for f in payload:
-                    if f.get("scope") == "global":
-                        text = self._format_telemetry(f)
-                        self._safe_call(self._update_eco_widget, text)
-                        return
-            self._safe_call(self._update_eco_widget, "Telemetry unavailable.")
-        except Exception as e:
-            self._safe_call(self._update_eco_widget, f"[red]Telemetry Error: {e}[/red]")
-
-    def _format_telemetry(self, f: dict) -> str:
-        spend = f.get("current_spend", 0.0)
-        limit = f.get("limit")
-        rem_pct = f.get("remaining_pct")
-        
-        if not limit:
-            return f"Spent: [bold green]${spend:.4f}[/bold green] (Unmetered)"
-            
-        bar_len = 20
-        fill = min(int((spend / limit) * bar_len), bar_len)
-        bar = "█" * fill + "░" * (bar_len - fill)
-        from cli_policies import get_budget_color
-        color = get_budget_color(rem_pct)
-        
-        return f"Global Budget Tracking\n[{color}]{bar}[/{color}] [bold]{spend:.2f}[/bold] / {limit:.2f} USD\n"
-
-    @work(thread=True)
-    def update_topology(self):
-        """Fetch status and show canonical topology robustly (async wrapper)."""
-        self._refresh_topology_logic()
-
-    def _refresh_topology_logic(self):
-        """The actual logic for fetching topology, separated from @work machinery."""
+    def update_status(self):
+        """Fetch canonical status snapshot and update all widgets (Invariant: authoritative_contracts)."""
         try:
             status, payload = _api_request(self.config, "GET", "/ops/operator/status")
             if status == 200 and isinstance(payload, dict):
@@ -653,46 +589,49 @@ class GimoApp(App):
                 budget = payload.get("budget_status", "ok")
                 ctx = payload.get("context_status", "0%")
                 
-                # Update Header (Invariant: tui_header_reads_operator_status)
+                # 1. Update Header
                 msg = f"REPO: {repo} | BRANCH: {branch} | MODEL: {model} | PERM: {perm} | BUDGET: {budget} | CTX: {ctx}"
                 self._safe_call(self._update_header, msg)
                 
-                # Update Graph
+                # 2. Update Graph
                 text = (
                     f"📁 Repo: [bold]{repo}[/bold] ({branch})\n"
                     f"🧠 Orchestrator: [cyan]{provider}[/cyan]\n"
                     f"   Model: [dim]{model}[/dim]"
                 )
                 self._safe_call(self._update_graph_widget, text)
-            else:
-                self._safe_call(self._update_graph_widget, "[yellow]Topology bridge disconnected.[/yellow]")
-        except Exception as e:
-            self._safe_call(self._update_graph_widget, f"[red]Topology Error: {e}[/red]")
 
-    def _update_header(self, text: str):
-        self.query_one("#header-text", Static).update(text)
-
-    @work(thread=True)
-    def update_notices(self):
-        """Fetch canonical notices (Invariant: tui_notices_respect_policy)."""
-        try:
-            status, payload = _api_request(self.config, "GET", "/ops/notices")
-            if status == 200 and isinstance(payload, list):
-                if not payload:
+                # 3. Update Notices
+                alerts = payload.get("alerts", [])
+                if not alerts:
                     self._safe_call(self._update_notices_widget, NO_NOTICES_MSG)
                 else:
                     lines = []
-                    for n in payload:
+                    for n in alerts:
                         lvl = n.get("level", "info")
                         msg = n.get("message", "")
                         icon = "⚠" if lvl == "warning" else "✗" if lvl == "error" else "ℹ"
                         color = "yellow" if lvl == "warning" else "red" if lvl == "error" else "blue"
                         lines.append(f"[{color}]{icon} {msg}[/{color}]")
                     self._safe_call(self._update_notices_widget, "\n".join(lines))
+
+                # 4. Update Telemetry (Budget Bar)
+                budget_pct = payload.get("budget_percentage", 100.0)
+                from cli_policies import get_budget_color
+                color = get_budget_color(budget_pct)
+                bar_len = 20
+                fill = min(int(((100 - budget_pct) / 100) * bar_len), bar_len)
+                bar = "█" * fill + "░" * (bar_len - fill)
+                telemetry_text = f"Global Budget Consumption\n[{color}]{bar}[/{color}] {100-budget_pct:.1f}% used\n"
+                self._safe_call(self._update_eco_widget, telemetry_text)
+
             else:
-                self._safe_call(self._update_notices_widget, "   Notice policy unreachable.")
+                self._safe_call(self._update_graph_widget, "[yellow]Status bridge disconnected.[/yellow]")
         except Exception as e:
-            self._safe_call(self._update_notices_widget, f"[red]Notices Error: {e}[/red]")
+            self._safe_call(self._update_graph_widget, f"[red]Status Error: {e}[/red]")
+
+    def _update_header(self, text: str):
+        self.query_one("#header-text", Static).update(text)
 
     def _update_notices_widget(self, text: str):
         self.query_one(NOTICES_CONTENT_ID, Static).update(text)
