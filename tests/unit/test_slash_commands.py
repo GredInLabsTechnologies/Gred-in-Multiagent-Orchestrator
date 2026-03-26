@@ -24,6 +24,8 @@ def mock_callbacks():
         "set_effort": MagicMock(return_value=None),
         "set_permissions": MagicMock(return_value=None),
         "add_file": MagicMock(return_value=None),
+        "toggle_debug": MagicMock(return_value=None),
+        "merge_run": MagicMock(return_value=None),
         "invalid_arg": MagicMock(return_value=None),
         "unknown_command": MagicMock(return_value=None),
     }
@@ -115,3 +117,39 @@ def test_unknown_slash_command(mock_callbacks):
     handled, new_model = dispatch_slash_command("/fakecmd", "", mock_callbacks)
     assert handled is True
     mock_callbacks["unknown_command"].assert_called_once_with("/fakecmd")
+
+
+@pytest.mark.parametrize(
+    ("command_str", "arg_str", "callback_name", "expected_arg"),
+    [
+        ("/help", "", "show_help", None),
+        ("/workspace", "", "show_workspace", None),
+        ("/thread", "", "show_thread", None),
+        ("/provider", "", "handle_provider", ""),
+        ("/providers", "list", "handle_provider", "list"),
+        ("/model", "gpt-5", "handle_model", "gpt-5"),
+        ("/models", "", "list_models", None),
+        ("/workers", "", "show_workers", None),
+        ("/pool", "", "show_workers", None),
+        ("/status", "", "show_status", None),
+        ("/debug", "", "toggle_debug", None),
+        ("/merge", "run_123", "merge_run", "run_123"),
+        ("/exit", "", "exit_session", None),
+        ("/quit", "", "exit_session", None),
+    ],
+)
+def test_registered_commands_dispatch_to_canonical_callbacks(
+    mock_callbacks,
+    command_str,
+    arg_str,
+    callback_name,
+    expected_arg,
+):
+    handled, _ = dispatch_slash_command(command_str, arg_str, mock_callbacks)
+
+    assert handled is True
+    callback = mock_callbacks[callback_name]
+    if expected_arg is None:
+        callback.assert_called_once_with() if callback_name in {"handle_provider", "handle_model", "merge_run"} and expected_arg is None else callback.assert_called_once()
+    else:
+        callback.assert_called_once_with(expected_arg)

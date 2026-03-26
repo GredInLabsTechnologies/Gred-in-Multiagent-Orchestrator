@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -104,11 +105,11 @@ def test_run_uses_auto_run_and_saves_backend_payload(tmp_path, monkeypatch):
 
 def test_status_reports_backend_summary(tmp_path, monkeypatch):
     _seed_config(tmp_path, monkeypatch)
+    calls: list[str] = []
 
     def _fake_api_request(config, method, path, *, params=None):
         del config, method, params
-        if path == "/health":
-            return 200, {"ok": True}
+        calls.append(path)
         if path == "/ops/operator/status":
             return 200, {
                 "repo": "some_repo",
@@ -117,6 +118,7 @@ def test_status_reports_backend_summary(tmp_path, monkeypatch):
                 "active_provider": "anthropic",
                 "active_model": "claude-3-5",
                 "backend_version": "9.9.9",
+                "permissions": "suggest",
                 "last_thread": "th_001",
                 "last_turn": "trn_7",
                 "alerts": ["Alert 1"]
@@ -128,7 +130,7 @@ def test_status_reports_backend_summary(tmp_path, monkeypatch):
     result = runner.invoke(gimo_cli.app, ["status"], color=False)
 
     assert result.exit_code == 0
-    assert "ONLINE" in result.stdout
+    assert calls == ["/ops/operator/status"]
     assert "9.9.9" in result.stdout
     assert "anthropic" in result.stdout
     assert "Alert 1" in result.stdout
@@ -199,11 +201,11 @@ def test_audit_aggregates_backend_checks(tmp_path, monkeypatch):
 
 def test_status_json_emits_machine_readable_payload(tmp_path, monkeypatch):
     _seed_config(tmp_path, monkeypatch)
+    calls: list[str] = []
 
     def _fake_api_request(config, method, path, *, params=None):
         del config, method, params
-        if path == "/health":
-            return 200, {"ok": True}
+        calls.append(path)
         if path == "/ops/operator/status":
             return 200, {
                 "repo": "some_repo",
@@ -224,12 +226,184 @@ def test_status_json_emits_machine_readable_payload(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["backend_online"] is True
-    assert payload["version"] == "1.2.3"
+    assert calls == ["/ops/operator/status"]
+    assert payload["backend_version"] == "1.2.3"
     assert payload["repo"] == "some_repo"
-    assert payload["provider"] == "openai"
-    assert payload["model"] == "gpt-4o"
+    assert payload["active_provider"] == "openai"
+    assert payload["active_model"] == "gpt-4o"
     assert payload["alerts"] == []
+
+
+def test_status_backend_failure_exits_without_local_fallback(tmp_path, monkeypatch):
+    _seed_config(tmp_path, monkeypatch)
+    git_calls: list[list[str]] = []
+
+    def _fake_api_request(config, method, path, *, params=None):
+        del config, method, params
+        assert path == "/ops/operator/status"
+        return 500, "backend unavailable"
+
+    def _fake_git_command(args: list[str]):
+        git_calls.append(args)
+        raise AssertionError("status must not fall back to local git heuristics")
+
+    monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
+    monkeypatch.setattr(gimo_cli, "_git_command", _fake_git_command)
+
+    result = runner.invoke(gimo_cli.app, ["status"], color=False)
+
+    assert result.exit_code == 1
+    assert "Failed to fetch authoritative status" in result.stdout
+    assert git_calls == []
+
+
+def test_interactive_chat_done_event_does_not_render_local_notices_or_post_run_report(tmp_path, monkeypatch):
+    config = _seed_config(tmp_path, monkeypatch)
+    renderer_box: dict[str, object] = {}
+
+    class FakeRenderer:
+        def __init__(self, console, verbose=False):
+            self.console = console
+            self.verbose = verbose
+            self.telemetry_html = None
+            self._generation_active = False
+            self.responses: list[str] = []
+            self.footers: list[dict[str, object]] = []
+            renderer_box["renderer"] = self
+
+        def render_preflight_error(self, *args, **kwargs):
+            raise AssertionError("preflight should pass")
+
+        def render_session_header(self, **kwargs):
+            return None
+
+        def get_user_input(self):
+            if not hasattr(self, "_inputs"):
+                self._inputs = iter(["hello", "/exit"])
+            return next(self._inputs)
+
+        @contextmanager
+        def render_thinking(self):
+            yield
+
+        def render_sse_raw(self, *args, **kwargs):
+            return None
+
+        def render_tool_call_start(self, *args, **kwargs):
+            return None
+
+        def render_hitl_prompt(self, *args, **kwargs):
+            return False
+
+        def render_tool_call_result(self, *args, **kwargs):
+            return None
+
+        def render_error(self, message):
+            raise AssertionError(message)
+
+        def render_user_question(self, *args, **kwargs):
+            return None
+
+        def render_plan(self, *args, **kwargs):
+            return None
+
+        def get_plan_approval(self):
+            return "approve"
+
+        def render_mood_indicator(self, *args, **kwargs):
+            return None
+
+        def render_interrupted(self):
+            return None
+
+        def render_response(self, response):
+            self.responses.append(response)
+
+        def render_footer(self, usage):
+            self.footers.append(usage)
+
+        def render_notice(self, *_args, **_kwargs):
+            raise AssertionError("local notice synthesis must not run")
+
+        def render_post_run_report(self, *_args, **_kwargs):
+            raise AssertionError("non-canonical post-run rendering must not run")
+
+    class FakeStreamResponse:
+        status_code = 200
+        request = object()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def iter_lines(self):
+            yield "event: done"
+            yield 'data: {"response":"server response","usage":{"total_tokens":13},"run":{"id":"run_1","objective":"ignored"}}'
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, *args, **kwargs):
+            return FakeStreamResponse()
+
+    def _fake_api_request(config, method, path, *, params=None, json_body=None):
+        del config, method, params, json_body
+        if path == "/ops/operator/status":
+            return 200, {
+                "active_provider": "openai",
+                "active_model": "gpt-5",
+                "alerts": [],
+                "budget_percentage": 100.0,
+                "context_status": "10%",
+            }
+        if path == "/ops/threads":
+            return 201, {"id": "th_123"}
+        raise AssertionError(f"Unexpected path: {path}")
+
+    monkeypatch.setattr(gimo_cli, "_preflight_check", lambda config: (True, None))
+    monkeypatch.setattr(gimo_cli, "_chat_provider_summary", lambda config: ("openai", "gpt-5"))
+    monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
+    monkeypatch.setattr(gimo_cli.httpx, "Client", FakeClient)
+    monkeypatch.setattr("gimo_cli_renderer.ChatRenderer", FakeRenderer)
+
+    gimo_cli._interactive_chat(config)
+
+    renderer = renderer_box["renderer"]
+    assert renderer.responses == ["server response"]
+    assert renderer.footers == [{"total_tokens": 13}]
+
+
+def test_cli_uses_shared_slash_command_authority(tmp_path, monkeypatch):
+    _seed_config(tmp_path, monkeypatch)
+
+    with monkeypatch.context() as m:
+        dispatch_calls: list[tuple[str, str]] = []
+
+        def _fake_dispatch(command, argument, callbacks):
+            dispatch_calls.append((command, argument))
+            return True, None
+
+        m.setattr(gimo_cli, "dispatch_slash_command", _fake_dispatch)
+        handled, outcome = gimo_cli._handle_chat_slash_command(
+            gimo_cli._load_config(),
+            "/status",
+            workspace_root=str(tmp_path),
+            thread_id="th_123",
+            renderer=None,
+        )
+
+    assert handled is True
+    assert outcome is None
+    assert dispatch_calls == [("/status", "")]
 
 
 def test_repos_select_is_removed_from_canonical_terminal_flow(tmp_path, monkeypatch):

@@ -31,21 +31,39 @@ async def test_tui_header_reads_operator_status():
 
 @pytest.mark.asyncio
 async def test_tui_notices_respect_policy():
-    """Verify TUI notices read from canonical notice policy endpoint."""
+    """Verify TUI notices read from the authoritative status snapshot alerts."""
     app = GimoApp(config={}, thread_id="test-thread")
+    calls: list[str] = []
     
-    mock_notices = [
-        {"level": "warning", "message": "Test Warning"},
-        {"level": "error", "message": "Test Error"}
-    ]
+    mock_status = {
+        "repo": "test-repo",
+        "branch": "main",
+        "active_provider": "openai",
+        "active_model": "gpt-4",
+        "permissions": "suggest",
+        "budget_status": "ok",
+        "budget_percentage": 80.0,
+        "context_status": "10%",
+        "alerts": [
+            {"level": "warning", "message": "Test Warning"},
+            {"level": "error", "message": "Test Error"},
+        ],
+    }
     
-    with patch("gimo_tui._api_request", return_value=(200, mock_notices)):
+    def _fake_api_request(config, method, path, **kwargs):
+        del config, method, kwargs
+        calls.append(path)
+        return 200, mock_status
+
+    with patch("gimo_tui._api_request", side_effect=_fake_api_request):
         async with app.run_test() as pilot:
+            calls.clear()
             app.update_notices()
             await pilot.pause()
             
             notices_content = app.query_one("#notices-content")
             content = str(getattr(notices_content, "content", notices_content.render()))
+            assert calls == ["/ops/operator/status"]
             assert "Test Warning" in content
             assert "Test Error" in content
 
@@ -109,4 +127,72 @@ async def test_tui_uses_shared_slash_command_authority():
             inp = app.query_one("#chat-input", Input)
             inp.value = "/status"
             app.on_input_submitted(Input.Submitted(inp, "/status"))
+            await pilot.pause()
             mock_dispatch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_tui_done_event_does_not_render_noncanonical_post_run_report():
+    app = GimoApp(config={}, thread_id="test-thread")
+
+    async with app.run_test() as pilot:
+        with patch.object(app, "_render_tui_post_run_report", side_effect=AssertionError("must stay unused")):
+            app._handle_sse_event(
+                "done",
+                {"usage": {"total_tokens": 5}, "run_report": {"goal": "ignored"}},
+            )
+            await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_tui_ctrl_c_interrupts_active_turn_without_quitting():
+    app = GimoApp(config={}, thread_id="test-thread")
+    closed = {"value": False}
+
+    class FakeResponse:
+        def close(self):
+            closed["value"] = True
+
+    async with app.run_test() as pilot:
+        with patch.object(app, "exit") as mock_exit:
+            app._stream_active = True
+            app._active_response = FakeResponse()
+            app.action_interrupt_or_quit()
+            await pilot.pause()
+
+            assert closed["value"] is True
+            assert app._interrupt_requested is True
+            mock_exit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_tui_reset_requires_confirmation_before_backend_reset():
+    app = GimoApp(config={}, thread_id="thread-123")
+    calls: list[tuple[str, str]] = []
+
+    def _fake_api_request(config, method, path, **kwargs):
+        del config, kwargs
+        calls.append((method, path))
+        if path == "/ops/threads/thread-123/reset":
+            return 204, {}
+        if path == "/ops/operator/status":
+            return 200, {"repo": "repo", "branch": "main", "active_provider": "openai", "active_model": "gpt-5", "alerts": []}
+        raise AssertionError(path)
+
+    async with app.run_test() as pilot:
+        with patch("gimo_tui._api_request", side_effect=_fake_api_request):
+            from textual.widgets import Input
+            calls.clear()
+
+            inp = app.query_one("#chat-input", Input)
+            inp.value = "/reset"
+            app.on_input_submitted(Input.Submitted(inp, "/reset"))
+            await pilot.pause()
+
+            assert calls == []
+
+            inp.value = "y"
+            app.on_input_submitted(Input.Submitted(inp, "y"))
+            await pilot.pause()
+
+            assert ("POST", "/ops/threads/thread-123/reset") in calls

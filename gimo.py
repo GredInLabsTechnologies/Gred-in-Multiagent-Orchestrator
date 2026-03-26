@@ -26,7 +26,14 @@ from cli_constants import (
 )
 from cli_parsers import is_terminal_status
 from cli_policies import get_budget_color
-from cli_commands import dispatch_slash_command, get_help_text
+from cli_commands import dispatch_slash_command
+from terminal_command_executor import (
+    TerminalCommandContext,
+    TerminalCommandOutcome,
+    TerminalSurfaceAdapter,
+    build_terminal_command_callbacks,
+    fetch_operator_status_snapshot,
+)
 
 app = typer.Typer(
     name="gimo",
@@ -250,22 +257,139 @@ def _select_chat_provider(
     return _api_request(config, "POST", "/ops/provider/select", json_body=payload)
 
 
+class ConsoleTerminalSurface(TerminalSurfaceAdapter):
+    def __init__(self, *, renderer: Any = None, workspace_root: str) -> None:
+        self._renderer = renderer
+        self._workspace_root = workspace_root
+
+    def render(self, renderable: Any) -> None:
+        console.print(renderable)
+
+    def render_message(self, message: str) -> None:
+        console.print(message)
+
+    def clear_view(self) -> None:
+        console.clear()
+
+    def confirm(self, prompt: str, on_confirm, *, cancel_message: str) -> Any:
+        from cli_parsers import parse_yes_no
+
+        try:
+            answer = console.input(prompt).strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print(cancel_message)
+            return None
+        if not parse_yes_no(answer):
+            console.print(cancel_message)
+            return None
+        return on_confirm()
+
+    def get_debug(self) -> bool:
+        return bool(self._renderer.verbose) if self._renderer is not None else False
+
+    def set_debug(self, value: bool) -> None:
+        if self._renderer is not None:
+            self._renderer.verbose = value
+
+    def render_status_snapshot(self, snapshot: dict[str, Any]) -> None:
+        version = str(snapshot.get("backend_version") or "?")
+        provider = str(snapshot.get("active_provider") or "unknown")
+        model = str(snapshot.get("active_model") or "unknown")
+        permissions = str(snapshot.get("permissions") or "suggest")
+        branch = str(snapshot.get("branch") or "?")
+        budget_status = str(snapshot.get("budget_status") or "unknown")
+        budget_pct = snapshot.get("budget_percentage")
+        context_status = str(snapshot.get("context_status") or "0%")
+        active_run_id = snapshot.get("active_run_id")
+        active_run_status = snapshot.get("active_run_status")
+        last_thread = str(snapshot.get("last_thread") or "n/a")
+        last_turn = str(snapshot.get("last_turn") or "n/a")
+        alerts = snapshot.get("alerts")
+        if not isinstance(alerts, list):
+            alerts = []
+
+        lines = [
+            f"System: [bold]v{version}[/bold]",
+            f"Provider: [cyan]{provider}[/cyan] / {model}",
+            f"Permissions: [bold]{permissions}[/bold]",
+            f"Workspace: [dim]{self._workspace_root}[/dim]",
+            f"Branch: [cyan]{branch}[/cyan]",
+            f"Budget: [bold]{budget_status}[/bold]"
+            + (f" ({budget_pct:.1f}% remaining)" if isinstance(budget_pct, (int, float)) else ""),
+            f"Context: [bold]{context_status}[/bold]",
+            f"Active run: [bold]{active_run_id or 'none'}[/bold]"
+            + (f" ({active_run_status})" if active_run_status else ""),
+            f"Last thread: {last_thread} turn {last_turn}",
+        ]
+        if alerts:
+            lines.append("Alerts:")
+            for alert in alerts:
+                if isinstance(alert, dict):
+                    level = str(alert.get("level") or "info")
+                    message = str(alert.get("message") or "")
+                else:
+                    level = "warning"
+                    message = str(alert)
+                color = "red" if level == "error" else "yellow" if level == "warning" else "blue"
+                lines.append(f" - [{color}]{message}[/{color}]")
+        console.print(Panel("\n".join(lines), title="Authoritative Status", border_style="magenta"))
+
+    def render_usage_snapshot(self, usage: dict[str, Any]) -> None:
+        if not usage:
+            console.print("[dim]No token usage data available for this thread.[/dim]")
+            return
+        lines = [
+            f"Input tokens:  [cyan]{usage.get('input_tokens', 0):,}[/cyan]",
+            f"Output tokens: [cyan]{usage.get('output_tokens', 0):,}[/cyan]",
+            f"Total tokens:  [bold]{usage.get('total_tokens', 0):,}[/bold]",
+            f"Cost:          [green]${usage.get('cost_usd', 0.0):.5f}[/green]",
+        ]
+        context_pct = usage.get("context_window_pct")
+        if isinstance(context_pct, (int, float)):
+            lines.append(f"Context:       [bold]{context_pct:.1f}%[/bold]")
+        console.print(Panel("\n".join(lines), title="Token Usage", border_style="cyan"))
+
+
+def _build_terminal_command_context(
+    config: dict[str, Any],
+    *,
+    workspace_root: str,
+    thread_id: str | None,
+) -> TerminalCommandContext:
+    return TerminalCommandContext(
+        config=config,
+        workspace_root=workspace_root,
+        thread_id=thread_id,
+        api_request=_api_request,
+        save_config=_save_config,
+        git_command=_git_command,
+    )
+
+
 def _handle_chat_slash_command(
     config: dict[str, Any],
     user_input: str,
     *,
     workspace_root: str,
     thread_id: str,
-    current_usage: dict[str, Any] | None = None,
-    current_perm: list[str] | None = None,
     renderer: Any = None,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, TerminalCommandOutcome | None]:
     if not user_input.startswith("/"):
         return False, None
 
     parts = user_input.strip().split(maxsplit=1)
     command = parts[0].lower()
     argument = parts[1].strip() if len(parts) > 1 else ""
+
+    surface = ConsoleTerminalSurface(renderer=renderer, workspace_root=workspace_root)
+    context = _build_terminal_command_context(
+        config,
+        workspace_root=workspace_root,
+        thread_id=thread_id,
+    )
+    callbacks = build_terminal_command_callbacks(context, surface)
+    handled, outcome = dispatch_slash_command(command, argument, callbacks)
+    return handled, outcome if isinstance(outcome, TerminalCommandOutcome) else None
 
     def show_help():
         console.print(Panel(get_help_text(), title="Chat Commands", border_style="cyan"))
@@ -878,35 +1002,30 @@ def _interactive_chat(config: dict[str, Any]) -> None:
     history_path = _history_dir() / f"{thread_id}.log"
     _ensure_project_dirs()
 
-    # State shared across turns for /tokens and /permissions
-    current_usage: dict[str, Any] = {}
-    current_perm: list[str] = ["suggest"]  # default HITL mode
-
     # Main loop
     while True:
         turn_interrupted = False
         try:
+            renderer.telemetry_html = _get_telemetry_toolbar(config)
             user_input = renderer.get_user_input()
         except KeyboardInterrupt:
             renderer.render_interrupted()
             continue
         if not user_input:
             continue
-        if user_input.lower() in {"/exit", "/quit"}:
-            console.print("[dim]Session ended.[/dim]")
-            break
-        handled, updated_model = _handle_chat_slash_command(
+        handled, outcome = _handle_chat_slash_command(
             config,
             user_input,
             workspace_root=workspace_root,
             thread_id=thread_id,
-            current_usage=current_usage,
-            current_perm=current_perm,
             renderer=renderer,
         )
         if handled:
-            if updated_model is not None:
-                model = updated_model
+            if outcome is not None and outcome.updated_model is not None:
+                model = outcome.updated_model
+            if outcome is not None and outcome.should_exit:
+                console.print("[dim]Session ended.[/dim]")
+                break
             continue
 
         # Save to history
@@ -1012,26 +1131,6 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                                 elif evt == "done":
                                     chat_response = data.get("response", chat_response)
                                     usage = data.get("usage", {})
-                                    current_usage.clear()
-                                    current_usage.update(usage)
-
-                                    # Emit warnings for ctx window and budget
-                                    ctx_pct = usage.get("context_window_pct", 0)
-                                    if ctx_pct > 70:
-                                        from cli_commands import Notice
-                                        import time
-                                        renderer.render_notice(Notice("warning", f"Context window high: {ctx_pct:.1f}%", time.time(), 30, False))
-
-                                    cost = usage.get("cost_usd", 0)
-                                    budget_limit = float(config.get("orchestrator", {}).get("budget_limit_usd") or 0)
-                                    if budget_limit > 0 and (cost / budget_limit) > 0.8:
-                                        from cli_commands import Notice
-                                        import time
-                                        renderer.render_notice(Notice("warning", f"Budget critical: ${cost:.2f}/${budget_limit:.2f}", time.time(), 30, False))
-
-                                    run_data = data.get("run", {})
-                                    if run_data.get("id") or run_data.get("tools_used") or run_data.get("objective"):
-                                        renderer.render_post_run_report(run_id=run_data.get("id"), usage=usage, run_data=run_data)
 
 
                                 elif evt == "error":
@@ -1129,10 +1228,6 @@ def _interactive_chat(config: dict[str, Any]) -> None:
                     renderer.render_tool_calls(tool_calls)
                 chat_response = payload.get("response", "")
                 usage = payload.get("usage", {})
-
-                run_data = payload.get("run", {})
-                if run_data.get("id") or run_data.get("tools_used") or run_data.get("objective"):
-                    renderer.render_post_run_report(run_id=run_data.get("id"), usage=usage, run_data=run_data)
 
             except KeyboardInterrupt:
                 turn_interrupted = True
@@ -1247,7 +1342,7 @@ def init(
 def status(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
 ) -> None:
-    """Comprehensive status panel: repo, backend, budget, active run, alerts."""
+    """Render the authoritative backend status snapshot."""
     from concurrent.futures import ThreadPoolExecutor
 
     result: dict[str, Any] = {}
@@ -1270,6 +1365,19 @@ def status(
             return
         console.print(Panel("\n".join(lines), title="GIMO Status", border_style="red"))
         return
+
+    status_code, payload = fetch_operator_status_snapshot(config, _api_request)
+    if status_code != 200 or not isinstance(payload, dict):
+        detail = payload.get("detail") if isinstance(payload, dict) else payload
+        console.print(f"[red]Failed to fetch authoritative status ({status_code}): {detail}[/red]")
+        raise typer.Exit(1)
+
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+
+    ConsoleTerminalSurface(workspace_root=str(_project_root())).render_status_snapshot(payload)
+    return
 
     orch_cfg = dict(config.get("orchestrator") or {})
     budget_limit = float(orch_cfg.get("budget_limit_usd") or 0)

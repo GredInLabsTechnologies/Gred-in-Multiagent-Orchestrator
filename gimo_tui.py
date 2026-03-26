@@ -1,7 +1,9 @@
 import json
 import httpx
-from typing import Any, Dict, Optional
+import subprocess
+from typing import Any, Callable, Dict, Optional
 
+import cli_commands
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -10,8 +12,17 @@ from textual.widgets import Header, Footer, Static, Input, RichLog
 from rich.text import Text
 from rich.panel import Panel
 
+from cli_policies import get_budget_color
+
 # Re-use critical logic from gimo 
-from gimo import _api_settings, _resolve_token, _api_request
+from gimo import _api_settings, _resolve_token, _api_request, _save_config
+from terminal_command_executor import (
+    TerminalCommandContext,
+    TerminalCommandOutcome,
+    TerminalSurfaceAdapter,
+    build_terminal_command_callbacks,
+    fetch_operator_status_snapshot,
+)
 
 # Constants to avoid literal duplication
 CHAT_LOG_ID = "#chat-log"
@@ -19,6 +30,67 @@ NOTICES_CONTENT_ID = "#notices-content"
 GRAPH_CONTENT_ID = "#graph-content"
 ECO_CONTENT_ID = "#eco-content"
 NO_NOTICES_MSG = "   No active notices."
+
+
+class TextualTerminalSurface(TerminalSurfaceAdapter):
+    def __init__(self, app: "GimoApp") -> None:
+        self._app = app
+
+    def render(self, renderable: Any) -> None:
+        self._app._safe_call(self._app._write_log, renderable)
+
+    def render_message(self, message: str) -> None:
+        self._app._safe_call(self._app._write_log, message)
+
+    def clear_view(self) -> None:
+        self._app._safe_call(self._app.action_clear_log)
+
+    def confirm(
+        self,
+        prompt: str,
+        on_confirm: Callable[[], Any],
+        *,
+        cancel_message: str,
+    ) -> Any:
+        self._app._safe_call(self._app._queue_command_confirmation, prompt, on_confirm, cancel_message)
+        return None
+
+    def get_debug(self) -> bool:
+        return bool(self._app.verbose)
+
+    def set_debug(self, value: bool) -> None:
+        self._app.verbose = value
+
+    def render_status_snapshot(self, snapshot: dict[str, Any]) -> None:
+        self._app._safe_call(self._app._apply_status_snapshot, snapshot)
+        provider = snapshot.get("active_provider", "?")
+        model = snapshot.get("active_model", "?")
+        self._app._safe_call(
+            self._app._write_log,
+            Panel(
+                f"Provider: [cyan]{provider}[/cyan]\nModel: [dim]{model}[/dim]",
+                title="Authoritative Status",
+                border_style="green",
+            ),
+        )
+
+    def render_usage_snapshot(self, usage: dict[str, Any]) -> None:
+        if not usage:
+            self._app._safe_call(self._app._write_log, "[dim]No token usage data available for this thread.[/dim]")
+            return
+        lines = [
+            f"Input tokens:  [cyan]{usage.get('input_tokens', 0):,}[/cyan]",
+            f"Output tokens: [cyan]{usage.get('output_tokens', 0):,}[/cyan]",
+            f"Total tokens:  [bold]{usage.get('total_tokens', 0):,}[/bold]",
+            f"Cost:          [green]${usage.get('cost_usd', 0.0):.5f}[/green]",
+        ]
+        context_pct = usage.get("context_window_pct")
+        if isinstance(context_pct, (int, float)):
+            lines.append(f"Context:       [bold]{context_pct:.1f}%[/bold]")
+        self._app._safe_call(
+            self._app._write_log,
+            Panel("\n".join(lines), title="Token Usage", border_style="cyan"),
+        )
 
 class GimoHeader(Static):
     """Fixed header: repo | branch | model | perm | budget | ctx"""
@@ -52,7 +124,7 @@ class GimoApp(App):
     TITLE = "GIMO Orchestrator"
     
     BINDINGS = [
-        Binding("ctrl+c", "quit", "Quit Session", show=True),
+        Binding("ctrl+c", "interrupt_or_quit", "Interrupt/Quit", show=True),
         Binding("ctrl+l", "clear_log", "Clear Chat", show=True),
         Binding("escape", "dismiss_notice", "Dismiss Notice", show=False),
         Binding("f5", "refresh_all", "Refresh Status", show=True),
@@ -154,9 +226,13 @@ class GimoApp(App):
         self.config = config or {}
         self.thread_id = thread_id
         self.pending_approval_data: Optional[Dict[str, Any]] = None
+        self.pending_command_confirmation: Optional[Dict[str, Any]] = None
         self.verbose: bool = False
         self._notice_timer = None
         self._stream_buffer: str = ""
+        self._stream_active: bool = False
+        self._interrupt_requested: bool = False
+        self._active_response = None
 
     def _safe_call(self, callback, *args, **kwargs):
         """Thread-safe call that doesn't crash if loop is not running."""
@@ -200,6 +276,20 @@ class GimoApp(App):
 
     def action_refresh_all(self):
         self.update_status()
+
+    def action_interrupt_or_quit(self) -> None:
+        if self._stream_active:
+            self._interrupt_requested = True
+            response = self._active_response
+            if response is not None:
+                try:
+                    response.close()
+                except Exception:
+                    pass
+            self._write_event("Interrupt requested. Closing active turn...")
+            self._write_log("[yellow]Interrupting active turn...[/yellow]")
+            return
+        self.exit()
 
     def action_clear_log(self) -> None:
         """Clear the chat log via hotkey."""
@@ -249,6 +339,106 @@ class GimoApp(App):
             inp.placeholder = "GIMO is processing..."
             box.add_class("input-disabled")
 
+    def _build_terminal_command_context(self) -> TerminalCommandContext:
+        workspace_root = str(self.config.get("repository", {}).get("workspace_root") or self.config.get("workspace_root") or ".")
+        return TerminalCommandContext(
+            config=self.config,
+            workspace_root=workspace_root,
+            thread_id=self.thread_id,
+            api_request=_api_request,
+            save_config=_save_config,
+            git_command=lambda args: subprocess.run(
+                ["git", *args],
+                text=True,
+                capture_output=True,
+                check=False,
+            ),
+        )
+
+    def _queue_command_confirmation(
+        self,
+        prompt: str,
+        on_confirm: Callable[[], Any],
+        cancel_message: str,
+    ) -> None:
+        self.pending_command_confirmation = {
+            "on_confirm": on_confirm,
+            "cancel_message": cancel_message,
+        }
+        self._write_log(prompt)
+        self._write_event("Awaiting command confirmation.")
+        self._set_input_state(True)
+        self.query_one("#chat-input", Input).placeholder = ">>> Type 'Y' to confirm or 'N' to cancel..."
+
+    @work(thread=True)
+    def _run_command_confirmation(self, on_confirm: Callable[[], Any]) -> None:
+        try:
+            on_confirm()
+        finally:
+            self._safe_call(self._set_input_state, True)
+
+    @work(thread=True)
+    def execute_slash_command(self, raw_command: str) -> None:
+        try:
+            parts = raw_command.split(maxsplit=1)
+            command = parts[0]
+            argument = parts[1].strip() if len(parts) > 1 else ""
+            context = self._build_terminal_command_context()
+            surface = TextualTerminalSurface(self)
+            callbacks = build_terminal_command_callbacks(context, surface)
+            handled, outcome = cli_commands.dispatch_slash_command(command, argument, callbacks)
+            if handled and command not in {"/help", "/workspace", "/thread", "/clear", "/exit", "/quit", "/undo", "/diff", "/tokens", "/reset"}:
+                self.update_status()
+            if handled and isinstance(outcome, TerminalCommandOutcome) and outcome.should_exit:
+                self._safe_call(self.exit)
+        finally:
+            self._safe_call(self._set_input_state, True)
+
+    def _apply_status_snapshot(self, payload: dict[str, Any]) -> None:
+        repo = payload.get("repo", "?")
+        branch = payload.get("branch", "?")
+        provider = payload.get("active_provider", "?")
+        model = payload.get("active_model", "?")
+        perm = payload.get("permissions", "suggest")
+        budget = payload.get("budget_status", "ok")
+        ctx = payload.get("context_status", "0%")
+        msg = f"REPO: {repo} | BRANCH: {branch} | MODEL: {model} | PERM: {perm} | BUDGET: {budget} | CTX: {ctx}"
+        self._update_header(msg)
+
+        graph_text = (
+            f"Repo: [bold]{repo}[/bold] ({branch})\n"
+            f"Orchestrator: [cyan]{provider}[/cyan]\n"
+            f"Model: [dim]{model}[/dim]"
+        )
+        self._update_graph_widget(graph_text)
+
+        alerts = payload.get("alerts", [])
+        if not isinstance(alerts, list) or not alerts:
+            self._update_notices_widget(NO_NOTICES_MSG)
+        else:
+            lines: list[str] = []
+            for notice in alerts:
+                if isinstance(notice, dict):
+                    level = notice.get("level", "info")
+                    message = notice.get("message", "")
+                else:
+                    level = "warning"
+                    message = str(notice)
+                icon = "!" if level == "warning" else "x" if level == "error" else "i"
+                color = "yellow" if level == "warning" else "red" if level == "error" else "blue"
+                lines.append(f"[{color}]{icon} {message}[/{color}]")
+            self._update_notices_widget("\n".join(lines))
+
+        budget_pct = payload.get("budget_percentage", 100.0)
+        if not isinstance(budget_pct, (int, float)):
+            budget_pct = 100.0
+        color = get_budget_color(budget_pct)
+        bar_len = 20
+        fill = min(int(((100 - budget_pct) / 100) * bar_len), bar_len)
+        bar = "█" * fill + "░" * (bar_len - fill)
+        telemetry_text = f"Global Budget Consumption\n[{color}]{bar}[/{color}] {100 - budget_pct:.1f}% used\n"
+        self._update_eco_widget(telemetry_text)
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         val = event.value.strip()
         if not val:
@@ -271,7 +461,25 @@ class GimoApp(App):
             self._set_input_state(False)
             self.submit_approval(tool_call_id, approved)
             return
-            
+
+        if self.pending_command_confirmation:
+            from cli_parsers import parse_yes_no
+
+            pending = self.pending_command_confirmation
+            self.pending_command_confirmation = None
+            approved = parse_yes_no(val)
+            if not approved:
+                self._write_log(str(pending["cancel_message"]))
+                return
+            self._set_input_state(False)
+            self._run_command_confirmation(pending["on_confirm"])
+            return
+
+        if val.startswith("/"):
+            self._set_input_state(False)
+            self.execute_slash_command(val)
+            return
+             
         # Handle slash commands natively 
         if val.startswith("/"):
             from cli_commands import dispatch_slash_command
@@ -384,9 +592,9 @@ class GimoApp(App):
                 "show_workspace": show_workspace,
                 "show_thread": show_thread,
                 "exit_session": self.exit,
-                "handle_provider": lambda arg: do_slash_fetch("provider_list") if arg == "list" else self._write_log("[yellow]Only /provider list is supported in TUI.[/yellow]"),
+                "handle_provider": lambda arg: do_slash_fetch("provider_list") if arg == "list" else self._write_log("[yellow]Legacy TUI slash handler is unreachable.[/yellow]"),
                 "list_models": lambda: do_slash_fetch("models"),
-                "handle_model": lambda arg: self._write_log("[yellow]Model switching is only supported via interactive chat or UI settings.[/yellow]"),
+                "handle_model": lambda arg: self._write_log("[yellow]Legacy TUI slash handler is unreachable.[/yellow]"),
                 "show_workers": lambda: do_slash_fetch("workers"),
                 "show_status": lambda: do_slash_fetch("status"),
                 # ── P0 new commands ───────────────────────────────────────────
@@ -426,6 +634,9 @@ class GimoApp(App):
         headers = {"Accept": "text/event-stream"}
         if auth_token:
             headers["Authorization"] = f"Bearer {auth_token}"
+        self._stream_active = True
+        self._interrupt_requested = False
+        self._active_response = None
 
         try:
             stream_timeout = httpx.Timeout(
@@ -441,6 +652,7 @@ class GimoApp(App):
                     params={"content": user_input},
                     headers=headers,
                 ) as response:
+                    self._active_response = response
                     if response.status_code != 200:
                         self.call_from_thread(self._write_log, f"[bold red]HTTP {response.status_code}:[/bold red] {response.read().decode('utf-8', errors='ignore')}")
                         self.call_from_thread(self._set_input_state, True)
@@ -449,11 +661,17 @@ class GimoApp(App):
         except Exception as e:
             self.call_from_thread(self._write_log, f"[bold red]Network Error:[/bold red] {e}")
             self.call_from_thread(self._set_input_state, True)
+        finally:
+            self._active_response = None
+            self._stream_active = False
+            self._interrupt_requested = False
 
     def _process_sse_stream(self, response) -> None:
         current_event_type = "message"
         self._stream_buffer = ""
         for line in response.iter_lines():
+            if self._interrupt_requested:
+                break
             if not line or line.startswith(":"):
                 continue
             if line.startswith("event: "):
@@ -526,15 +744,7 @@ class GimoApp(App):
         elif evt == "done":
             self._safe_call(self._write_event, "Response complete. Awaiting input.")
             self._safe_call(self._set_input_state, True)
-            
-            usage = data.get("usage", {})
-            run_data = data.get("run_report", {})
-            
-            # FOCUS MODE: Post-run report
-            if not self.verbose and (run_data or usage):
-                self._safe_call(self._render_tui_post_run_report, run_data, usage)
-                
-            # Notices are now handled authoritatively via update_status/snapshot.
+            self.update_status()
                 
         elif evt == "error":
             self._safe_call(self._write_log, f"\n[bold red]Orchestrator Error:[/bold red] {data.get('message', 'Unknown')}\n")
@@ -595,6 +805,12 @@ class GimoApp(App):
     def update_status(self):
         """Fetch canonical status snapshot and update all widgets (Invariant: authoritative_contracts)."""
         try:
+            status, payload = fetch_operator_status_snapshot(self.config, _api_request)
+            if status == 200 and isinstance(payload, dict):
+                self._safe_call(self._apply_status_snapshot, payload)
+            else:
+                self._safe_call(self._update_graph_widget, "[yellow]Status bridge disconnected.[/yellow]")
+            return
             status, payload = _api_request(self.config, "GET", "/ops/operator/status")
             if status == 200 and isinstance(payload, dict):
                 repo = payload.get("repo", "?")
@@ -671,6 +887,12 @@ class GimoApp(App):
     def update_notices(self):
         """Backward-compatible notice refresh that consumes the canonical backend notice feed."""
         try:
+            status, payload = fetch_operator_status_snapshot(self.config, _api_request)
+            if status != 200 or not isinstance(payload, dict):
+                self._safe_call(self._update_notices_widget, NO_NOTICES_MSG)
+                return
+            self._safe_call(self._apply_status_snapshot, payload)
+            return
             status, payload = _api_request(self.config, "GET", "/ops/notices")
             if status != 200 or not isinstance(payload, list) or not payload:
                 self._safe_call(self._update_notices_widget, NO_NOTICES_MSG)
