@@ -45,6 +45,7 @@ _ACTIONS_SAFE_PUBLIC_ENDPOINTS: tuple[tuple[str, str], ...] = (
     ("get", "/ops/runs/{run_id}/preview"),
     ("get", "/ops/repos"),
     ("get", "/ops/repos/active"),
+    ("get", "/ops/app/repos"),
     ("post", "/ops/app/sessions"),
     ("get", "/ops/app/sessions/{id}"),
     ("post", "/ops/app/sessions/{id}/repo/select"),

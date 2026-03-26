@@ -25,6 +25,7 @@ def test_phase9_filtered_openapi_exposes_only_allowed_contract(test_client):
             "/ops/runs/{run_id}/preview",
             "/ops/repos",
             "/ops/repos/active",
+            "/ops/app/repos",
             "/ops/app/sessions",
             "/ops/app/sessions/{id}",
             "/ops/app/sessions/{id}/repo/select",
@@ -44,6 +45,7 @@ def test_phase9_filtered_openapi_exposes_only_allowed_contract(test_client):
         assert set(paths["/ops/runs/{run_id}/preview"].keys()) == {"get"}
         assert set(paths["/ops/repos"].keys()) == {"get"}
         assert set(paths["/ops/repos/active"].keys()) == {"get"}
+        assert set(paths["/ops/app/repos"].keys()) == {"get"}
         assert set(paths["/ops/app/sessions"].keys()) == {"post"}
         assert set(paths["/ops/app/sessions/{id}"].keys()) == {"get"}
         assert set(paths["/ops/app/sessions/{id}/repo/select"].keys()) == {"post"}

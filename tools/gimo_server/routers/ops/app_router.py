@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Annotated, List, Optional
 from pydantic import BaseModel
 from tools.gimo_server.security import verify_token
@@ -20,8 +20,19 @@ router = APIRouter(prefix="/app", tags=["ops.app"]) # Prefix /ops comes from ops
 class AppSessionCreate(BaseModel):
     metadata: Optional[dict] = None
 
+class AppRepoHandle(BaseModel):
+    repo_id: str
+
 class AppRepoSelection(BaseModel):
     repo_id: str # Opaque handle
+
+@router.get("/repos", response_model=List[AppRepoHandle])
+async def list_repos(
+    auth: Annotated[AuthContext, Depends(verify_token)],
+):
+    """P4: Lista los repositorios disponibles mediante handles opacos."""
+    del auth
+    return [{"repo_id": handle} for handle in AppSessionService.get_handle_mapping().keys()]
 
 @router.post("/sessions")
 async def create_session(
@@ -208,4 +219,3 @@ async def purge_session(
     if not AppSessionService.purge_session(id):
         raise HTTPException(status_code=404, detail="Session not found")
     return {"status": "ok", "deleted": id}
-

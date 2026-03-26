@@ -1,7 +1,21 @@
 import pytest
 import json
+from tools.gimo_server.main import app
 from tools.gimo_server.app_mcp.server import mcp
 from tools.gimo_server.services.app_session_service import AppSessionService
+
+
+def _parse_text_payload(payload):
+    if isinstance(payload, list) and payload and hasattr(payload[0], "text"):
+        parsed = [json.loads(item.text) for item in payload]
+        return parsed[0] if len(parsed) == 1 else parsed
+    if isinstance(payload, list) and payload and hasattr(payload[0], "content"):
+        parsed = json.loads(payload[0].content)
+        return parsed
+    if isinstance(payload, str):
+        return json.loads(payload)
+    return payload
+
 
 @pytest.mark.anyio
 async def test_mcp_tools_registration():
@@ -9,80 +23,80 @@ async def test_mcp_tools_registration():
     tools = await mcp.list_tools()
     tool_names = [t.name for t in tools]
     assert "create_app_session" in tool_names
+    assert "get_app_session" in tool_names
     assert "select_app_repo" in tool_names
     assert "list_app_repos" in tool_names
+    assert "purge_app_session" in tool_names
 
 @pytest.mark.anyio
 async def test_mcp_resources_registration():
-    """P4: Verifica que los recursos de la superficie App estén registrados."""
+    """P4: Verifica que los recursos y templates de App estén registrados canónicamente."""
     resources = await mcp.list_resources()
-    # Verificamos que existan los recursos mínimos requeridos
     uris = [str(r.uri) for r in resources]
-    assert "gimo://app/review/summary" in uris
-    assert "gimo://app/diff/summary" in uris
-    assert "gimo://app/logs/summary" in uris
+    assert "gimo://app/repos" in uris
+
+    templates = await mcp.list_resource_templates()
+    template_uris = [t.uriTemplate for t in templates]
+    assert "gimo://app/session/{session_id}" in template_uris
+
+def test_official_app_facade_is_mounted():
+    """P4: Verifica que la fachada oficial esté montada en /mcp/app."""
+    mount_paths = [getattr(route, "path", None) for route in app.routes]
+    assert "/mcp/app" in mount_paths
 
 @pytest.mark.anyio
-async def test_create_app_session_tool():
-    """P4: Prueba la herramienta de creación de sesión a través de MCP."""
-    # Obtenemos el objeto de la herramienta y lo llamamos
-    tool_func = None
-    tools = await mcp.list_tools()
-    for t in tools:
-        if t.name == "create_app_session":
-            # FastMCP call_tool convenient wrapper
-            res = await mcp.call_tool("create_app_session", {"metadata": {"mcp": "test"}})
-            # La respuesta de FastMCP suele estar en .content[0].text si devuelve un dict/str
-            data = json.loads(res[0].text)
-            assert "id" in data
-            assert data["metadata"]["mcp"] == "test"
-            AppSessionService.purge_session(data["id"])
-            return
-    pytest.fail("Tool create_app_session not found")
+async def test_app_mcp_lifecycle_roundtrip():
+    """P4: Prueba create/get/select/purge y recursos canónicos a través de MCP."""
+    mapping = AppSessionService.get_handle_mapping()
+    assert mapping, "App surface requires at least one registered repo handle"
+    expected_handle = next(iter(mapping.keys()))
+
+    created = _parse_text_payload(
+        await mcp.call_tool("create_app_session", {"metadata": {"mcp": "test"}})
+    )
+    session_id = created["id"]
+    assert created["metadata"]["mcp"] == "test"
+
+    fetched = _parse_text_payload(await mcp.call_tool("get_app_session", {"session_id": session_id}))
+    assert fetched["id"] == session_id
+    assert fetched["repo_id"] is None
+
+    repos = _parse_text_payload(await mcp.read_resource("gimo://app/repos"))
+    assert any(repo["repo_id"] == expected_handle for repo in repos)
+
+    selected = _parse_text_payload(
+        await mcp.call_tool("select_app_repo", {"session_id": session_id, "repo_id": expected_handle})
+    )
+    assert selected == {"status": "ok", "repo_id": expected_handle}
+
+    session_resource = _parse_text_payload(await mcp.read_resource(f"gimo://app/session/{session_id}"))
+    assert session_resource["id"] == session_id
+    assert session_resource["repo_id"] == expected_handle
+
+    purged = _parse_text_payload(await mcp.call_tool("purge_app_session", {"session_id": session_id}))
+    assert purged == {"status": "ok", "deleted": session_id}
+
+    missing = _parse_text_payload(await mcp.call_tool("get_app_session", {"session_id": session_id}))
+    assert missing["status"] == "error"
+    assert missing["msg"] == "Session not found"
 
 @pytest.mark.anyio
 async def test_app_surface_does_not_leak_paths():
     """P4: Verifica que la superficie de App no expone host paths."""
-    # En algunos entornos de prueba, call_tool puede devolver el resultado directamente 
-    # o envuelto en una lista de objetos de contenido.
-    res = await mcp.call_tool("list_app_repos", {})
-    
-    repos = []
-    if isinstance(res, list) and len(res) > 0 and hasattr(res[0], "text"):
-        # Si es una lista de TextContent (comportamiento estándar de MCP)
-        try:
-            repos = json.loads(res[0].text)
-        except (json.JSONDecodeError, TypeError):
-            import ast
-            try:
-                repos = ast.literal_eval(res[0].text)
-            except:
-                repos = res[0].text
-    else:
-        # Si FastMCP devolvió el objeto directo en el test
-        repos = res
-
-    # Si es un solo dict, lo metemos en una lista para el bucle
-    if isinstance(repos, dict):
-        repos = [repos]
-    # Si sigue siendo un string, intentamos parsearlo
-    elif isinstance(repos, str):
-        try:
-            repos = json.loads(repos)
-        except:
-            import ast
-            try:
-                repos = ast.literal_eval(repos)
-            except:
-                repos = []
-
+    repos = _parse_text_payload(await mcp.call_tool("list_app_repos", {}))
     assert isinstance(repos, list), f"Se esperaba una lista de repositorios, se obtuvo {type(repos)}: {repos}"
 
+    host_paths = set(AppSessionService.get_handle_mapping().values())
     for repo in repos:
         assert isinstance(repo, dict), f"Cada repositorio debe ser un dict, se obtuvo {type(repo)}: {repo}"
         handle = repo["repo_id"]
-        # El handle debe ser opaco (hash de 12 chars), no una ruta.
         assert len(handle) == 12
         assert ":" not in handle
         assert "\\" not in handle
         assert "/" not in handle
+        assert handle not in host_paths
+
+    repos_resource = await mcp.read_resource("gimo://app/repos")
+    serialized_resource = repos_resource[0].content
+    for host_path in host_paths:
+        assert host_path not in serialized_resource

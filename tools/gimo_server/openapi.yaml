@@ -355,6 +355,24 @@ paths:
               schema:
                 type: object
 
+  /ops/app/repos:
+    get:
+      summary: List opaque repo handles for the App surface
+      operationId: listAppRepos
+      tags: [ops.app]
+      responses:
+        '200':
+          description: Available repo handles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [repo_id]
+                  properties:
+                    repo_id: { type: string }
+
   /ops/app/sessions/{id}:
     get:
       summary: Get App session state
