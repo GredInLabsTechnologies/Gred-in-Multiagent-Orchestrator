@@ -210,11 +210,12 @@ def _provider_config_request(config: dict[str, Any]) -> tuple[int, Any]:
 
 
 def _chat_provider_summary(config: dict[str, Any]) -> tuple[str, str]:
-    status_code, payload = _provider_config_request(config)
+    """Retrieves authoritative provider and model from the single source of truth snapshot."""
+    status_code, payload = _api_request(config, "GET", "/ops/operator/status")
     if status_code != 200 or not isinstance(payload, dict):
         return "unknown", "unknown"
-    provider_id = str(payload.get("orchestrator_provider") or payload.get("active") or "unknown")
-    model_id = str(payload.get("orchestrator_model") or payload.get("model_id") or "unknown")
+    provider_id = str(payload.get("active_provider") or "unknown")
+    model_id = str(payload.get("active_model") or "unknown")
     return provider_id, model_id
 
 
@@ -446,8 +447,13 @@ def _handle_chat_slash_command(
             return
 
         lines = []
-        lines.append(f"🟢 [bold]System[/bold]: Healthy (v{py.get('backend_version', '?')})")
+        v = py.get('backend_version', '?')
+        lines.append(f"🟢 [bold]System[/bold]: Healthy (v{v})")
         lines.append(f"🧠 [bold]Active Orchestrator[/bold]: [cyan]{py.get('active_provider', '?')}[/cyan] ({py.get('active_model', '?')})")
+        
+        perm = py.get("permissions", "suggest")
+        lines.append(f"🔒 [bold]Permissions[/bold]: [bold green]{perm.upper()}[/bold green]")
+        
         lines.append(f"📁 [bold]Workspace[/bold]: [dim]{workspace_root}[/dim] (Branch: {py.get('branch', '?')})")
         
         budget_pct = py.get("budget_percentage", 100.0)

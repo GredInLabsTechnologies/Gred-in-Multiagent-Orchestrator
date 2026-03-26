@@ -36,9 +36,10 @@ async def test_pipeline_uses_provided_workspace(monkeypatch, tmp_path):
     calls = {"tests": [], "lint": [], "dry": [], "merge": []}
     statuses = []
 
+    stages = []
     monkeypatch.setattr(
         "tools.gimo_server.services.merge_gate_service.OpsService.set_run_stage",
-        lambda run_id, stage, msg=None: None,
+        lambda run_id, stage, msg=None: stages.append(stage),
     )
     monkeypatch.setattr(
         "tools.gimo_server.services.merge_gate_service.OpsService.append_log",
@@ -77,6 +78,7 @@ async def test_pipeline_uses_provided_workspace(monkeypatch, tmp_path):
     await MergeGateService._pipeline("run2", repo_id="default", source_ref="src", target_ref="tgt", provided_workspace=str(fake_workspace))
     
     assert statuses[-1] == "done"
+    assert "gate_sandbox" in stages
     assert calls["tests"][0] == fake_workspace
     assert calls["lint"][0] == fake_workspace
     assert calls["dry"][0] == fake_workspace

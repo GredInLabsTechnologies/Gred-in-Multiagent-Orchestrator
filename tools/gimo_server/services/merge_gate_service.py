@@ -19,7 +19,7 @@ class MergeGateService:
     Pipeline determinista:
     1) gates previos (policy/intent/risk)
     2) lock por repo (TTL + heartbeat)
-    3) worktree limpio
+    3) sandbox limpio (provisioned)
     4) tests
     5) lint/typecheck
     6) dry-run merge
@@ -211,7 +211,7 @@ class MergeGateService:
             OpsService.update_run_status(run_id, "WORKER_CRASHED", msg=msg)
             return
 
-        OpsService.set_run_stage(run_id, "gate_worktree", msg="Phase7: using provisioned sandbox workspace")
+        OpsService.set_run_stage(run_id, "gate_sandbox", msg="Phase7: using provisioned sandbox workspace")
         base_dir = Path(provided_workspace)
 
         try:
