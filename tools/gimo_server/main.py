@@ -519,10 +519,11 @@ def create_app() -> FastAPI:
     try:
         from tools.gimo_server.mcp_server import mcp as legacy_mcp
         if legacy_mcp:
+            # [LEGACY/GENERAL BRIDGE] - Not the official App façade.
             app.mount("/mcp", legacy_mcp.sse_app())
-            logger.info("Universal MCP Server mounted at /mcp [LEGACY] entry point for ChatGPT Apps")
+            logger.info("General MCP Bridge mounted at /mcp [LEGACY]")
         
-        # Phase 4: official App façade
+        # [OFFICIAL APP FAÇADE] - Phase 4: official App façade
         from tools.gimo_server.app_mcp.server import mcp as app_mcp
         app.mount("/mcp/app", app_mcp.sse_app())
         logger.info("Official App façade MCP Server mounted at /mcp/app")

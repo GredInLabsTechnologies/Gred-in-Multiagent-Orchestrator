@@ -28,12 +28,27 @@ All domain logic, execution authority, and state persistence lives strictly in t
 
 ### 4. MCPs (Model Context Protocol)
 - **Role**: General-purpose bridge for IDEs and external agents.
-- **Consumption**: Exposed securely over `/mcp`.
+- **Consumption**: Exposed securely over `/mcp` (**[LEGACY/GENERAL BRIDGE]**).
+- **Note**: Not intended for first-class App integration.
 
-### 5. ChatGPT Apps
-- **Role**: Official facade for ChatGPT consumers.
-- **Consumption**: A hardened, purpose-built facade mounted at `/mcp/app`.
-- **Note**: It is not meant to replace CLI or Web, but serves as another first-class citizen client.
+### 5. ChatGPT Apps [Phase 7B Verified]
+- **Role**: Official façade for ChatGPT consumers.
+- **Consumption**: A hardened, purpose-built façade mounted at `/mcp/app` (**[OFFICIAL FAÇADE]**).
+- **Parity**: Shares the same backend authority as CLI and Web via Canonical Contracts.
+- **Note**: This is the primary entry point for modern external agents.
+
+---
+
+## Parity Closure (Cross-Surface Invariants)
+
+| Feature | Web Authority | CLI/TUI Authority | App Façade Authority |
+|---|---|---|---|
+| Status | `/ops/operator/status` | `/ops/operator/status` | `/ops/operator/status` |
+| Notices | `/ops/notices` | `/ops/notices` | `/ops/notices` |
+| Approval | `/ops/drafts/{id}/approve` | `/ops/drafts/{id}/approve` | `/ops/drafts/{id}/approve` |
+| Execution | `RunWorker` (Backend) | `RunWorker` (Backend) | `RunWorker` (Backend) |
+
+All surfaces are strictly **thin clients** consuming the same **Canonical Backend**. No surface-specific domain logic is permitted.
 
 ---
 

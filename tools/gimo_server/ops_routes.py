@@ -67,10 +67,10 @@ async def get_filtered_openapi(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
 ):
-    """[LEGACY] integration. Return a filtered OpenAPI spec with only actions-safe endpoints.
+    """[LEGACY INTEGRATION] Return a filtered OpenAPI spec with only actions-safe endpoints.
 
-    Useful for ChatGPT Actions import — excludes admin-only endpoints
-    like /ops/provider, /ops/generate, PUT /ops/plan, etc.
+    Note: This is provided for backward compatibility with external integrations 
+    like ChatGPT Actions. The /mcp/app façade is the preferred modern entry point.
     """
     import copy
     import yaml
@@ -96,8 +96,8 @@ async def get_filtered_openapi(
         entry[method] = source_methods[method]
 
     filtered["paths"] = new_paths
-    filtered["info"]["title"] = "Repo Orchestrator API (Actions)"
-    filtered["info"]["description"] = "Filtered spec for external integrations. Admin-only endpoints excluded."
+    filtered["info"]["title"] = "GIMO Core (Legacy Actions-Safe)"
+    filtered["info"]["description"] = "Legacy filtered spec for external integrations. Official façade is at /mcp/app."
     return filtered
 
 @router.get("/stream")

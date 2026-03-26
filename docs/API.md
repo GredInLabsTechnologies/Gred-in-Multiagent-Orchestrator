@@ -31,7 +31,13 @@ All endpoints require `Authorization: Bearer <ORCH_TOKEN>`.
 - `POST|GET /ops/runs`, `GET|POST /ops/runs/{id}[/cancel]`: Run execution state.
 - `GET|PUT /ops/provider` & `POST /ops/generate`: Provider configuration and LLM generation.
 - `GET|PUT /ops/config`: General OPS config.
-- `GET /ops/openapi.json`: [LEGACY] OpenAPI schema for integrations.
+- `GET /ops/openapi.json`: [LEGACY INTEGRATION] OpenAPI schema for external agents. Preferred: `/mcp/app`.
+
+## 4. First-Class Client Façades [Phase 7B Verified]
+- `/mcp/app`: **[OFFICIAL]** High-privilege App façade for ChatGPT and other first-class consumers.
+- `/mcp`: **[LEGACY]** General-purpose MCP bridge.
+- `/ops/operator/status`: Canonical backend status for TUI/CLI parity.
+- `/ops/notices`: Canonical notification feed for all surfaces.
 
 ## 4. Multi-Agent API (UI / Orchestrator)
 - `GET /ui/agent/{agent_id}/quality`: Quality metrics.

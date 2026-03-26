@@ -228,10 +228,12 @@ GIMO is being used as the operational substrate for multi-agent execution.
 
 **Important**: This doc does not describe a roadmap. It defines the boundary conditions any multi-agent executor must respect:
 
-- All actions must be represented as durable, auditable artifacts.
-- Execution must be pausable/cancellable and must support human approval gates.
-- Operators (Antigravity + VS Code + Actions) are clients; execution authority remains server-side.
 - Any future “step graph” system must preserve the guardrails in §2.4.
+- **Multi-Surface Stabilization (Phase 7B)**:
+  - Canonical authority is strictly server-side.
+  - Clients (App, CLI, TUI) consume the same backend contracts (`/ops/operator/status`, `/ops/notices`).
+  - Deprecated paths (`/mcp`, path-based repo selection) are marked as legacy and slated for removal.
+  - The official App façade is hosted at `/mcp/app`.
 
 ---
 

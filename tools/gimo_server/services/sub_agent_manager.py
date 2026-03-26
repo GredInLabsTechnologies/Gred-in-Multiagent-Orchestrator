@@ -107,13 +107,14 @@ class SubAgentManager:
             worktree_path = Path(workspace_path_str)
             logger.info(f"Using provisioned workspace for sub-agent {sub_id} at {worktree_path}")
         else:
-            # [LEGACY] Create isolated worktree directly from source repo
+            # [OBSOLETE/TRANSITIONAL] Create isolated worktree directly from source repo.
+            # This path is legacy and slated for removal in favor of provisioned workspaces.
             cls._ensure_worktrees_dir()
             worktree_path = WORKTREES_DIR / sub_id
             try:
                 # We add worktree relative to REPO_ROOT_DIR
                 GitService.add_worktree(REPO_ROOT_DIR, worktree_path)
-                logger.info(f"Created legacy isolated worktree at {worktree_path}")
+                logger.info(f"Created OBSOLETE isolated worktree at {worktree_path}")
             except Exception as e:
                 logger.error(f"Failed to create worktree for sub-agent {sub_id}: {e}")
                 worktree_path = None

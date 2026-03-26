@@ -173,6 +173,9 @@ def open_repo(
     auth: AuthContext = Depends(require_read),
     _rl: None = Depends(check_rate_limit),
 ):
+    """[LEGACY] Open repo by local filesystem path. 
+    Preferred method: session-based repo selection.
+    """
     repo_path = Path(path).resolve()
     if not _is_path_within_base(repo_path, REPO_ROOT_DIR):
         raise HTTPException(status_code=400, detail="Repo outside of allowed base")
@@ -190,6 +193,9 @@ def select_repo(
     auth: AuthContext = Depends(require_read),
     _rl: None = Depends(check_rate_limit),
 ):
+    """[LEGACY] Select active repo by local filesystem path.
+    Preferred method: session-based repo selection via /ops/app/sessions.
+    """
     repo_path = Path(path).resolve()
     if not _is_path_within_base(repo_path, REPO_ROOT_DIR) and not _is_registered_repo_path(repo_path):
         raise HTTPException(status_code=400, detail="Repo outside of allowed base")
