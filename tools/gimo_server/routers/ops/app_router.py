@@ -7,6 +7,9 @@ from tools.gimo_server.services.app_session_service import AppSessionService
 from tools.gimo_server.services.repo_recon_service import RepoReconService
 from tools.gimo_server.services.draft_validation_service import DraftValidationService
 from tools.gimo_server.services.context_request_service import ContextRequestService
+from tools.gimo_server.services.merge_gate_service import MergeGateService
+from tools.gimo_server.services.review_merge_service import ReviewMergeService
+from tools.gimo_server.services.purge_service import PurgeService
 
 from tools.gimo_server.schemas.repo_recon import ReconEntry, FileContentResponse
 from tools.gimo_server.schemas.draft_validation import DraftCreateRequest, DraftValidationResponse
@@ -148,30 +151,53 @@ async def cancel_context_request(
         return {"status": "ok"}
     raise HTTPException(status_code=404, detail="Request not found")
 
-# --- LEGACY / UNTOUCHED ---
-@router.post("/runs")
-async def create_run(
+# --- P6/P7 RUN OPERATIONS ---
+@router.post("/runs/{run_id}/execute")
+async def execute_run(
     auth: Annotated[AuthContext, Depends(verify_token)],
-    payload: dict = Body(...)
+    run_id: str
 ):
-    """P4 Honest Dummy: No implementado todavía."""
-    return {"status": "not_implemented", "msg": "Run creation via App surface not yet available"}
+    """P7: Dispara la ejecución del pipeline de merge gate de forma asíncrona."""
+    # En un entorno de producción, esto debería encolarse en un task worker.
+    # Por ahora invocamos el gate service de forma directa para validación del lifecycle.
+    try:
+        success = await MergeGateService.execute_run(run_id)
+        return {"status": "ok" if success else "failed", "run_id": run_id}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/runs/{run_id}/review")
 async def get_run_review(
     auth: Annotated[AuthContext, Depends(verify_token)],
     run_id: str
 ):
-    """P4 Honest Dummy: No implementado todavía."""
-    return {"status": "not_implemented", "msg": "Run review not yet available"}
+    """P6A: Recupera el bundle de revisión y el preview del merge."""
+    try:
+        preview = ReviewMergeService.get_merge_preview(run_id)
+        bundle = ReviewMergeService.build_review_bundle(run_id)
+        return {
+            "preview": preview.model_dump(),
+            "bundle": {
+                "base_commit": bundle.base_commit,
+                "head_commit": bundle.head_commit,
+                "changed_files": bundle.changed_files,
+                "drift_detected": bundle.drift_detected
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/runs/{run_id}/discard")
 async def discard_run(
     auth: Annotated[AuthContext, Depends(verify_token)],
     run_id: str
 ):
-    """P4 Honest Dummy: No implementado todavía."""
-    return {"status": "not_implemented", "msg": "Run discard not yet available"}
+    """P6B: Descarta un run y purga su estado reconstructivo (PurgeService)."""
+    try:
+        receipt = PurgeService.purge_run(run_id)
+        return {"status": "ok", "receipt": receipt.model_dump()}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/sessions/{id}/purge")
 async def purge_session(

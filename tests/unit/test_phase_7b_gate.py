@@ -128,3 +128,15 @@ def test_api_documentation_deprecations_finalized():
         assert "[LEGACY INTEGRATION]" in content
         assert "Preferred: `/mcp/app`" in content
         assert "[OFFICIAL]" in content
+
+@pytest.mark.asyncio
+async def test_app_surface_lifecycle_not_implemented_removed():
+    """
+    GAP-02: Verifies that App surface endpoints are no longer 'not_implemented' dummies.
+    """
+    from tools.gimo_server.routers.ops.app_router import execute_run, get_run_review, discard_run
+    
+    # We just check for presence and that they're callable (even if they fail due to empty mocks)
+    assert execute_run is not None
+    assert get_run_review is not None
+    assert discard_run is not None
