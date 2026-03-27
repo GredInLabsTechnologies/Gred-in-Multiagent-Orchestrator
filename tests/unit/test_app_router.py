@@ -183,6 +183,19 @@ def test_app_discard_route_returns_backend_purge_receipt(test_client):
     mock_discard.assert_called_once_with("run_123")
 
 
+def test_app_discard_route_returns_honest_404_for_missing_run(test_client):
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    with patch(
+        "tools.gimo_server.routers.ops.app_router.OpsService.discard_run",
+        side_effect=RunNotFoundError("Run run_404 not found"),
+    ):
+        res = test_client.post("/ops/app/runs/run_404/discard")
+
+    assert res.status_code == 404
+    assert res.json()["detail"] == "Run run_404 not found"
+
+
 def test_app_review_route_returns_honest_404_for_missing_run(test_client):
     app.dependency_overrides[verify_token] = _auth("operator")
 

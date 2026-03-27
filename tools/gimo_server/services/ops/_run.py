@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from ...config import OPS_RUN_TTL
 from ...ops_models import OpsRun
+from ..lifecycle_errors import RunNotFoundError
 from ._base import _utcnow, _json_dump
 
 logger = logging.getLogger("orchestrator.ops")
@@ -448,7 +449,7 @@ class RunMixin:
 
         run = cls.get_run(run_id)
         if not run:
-            raise ValueError(f"Run {run_id} not found")
+            raise RunNotFoundError(f"Run {run_id} not found")
 
         # Move to cancelled if not terminal
         if run.status not in cls._TERMINAL_RUN_STATUSES:
