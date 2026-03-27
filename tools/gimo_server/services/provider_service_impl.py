@@ -75,10 +75,12 @@ class ProviderService:
                 active = "claude-account"
                 orch_model = "claude-3-7-sonnet-latest"
 
-        roles = ProviderRolesConfig(
-            orchestrator=ProviderRoleBinding(provider_id=active, model=orch_model) if active else None,
-            workers=[],
-        )
+        roles = None
+        if active and orch_model:
+            roles = ProviderRolesConfig(
+                orchestrator=ProviderRoleBinding(provider_id=active, model=orch_model),
+                workers=[],
+            )
         default = ProviderConfig(active=active, providers=providers, roles=roles)
         cls.CONFIG_FILE.write_text(default.model_dump_json(indent=2), encoding="utf-8")
 

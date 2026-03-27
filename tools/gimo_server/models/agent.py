@@ -8,12 +8,12 @@ AgentRole = Literal["orchestrator", "worker", "external_action"]
 AgentChannel = Literal["cli", "provider_api", "gpt_actions", "mcp_remote"]
 
 class AgentProfile(BaseModel):
-    role: str
+    role: AgentRole
     goal: str
     backstory: Optional[str] = None
     model: str = "qwen2.5-coder:32b"
     system_prompt: str
-    instructions: List[str] = []
+    instructions: List[str] = Field(default_factory=list)
 
 class AgentActionEvent(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

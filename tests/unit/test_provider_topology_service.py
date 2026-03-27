@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import shutil
+
 from tools.gimo_server.ops_models import ProviderConfig, ProviderEntry, ProviderRoleBinding, ProviderRolesConfig
+from tools.gimo_server.services.provider_service_impl import ProviderService
 from tools.gimo_server.services.provider_topology_service import ProviderTopologyService
 
 
@@ -100,3 +104,31 @@ def test_normalize_roles_falls_back_to_active_when_no_roles_schema():
     assert roles.orchestrator.provider_id == "local-1"
     assert roles.orchestrator.model == "qwen2.5-coder:3b"
     assert roles.workers == []
+
+
+def test_provider_entry_exposes_configured_model_id_without_collapsing_provider_identity():
+    entry = ProviderEntry(
+        type="openai",
+        provider_type="openai",
+        model="gpt-4o-mini",
+        model_id="gpt-4.1",
+    )
+
+    assert entry.provider_type == "openai"
+    assert entry.configured_model_id() == "gpt-4.1"
+
+
+def test_ensure_default_config_without_detected_cli_keeps_roles_unset(monkeypatch, tmp_path):
+    config_file = tmp_path / "provider.json"
+
+    monkeypatch.setattr("tools.gimo_server.services.provider_service_impl.OPS_DATA_DIR", tmp_path)
+    monkeypatch.setattr(ProviderService, "CONFIG_FILE", config_file)
+    monkeypatch.setattr(shutil, "which", lambda _binary: None)
+
+    ProviderService.ensure_default_config()
+
+    payload = json.loads(config_file.read_text(encoding="utf-8"))
+    cfg = ProviderConfig.model_validate(payload)
+
+    assert cfg.providers == {}
+    assert cfg.roles is None

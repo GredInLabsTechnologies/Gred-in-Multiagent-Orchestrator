@@ -69,6 +69,7 @@ async def test_app_mcp_lifecycle_roundtrip(app_registered_repo):
     assert created["metadata"]["workspace_mode"] == "ephemeral"
     assert created["metadata"]["orchestrator_authority"] == "chatgpt_app"
     assert created["metadata"]["orchestrator_selection_allowed"] is False
+    assert created["metadata"]["worker_model_selection_allowed"] is False
 
     fetched = _parse_text_payload(await mcp.call_tool("get_app_session", {"session_id": session_id}))
     assert fetched["id"] == session_id

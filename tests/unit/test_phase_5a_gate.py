@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 from fastapi.testclient import TestClient
 from tools.gimo_server.main import app
+from tools.gimo_server.models import ProviderConfig, ProviderEntry, ProviderRoleBinding, ProviderRolesConfig
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.app_session_service import AppSessionService
@@ -332,9 +333,24 @@ def test_draft_validation_requires_acceptance_criteria_payload(test_client, sess
     assert res.json()["detail"] == "Invalid request payload."
 
 
-def test_draft_validation_allows_worker_model_for_chatgpt_app_workers(test_client, session_with_repo):
+def test_draft_validation_uses_backend_worker_model_for_chatgpt_app_workers(test_client, session_with_repo, monkeypatch):
     session_id, _ = session_with_repo
     app.dependency_overrides[verify_token] = _auth("operator")
+
+    monkeypatch.setattr(
+        "tools.gimo_server.services.provider_service_impl.ProviderService.get_config",
+        lambda: ProviderConfig(
+            active="orch-main",
+            providers={
+                "orch-main": ProviderEntry(type="openai", provider_type="openai", model="gpt-5.4"),
+                "worker-main": ProviderEntry(type="openai", provider_type="openai", model="gpt-4o-mini"),
+            },
+            roles=ProviderRolesConfig(
+                orchestrator=ProviderRoleBinding(provider_id="orch-main", model="gpt-5.4"),
+                workers=[ProviderRoleBinding(provider_id="worker-main", model="gpt-4o-mini")],
+            ),
+        ),
+    )
 
     res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
     file_handle = res.json()[0]["handle"]
@@ -345,11 +361,10 @@ def test_draft_validation_allows_worker_model_for_chatgpt_app_workers(test_clien
         json={
             "acceptance_criteria": "Bound to app surface",
             "allowed_paths": ["app.py"],
-            "worker_model": "gpt-4o",
         },
     )
     assert res.status_code == 200
-    assert res.json()["validated_task_spec"]["worker_model"] == "gpt-4o"
+    assert res.json()["validated_task_spec"]["worker_model"] == "gpt-4o-mini"
 
 def test_context_request_routes_fail_honestly_for_missing_session_and_request(test_client):
     app.dependency_overrides[verify_token] = _auth("operator")

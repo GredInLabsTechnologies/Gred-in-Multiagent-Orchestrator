@@ -219,6 +219,17 @@ def test_mixed_base_commit_evidence_fails_closed(mock_session):
         with pytest.raises(ValueError, match="spans multiple base commits"):
             DraftValidationService.validate_draft("sess_123", payload)
 
+
+def test_app_surface_validation_rejects_topology_override_even_without_router_schema(mock_session):
+    payload = {
+        "acceptance_criteria": "done",
+        "worker_model": "gpt-5.4",
+    }
+
+    with patch("tools.gimo_server.services.app_session_service.AppSessionService.get_session", return_value=mock_session):
+        with pytest.raises(ValueError, match="cannot override provider/model topology"):
+            DraftValidationService.validate_draft("sess_123", payload)
+
 def test_non_read_evidence_kind_fails_closed(mock_session):
     mock_session["read_proofs"][0]["kind"] = "search"
     payload = {"acceptance_criteria": "done"}

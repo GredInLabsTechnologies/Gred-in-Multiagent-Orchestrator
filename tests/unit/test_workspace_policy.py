@@ -37,6 +37,9 @@ def test_chatgpt_app_uses_chatgpt_orchestrator_authority():
     assert WorkspacePolicyService.can_surface_select_orchestrator(
         WorkspacePolicyService.SURFACE_CHATGPT_APP
     ) is False
+    assert WorkspacePolicyService.can_surface_select_worker_model(
+        WorkspacePolicyService.SURFACE_CHATGPT_APP
+    ) is False
 
 
 def test_operator_surface_uses_gimo_orchestrator_authority():
@@ -47,5 +50,8 @@ def test_operator_surface_uses_gimo_orchestrator_authority():
         == WorkspacePolicyService.ORCHESTRATOR_AUTHORITY_GIMO
     )
     assert WorkspacePolicyService.can_surface_select_orchestrator(
+        WorkspacePolicyService.SURFACE_OPERATOR
+    ) is True
+    assert WorkspacePolicyService.can_surface_select_worker_model(
         WorkspacePolicyService.SURFACE_OPERATOR
     ) is True

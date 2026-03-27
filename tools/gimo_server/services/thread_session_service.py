@@ -18,8 +18,16 @@ class ThreadSessionService:
     @classmethod
     def update_config(cls, thread_id: str, config_data: Dict[str, Any]) -> bool:
         def _mutate(thread: GimoThread) -> bool:
-            if "surface" in config_data or "orchestrator_authority" in config_data:
-                raise ValueError("surface and orchestrator_authority are backend-controlled and cannot be overridden")
+            backend_controlled = {
+                "surface",
+                "orchestrator_authority",
+                "orchestrator_selection_allowed",
+                "worker_model_selection_allowed",
+            }
+            if backend_controlled.intersection(config_data):
+                raise ValueError(
+                    "surface, orchestrator_authority, and surface selection authority are backend-controlled and cannot be overridden"
+                )
             if "effort" in config_data:
                 thread.metadata["effort"] = config_data["effort"]
             if "permissions" in config_data:

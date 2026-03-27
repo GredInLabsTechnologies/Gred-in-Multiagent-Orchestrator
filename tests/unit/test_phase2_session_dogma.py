@@ -49,6 +49,7 @@ def test_thread_creation_sets_backend_authored_surface_and_orchestrator(tmp_path
     assert thread.metadata["surface"] == "operator"
     assert thread.metadata["orchestrator_authority"] == "gimo"
     assert thread.metadata["orchestrator_selection_allowed"] is True
+    assert thread.metadata["worker_model_selection_allowed"] is True
 
 
 def test_thread_config_rejects_orchestrator_override(tmp_path):
@@ -57,6 +58,9 @@ def test_thread_config_rejects_orchestrator_override(tmp_path):
 
     with pytest.raises(ValueError, match="backend-controlled"):
         ThreadSessionService.update_config(thread.id, {"orchestrator_authority": "chatgpt_app"})
+
+    with pytest.raises(ValueError, match="backend-controlled"):
+        ThreadSessionService.update_config(thread.id, {"worker_model_selection_allowed": False})
 
 def test_get_usage_explains_absence_if_not_authoritative(tmp_path):
     ConversationService.THREADS_DIR = tmp_path

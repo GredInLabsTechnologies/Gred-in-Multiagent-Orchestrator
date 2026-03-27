@@ -5,7 +5,6 @@ class DraftCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     allowed_paths: Optional[List[str]] = None
     acceptance_criteria: str
-    worker_model: Optional[str] = None
 
 class ValidatedTaskSpec(BaseModel):
     base_commit: str

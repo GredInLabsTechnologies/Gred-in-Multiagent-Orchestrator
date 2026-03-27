@@ -49,6 +49,10 @@ class WorkspacePolicyService:
         return str(surface or "").strip().lower() != cls.SURFACE_CHATGPT_APP
 
     @classmethod
+    def can_surface_select_worker_model(cls, surface: str | None) -> bool:
+        return str(surface or "").strip().lower() != cls.SURFACE_CHATGPT_APP
+
+    @classmethod
     def default_metadata_for_surface(cls, surface: str | None) -> dict[str, str | bool]:
         normalized_surface = str(surface or "").strip().lower() or cls.SURFACE_OPERATOR
         return {
@@ -56,6 +60,7 @@ class WorkspacePolicyService:
             "workspace_mode": cls.resolve_effective_mode(requested_mode=None, surface=normalized_surface),
             "orchestrator_authority": cls.orchestrator_authority_for_surface(normalized_surface),
             "orchestrator_selection_allowed": cls.can_surface_select_orchestrator(normalized_surface),
+            "worker_model_selection_allowed": cls.can_surface_select_worker_model(normalized_surface),
         }
 
     @classmethod

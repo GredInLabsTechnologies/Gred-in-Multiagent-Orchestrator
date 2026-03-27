@@ -80,7 +80,7 @@ class ProviderTopologyService:
     @staticmethod
     def _get_entry_model(provider_id: str, providers: Dict[str, ProviderEntry]) -> str:
         entry = providers.get(provider_id)
-        return str(entry.model_id or entry.model or "").strip() if entry else ""
+        return entry.configured_model_id() if entry else ""
 
     @classmethod
     def _create_binding(

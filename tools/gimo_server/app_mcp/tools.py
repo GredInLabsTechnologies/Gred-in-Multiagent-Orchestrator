@@ -74,15 +74,15 @@ def register_tools(mcp: FastMCP):
         session_id: str,
         acceptance_criteria: str,
         allowed_paths: list[str] | None = None,
-        worker_model: str | None = None,
     ) -> dict:
-        """Create a ValidatedTaskSpec from recon evidence already recorded."""
+        """Create a ValidatedTaskSpec from recon evidence already recorded.
+
+        Worker model selection is resolved by backend authority, not by the App surface.
+        """
         payload: dict[str, object] = {
             "acceptance_criteria": acceptance_criteria,
             "allowed_paths": allowed_paths or [],
         }
-        if worker_model is not None:
-            payload["worker_model"] = worker_model
         try:
             result = DraftValidationService.validate_draft(session_id, payload)
             return {"status": "ok", **result}

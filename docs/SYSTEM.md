@@ -188,6 +188,7 @@ Implications:
 - ChatGPT Apps may still cause GIMO to deploy workers
 - authoritative manual merge remains a backend/first-party action resolved against the canonical source repo, not a ChatGPT App repo control
 - ChatGPT Apps must not choose or replace the session orchestrator authority
+- ChatGPT Apps must not choose the worker model; backend topology resolves provider/model role bindings authoritatively
 
 ### 1.8 Practical selection logic
 

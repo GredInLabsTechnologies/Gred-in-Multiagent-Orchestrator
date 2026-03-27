@@ -19,8 +19,14 @@ class ProviderEntry(BaseModel):
     api_key: Optional[str] = None
     auth_mode: Optional[str] = None
     auth_ref: Optional[str] = None
-    model: str = "gpt-4o-mini"
-    model_id: Optional[str] = None
+    model: str = Field(
+        default="gpt-4o-mini",
+        description="Configured default/active model for this provider entry. Provider identity remains separate.",
+    )
+    model_id: Optional[str] = Field(
+        default=None,
+        description="Canonical identifier for the configured default/active model exposed by this provider entry.",
+    )
     capabilities: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -30,6 +36,9 @@ class ProviderEntry(BaseModel):
         if not self.model_id:
             self.model_id = self.model
         return self
+
+    def configured_model_id(self) -> str:
+        return str(self.model_id or self.model or "").strip()
 
 class ProviderRoleBinding(BaseModel):
     provider_id: str

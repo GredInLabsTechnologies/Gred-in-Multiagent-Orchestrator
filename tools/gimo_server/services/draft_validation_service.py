@@ -3,6 +3,8 @@ import logging
 from pathlib import PurePosixPath
 from typing import Dict, Any, List, Optional
 from tools.gimo_server.services.app_session_service import AppSessionService
+from tools.gimo_server.services.model_router_service import ModelRouterService
+from tools.gimo_server.services.provider_service import ProviderService
 
 logger = logging.getLogger("orchestrator.services.draft_validation")
 
@@ -18,6 +20,8 @@ class DraftValidationService:
         """
         Validates a draft creation request using recorded ReadProofs.
         """
+        cls._reject_surface_topology_overrides(payload)
+
         session = AppSessionService.get_session(session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found")
@@ -102,7 +106,7 @@ class DraftValidationService:
         # base_commit from the latest read proof or session
         base_commit = next(iter(evidence_base_commits))
         
-        worker_model = str(payload.get("worker_model") or "").strip() or "gpt-4o"
+        worker_model = cls._resolve_backend_worker_model()
 
         validated_task_spec = {
             "base_commit": base_commit,
@@ -135,6 +139,46 @@ class DraftValidationService:
             "validated_task_spec": validated_task_spec,
             "repo_context_pack": repo_context_pack
         }
+
+    @classmethod
+    def _reject_surface_topology_overrides(cls, payload: Dict[str, Any]) -> None:
+        forbidden_keys = (
+            "worker_model",
+            "worker_provider",
+            "orchestrator_model",
+            "orchestrator_provider",
+            "provider_type",
+            "model_id",
+            "roles",
+        )
+        present = [key for key in forbidden_keys if str(payload.get(key) or "").strip()]
+        if present:
+            raise ValueError(
+                "Draft creation rejected: App surface cannot override provider/model topology."
+            )
+
+    @classmethod
+    def _resolve_backend_worker_model(cls) -> str:
+        cfg = ProviderService.get_config()
+        if cfg:
+            _provider_id, requested_model = ModelRouterService.resolve_tier_routing("worker", cfg)
+            if requested_model:
+                return requested_model
+
+            _provider_id, requested_model = ModelRouterService.resolve_tier_routing("analysis", cfg)
+            if requested_model:
+                return requested_model
+
+            if cfg.model_id:
+                return str(cfg.model_id).strip()
+
+            entry = cfg.providers.get(cfg.active)
+            if entry:
+                resolved = entry.configured_model_id()
+                if resolved:
+                    return resolved
+
+        return "gpt-4o"
 
     @classmethod
     def _get_path_from_handle(cls, session: Dict[str, Any], handle: str) -> Optional[str]:
