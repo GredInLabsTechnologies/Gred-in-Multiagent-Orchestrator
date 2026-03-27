@@ -221,9 +221,9 @@ async def test_execute_plan_records_successful_nodes_with_high_quality(monkeypat
 
 
 def test_sandbox_service_uses_configured_worktrees_dir():
-    from tools.gimo_server.config import WORKTREES_DIR
+    from tools.gimo_server.config import get_settings
 
-    assert SandboxService.BASE_WORKTREE_PATH == WORKTREES_DIR
+    assert SandboxService.BASE_WORKTREE_PATH == get_settings().ephemeral_repos_dir
 
 
 @pytest.mark.asyncio

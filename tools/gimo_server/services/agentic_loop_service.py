@@ -14,11 +14,13 @@ from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List
 from ..engine.moods import MoodProfile, get_mood_profile
 from ..engine.tools.chat_tools_schema import CHAT_TOOLS, get_tool_risk_level
 from ..engine.tools.executor import ToolExecutor
+from ..models.agent_routing import WorkflowPhase
 from ..ops_models import GimoItem, GimoTurn
 from ..providers.base import ProviderAdapter
 from ..security.execution_proof import ExecutionProof, ExecutionProofChain
 from .conversation_service import ConversationService
 from .cost_service import CostService
+from .execution_policy_service import ExecutionPolicyService
 from .notification_service import NotificationService
 from .provider_auth_service import ProviderAuthService
 from .provider_service_adapter_registry import build_provider_adapter
@@ -35,6 +37,8 @@ SYSTEM_PROMPT_TEMPLATE = """You are GIMO, a governance-aware coding orchestrator
 You help users with software engineering tasks by reading, writing, and searching code.
 
 Workspace: {workspace_root}
+Task role: {task_role}
+Workflow phase: {workflow_phase}
 Project structure:
 {tree}
 
@@ -190,6 +194,25 @@ def _resolve_orchestrator_adapter() -> tuple[ProviderAdapter, str, str]:
         resolve_secret=ProviderAuthService.resolve_secret,
     )
     return adapter, provider_id, model
+
+
+def _resolve_bound_adapter(provider_id: str, model: str) -> tuple[ProviderAdapter, str, str]:
+    cfg = ProviderService.get_config()
+    if not cfg:
+        raise RuntimeError("Provider config not found. Run gimo init or configure providers.")
+    if provider_id in {"", "auto"}:
+        return _resolve_orchestrator_adapter()
+    entry = cfg.providers.get(provider_id)
+    if not entry:
+        raise RuntimeError(f"Provider '{provider_id}' not found in providers")
+    canonical_type = ProviderService.normalize_provider_type(entry.provider_type or entry.type)
+    adapter = build_provider_adapter(
+        entry=entry,
+        canonical_type=canonical_type,
+        resolve_secret=ProviderAuthService.resolve_secret,
+    )
+    resolved_model = model if model and model != "auto" else str(entry.model_id or entry.model or "")
+    return adapter, provider_id, resolved_model
 
 
 class AgenticLoopService:
@@ -541,10 +564,18 @@ class AgenticLoopService:
         return None
 
     @staticmethod
-    def _build_system_prompt(workspace_root: str, mood_profile: MoodProfile) -> str:
+    def _build_system_prompt(
+        workspace_root: str,
+        mood_profile: MoodProfile,
+        *,
+        task_role: str = "orchestrator",
+        workflow_phase: WorkflowPhase | str = "planning",
+    ) -> str:
         tree = _generate_workspace_tree(workspace_root)
         return SYSTEM_PROMPT_TEMPLATE.format(
             workspace_root=workspace_root,
+            task_role=task_role,
+            workflow_phase=workflow_phase,
             tree=tree,
             mood_prefix=mood_profile.prompt_prefix or "",
         )
@@ -559,6 +590,7 @@ class AgenticLoopService:
         workspace_root: str,
         token: str,
         mood: str,
+        execution_policy: str | None = None,
         mood_profile: MoodProfile,
         messages: List[Dict[str, Any]],
         max_turns: int,
@@ -573,14 +605,25 @@ class AgenticLoopService:
         session_id: str | None = None,
     ) -> AgenticResult:
         emit_event = emit or cls._noop_emit
-        executor = ToolExecutor(workspace_root=workspace_root, token=token, mood=mood, session_id=session_id)
+        resolved_execution_policy = ExecutionPolicyService.resolve_policy_name(
+            execution_policy=execution_policy,
+            legacy_mood=mood,
+        )
+        policy_profile = ExecutionPolicyService.resolve_policy(execution_policy=resolved_execution_policy, legacy_mood=mood)
+        executor = ToolExecutor(
+            workspace_root=workspace_root,
+            token=token,
+            mood=mood,
+            execution_policy=resolved_execution_policy,
+            session_id=session_id,
+        )
         total_usage: Dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         all_tool_logs: List[Dict[str, Any]] = []
         final_response = ""
         finish_reason = "stop"
         iterations_used = 0
         total_cost = 0.0
-        total_budget = float(mood_profile.contract.max_cost_per_turn_usd or 0.0) * max(1, max_turns)
+        total_budget = float(policy_profile.max_cost_per_turn_usd or 0.0) * max(1, max_turns)
         proof_chain = cls._load_execution_proof_chain(thread_id, recover=True) if thread_id else None
         last_content = ""
 
@@ -591,6 +634,7 @@ class AgenticLoopService:
                 "provider": provider_id,
                 "model": model,
                 "mood": mood,
+                "execution_policy": resolved_execution_policy,
                 "temperature": temperature,
                 "max_turns": max_turns,
             },
@@ -623,13 +667,13 @@ class AgenticLoopService:
             iteration_cost = cls._calculate_usage_cost(model, usage)
             total_cost += iteration_cost
 
-            if iteration_cost > float(mood_profile.contract.max_cost_per_turn_usd or 0.0):
+            if iteration_cost > float(policy_profile.max_cost_per_turn_usd or 0.0):
                 finish_reason = "turn_budget_exhausted"
-                final_response = f"Turn budget exhausted for mood '{mood}'."
+                final_response = f"Turn budget exhausted for execution policy '{resolved_execution_policy}'."
                 break
             if total_cost > total_budget:
                 finish_reason = "budget_exhausted"
-                final_response = f"Budget exhausted for mood '{mood}'."
+                final_response = f"Budget exhausted for execution policy '{resolved_execution_policy}'."
                 break
 
             content = llm_result.get("content")
@@ -985,6 +1029,9 @@ class AgenticLoopService:
             logger.warning("Invalid mood '%s', using neutral", mood)
             mood = "neutral"
             mood_profile = get_mood_profile(mood)
+        execution_policy = thread.metadata.get("execution_policy") or ExecutionPolicyService.resolve_policy_name(legacy_mood=mood)
+        workflow_phase = getattr(thread, "workflow_phase", "intake") or "intake"
+        task_role = "orchestrator"
 
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
         if not user_turn:
@@ -999,7 +1046,12 @@ class AgenticLoopService:
         if not thread:
             raise RuntimeError(f"Thread {thread_id} not found after saving user message")
 
-        system_prompt = AgenticLoopService._build_system_prompt(workspace_root, mood_profile)
+        system_prompt = AgenticLoopService._build_system_prompt(
+            workspace_root,
+            mood_profile,
+            task_role=task_role,
+            workflow_phase=workflow_phase,
+        )
         messages = _build_messages_from_thread(thread.turns, system_prompt)
         return await AgenticLoopService._run_loop(
             adapter=adapter,
@@ -1008,6 +1060,7 @@ class AgenticLoopService:
             workspace_root=workspace_root,
             token=token,
             mood=mood,
+            execution_policy=execution_policy,
             mood_profile=mood_profile,
             messages=messages,
             max_turns=mood_profile.max_turns,
@@ -1067,6 +1120,9 @@ class AgenticLoopService:
             logger.warning("Invalid mood '%s', using neutral", mood)
             mood = "neutral"
             mood_profile = get_mood_profile(mood)
+        execution_policy = thread.metadata.get("execution_policy") or ExecutionPolicyService.resolve_policy_name(legacy_mood=mood)
+        workflow_phase = getattr(thread, "workflow_phase", "intake") or "intake"
+        task_role = "orchestrator"
 
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
         if not user_turn:
@@ -1083,7 +1139,12 @@ class AgenticLoopService:
             yield {"event": "error", "data": {"message": f"Thread {thread_id} not found after saving user message"}}
             return
 
-        system_prompt = AgenticLoopService._build_system_prompt(workspace_root, mood_profile)
+        system_prompt = AgenticLoopService._build_system_prompt(
+            workspace_root,
+            mood_profile,
+            task_role=task_role,
+            workflow_phase=workflow_phase,
+        )
         messages = _build_messages_from_thread(thread.turns, system_prompt)
 
         queue: asyncio.Queue[Dict[str, Any] | None] = asyncio.Queue()
@@ -1100,6 +1161,7 @@ class AgenticLoopService:
                     workspace_root=workspace_root,
                     token=token,
                     mood=mood,
+                    execution_policy=execution_policy,
                     mood_profile=mood_profile,
                     messages=messages,
                     max_turns=mood_profile.max_turns,
@@ -1213,7 +1275,14 @@ class AgenticLoopService:
             thread = ConversationService.get_thread(thread_id)
             mood = getattr(thread, "mood", "neutral")
             mood_profile = get_mood_profile(mood)
-            system_prompt = cls._build_system_prompt(workspace_root, mood_profile)
+            execution_policy = thread.metadata.get("execution_policy") or ExecutionPolicyService.resolve_policy_name(legacy_mood=mood)
+            workflow_phase = getattr(thread, "workflow_phase", "intake") or "intake"
+            system_prompt = cls._build_system_prompt(
+                workspace_root,
+                mood_profile,
+                task_role="orchestrator",
+                workflow_phase=workflow_phase,
+            )
             messages = _build_messages_from_thread(thread.turns, system_prompt)
 
             adapter, provider_id, model = _resolve_orchestrator_adapter()
@@ -1224,6 +1293,7 @@ class AgenticLoopService:
                 workspace_root=workspace_root,
                 token=token,
                 mood=mood,
+                execution_policy=execution_policy,
                 mood_profile=mood_profile,
                 messages=messages,
                 max_turns=10,
@@ -1245,12 +1315,17 @@ class AgenticLoopService:
         workspace_root: str,
         node_prompt: str,
         mood: str = "executor",
+        execution_policy: str | None = None,
+        provider: str = "auto",
+        model: str = "auto",
+        task_role: str = "executor",
+        workflow_phase: WorkflowPhase | str = "executing",
         max_turns: int = 10,
         temperature: float | None = None,
         tools: List[Dict[str, Any]] | None = None,
         token: str = "system",
     ) -> AgenticResult:
-        adapter, provider_id, model = _resolve_orchestrator_adapter()
+        adapter, provider_id, resolved_model = _resolve_bound_adapter(provider, model)
         try:
             mood_profile = get_mood_profile(mood)
         except KeyError:
@@ -1258,8 +1333,17 @@ class AgenticLoopService:
             mood = "executor"
             mood_profile = get_mood_profile(mood)
 
+        resolved_policy = ExecutionPolicyService.resolve_policy_name(
+            execution_policy=execution_policy,
+            legacy_mood=mood,
+        )
         resolved_temperature = mood_profile.temperature if temperature is None else temperature
-        system_prompt = AgenticLoopService._build_system_prompt(workspace_root, mood_profile)
+        system_prompt = AgenticLoopService._build_system_prompt(
+            workspace_root,
+            mood_profile,
+            task_role=task_role,
+            workflow_phase=workflow_phase,
+        )
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": node_prompt},
@@ -1267,10 +1351,11 @@ class AgenticLoopService:
         return await AgenticLoopService._run_loop(
             adapter=adapter,
             provider_id=provider_id,
-            model=model,
+            model=resolved_model,
             workspace_root=workspace_root,
             token=token,
             mood=mood,
+            execution_policy=resolved_policy,
             mood_profile=mood_profile,
             messages=messages,
             max_turns=max_turns,

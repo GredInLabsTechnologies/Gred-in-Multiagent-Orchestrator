@@ -277,7 +277,7 @@ async def respond_to_plan(
         try:
             proposed_plan = thread.proposed_plan or {}
             plan = CustomPlanService.create_plan_from_llm(
-                plan_data={"tasks": proposed_plan.get("tasks", [])},
+                plan_data=proposed_plan,
                 name=proposed_plan.get("title", "Approved Plan"),
                 description=proposed_plan.get("objective", ""),
             )
@@ -285,7 +285,7 @@ async def respond_to_plan(
             updated = ConversationService.mutate_thread(
                 thread_id,
                 lambda current: (
-                    setattr(current, "mood", "executor"),
+                    setattr(current, "workflow_phase", "executing"),
                     current.metadata.__setitem__("plan_approved", True),
                     current.metadata.__setitem__("plan_approved_at", json.dumps({"time": "now"})),
                 ),
@@ -301,7 +301,7 @@ async def respond_to_plan(
                 "status": "approved",
                 "message": "Plan approved and execution started",
                 "plan_id": plan.id,
-                "mood_transition": "executor",
+                "workflow_phase": "executing",
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to create plan: {str(e)}")
@@ -312,7 +312,7 @@ async def respond_to_plan(
             thread_id,
             lambda current: (
                 setattr(current, "proposed_plan", None),
-                setattr(current, "mood", "dialoger"),
+                setattr(current, "workflow_phase", "planning"),
             ),
         )
 
@@ -326,7 +326,7 @@ async def respond_to_plan(
         return {
             "status": "rejected",
             "message": "Plan rejected. Agent will revise.",
-            "mood_transition": "dialoger",
+            "workflow_phase": "planning",
         }
 
     elif action == "modify":

@@ -13,7 +13,8 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from ...services.file_service import FileService
-from ..moods import MoodContract, MoodProfile, get_mood_profile
+from ...services.execution_policy_service import ExecutionPolicyProfile, ExecutionPolicyService
+from ..moods import get_mood_profile
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class ToolExecutionResult(Dict[str, Any]):
 
 
 class ToolExecutor:
-    """Handles execution of artifact tools with mood policy enforcement."""
+    """Handles execution of artifact tools with execution-policy enforcement."""
 
     def __init__(
         self,
@@ -35,39 +36,46 @@ class ToolExecutor:
         policy: Optional[Dict[str, Any]] = None,
         token: str = "SYSTEM",
         mood: str = "neutral",
+        execution_policy: Optional[str] = None,
         session_id: Optional[str] = None,
     ):
         self.workspace_root = os.path.abspath(workspace_root)
         self.policy = policy or {}
         self.token = token
         self.mood = mood
+        self.execution_policy = ExecutionPolicyService.resolve_policy_name(
+            execution_policy=execution_policy,
+            legacy_mood=mood,
+        )
         self.session_id = session_id
-        self._mood_profile: Optional[MoodProfile] = None
+        try:
+            self._policy_profile = ExecutionPolicyService.resolve_policy(
+                execution_policy=execution_policy,
+                legacy_mood=mood,
+            )
+        except KeyError:
+            logger.warning("Invalid execution policy '%s' for mood '%s', using workspace_safe", execution_policy, mood)
+            self.execution_policy = "workspace_safe"
+            self._policy_profile = ExecutionPolicyService.get_policy("workspace_safe")
         try:
             self._mood_profile = get_mood_profile(mood)
         except KeyError:
             logger.warning("Invalid mood '%s', using neutral", mood)
+            self.mood = "neutral"
             self._mood_profile = get_mood_profile("neutral")
 
     @property
-    def _contract(self) -> MoodContract:
-        assert self._mood_profile is not None
-        return self._mood_profile.contract
+    def _contract(self) -> ExecutionPolicyProfile:
+        return self._policy_profile
 
     def _is_tool_allowed(self, tool_name: str) -> tuple[bool, Optional[str]]:
-        if not self._mood_profile:
-            return True, None
-        if tool_name in self._mood_profile.tool_blacklist:
-            return False, f"Tool '{tool_name}' is blacklisted in {self.mood} mood"
-        if self._mood_profile.tool_whitelist and tool_name not in self._mood_profile.tool_whitelist:
-            allowed_tools = ", ".join(sorted(self._mood_profile.tool_whitelist))
-            return False, f"Tool '{tool_name}' not in {self.mood} mood whitelist. Allowed: {allowed_tools}"
+        if self._contract.allowed_tools and tool_name not in self._contract.allowed_tools:
+            allowed_tools = ", ".join(sorted(self._contract.allowed_tools))
+            return False, f"Tool '{tool_name}' not allowed by execution policy '{self.execution_policy}'. Allowed: {allowed_tools}"
         return True, None
 
     def _requires_confirmation(self, tool_name: str) -> bool:
-        if not self._mood_profile:
-            return False
-        return tool_name in self._mood_profile.requires_confirmation
+        return tool_name in self._contract.requires_confirmation
 
     def _is_path_allowed(self, full_path: str) -> bool:
         allowed_paths: list[str] = []
@@ -113,9 +121,9 @@ class ToolExecutor:
     def _validate_mutation_path(self, path: str) -> Optional[ToolExecutionResult]:
         full_path = self._to_abs_path(path)
         if self._contract.fs_mode == "read_only":
-            return ToolExecutionResult("error", f"Mood '{self.mood}' is read-only and cannot modify files")
+            return ToolExecutionResult("error", f"Execution policy '{self.execution_policy}' is read-only and cannot modify files")
         if self._contract.fs_mode == "workspace_only" and not self._is_within_workspace(full_path):
-            return ToolExecutionResult("error", f"Path must stay inside workspace for {self.mood} mood: {path}")
+            return ToolExecutionResult("error", f"Path must stay inside workspace for execution policy '{self.execution_policy}': {path}")
         if not self._is_path_allowed(full_path):
             return ToolExecutionResult("error", f"Path not allowed by runtime policy: {path}")
         return None
@@ -210,14 +218,14 @@ class ToolExecutor:
                 return None
         return ToolExecutionResult(
             "error",
-            f"Command '{command}' is not allowed in {self.mood} mood",
+            f"Command '{command}' is not allowed by execution policy '{self.execution_policy}'",
         )
 
     async def execute_tool_call(self, name: str, arguments: Dict[str, Any]) -> ToolExecutionResult:
         if name in _MUTATING_TOOLS and self._contract.fs_mode == "read_only":
-            return ToolExecutionResult("error", f"Mood '{self.mood}' is read-only and cannot execute '{name}'")
+            return ToolExecutionResult("error", f"Execution policy '{self.execution_policy}' is read-only and cannot execute '{name}'")
         if name in _NETWORK_TOOLS and self._contract.network_mode == "blocked":
-            return ToolExecutionResult("error", f"Mood '{self.mood}' blocks network tool '{name}'")
+            return ToolExecutionResult("error", f"Execution policy '{self.execution_policy}' blocks network tool '{name}'")
 
         is_allowed, deny_reason = self._is_tool_allowed(name)
         if not is_allowed:
@@ -226,8 +234,8 @@ class ToolExecutor:
         if self._requires_confirmation(name):
             return ToolExecutionResult(
                 "requires_confirmation",
-                f"Tool '{name}' requires user approval in {self.mood} mood",
-                {"tool_name": name, "arguments": arguments, "mood": self.mood},
+                f"Tool '{name}' requires user approval in execution policy '{self.execution_policy}'",
+                {"tool_name": name, "arguments": arguments, "execution_policy": self.execution_policy},
             )
 
         handler = getattr(self, f"handle_{name}", None)
@@ -508,7 +516,12 @@ class ToolExecutor:
             if not task.get("agent_rationale"):
                 return ToolExecutionResult(
                     "error",
-                    f"Task {task.get('id')} missing 'agent_rationale' (explain WHY you chose this mood)",
+                    f"Task {task.get('id')} missing 'agent_rationale' (explain WHY you chose this profile)",
+                )
+            if not task.get("agent_preset") and not task.get("agent_mood") and not task.get("mood"):
+                return ToolExecutionResult(
+                    "error",
+                    f"Task {task.get('id')} must include either 'agent_preset' or a legacy mood hint",
                 )
         return ToolExecutionResult(
             "plan_proposed",

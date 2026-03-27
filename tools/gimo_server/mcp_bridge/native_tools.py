@@ -517,7 +517,7 @@ def register_native_tools(mcp: FastMCP):
 
                 result = resp.json()
                 plan_id = result.get("plan_id", "")
-                return f"✓ Plan approved. Execution started (plan_id: {plan_id}). Mood transitioned to: {result.get('mood_transition', 'executor')}"
+            return f"✓ Plan approved. Execution started (plan_id: {plan_id}). Workflow phase: {result.get('workflow_phase', 'executing')}"
 
         except Exception as e:
             return f"gimo_approve_plan error: {e}"
@@ -548,7 +548,7 @@ def register_native_tools(mcp: FastMCP):
                     return f"Failed to reject plan: HTTP {resp.status_code} {resp.text[:200]}"
 
                 result = resp.json()
-                return f"✗ Plan rejected. Agent will revise. Mood transitioned to: {result.get('mood_transition', 'dialoger')}"
+            return f"✗ Plan rejected. Agent will revise. Workflow phase: {result.get('workflow_phase', 'planning')}"
 
         except Exception as e:
             return f"gimo_reject_plan error: {e}"

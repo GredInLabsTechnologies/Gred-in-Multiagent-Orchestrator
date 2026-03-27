@@ -28,7 +28,7 @@ def _create_thread_with_plan(test_client, valid_token, workspace_root):
     assert resp.status_code == 201
     thread_id = resp.json()["id"]
 
-    # Patch the thread file directly to add proposed_plan and mood
+    # Patch the thread file directly to add proposed_plan and legacy mood hint
     thread_path = ConversationService.THREADS_DIR / f"{thread_id}.json"
     data = json.loads(thread_path.read_text(encoding="utf-8"))
     data["proposed_plan"] = SAMPLE_PLAN
@@ -39,7 +39,7 @@ def _create_thread_with_plan(test_client, valid_token, workspace_root):
 
 
 class TestPlanApproval:
-    def test_approve_transitions_to_executor(self, test_client, valid_token, tmp_path):
+    def test_approve_transitions_to_executing_phase(self, test_client, valid_token, tmp_path):
         thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path))
 
         # CustomPlanService is imported lazily inside the handler, so we patch
@@ -59,15 +59,15 @@ class TestPlanApproval:
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         data = resp.json()
         assert data["status"] == "approved"
-        assert data["mood_transition"] == "executor"
+        assert data["workflow_phase"] == "executing"
         assert "plan_id" in data
 
         # Verify thread state updated
         thread = ConversationService.get_thread(thread_id)
-        assert thread.mood == "executor"
+        assert thread.workflow_phase == "executing"
         assert thread.metadata.get("plan_approved") is True
 
-    def test_reject_transitions_to_dialoger(self, test_client, valid_token, tmp_path):
+    def test_reject_transitions_to_planning_phase(self, test_client, valid_token, tmp_path):
         thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path))
 
         resp = test_client.post(
@@ -79,10 +79,10 @@ class TestPlanApproval:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "rejected"
-        assert data["mood_transition"] == "dialoger"
+        assert data["workflow_phase"] == "planning"
 
         thread = ConversationService.get_thread(thread_id)
-        assert thread.mood == "dialoger"
+        assert thread.workflow_phase == "planning"
         assert thread.proposed_plan is None
 
     def test_approve_failure_does_not_mark_thread_as_approved(self, test_client, valid_token, tmp_path):
@@ -100,7 +100,7 @@ class TestPlanApproval:
         assert resp.status_code == 500
         thread = ConversationService.get_thread(thread_id)
         assert thread is not None
-        assert thread.mood == "dialoger"
+        assert thread.workflow_phase == "intake"
         assert thread.metadata.get("plan_approved") is None
         assert thread.proposed_plan == SAMPLE_PLAN
 

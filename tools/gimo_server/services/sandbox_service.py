@@ -22,6 +22,7 @@ class SandboxHandle:
 
 class SandboxService:
     """Provision isolated execution sandboxes without mutating the source repo."""
+    BASE_WORKTREE_PATH: Path = get_settings().ephemeral_repos_dir
 
     @classmethod
     def _workspace_id(cls, run_id: str) -> str:

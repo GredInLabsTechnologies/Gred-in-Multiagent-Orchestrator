@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal
 from pydantic import BaseModel, Field
 
+from .agent_routing import ProfileSummary, WorkflowPhase
+
 GimoItemType = Literal["text", "tool_call", "tool_result", "diff", "thought", "error"]
 GimoItemStatus = Literal["started", "delta", "completed", "error"]
 GimoThreadStatus = Literal["active", "archived", "deleted"]
@@ -32,6 +34,8 @@ class GimoThread(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    # P2: Mood-driven conversational flow
-    mood: str = "neutral"  # Current mood of the agent (neutral, forensic, executor, dialoger, creative, guardian, mentor)
-    proposed_plan: Dict[str, Any] | None = None  # Plan proposed by propose_plan tool, awaiting approval
+    mood: str = "neutral"  # Legacy compatibility field at the conversation edge.
+    agent_preset: str = "plan_orchestrator"
+    workflow_phase: WorkflowPhase = "intake"
+    profile_summary: ProfileSummary | None = None
+    proposed_plan: Dict[str, Any] | None = None

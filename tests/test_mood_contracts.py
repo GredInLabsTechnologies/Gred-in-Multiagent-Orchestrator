@@ -103,3 +103,13 @@ async def test_executor_write_file_reports_successful_auto_checks(tmp_path):
 
     assert result["status"] == "success"
     assert result["data"]["checks"] == fake_results
+
+
+@pytest.mark.asyncio
+async def test_explicit_execution_policy_overrides_mood_permissions(tmp_path):
+    executor = ToolExecutor(workspace_root=str(tmp_path), mood="executor", execution_policy="read_only")
+
+    result = await executor.execute_tool_call("write_file", {"path": "x.txt", "content": "hello"})
+
+    assert result["status"] == "error"
+    assert "read-only" in result["message"].lower()
