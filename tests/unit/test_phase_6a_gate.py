@@ -16,6 +16,7 @@ def mock_run():
         validated_task_spec={
             "workspace_path": "/tmp/workspace",
             "base_commit": "base123",
+            "repo_handle": "repo_h",
         },
         log=[
             {"ts": "2026-03-26T00:00:00Z", "level": "INFO", "msg": "tests_output_tail=PASSED"},
@@ -35,7 +36,7 @@ def _settings(repo_root="/repo", ephemeral_root="/tmp", worktree_root="/worktree
 def test_invariant_review_bundle_contains_changed_files(mock_run):
     settings = _settings()
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.review_merge_service.get_settings", return_value=settings), \
+         patch("tools.gimo_server.services.review_purge_contract.AppSessionService.get_path_from_handle", return_value="/repo"), \
          patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.is_dir", return_value=True), \
@@ -51,7 +52,7 @@ def test_invariant_review_bundle_contains_changed_files(mock_run):
 def test_invariant_review_bundle_contains_diff_or_diff_summary(mock_run):
     settings = _settings()
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.review_merge_service.get_settings", return_value=settings), \
+         patch("tools.gimo_server.services.review_purge_contract.AppSessionService.get_path_from_handle", return_value="/repo"), \
          patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.is_dir", return_value=True), \
@@ -66,7 +67,7 @@ def test_invariant_review_bundle_contains_diff_or_diff_summary(mock_run):
 def test_invariant_review_bundle_carries_available_logs_and_test_evidence(mock_run):
     settings = _settings()
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.review_merge_service.get_settings", return_value=settings), \
+         patch("tools.gimo_server.services.review_purge_contract.AppSessionService.get_path_from_handle", return_value="/repo"), \
          patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.is_dir", return_value=True), \
@@ -82,8 +83,11 @@ def test_invariant_review_bundle_carries_available_logs_and_test_evidence(mock_r
 
 def test_invariant_merge_preview_detects_base_drift(mock_run):
     settings = _settings()
-    with patch("tools.gimo_server.services.review_merge_service.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run):
+    with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
+         patch("tools.gimo_server.services.review_purge_contract.AppSessionService.get_path_from_handle", return_value="/repo"), \
+         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
+         patch("pathlib.Path.exists", return_value=True), \
+         patch("pathlib.Path.is_dir", return_value=True):
         with patch("tools.gimo_server.services.git_service.GitService.get_head_commit", return_value="base123"):
             preview = ReviewMergeService.get_merge_preview("r1")
             assert not preview.drift_detected
@@ -95,8 +99,11 @@ def test_invariant_merge_preview_detects_base_drift(mock_run):
 
 def test_invariant_manual_merge_only(mock_run):
     settings = _settings()
-    with patch("tools.gimo_server.services.review_merge_service.get_settings", return_value=settings), \
+    with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
+         patch("tools.gimo_server.services.review_purge_contract.AppSessionService.get_path_from_handle", return_value="/repo"), \
          patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
+         patch("pathlib.Path.exists", return_value=True), \
+         patch("pathlib.Path.is_dir", return_value=True), \
          patch("tools.gimo_server.services.git_service.GitService.get_head_commit", return_value="base123"):
         preview = ReviewMergeService.get_merge_preview("r1")
 

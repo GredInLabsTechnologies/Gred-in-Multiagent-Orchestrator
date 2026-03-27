@@ -23,20 +23,22 @@ class RepoReconService:
         session = AppSessionService.get_session(session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found")
-        
-        repo_handle = session.get("repo_id")
+
+        repo_handle = str(session.get("repo_id") or "").strip()
         if not repo_handle:
             raise ValueError(f"No repository bound to session {session_id}")
-        
-        repo_path_str = AppSessionService.get_path_from_handle(repo_handle)
-        if not repo_path_str:
+
+        bound_repo_path = AppSessionService.get_bound_repo_path(session_id)
+        if bound_repo_path:
+            repo_path = Path(bound_repo_path).resolve()
+            if not repo_path.exists() or not repo_path.is_dir():
+                raise ValueError("Bound repository snapshot is unavailable")
+            return repo_path
+
+        if not AppSessionService.validate_handle(repo_handle):
             raise ValueError(f"Invalid repo handle: {repo_handle}")
 
-        repo_path = Path(repo_path_str).resolve()
-        if not repo_path.exists() or not repo_path.is_dir():
-            raise ValueError("Bound repository is unavailable")
-
-        return repo_path
+        raise ValueError("Bound repository snapshot is unavailable")
 
     @classmethod
     def _normalize_rel_path(cls, rel_path: str, *, allow_root: bool = False) -> str:

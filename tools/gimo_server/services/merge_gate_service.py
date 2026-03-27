@@ -6,10 +6,9 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
-from ..config import get_settings
 from .git_service import GitService
 from .ops_service import OpsService
-from .review_purge_contract import resolve_workspace_path
+from .review_purge_contract import resolve_authoritative_repo_path, resolve_workspace_path
 
 logger = logging.getLogger("orchestrator.merge_gate")
 
@@ -37,6 +36,12 @@ class MergeGateService:
         "DOC_UPDATE", "DOC_WRITE", "DOC_CREATE", "DOCUMENTATION",
         "DOCS", "FILE_WRITE", "FILE_CREATE",
     })
+
+    @classmethod
+    def _prepare_workspace_source_ref(cls, run_id: str, workspace_path: Path) -> str:
+        if GitService.clean_repo_check(workspace_path):
+            return GitService.get_head_commit(workspace_path)
+        return GitService.commit_all(workspace_path, f"GIMO workspace snapshot for run {run_id}")
 
     @classmethod
     def _validate_policy(cls, run_id: str, context: dict, run: Any) -> bool:
@@ -97,6 +102,11 @@ class MergeGateService:
     async def execute_run(cls, run_id: str) -> bool:
         run = OpsService.get_run(run_id)
         if not run: return False
+
+        if str(getattr(run, "status", None) or "pending") == "pending":
+            updated_run = OpsService.update_run_status(run_id, "running", msg="merge gate execution started")
+            if updated_run is not None:
+                run = updated_run
         
         approved = OpsService.get_approved(run.approved_id)
         if not approved:
@@ -109,11 +119,6 @@ class MergeGateService:
         repo_id = str(run.repo_id or repo_context.get("repo_id") or "default")
         source_ref = str(context.get("source_ref") or "HEAD")
         target_ref = str(repo_context.get("target_branch") or "main")
-        try:
-            workspace_path = str(resolve_workspace_path(run_id, run, context, required=True, require_exists=True))
-        except Exception as exc:
-            OpsService.update_run_status(run_id, "WORKER_CRASHED", msg=str(exc))
-            return True
 
         if not cls._validate_policy(run_id, context, run): return True
         if not cls._validate_risk(run_id, context, run): return True
@@ -123,9 +128,24 @@ class MergeGateService:
             OpsService.append_log(run_id, level="INFO", msg=f"MergeGate: bypassing git pipeline for low-risk intent '{intent_effective or 'unset'}'.")
             return False
 
+        try:
+            workspace_path = str(resolve_workspace_path(run_id, run, context, required=True, require_exists=True))
+            authoritative_repo_path = str(
+                resolve_authoritative_repo_path(
+                    run_id,
+                    run,
+                    context,
+                    required=True,
+                    require_exists=True,
+                )
+            )
+        except Exception as exc:
+            OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg=str(exc))
+            return True
+
         if not workspace_path:
             msg = "Missing canonical workspace_path; sandbox worktree fallback is disabled."
-            OpsService.update_run_status(run_id, "WORKER_CRASHED", msg=msg)
+            OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg=msg)
             return True
 
         OpsService.recover_stale_lock(repo_id)
@@ -140,7 +160,14 @@ class MergeGateService:
 
         try:
             await asyncio.wait_for(
-                cls._pipeline(run_id, repo_id=repo_id, source_ref=source_ref, target_ref=target_ref, provided_workspace=workspace_path),
+                cls._pipeline(
+                    run_id,
+                    repo_id=repo_id,
+                    source_ref=source_ref,
+                    target_ref=target_ref,
+                    provided_workspace=workspace_path,
+                    authoritative_repo=authoritative_repo_path,
+                ),
                 timeout=cls.PIPELINE_TIMEOUT_SECONDS,
             )
             return True
@@ -168,35 +195,52 @@ class MergeGateService:
             except Exception: break
 
     @classmethod
-    async def _pipeline(cls, run_id: str, *, repo_id: str, source_ref: str, target_ref: str, provided_workspace: str) -> None:
+    async def _pipeline(
+        cls,
+        run_id: str,
+        *,
+        repo_id: str,
+        source_ref: str,
+        target_ref: str,
+        provided_workspace: str,
+        authoritative_repo: str,
+    ) -> None:
         del repo_id
-        base_dir = Path(provided_workspace)
+        workspace_dir = Path(provided_workspace).resolve()
+        authoritative_dir = Path(authoritative_repo).resolve()
+        effective_source_ref = source_ref
 
         try:
             # 1. Tests in Sandbox
             OpsService.set_run_stage(run_id, "gate_tests", msg="Phase7: running tests in sandbox")
-            ok_tests, tests_out = GitService.run_tests(base_dir)
+            ok_tests, tests_out = GitService.run_tests(workspace_dir)
             if not ok_tests:
                 OpsService.update_run_status(run_id, "VALIDATION_FAILED_TESTS", msg="tests failed")
                 return
 
             # 2. Lint/Typecheck in Sandbox
             OpsService.set_run_stage(run_id, "gate_lint", msg="Phase7: running lint/typecheck in sandbox")
-            ok_lint, lint_out = GitService.run_lint_typecheck(base_dir)
+            ok_lint, lint_out = GitService.run_lint_typecheck(workspace_dir)
             if not ok_lint:
                 OpsService.update_run_status(run_id, "VALIDATION_FAILED_LINT", msg="lint/typecheck failed")
                 return
 
-            # 3. Dry-run merge in Sandbox
-            OpsService.set_run_stage(run_id, "dry_run_merge", msg="Phase7: dry-run merge in sandbox")
-            ok_dry, dry_out = GitService.dry_run_merge(base_dir, source_ref, target_ref)
+            # 3. Dry-run merge on the authoritative repo using the workspace as the source of truth.
+            OpsService.set_run_stage(run_id, "dry_run_merge", msg="Phase7: dry-run merge against authoritative repo")
+            if workspace_dir != authoritative_dir:
+                effective_source_ref = cls._prepare_workspace_source_ref(run_id, workspace_dir)
+                GitService.fetch_local_ref(authoritative_dir, workspace_dir, effective_source_ref)
+                dry_run_source_ref = "FETCH_HEAD"
+            else:
+                dry_run_source_ref = source_ref
+            ok_dry, dry_out = GitService.dry_run_merge(authoritative_dir, dry_run_source_ref, target_ref)
             if not ok_dry:
                 OpsService.update_run_status(run_id, "MERGE_CONFLICT", msg="dry-run merge conflict")
                 return
 
             # Phase 7B Mandatory Pause: transition to AWAITING_MERGE.
             # NO merge_real here. 
-            commit_before = GitService.get_head_commit(base_dir)
+            commit_before = GitService.get_head_commit(authoritative_dir)
             OpsService.update_run_merge_metadata(run_id, commit_before=commit_before)
             OpsService.update_run_status(run_id, "AWAITING_MERGE", msg="Gate passed; awaiting manual merge command.")
             
@@ -216,25 +260,41 @@ class MergeGateService:
         source_ref = str(context.get("source_ref") or "HEAD")
         target_ref = str(repo_context.get("target_branch") or "main")
         workspace_path = str(resolve_workspace_path(run_id, run, context, required=True, require_exists=True))
+        authoritative_repo_path = str(
+            resolve_authoritative_repo_path(
+                run_id,
+                run,
+                context,
+                required=True,
+                require_exists=True,
+            )
+        )
 
-        base_dir = Path(workspace_path)
-        commit_before = run.commit_before or GitService.get_head_commit(base_dir)
+        workspace_dir = Path(workspace_path).resolve()
+        authoritative_dir = Path(authoritative_repo_path).resolve()
+        commit_before = run.commit_before or GitService.get_head_commit(authoritative_dir)
 
         OpsService.set_run_stage(run_id, "merge_real", msg="Phase7: performing authoritative manual merge")
-        ok_merge, merge_out = GitService.perform_merge(base_dir, source_ref, target_ref)
+        if workspace_dir != authoritative_dir:
+            source_ref = cls._prepare_workspace_source_ref(run_id, workspace_dir)
+            GitService.fetch_local_ref(authoritative_dir, workspace_dir, source_ref)
+            merge_source_ref = "FETCH_HEAD"
+        else:
+            merge_source_ref = source_ref
+        ok_merge, merge_out = GitService.perform_merge(authoritative_dir, merge_source_ref, target_ref)
         
         if not ok_merge:
             OpsService.update_run_status(run_id, "MERGE_CONFLICT", msg="manual merge failed")
             return False
 
         try:
-            commit_after = GitService.get_head_commit(base_dir)
+            commit_after = GitService.get_head_commit(authoritative_dir)
             OpsService.update_run_merge_metadata(run_id, commit_after=commit_after)
             OpsService.update_run_status(run_id, "done", msg="manual merge completed successfully")
             return True
         except Exception as exc:
             # Post-merge failure (e.g. metadata update) triggers rollback
-            ok_rb, rb_out = GitService.rollback_to_commit(base_dir, commit_before)
+            ok_rb, rb_out = GitService.rollback_to_commit(authoritative_dir, commit_before)
             if ok_rb:
                 OpsService.update_run_status(run_id, "ROLLBACK_EXECUTED", msg=f"rollback after manual merge error: {exc}")
             else:

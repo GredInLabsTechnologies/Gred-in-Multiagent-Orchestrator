@@ -188,6 +188,7 @@ class RunMixin:
             context = dict((draft.context if draft else {}) or {})
             validated_task_spec = dict(context.get("validated_task_spec") or {})
             repo_context = dict(context.get("repo_context") or {})
+            repo_context_pack = dict(context.get("repo_context_pack") or {})
             surface = str(context.get("surface") or "operator")
             workspace_mode = str(context.get("workspace_mode") or "ephemeral")
             repo_id = str(repo_context.get("repo_id") or repo_context.get("target_branch") or "default")
@@ -223,7 +224,13 @@ class RunMixin:
                 from ..workspace_policy_service import WorkspacePolicyService
 
                 repo_handle = str(validated_task_spec.get("repo_handle") or "").strip()
-                repo_path = AppSessionService.get_path_from_handle(repo_handle) if repo_handle else None
+                if surface == WorkspacePolicyService.SURFACE_CHATGPT_APP:
+                    session_id = str(repo_context_pack.get("session_id") or "").strip()
+                    repo_path = AppSessionService.get_bound_repo_path(session_id) if session_id else None
+                    if not repo_path:
+                        raise RuntimeError("CHATGPT_APP_REPO_SNAPSHOT_UNAVAILABLE")
+                else:
+                    repo_path = AppSessionService.get_path_from_handle(repo_handle) if repo_handle else None
                 if not repo_path:
                     raise RuntimeError("VALIDATED_TASK_SPEC_REPO_UNRESOLVABLE")
 

@@ -110,7 +110,7 @@ def test_p0_ops_http_lifecycle_happy_path_and_rerun(monkeypatch, tmp_path):
         approval = approve_res.json()
         run = approval["run"]
         assert run is not None
-        assert run["status"] == "pending"
+        assert run["status"] == "running"
         assert len(queued) == 1
 
         _run_queued_tasks(queued)

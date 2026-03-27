@@ -179,12 +179,14 @@ def e2e_env(ops_dir):
 def _reset_queued(e2e_env):
     """Vacía la cola de tasks capturados y restaura auth entre tests."""
     _, queued, active_policy = e2e_env
-    queued.clear()
+    while queued:
+        queued.pop().close()
     active_policy[0] = _policy_allow
     # Restaurar auth override (conftest lo limpia después de cada test)
     app.dependency_overrides[verify_token] = _override_auth
     yield
-    queued.clear()
+    while queued:
+        queued.pop().close()
 
 
 def _run_queued_tasks(queued):
@@ -207,7 +209,7 @@ def test_full_pipeline_draft_to_done(e2e_env):
     assert approve_res.status_code == 200, f"Approval failed: {approve_res.text}"
     run = approve_res.json().get("run")
     assert run is not None, "auto_run should create a run"
-    assert run["status"] == "pending"
+    assert run["status"] == "running"
 
     assert len(queued) == 1, "Expected 1 queued task"
     _run_queued_tasks(queued)

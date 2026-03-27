@@ -28,6 +28,21 @@ def test_get_changed_files_includes_untracked_files(tmp_path: Path):
     assert "new_file.py" in changed
 
 
+def test_get_changed_files_preserves_first_modified_filename(tmp_path: Path):
+    _git(tmp_path, "init")
+    _git(tmp_path, "config", "user.name", "Tester")
+    _git(tmp_path, "config", "user.email", "tester@example.com")
+    (tmp_path / "tracked.txt").write_text("base\n", encoding="utf-8")
+    _git(tmp_path, "add", "tracked.txt")
+    _git(tmp_path, "commit", "-m", "init")
+
+    (tmp_path / "tracked.txt").write_text("changed\n", encoding="utf-8")
+
+    changed = GitService.get_changed_files(tmp_path)
+
+    assert changed == ["tracked.txt"]
+
+
 def test_perform_merge_aborts_on_conflict_and_leaves_repo_clean(tmp_path: Path):
     _git(tmp_path, "init", "-b", "main")
     _git(tmp_path, "config", "user.name", "Tester")

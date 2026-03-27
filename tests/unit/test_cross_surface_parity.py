@@ -103,12 +103,10 @@ async def test_cli_and_tui_consume_same_operator_status_contract():
 
 
 @pytest.mark.anyio
-async def test_app_rest_and_mcp_share_session_state_for_official_overlap(test_client):
+async def test_app_rest_and_mcp_share_session_state_for_official_overlap(test_client, app_registered_repo):
     app.dependency_overrides[verify_token] = _auth("operator")
 
-    handles = AppSessionService.get_handle_mapping()
-    assert handles, "App surface requires at least one registered repo handle"
-    repo_id = next(iter(handles.keys()))
+    repo_id = app_registered_repo["repo_id"]
 
     created = test_client.post("/ops/app/sessions", json={"metadata": {"created_via": "rest"}})
     assert created.status_code == 200

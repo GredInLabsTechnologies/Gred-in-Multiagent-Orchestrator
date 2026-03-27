@@ -38,6 +38,8 @@ All domain logic, execution authority, and state persistence lives strictly in t
 - **Note**: This is the primary entry point for modern external agents.
 - **Authority note**: ChatGPT Apps is not a sovereign operator surface. From the user perspective, the conversational ChatGPT-side agent acts as the outer orchestrator, so this surface must remain more constrained than first-party GIMO surfaces.
 - **Agent note**: ChatGPT Apps may request or trigger worker execution through GIMO, but it must not expose orchestrator selection or create a second orchestrator authority for the same session.
+- **Repo access note**: ChatGPT Apps never read the registered source repository directly. App sessions bind an opaque repo handle to an App-managed snapshot/clone, and App reconnaissance runs only against that bound snapshot.
+- **Lifecycle note**: App review resources operate on the App-bound snapshot/workspace. Manual merge remains a sovereign backend action and resolves the authoritative source repo server-side when another first-party surface closes the run.
 
 ---
 

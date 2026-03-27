@@ -47,13 +47,49 @@ def test_bind_repo_opaque_handle(tmp_path):
         
         updated = AppSessionService.get_session(session["id"])
         assert updated["repo_id"] == handle
+        bound_repo_path = AppSessionService.get_bound_repo_path(session["id"])
+        assert bound_repo_path is not None
+        assert Path(bound_repo_path).exists()
+        assert Path(bound_repo_path).resolve() != Path(test_repo_path).resolve()
         
         # Fallback de seguridad: el handle es consistente
         assert AppSessionService.get_path_from_handle(handle) == test_repo_path
     finally:
         # Restauramos el registry
-        if old_content:
-            registry_path.write_text(old_content)
+        if old_content is not None:
+            registry_path.write_text(old_content, encoding="utf-8")
+        elif registry_path.exists():
+            registry_path.unlink()
+
+def test_bind_repo_creates_app_snapshot_isolated_from_source_repo(tmp_path):
+    settings = get_settings()
+    registry_path = settings.repo_registry_path
+
+    old_content = registry_path.read_text(encoding="utf-8") if registry_path.exists() else None
+
+    try:
+        source_repo = tmp_path / "source-repo"
+        source_repo.mkdir()
+        (source_repo / "app.py").write_text("print('hello')", encoding="utf-8")
+        registry_path.write_text(json.dumps({"repos": [str(source_repo)]}), encoding="utf-8")
+
+        handle = next(iter(AppSessionService.get_handle_mapping().keys()))
+        session = AppSessionService.create_session()
+        assert AppSessionService.bind_repo(session["id"], handle) is True
+
+        bound_repo_path = Path(AppSessionService.get_bound_repo_path(session["id"]))
+        assert (bound_repo_path / "app.py").read_text(encoding="utf-8") == "print('hello')"
+
+        (source_repo / "app.py").write_text("print('goodbye')", encoding="utf-8")
+        (source_repo / "new.py").write_text("print('new')", encoding="utf-8")
+
+        assert (bound_repo_path / "app.py").read_text(encoding="utf-8") == "print('hello')"
+        assert not (bound_repo_path / "new.py").exists()
+    finally:
+        if old_content is not None:
+            registry_path.write_text(old_content, encoding="utf-8")
+        elif registry_path.exists():
+            registry_path.unlink()
 
 def test_purge_session():
     """Verifica que la sesión se elimine correctamente."""

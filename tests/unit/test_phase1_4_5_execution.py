@@ -29,11 +29,6 @@ async def test_merge_gate_does_not_require_source_worktree(monkeypatch, tmp_path
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    monkeypatch.setattr(
-        "tools.gimo_server.services.merge_gate_service.get_settings",
-        lambda: SimpleNamespace(repo_root_dir=repo_root, ops_data_dir=tmp_path / "ops"),
-    )
-
     calls = {"add": [], "remove": [], "tests": [], "lint": [], "dry": [], "merge": []}
     statuses = []
 
@@ -60,20 +55,27 @@ async def test_merge_gate_does_not_require_source_worktree(monkeypatch, tmp_path
     monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.GitService.get_head_commit", lambda base_dir: "c1")
     monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.GitService.perform_merge", lambda *a: (calls["merge"].append(a) or True, "ok"))
     monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.GitService.rollback_to_commit", lambda *a: (True, "ok"))
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.GitService.clean_repo_check", lambda *a: True)
+    monkeypatch.setattr("tools.gimo_server.services.merge_gate_service.GitService.fetch_local_ref", lambda *a: None)
 
     provisioned_workspace = "/tmp/provided_sandbox"
 
     await MergeGateService._pipeline(
-        "run123", repo_id="default", source_ref="feature/a", target_ref="main", provided_workspace=provisioned_workspace
+        "run123",
+        repo_id="default",
+        source_ref="feature/a",
+        target_ref="main",
+        provided_workspace=provisioned_workspace,
+        authoritative_repo=str(repo_root),
     )
 
     assert statuses[-1] == "AWAITING_MERGE"
     assert len(calls["add"]) == 0, "_create_sandbox_worktree should not be called"
     assert len(calls["remove"]) == 0, "_cleanup_sandbox_worktree should not be called"
     
-    assert str(calls["tests"][0]) == str(Path(provisioned_workspace)), "Tests should run in provisioned workspace"
-    assert str(calls["lint"][0]) == str(Path(provisioned_workspace)), "Lint should run in provisioned workspace"
-    assert str(calls["dry"][0][0]) == str(Path(provisioned_workspace)), "Dry run merge should use provisioned workspace"
+    assert str(calls["tests"][0]) == str(Path(provisioned_workspace).resolve()), "Tests should run in provisioned workspace"
+    assert str(calls["lint"][0]) == str(Path(provisioned_workspace).resolve()), "Lint should run in provisioned workspace"
+    assert str(calls["dry"][0][0]) == str(repo_root), "Dry run merge should target the authoritative repo"
     assert len(calls["merge"]) == 0, "Real merge must not run before the explicit manual merge step"
 
 
@@ -339,3 +341,127 @@ def test_create_run_can_target_source_repo_for_sovereign_surface(monkeypatch, tm
     assert run.validated_task_spec is not None
     assert run.validated_task_spec["workspace_mode"] == "source_repo"
     assert run.validated_task_spec["workspace_path"] == str(repo_root)
+
+
+def test_create_run_uses_app_bound_snapshot_for_chatgpt_surface(monkeypatch, tmp_path):
+    from tools.gimo_server.models.core import OpsApproved, OpsDraft
+    from tools.gimo_server.services.ops_service import OpsService
+
+    OpsService.OPS_DIR = tmp_path
+    OpsService.DRAFTS_DIR = tmp_path / "drafts"
+    OpsService.APPROVED_DIR = tmp_path / "approved"
+    OpsService.RUNS_DIR = tmp_path / "runs"
+    OpsService.RUN_EVENTS_DIR = tmp_path / "run_events"
+    OpsService.RUN_LOGS_DIR = tmp_path / "run_logs"
+    OpsService.LOCKS_DIR = tmp_path / "locks"
+    OpsService.LOCK_FILE = tmp_path / ".ops.lock"
+    OpsService.ensure_dirs()
+
+    app_snapshot = tmp_path / "app_snapshot"
+    app_snapshot.mkdir()
+
+    draft = OpsDraft(
+        id="d_app",
+        prompt="validated prompt",
+        context={
+            "surface": "chatgpt_app",
+            "workspace_mode": "ephemeral",
+            "repo_context_pack": {"session_id": "s_app"},
+            "validated_task_spec": {
+                "base_commit": "abc123",
+                "repo_handle": "repo_h",
+                "allowed_paths": ["app.py"],
+                "acceptance_criteria": "ok",
+                "evidence_hash": "hash1",
+                "context_pack_id": "ctx1",
+                "worker_model": "gpt-4o",
+                "requires_manual_merge": True,
+            },
+        },
+    )
+    approved = OpsApproved(id="a_app", draft_id="d_app", prompt="validated prompt", content="validated prompt")
+    OpsService._draft_path(draft.id).write_text(draft.model_dump_json(indent=2), encoding="utf-8")
+    OpsService._approved_path(approved.id).write_text(approved.model_dump_json(indent=2), encoding="utf-8")
+
+    observed_repo_paths = []
+    workspace = tmp_path / "ephemeral" / "run_workspace"
+    workspace.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "tools.gimo_server.services.app_session_service.AppSessionService.get_bound_repo_path",
+        lambda session_id: str(app_snapshot) if session_id == "s_app" else None,
+    )
+    monkeypatch.setattr(
+        "tools.gimo_server.services.app_session_service.AppSessionService.get_path_from_handle",
+        lambda handle: (_ for _ in ()).throw(AssertionError("chatgpt_app runs must not resolve source repo paths")),
+    )
+
+    def _create_handle(run_id, repo_path, base_ref="main"):
+        observed_repo_paths.append(repo_path)
+        return SimpleNamespace(worktree_path=workspace)
+
+    monkeypatch.setattr(
+        "tools.gimo_server.services.sandbox_service.SandboxService.create_worktree_handle",
+        _create_handle,
+    )
+
+    run = OpsService.create_run("a_app")
+
+    assert observed_repo_paths == [str(app_snapshot)]
+    assert run.validated_task_spec is not None
+    assert run.validated_task_spec["workspace_path"] == str(workspace)
+
+
+def test_create_run_for_chatgpt_surface_fails_closed_without_bound_snapshot(monkeypatch, tmp_path):
+    from tools.gimo_server.models.core import OpsApproved, OpsDraft
+    from tools.gimo_server.services.ops_service import OpsService
+
+    OpsService.OPS_DIR = tmp_path
+    OpsService.DRAFTS_DIR = tmp_path / "drafts"
+    OpsService.APPROVED_DIR = tmp_path / "approved"
+    OpsService.RUNS_DIR = tmp_path / "runs"
+    OpsService.RUN_EVENTS_DIR = tmp_path / "run_events"
+    OpsService.RUN_LOGS_DIR = tmp_path / "run_logs"
+    OpsService.LOCKS_DIR = tmp_path / "locks"
+    OpsService.LOCK_FILE = tmp_path / ".ops.lock"
+    OpsService.ensure_dirs()
+
+    draft = OpsDraft(
+        id="d_app_missing",
+        prompt="validated prompt",
+        context={
+            "surface": "chatgpt_app",
+            "workspace_mode": "ephemeral",
+            "repo_context_pack": {"session_id": "s_missing"},
+            "validated_task_spec": {
+                "base_commit": "abc123",
+                "repo_handle": "repo_h",
+                "allowed_paths": ["app.py"],
+                "acceptance_criteria": "ok",
+                "evidence_hash": "hash1",
+                "context_pack_id": "ctx1",
+                "worker_model": "gpt-4o",
+                "requires_manual_merge": True,
+            },
+        },
+    )
+    approved = OpsApproved(
+        id="a_app_missing",
+        draft_id="d_app_missing",
+        prompt="validated prompt",
+        content="validated prompt",
+    )
+    OpsService._draft_path(draft.id).write_text(draft.model_dump_json(indent=2), encoding="utf-8")
+    OpsService._approved_path(approved.id).write_text(approved.model_dump_json(indent=2), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "tools.gimo_server.services.app_session_service.AppSessionService.get_bound_repo_path",
+        lambda session_id: None,
+    )
+    monkeypatch.setattr(
+        "tools.gimo_server.services.app_session_service.AppSessionService.get_path_from_handle",
+        lambda handle: (_ for _ in ()).throw(AssertionError("chatgpt_app must not fall back to source repos")),
+    )
+
+    with pytest.raises(RuntimeError, match="CHATGPT_APP_REPO_SNAPSHOT_UNAVAILABLE"):
+        OpsService.create_run("a_app_missing")

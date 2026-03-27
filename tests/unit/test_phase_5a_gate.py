@@ -258,7 +258,7 @@ def test_recon_rejects_oversized_file_reads(test_client, session_with_repo, tmp_
     session_id, repo_handle = session_with_repo
     app.dependency_overrides[verify_token] = _auth("operator")
 
-    repo_dir = Path(AppSessionService.get_path_from_handle(repo_handle))
+    repo_dir = Path(AppSessionService.get_bound_repo_path(session_id))
     big_file = repo_dir / "large.py"
     big_file.write_text("x" * 500001, encoding="utf-8")
 
@@ -268,6 +268,24 @@ def test_recon_rejects_oversized_file_reads(test_client, session_with_repo, tmp_
     res = test_client.get(f"/ops/app/sessions/{session_id}/recon/read/{large_handle}")
     assert res.status_code == 400
     assert "too large" in res.json()["detail"].lower()
+
+def test_recon_reads_bound_snapshot_not_live_source_repo(test_client, session_with_repo):
+    session_id, repo_handle = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    source_repo = Path(AppSessionService.get_path_from_handle(repo_handle))
+    (source_repo / "app.py").write_text("print('goodbye')", encoding="utf-8")
+    (source_repo / "live_only.py").write_text("print('live only')", encoding="utf-8")
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
+    assert res.status_code == 200
+    entries = res.json()
+    assert not any(item["name"] == "live_only.py" for item in entries)
+
+    file_handle = next(item["handle"] for item in entries if item["name"] == "app.py")
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/read/{file_handle}")
+    assert res.status_code == 200
+    assert res.json()["content"] == "print('hello')"
 
 def test_draft_validation_rejects_untrusted_allowed_paths(test_client, session_with_repo):
     session_id, _ = session_with_repo

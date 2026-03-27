@@ -41,13 +41,14 @@ All endpoints require `Authorization: Bearer <ORCH_TOKEN>`.
 - `/ops/notices`: Canonical notification feed for all surfaces.
 - `POST /ops/app/sessions`: Create App session.
 - `GET /ops/app/sessions/{id}`: Read App session state.
-- `POST /ops/app/sessions/{id}/repo/select`: Bind opaque repo handle to App session.
+- `POST /ops/app/sessions/{id}/repo/select`: Bind opaque repo handle to App session and provision an App-managed snapshot/clone. The App surface does not read the original repo directly.
 - `GET /ops/app/sessions/{id}/recon/*`: App reconnaissance over opaque handles only.
 - `POST /ops/app/sessions/{id}/drafts`: Create validated App draft from recon evidence.
 - `POST /ops/app/sessions/{id}/context-requests`: Create/list/resolve/cancel App context requests.
-- `GET /ops/app/runs/{run_id}/review`: Canonical review bundle + merge preview.
+- `GET /ops/app/runs/{run_id}/review`: Canonical review bundle + merge preview over the App-bound snapshot/workspace; this façade does not read the original repo directly.
 - `POST /ops/app/runs/{run_id}/discard`: Discard run and purge reconstructive state.
 - `POST /ops/app/sessions/{id}/purge`: Remove App session state.
+- `POST /ops/runs/{id}/merge`: First-party/operator manual merge against the authoritative source repo resolved by backend contracts.
 
 ## 4. Multi-Agent API (UI / Orchestrator)
 - `GET /ui/agent/{agent_id}/quality`: Quality metrics.

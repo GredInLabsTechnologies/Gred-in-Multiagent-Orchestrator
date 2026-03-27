@@ -85,6 +85,16 @@ def _valid_skill_payload(command: str = "/hardened") -> dict:
 # ── Hardening tests (from test_phase7_hardening.py) ─────────
 
 
+def _provision_merge_gate_contract(monkeypatch, tmp_path):
+    from tools.gimo_server.services import merge_gate_service as mgs
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(mgs, "resolve_workspace_path", lambda *args, **kwargs: workspace)
+    monkeypatch.setattr(mgs, "resolve_authoritative_repo_path", lambda *args, **kwargs: workspace)
+    return workspace
+
+
 @pytest.fixture
 def client():
     app.dependency_overrides[verify_token] = _override_auth
@@ -300,6 +310,7 @@ def test_phase7_merge_gate_lock_conflict_sets_merge_locked(tmp_path, monkeypatch
     _setup_ops_dirs(tmp_path)
     _, approved = _seed_draft_and_approved(draft_id="d3", approved_id="a3")
     run = OpsService.create_run(approved.id)
+    _provision_merge_gate_contract(monkeypatch, tmp_path)
 
     OpsService.acquire_merge_lock("repoA", "other_run", ttl_seconds=30)
 
@@ -316,6 +327,7 @@ def test_phase7_merge_gate_tests_failure_sets_validation_failed_tests(tmp_path, 
     run = OpsService.create_run(approved.id)
 
     from tools.gimo_server.services import merge_gate_service as mgs
+    _provision_merge_gate_contract(monkeypatch, tmp_path)
 
     monkeypatch.setattr(mgs.GitService, "is_worktree_clean", lambda _base: True)
     monkeypatch.setattr(mgs.GitService, "run_tests", lambda _base: (False, "tests failed"))
@@ -337,6 +349,7 @@ def test_phase7_merge_gate_lint_failure_sets_validation_failed_lint(tmp_path, mo
     run = OpsService.create_run(approved.id)
 
     from tools.gimo_server.services import merge_gate_service as mgs
+    _provision_merge_gate_contract(monkeypatch, tmp_path)
 
     monkeypatch.setattr(mgs.GitService, "is_worktree_clean", lambda _base: True)
     monkeypatch.setattr(mgs.GitService, "run_tests", lambda _base: (True, "ok"))
@@ -355,6 +368,7 @@ def test_phase7_merge_gate_dry_run_conflict_sets_merge_conflict(tmp_path, monkey
     run = OpsService.create_run(approved.id)
 
     from tools.gimo_server.services import merge_gate_service as mgs
+    _provision_merge_gate_contract(monkeypatch, tmp_path)
 
     monkeypatch.setattr(mgs.GitService, "is_worktree_clean", lambda _base: True)
     monkeypatch.setattr(mgs.GitService, "run_tests", lambda _base: (True, "ok"))
@@ -442,6 +456,7 @@ def test_phase7_merge_gate_post_merge_failure_triggers_rollback(tmp_path, monkey
     run = OpsService.create_run(approved.id)
 
     from tools.gimo_server.services import merge_gate_service as mgs
+    _provision_merge_gate_contract(monkeypatch, tmp_path)
 
     monkeypatch.setattr(mgs.GitService, "is_worktree_clean", lambda _base: True)
     monkeypatch.setattr(mgs.GitService, "run_tests", lambda _base: (True, "ok"))
@@ -462,6 +477,12 @@ def test_phase7_merge_gate_post_merge_failure_triggers_rollback(tmp_path, monkey
 
     ok = asyncio.run(MergeGateService.execute_run(run.id))
     assert ok is True
+    awaiting = OpsService.get_run(run.id)
+    assert awaiting is not None
+    assert awaiting.status == "AWAITING_MERGE"
+
+    ok = asyncio.run(MergeGateService.perform_manual_merge(run.id))
+    assert ok is False
     updated = OpsService.get_run(run.id)
     assert updated is not None
     assert updated.status == "ROLLBACK_EXECUTED"

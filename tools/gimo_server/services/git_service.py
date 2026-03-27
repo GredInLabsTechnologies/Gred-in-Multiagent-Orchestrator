@@ -227,7 +227,14 @@ class GitService:
         for line in out.splitlines():
             if not line.strip():
                 continue
-            payload = line[3:].strip() if len(line) > 3 else ""
+            # _run_git() strips global stdout, so the first porcelain line may lose its
+            # leading space (" M file.py" -> "M file.py"). Parse both canonical forms.
+            if len(line) >= 3 and line[2] == " ":
+                payload = line[3:].strip()
+            elif len(line) >= 2 and line[1] == " ":
+                payload = line[2:].strip()
+            else:
+                payload = line.strip()
             if " -> " in payload:
                 payload = payload.split(" -> ", 1)[1].strip()
             if payload:
@@ -388,6 +395,14 @@ class GitService:
         code, out, err = GitService._run_git(mirror_dir, ["fetch", "--prune"])
         if code != 0:
             raise RuntimeError(f"Git fetch mirror error: {err or out}")
+
+    @staticmethod
+    def fetch_local_ref(base_dir: Path, source_repo: Path, ref: str) -> None:
+        src = str(source_repo.resolve())
+        safe_ref = _sanitize_git_ref(ref)
+        code, out, err = GitService._run_git(base_dir, ["fetch", src, safe_ref])
+        if code != 0:
+            raise RuntimeError(f"Git fetch local ref error: {err or out}")
 
     @staticmethod
     def checkout_commit(base_dir: Path, commit_hash: str) -> None:

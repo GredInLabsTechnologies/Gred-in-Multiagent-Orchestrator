@@ -27,9 +27,8 @@ async def test_merge_gate_refuses_no_workspace():
         
         await MergeGateService.execute_run(run_id)
         
-        # Should be WORKER_CRASHED due to missing workspace
-        msg = "Missing canonical workspace_path; sandbox worktree fallback is disabled."
-        mock_status.assert_any_call(run_id, "WORKER_CRASHED", msg=msg)
+        msg = f"No canonical workspace_path found for run {run_id}"
+        mock_status.assert_any_call(run_id, "WORKER_CRASHED_RECOVERABLE", msg=msg)
 
 
 @pytest.mark.asyncio

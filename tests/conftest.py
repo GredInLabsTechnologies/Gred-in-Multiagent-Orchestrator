@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import json
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -149,6 +150,38 @@ def valid_token() -> str:
 def test_actor() -> str:
     """Provide the canonical test actor for auth override contexts."""
     return os.environ["ORCH_TEST_ACTOR"]
+
+
+@pytest.fixture
+def app_registered_repo(tmp_path: Path):
+    """Provide a deterministic registered repo handle for App-surface tests."""
+    from tools.gimo_server.config import get_settings
+    from tools.gimo_server.services.app_session_service import AppSessionService
+
+    settings = get_settings()
+    registry_path = settings.repo_registry_path
+    old_content = registry_path.read_text(encoding="utf-8") if registry_path.exists() else None
+
+    repo_dir = tmp_path / "app_registered_repo"
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    (repo_dir / "app.py").write_text("print('hello')\n", encoding="utf-8")
+
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps({"repos": [str(repo_dir.resolve())]}, indent=2),
+        encoding="utf-8",
+    )
+
+    mapping = AppSessionService.get_handle_mapping()
+    handle = next(iter(mapping.keys()))
+
+    try:
+        yield {"repo_dir": repo_dir, "repo_id": handle}
+    finally:
+        if old_content is not None:
+            registry_path.write_text(old_content, encoding="utf-8")
+        elif registry_path.exists():
+            registry_path.unlink()
 
 
 @pytest.fixture(autouse=True)

@@ -5,8 +5,12 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from .git_service import GitService
-from .review_purge_contract import get_run_with_context, resolve_base_commit, resolve_workspace_path
-from ..config import get_settings
+from .review_purge_contract import (
+    get_run_with_context,
+    resolve_base_commit,
+    resolve_review_source_repo_path,
+    resolve_workspace_path,
+)
 
 logger = logging.getLogger("orchestrator.review_merge")
 
@@ -77,10 +81,14 @@ class ReviewMergeService:
             if "lint_output_tail=" in msg:
                  lint_evidence = msg.split("lint_output_tail=", 1)[1]
 
-        # Drift detection
-        settings = get_settings()
-        repo_root = settings.repo_root_dir
-        source_repo_head = GitService.get_head_commit(repo_root)
+        review_source_repo = resolve_review_source_repo_path(
+            run_id,
+            run,
+            draft_context,
+            required=True,
+            require_exists=True,
+        )
+        source_repo_head = GitService.get_head_commit(review_source_repo)
         drift_detected = (source_repo_head != base_commit)
 
         return ReviewBundle(
@@ -106,9 +114,14 @@ class ReviewMergeService:
         run, draft_context = get_run_with_context(run_id)
         base_commit = resolve_base_commit(run_id, run, draft_context)
 
-        settings = get_settings()
-        repo_root = settings.repo_root_dir
-        source_head = GitService.get_head_commit(repo_root)
+        review_source_repo = resolve_review_source_repo_path(
+            run_id,
+            run,
+            draft_context,
+            required=True,
+            require_exists=True,
+        )
+        source_head = GitService.get_head_commit(review_source_repo)
         
         drift_detected = (source_head != base_commit)
         

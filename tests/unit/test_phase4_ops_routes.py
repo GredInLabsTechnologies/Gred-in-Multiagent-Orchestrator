@@ -103,6 +103,50 @@ def test_phase4_approve_disables_auto_run_when_not_eligible(monkeypatch, client)
     assert called["create_run"] is False
 
 
+def test_phase4_approve_auto_run_enters_running_immediately(monkeypatch, client):
+    from tools.gimo_server.routers.ops import run_router
+
+    draft = OpsDraft(
+        id="d_phase4_auto",
+        prompt="p",
+        context={"execution_decision": "AUTO_RUN_ELIGIBLE"},
+        status="draft",
+    )
+    approved = OpsApproved(
+        id="a_phase4_auto",
+        draft_id="d_phase4_auto",
+        prompt="p",
+        content="ok",
+    )
+    created_run = OpsRun(
+        id="r_phase4_auto",
+        approved_id="a_phase4_auto",
+        status="pending",
+    )
+    updated_run = OpsRun(
+        id="r_phase4_auto",
+        approved_id="a_phase4_auto",
+        status="running",
+    )
+
+    monkeypatch.setattr(run_router.OpsService, "get_draft", lambda _id: draft)
+    monkeypatch.setattr(run_router.OpsService, "approve_draft", lambda *_args, **_kwargs: approved)
+    monkeypatch.setattr(run_router.OpsService, "create_run", lambda _approved_id: created_run)
+    monkeypatch.setattr(run_router.OpsService, "update_run_status", lambda *_a, **_k: updated_run)
+
+    def _capture_task(coro):
+        coro.close()
+        return None
+
+    monkeypatch.setattr(run_router.asyncio, "create_task", _capture_task)
+
+    res = client.post("/ops/drafts/d_phase4_auto/approve?auto_run=true")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["run"] is not None
+    assert data["run"]["status"] == "running"
+
+
 def test_phase4_prompt_mode_allows_missing_intent_class_in_context(client):
     body = {
         "prompt": "haz cambios pequeños",

@@ -16,14 +16,15 @@ def _auth(role: str):
     return lambda: AuthContext(token="t", role=role)
 
 
-def test_session_lifecycle_via_router(test_client):
+def test_session_lifecycle_via_router(test_client, app_registered_repo):
     app.dependency_overrides[verify_token] = _auth("operator")
 
     repos = test_client.get("/ops/app/repos")
     assert repos.status_code == 200
     repo_listing = repos.json()
     assert repo_listing
-    repo_id = repo_listing[0]["repo_id"]
+    repo_id = app_registered_repo["repo_id"]
+    assert any(repo["repo_id"] == repo_id for repo in repo_listing)
     assert ":" not in repo_id
     assert "\\" not in repo_id
     assert "/" not in repo_id

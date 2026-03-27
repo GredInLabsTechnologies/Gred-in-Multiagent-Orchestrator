@@ -22,11 +22,21 @@ async def test_merge_gate_stops_at_awaiting_merge():
          patch("tools.gimo_server.services.git_service.GitService.dry_run_merge") as mock_dry_run, \
          patch("tools.gimo_server.services.git_service.GitService.run_tests") as mock_tests, \
          patch("tools.gimo_server.services.git_service.GitService.run_lint_typecheck") as mock_lint, \
-         patch("tools.gimo_server.services.git_service.GitService.get_head_commit") as mock_head:
+         patch("tools.gimo_server.services.git_service.GitService.get_head_commit") as mock_head, \
+         patch("tools.gimo_server.services.merge_gate_service.resolve_authoritative_repo_path", return_value=Path("/repo")), \
+         patch("tools.gimo_server.services.merge_gate_service.resolve_workspace_path", return_value=Path("/tmp/ws")), \
+         patch("tools.gimo_server.services.merge_gate_service.GitService.clean_repo_check", return_value=True), \
+         patch("tools.gimo_server.services.merge_gate_service.GitService.fetch_local_ref"):
         
         mock_get_run.return_value = MagicMock(approved_id="app1", risk_score=0.0, policy_decision_id="p1", repo_id="default")
         mock_get_approved.return_value = MagicMock(draft_id="d1")
-        mock_get_draft.return_value = MagicMock(context={"intent_effective": "CODE_PATCH", "workspace_path": "/tmp/ws"})
+        mock_get_draft.return_value = MagicMock(
+            context={
+                "intent_effective": "CODE_PATCH",
+                "workspace_path": "/tmp/ws",
+                "validated_task_spec": {"repo_handle": "repo_h"},
+            }
+        )
         
         mock_dry_run.return_value = (True, "Dry run success")
         mock_tests.return_value = (True, "Tests passed")
@@ -50,12 +60,18 @@ async def test_perform_manual_merge_success():
          patch("tools.gimo_server.services.ops_service.OpsService.get_approved") as mock_get_approved, \
          patch("tools.gimo_server.services.ops_service.OpsService.get_draft") as mock_get_draft, \
          patch("tools.gimo_server.services.git_service.GitService.perform_merge") as mock_real_merge, \
-         patch("tools.gimo_server.services.git_service.GitService.get_head_commit") as mock_head:
+         patch("tools.gimo_server.services.git_service.GitService.get_head_commit") as mock_head, \
+         patch("tools.gimo_server.services.merge_gate_service.resolve_authoritative_repo_path", return_value=Path("/repo")), \
+         patch("tools.gimo_server.services.merge_gate_service.resolve_workspace_path", return_value=Path("/tmp/ws")), \
+         patch("tools.gimo_server.services.merge_gate_service.GitService.clean_repo_check", return_value=True), \
+         patch("tools.gimo_server.services.merge_gate_service.GitService.fetch_local_ref") as mock_fetch:
         
         mock_get_run.return_value = MagicMock(id=run_id, status="AWAITING_MERGE", approved_id="app1", commit_before="abc1234")
         mock_load.return_value = MagicMock(id=run_id, status="AWAITING_MERGE", approved_id="app1", commit_before="abc1234")
         mock_get_approved.return_value = MagicMock(draft_id="d1")
-        mock_get_draft.return_value = MagicMock(context={"workspace_path": "/tmp/ws"})
+        mock_get_draft.return_value = MagicMock(
+            context={"workspace_path": "/tmp/ws", "validated_task_spec": {"repo_handle": "repo_h"}}
+        )
         mock_real_merge.return_value = (True, "Real merge success")
         mock_head.return_value = "def5678"
         
@@ -63,6 +79,8 @@ async def test_perform_manual_merge_success():
         
         assert success is True
         mock_status.assert_any_call(run_id, "done", msg="manual merge completed successfully")
+        mock_fetch.assert_called_once_with(Path("/repo").resolve(), Path("/tmp/ws").resolve(), "def5678")
+        mock_real_merge.assert_called_once_with(Path("/repo").resolve(), "FETCH_HEAD", "main")
 
 @pytest.mark.asyncio
 async def test_perform_manual_merge_conflict():
@@ -77,12 +95,18 @@ async def test_perform_manual_merge_conflict():
          patch("tools.gimo_server.services.ops_service.OpsService.get_approved") as mock_get_approved, \
          patch("tools.gimo_server.services.ops_service.OpsService.get_draft") as mock_get_draft, \
          patch("tools.gimo_server.services.git_service.GitService.perform_merge") as mock_real_merge, \
-         patch("tools.gimo_server.services.git_service.GitService.get_head_commit") as mock_head:
+         patch("tools.gimo_server.services.git_service.GitService.get_head_commit") as mock_head, \
+         patch("tools.gimo_server.services.merge_gate_service.resolve_authoritative_repo_path", return_value=Path("/repo")), \
+         patch("tools.gimo_server.services.merge_gate_service.resolve_workspace_path", return_value=Path("/tmp/ws")), \
+         patch("tools.gimo_server.services.merge_gate_service.GitService.clean_repo_check", return_value=True), \
+         patch("tools.gimo_server.services.merge_gate_service.GitService.fetch_local_ref"):
         
         mock_get_run.return_value = MagicMock(id=run_id, status="AWAITING_MERGE", approved_id="app1", commit_before="abc1234")
         mock_load.return_value = MagicMock(id=run_id, status="AWAITING_MERGE", approved_id="app1", commit_before="abc1234")
         mock_get_approved.return_value = MagicMock(draft_id="d1")
-        mock_get_draft.return_value = MagicMock(context={"workspace_path": "/tmp/ws"})
+        mock_get_draft.return_value = MagicMock(
+            context={"workspace_path": "/tmp/ws", "validated_task_spec": {"repo_handle": "repo_h"}}
+        )
         mock_real_merge.return_value = (False, "Conflict detected")
         mock_head.return_value = "abc1234"
         

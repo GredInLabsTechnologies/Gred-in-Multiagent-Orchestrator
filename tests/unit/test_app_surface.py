@@ -56,11 +56,9 @@ def test_official_app_facade_is_mounted():
     assert "/mcp/app" in mount_paths
 
 @pytest.mark.anyio
-async def test_app_mcp_lifecycle_roundtrip():
+async def test_app_mcp_lifecycle_roundtrip(app_registered_repo):
     """P4: Prueba create/get/select/purge y recursos canónicos a través de MCP."""
-    mapping = AppSessionService.get_handle_mapping()
-    assert mapping, "App surface requires at least one registered repo handle"
-    expected_handle = next(iter(mapping.keys()))
+    expected_handle = app_registered_repo["repo_id"]
 
     created = _parse_text_payload(
         await mcp.call_tool("create_app_session", {"metadata": {"mcp": "test"}})
@@ -96,7 +94,7 @@ async def test_app_mcp_lifecycle_roundtrip():
     assert missing["msg"] == "Session not found"
 
 @pytest.mark.anyio
-async def test_app_surface_does_not_leak_paths():
+async def test_app_surface_does_not_leak_paths(app_registered_repo):
     """P4: Verifica que la superficie de App no expone host paths."""
     repos = _parse_text_payload(await mcp.call_tool("list_app_repos", {}))
     if isinstance(repos, dict) and "repo_id" in repos:
@@ -119,10 +117,8 @@ async def test_app_surface_does_not_leak_paths():
         assert host_path not in serialized_resource
 
 @pytest.mark.anyio
-async def test_app_mcp_recon_and_context_roundtrip():
-    mapping = AppSessionService.get_handle_mapping()
-    assert mapping, "App surface requires at least one registered repo handle"
-    expected_handle = next(iter(mapping.keys()))
+async def test_app_mcp_recon_and_context_roundtrip(app_registered_repo):
+    expected_handle = app_registered_repo["repo_id"]
 
     created = _parse_text_payload(
         await mcp.call_tool("create_app_session", {"metadata": {"mcp": "recon"}})

@@ -69,7 +69,7 @@ class OpsServiceBase:
             "MERGE_LOCKED", "MERGE_CONFLICT", "VALIDATION_FAILED_TESTS",
             "VALIDATION_FAILED_LINT", "RISK_SCORE_TOO_HIGH", "BASELINE_TAMPER_DETECTED",
             "PIPELINE_TIMEOUT", "WORKTREE_CORRUPTED", "ROLLBACK_EXECUTED",
-            "WORKER_CRASHED_RECOVERABLE", "HUMAN_APPROVAL_REQUIRED"
+            "WORKER_CRASHED_RECOVERABLE", "HUMAN_APPROVAL_REQUIRED", "AWAITING_MERGE"
         },
         # awaiting_review: ReviewGate is waiting for orchestrator GO/NO-GO.
         # GO  → running (pipeline continues to done)
@@ -80,7 +80,7 @@ class OpsServiceBase:
         "MERGE_LOCKED": {"running", "error", "cancelled", "MERGE_CONFLICT"},
         "MERGE_CONFLICT": {"pending", "error", "cancelled"},
         "HUMAN_APPROVAL_REQUIRED": {"running", "cancelled", "error"},
-        "AWAITING_MERGE": {"done", "error", "cancelled"},
+        "AWAITING_MERGE": {"done", "error", "cancelled", "ROLLBACK_EXECUTED", "WORKER_CRASHED_RECOVERABLE"},
         "WORKER_CRASHED_RECOVERABLE": {"pending", "error", "cancelled"},
     }
 

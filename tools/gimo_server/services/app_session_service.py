@@ -1,11 +1,13 @@
 import hashlib
 import json
 import logging
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from tools.gimo_server.config import get_settings
+from tools.gimo_server.services.git_service import GitService
 from tools.gimo_server.services.workspace_policy_service import WorkspacePolicyService
 
 logger = logging.getLogger("orchestrator.services.app_session")
@@ -19,8 +21,56 @@ class AppSessionService:
         return path
 
     @classmethod
+    def _get_bound_repos_dir(cls) -> Path:
+        path = cls._get_sessions_dir() / "_repos"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @classmethod
     def _get_session_path(cls, session_id: str) -> Path:
         return cls._get_sessions_dir() / f"{session_id}.json"
+
+    @classmethod
+    def _get_bound_repo_workspace(cls, session_id: str) -> Path:
+        return cls._get_bound_repos_dir() / session_id
+
+    @classmethod
+    def _remove_tree(cls, path: Path) -> None:
+        if not path.exists():
+            return
+
+        def _remove_readonly(func, target, _exc_info):
+            try:
+                Path(target).chmod(0o700)
+                func(target)
+            except Exception:
+                pass
+
+        shutil.rmtree(path, onerror=_remove_readonly)
+
+    @classmethod
+    def _provision_bound_repo_workspace(cls, session_id: str, source_repo: Path) -> Path:
+        workspace_path = cls._get_bound_repo_workspace(session_id)
+        cls._remove_tree(workspace_path)
+        workspace_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            GitService.clone_local(source_repo.parent, source_repo, workspace_path)
+            logger.info(
+                "Provisioned App repo snapshot via local clone for session %s at %s",
+                session_id,
+                workspace_path,
+            )
+        except Exception as exc:
+            logger.info(
+                "Falling back to filesystem snapshot for App session %s: %s",
+                session_id,
+                exc,
+            )
+            cls._remove_tree(workspace_path)
+            shutil.copytree(source_repo, workspace_path)
+
+        return workspace_path
 
     @classmethod
     def create_session(cls, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -59,12 +109,23 @@ class AppSessionService:
         session = cls.get_session(session_id)
         if not session:
             return False
-        
-        # Validar el handle mediante el registry sin exponer host paths
-        if not cls.validate_handle(repo_handle):
+
+        repo_path_str = cls.get_path_from_handle(repo_handle)
+        if not repo_path_str:
+            return False
+        repo_path = Path(repo_path_str).resolve()
+        if not repo_path.exists() or not repo_path.is_dir():
+            return False
+
+        try:
+            cls._provision_bound_repo_workspace(session_id, repo_path)
+        except Exception as exc:
+            logger.error("Failed to provision App-bound repo snapshot for session %s: %s", session_id, exc)
             return False
 
         session["repo_id"] = repo_handle
+        for key in ("recon_handles", "read_proofs", "context_packs", "context_requests"):
+            session.pop(key, None)
         cls._save_session(session_id, session)
         return True
 
@@ -102,6 +163,16 @@ class AppSessionService:
         return cls.get_handle_mapping().get(handle)
 
     @classmethod
+    def get_bound_repo_path(cls, session_id: str) -> Optional[str]:
+        session = cls.get_session(session_id)
+        if not session or not session.get("repo_id"):
+            return None
+        workspace_path = cls._get_bound_repo_workspace(session_id)
+        if not workspace_path.exists() or not workspace_path.is_dir():
+            return None
+        return str(workspace_path)
+
+    @classmethod
     def update_status(cls, session_id: str, status: str) -> bool:
         session = cls.get_session(session_id)
         if not session:
@@ -113,10 +184,17 @@ class AppSessionService:
     @classmethod
     def purge_session(cls, session_id: str) -> bool:
         path = cls._get_session_path(session_id)
+        deleted = False
+
+        workspace_path = cls._get_bound_repo_workspace(session_id)
+        if workspace_path.exists():
+            cls._remove_tree(workspace_path)
+
         if path.exists():
             path.unlink()
-            return True
-        return False
+            deleted = True
+
+        return deleted
 
     @classmethod
     def list_sessions(cls) -> List[Dict[str, Any]]:

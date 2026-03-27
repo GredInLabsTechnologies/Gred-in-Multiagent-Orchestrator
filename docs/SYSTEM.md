@@ -182,8 +182,11 @@ Implications:
 - ChatGPT Apps must remain more constrained
 - ChatGPT Apps must not gain unrestricted operator powers
 - ChatGPT Apps must not be treated as a sovereign repo-control surface
+- ChatGPT Apps must not read registered source repositories directly; App-bound repo access must go through an App-managed snapshot or clone
+- App-facing review and reconnaissance must stay inside the App-bound snapshot or derived workspace
 - App-facing controls may be intentionally narrower than first-party surfaces
 - ChatGPT Apps may still cause GIMO to deploy workers
+- authoritative manual merge remains a backend/first-party action resolved against the canonical source repo, not a ChatGPT App repo control
 - ChatGPT Apps must not choose or replace the session orchestrator authority
 
 ### 1.8 Practical selection logic

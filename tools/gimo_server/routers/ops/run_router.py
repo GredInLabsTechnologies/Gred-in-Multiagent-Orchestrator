@@ -142,7 +142,19 @@ async def approve_draft(
             audit_log("OPS", "/ops/runs", run.id, operation="WRITE_AUTO", actor=actor)
             
             composition = "custom_plan" if context.get("custom_plan_id") else None
-            asyncio.create_task(EngineService.execute_run(run.id, composition=composition))
+            if run.status == "pending":
+                try:
+                    run = OpsService.update_run_status(run.id, "running", msg="Execution started via draft approval auto-run")
+                    asyncio.create_task(EngineService.execute_run(run.id, composition=composition))
+                except Exception:
+                    try:
+                        worker = getattr(request.app.state, "run_worker", None)
+                        if worker is not None:
+                            worker.notify()
+                    except Exception:
+                        pass
+            else:
+                asyncio.create_task(EngineService.execute_run(run.id, composition=composition))
             
             if composition:
                 audit_log("OPS", f"/ops/{composition}s/{context.get('custom_plan_id')}/execute", run.id, operation="WRITE_AUTO", actor=actor)
