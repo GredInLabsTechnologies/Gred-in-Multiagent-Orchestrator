@@ -442,7 +442,7 @@ class RunMixin:
         return cleaned
 
     @classmethod
-    def discard_run(cls, run_id: str) -> None:
+    def discard_run(cls, run_id: str):
         """Phase 6B: Discard a run manually. Triggers immediate purge."""
         from ..purge_service import PurgeService
 
@@ -455,4 +455,4 @@ class RunMixin:
             cls.update_run_status(run_id, "cancelled", msg="Discarded by user")
 
         # Trigger purge
-        PurgeService.purge_run(run_id)
+        return PurgeService.purge_run(run_id)

@@ -7,9 +7,15 @@ from tools.gimo_server.services.app_session_service import AppSessionService
 from tools.gimo_server.services.repo_recon_service import RepoReconService
 from tools.gimo_server.services.draft_validation_service import DraftValidationService
 from tools.gimo_server.services.context_request_service import ContextRequestService
+from tools.gimo_server.services.lifecycle_errors import (
+    LifecycleProofError,
+    PurgeExecutionError,
+    PurgeSafetyError,
+    RunNotFoundError,
+)
 from tools.gimo_server.services.merge_gate_service import MergeGateService
+from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.review_merge_service import ReviewMergeService
-from tools.gimo_server.services.purge_service import PurgeService
 
 from tools.gimo_server.schemas.repo_recon import ReconEntry, FileContentResponse
 from tools.gimo_server.schemas.draft_validation import DraftCreateRequest, DraftValidationResponse
@@ -29,6 +35,14 @@ class AppRepoSelection(BaseModel):
 def _require_existing_session(session_id: str):
     if AppSessionService.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
+
+
+def _raise_phase6_http_error(exc: Exception) -> None:
+    if isinstance(exc, RunNotFoundError):
+        raise HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, (LifecycleProofError, PurgeSafetyError, PurgeExecutionError)):
+        raise HTTPException(status_code=409, detail=str(exc))
+    raise HTTPException(status_code=500, detail="Internal error.")
 
 @router.get("/repos", response_model=List[AppRepoHandle])
 async def list_repos(
@@ -200,15 +214,10 @@ async def get_run_review(
         bundle = ReviewMergeService.build_review_bundle(run_id)
         return {
             "preview": preview.model_dump(),
-            "bundle": {
-                "base_commit": bundle.base_commit,
-                "head_commit": bundle.head_commit,
-                "changed_files": bundle.changed_files,
-                "drift_detected": bundle.drift_detected
-            }
+            "bundle": bundle.model_dump(),
         }
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        _raise_phase6_http_error(e)
 
 @router.post("/runs/{run_id}/discard")
 async def discard_run(
@@ -217,10 +226,10 @@ async def discard_run(
 ):
     """P6B: Descarta un run y purga su estado reconstructivo (PurgeService)."""
     try:
-        receipt = PurgeService.purge_run(run_id)
+        receipt = OpsService.discard_run(run_id)
         return {"status": "ok", "receipt": receipt.model_dump()}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        _raise_phase6_http_error(e)
 
 @router.post("/sessions/{id}/purge")
 async def purge_session(

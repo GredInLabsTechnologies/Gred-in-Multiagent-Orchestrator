@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-from .ops_service import OpsService
 from .git_service import GitService
+from .review_purge_contract import get_run_with_context, resolve_base_commit, resolve_workspace_path
 from ..config import get_settings
 
 logger = logging.getLogger("orchestrator.review_merge")
@@ -51,35 +50,16 @@ class ReviewMergeService:
         Invariant: review_bundle_contains_diff_or_diff_summary
         Invariant: review_bundle_carries_available_logs_and_test_evidence
         """
-        run = OpsService.get_run(run_id)
-        if not run:
-            raise ValueError(f"Run {run_id} not found")
-
-        # Get workspace from run context/metadata
-        # Phase 5B added validated_task_spec which may contain workspace_path
-        workspace_path_str = None
-        if run.validated_task_spec:
-            workspace_path_str = run.validated_task_spec.get("workspace_path")
-        
-        if not workspace_path_str:
-            approved = OpsService.get_approved(run.approved_id)
-            if approved:
-                draft = OpsService.get_draft(approved.draft_id)
-                if draft and draft.context:
-                    workspace_path_str = draft.context.get("workspace_path")
-
-        if not workspace_path_str:
-            raise ValueError(f"No workspace_path found for run {run_id}")
-        
-        workspace_path = Path(workspace_path_str)
-        if not workspace_path.exists():
-            raise ValueError(f"Workspace path {workspace_path} does not exist")
-
+        run, draft_context = get_run_with_context(run_id)
+        workspace_path = resolve_workspace_path(
+            run_id,
+            run,
+            draft_context,
+            required=True,
+            require_exists=True,
+        )
         head_commit = GitService.get_head_commit(workspace_path)
-        base_commit = run.commit_base or (run.validated_task_spec.get("base_commit") if run.validated_task_spec else None)
-        
-        if not base_commit:
-            raise RuntimeError(f"Base commit for run {run_id} cannot be proven. Failing closed.")
+        base_commit = resolve_base_commit(run_id, run, draft_context)
 
         # Gather evidence from the ephemeral workspace (untouched source repo)
         changed_files = GitService.get_changed_files(workspace_path, base=base_commit)
@@ -99,7 +79,7 @@ class ReviewMergeService:
 
         # Drift detection
         settings = get_settings()
-        repo_root = Path(settings.repo_root_dir)
+        repo_root = settings.repo_root_dir
         source_repo_head = GitService.get_head_commit(repo_root)
         drift_detected = (source_repo_head != base_commit)
 
@@ -123,16 +103,11 @@ class ReviewMergeService:
         Invariant: merge_preview_detects_base_drift
         Invariant: manual_merge_only
         """
-        run = OpsService.get_run(run_id)
-        if not run:
-             raise ValueError(f"Run {run_id} not found")
-        
-        base_commit = run.commit_base or (run.validated_task_spec.get("base_commit") if run.validated_task_spec else None)
-        if not base_commit:
-             raise RuntimeError(f"Base commit for run {run_id} cannot be proven. Failing closed.")
+        run, draft_context = get_run_with_context(run_id)
+        base_commit = resolve_base_commit(run_id, run, draft_context)
 
         settings = get_settings()
-        repo_root = Path(settings.repo_root_dir)
+        repo_root = settings.repo_root_dir
         source_head = GitService.get_head_commit(repo_root)
         
         drift_detected = (source_head != base_commit)
@@ -144,5 +119,5 @@ class ReviewMergeService:
             drift_detected=drift_detected,
             manual_merge_required=True, # Phase 6A strict requirement
             can_merge=not drift_detected,
-            reason="Source repo has drifted from base" if drift_detected else "Ready for manual review/merge"
+            reason="Source repo has drifted from expected base" if drift_detected else "Ready for manual review/merge"
         )

@@ -30,6 +30,8 @@ def test_phase9_filtered_openapi_exposes_only_allowed_contract(test_client):
             "/ops/app/sessions/{id}",
             "/ops/app/sessions/{id}/repo/select",
             "/ops/app/sessions/{id}/purge",
+            "/ops/app/runs/{run_id}/review",
+            "/ops/app/runs/{run_id}/discard",
             "/ops/app/sessions/{id}/recon/list",
             "/ops/app/sessions/{id}/recon/search",
             "/ops/app/sessions/{id}/recon/read/{file_handle}",
@@ -50,6 +52,8 @@ def test_phase9_filtered_openapi_exposes_only_allowed_contract(test_client):
         assert set(paths["/ops/app/sessions/{id}"].keys()) == {"get"}
         assert set(paths["/ops/app/sessions/{id}/repo/select"].keys()) == {"post"}
         assert set(paths["/ops/app/sessions/{id}/purge"].keys()) == {"post"}
+        assert set(paths["/ops/app/runs/{run_id}/review"].keys()) == {"get"}
+        assert set(paths["/ops/app/runs/{run_id}/discard"].keys()) == {"post"}
         assert set(paths["/ops/app/sessions/{id}/recon/list"].keys()) == {"get"}
         assert set(paths["/ops/app/sessions/{id}/recon/search"].keys()) == {"get"}
         assert set(paths["/ops/app/sessions/{id}/recon/read/{file_handle}"].keys()) == {"get"}

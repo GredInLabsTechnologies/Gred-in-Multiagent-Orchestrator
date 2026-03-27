@@ -2,14 +2,16 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import shutil
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 from ..models.core import PurgeReceipt, OpsRun
-from .ops_service import OpsService
+from .ephemeral_repo_service import EphemeralRepoService
 from .git_service import GitService
+from .lifecycle_errors import LifecycleProofError, PurgeExecutionError, PurgeSafetyError, RunNotFoundError
+from .ops_service import OpsService
+from .review_purge_contract import get_run_with_context, resolve_workspace_path
 from ..config import get_settings
 
 logger = logging.getLogger("orchestrator.purge")
@@ -35,37 +37,44 @@ class PurgeService:
         removed_categories = []
         
         try:
-            run = OpsService.get_run(run_id)
-            if not run:
-                raise ValueError(f"Run {run_id} not found")
+            run, draft_context = get_run_with_context(run_id)
+            settings = get_settings()
+            repo_root = Path(settings.repo_root_dir).resolve()
+            workspace_root = Path(settings.worktrees_dir).resolve()
+            ephemeral_root = Path(settings.ephemeral_repos_dir).resolve()
 
             # 1. Identify and remove workspace reconstructed state
-            workspace_path_str = None
-            if run.validated_task_spec:
-                workspace_path_str = run.validated_task_spec.get("workspace_path")
-            
-            if workspace_path_str:
-                workspace_path = Path(workspace_path_str).resolve()
-                settings = get_settings()
-                repo_root = Path(settings.repo_root_dir).resolve()
-                
-                # B2 Security: Never purge the main repo root
+            workspace_path = resolve_workspace_path(
+                run_id,
+                run,
+                draft_context,
+                required=False,
+                require_exists=False,
+            )
+            if workspace_path:
                 if workspace_path == repo_root:
-                    raise RuntimeError(f"Refusing to purge workspace because it matches repo_root: {workspace_path}")
-
+                    raise PurgeSafetyError(
+                        f"Refusing to purge workspace because it matches repo_root: {workspace_path}"
+                    )
                 if workspace_path.exists():
                     try:
-                        # Use GitService to remove worktree if it is one
-                        GitService.remove_worktree(repo_root, workspace_path)
-                        if workspace_path.exists():
-                             # If still exists, attempt hard removal
-                             shutil.rmtree(workspace_path, ignore_errors=False)
+                        if workspace_path.is_relative_to(workspace_root):
+                            GitService.remove_worktree(repo_root, workspace_path)
+                        elif workspace_path.is_relative_to(ephemeral_root):
+                            EphemeralRepoService(
+                                settings.ephemeral_repos_dir,
+                                settings.repo_mirrors_dir,
+                                settings.purge_quarantine_dir,
+                            ).destroy_workspace(workspace_path)
+                        else:
+                            raise PurgeSafetyError(
+                                f"Refusing to purge workspace outside canonical roots: {workspace_path}"
+                            )
                         removed_categories.append("workspace")
                     except Exception as e:
                         logger.error(f"Failed to remove workspace {workspace_path}: {e}")
-                        # Final check for failure
                         if workspace_path.exists():
-                             raise RuntimeError(f"Failed to remove workspace {workspace_path}: {str(e)}")
+                            raise PurgeExecutionError(f"Failed to remove workspace {workspace_path}: {str(e)}")
 
             # 2. Remove Events
             events_path = OpsService._run_events_path(run_id)
@@ -74,7 +83,7 @@ class PurgeService:
                     events_path.unlink()
                     removed_categories.append("events")
                 except Exception as e:
-                    raise RuntimeError(f"Failed to unlink events: {e}")
+                    raise PurgeExecutionError(f"Failed to unlink events: {e}")
 
             # 3. Remove Logs
             logs_path = OpsService._run_log_path(run_id)
@@ -83,7 +92,7 @@ class PurgeService:
                     logs_path.unlink()
                     removed_categories.append("logs")
                 except Exception as e:
-                    raise RuntimeError(f"Failed to unlink logs: {e}")
+                    raise PurgeExecutionError(f"Failed to unlink logs: {e}")
 
             # 4. Retain minimal metadata only (IDs, hashes, outcome, timestamps, commit refs, model identifier)
             # survivor fields: id, approved_id, status, commit refs, timestamps, risk score, model identifier, purge markers
@@ -111,7 +120,7 @@ class PurgeService:
             try:
                 run_path.write_text(json.dumps(retained_data, indent=2), encoding="utf-8")
             except Exception as e:
-                raise RuntimeError(f"Failed to persist terminal metadata: {e}")
+                raise PurgeExecutionError(f"Failed to persist terminal metadata: {e}")
             
             # 5. Persist Purge Receipt
             receipt = PurgeReceipt(
@@ -123,14 +132,16 @@ class PurgeService:
             try:
                 cls._persist_receipt(receipt)
             except Exception as e:
-                raise RuntimeError(f"Failed to persist purge receipt: {e}")
+                raise PurgeExecutionError(f"Failed to persist purge receipt: {e}")
             
             return receipt
 
+        except (RunNotFoundError, LifecycleProofError, PurgeSafetyError, PurgeExecutionError):
+            raise
         except Exception as e:
             logger.error(f"Purge failed for run {run_id}: {e}")
             # Fail closed: ensure we don't return success
-            raise RuntimeError(f"Purge failed for run {run_id}: {str(e)}")
+            raise PurgeExecutionError(f"Purge failed for run {run_id}: {str(e)}")
 
     @classmethod
     def _persist_receipt(cls, receipt: PurgeReceipt):

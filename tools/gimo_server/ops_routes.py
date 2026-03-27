@@ -50,6 +50,8 @@ _ACTIONS_SAFE_PUBLIC_ENDPOINTS: tuple[tuple[str, str], ...] = (
     ("get", "/ops/app/sessions/{id}"),
     ("post", "/ops/app/sessions/{id}/repo/select"),
     ("post", "/ops/app/sessions/{id}/purge"),
+    ("get", "/ops/app/runs/{run_id}/review"),
+    ("post", "/ops/app/runs/{run_id}/discard"),
     # Phase 5A: Recon & Draft Semantics
     ("get", "/ops/app/sessions/{id}/recon/list"),
     ("get", "/ops/app/sessions/{id}/recon/search"),

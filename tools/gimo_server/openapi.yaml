@@ -439,6 +439,46 @@ paths:
                 type: object
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
+  /ops/app/runs/{run_id}/review:
+    get:
+      summary: Get the canonical Phase 6 review bundle and merge preview
+      operationId: getAppRunReview
+      tags: [ops.app]
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Backend-authored review bundle and merge preview
+          content:
+            application/json:
+              schema:
+                type: object
+        '404': { description: Run not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '409': { description: Review evidence cannot be proven, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /ops/app/runs/{run_id}/discard:
+    post:
+      summary: Discard a run through the canonical Phase 6 purge lifecycle
+      operationId: discardAppRun
+      tags: [ops.app]
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Backend-authored purge receipt
+          content:
+            application/json:
+              schema:
+                type: object
+        '404': { description: Run not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '409': { description: Discard or purge refused / failed closed, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
   /ops/app/sessions/{id}/recon/list:
     get:
       summary: List files for the App session repo
