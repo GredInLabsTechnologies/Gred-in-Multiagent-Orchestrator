@@ -11,6 +11,12 @@ class ContextRequestService:
     P5.3 ContextRequestService: Persistent contract for requesting additional context.
     Allows for structured pause/resume points before execution.
     """
+    _ALLOWED_TRANSITIONS = {
+        "pending": {"resolved", "cancelled"},
+        "resolved": {"archived"},
+        "cancelled": set(),
+        "archived": set(),
+    }
 
     @classmethod
     def create_request(cls, session_id: str, description: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -50,6 +56,9 @@ class ContextRequestService:
             return False
             
         req = session["context_requests"][request_id]
+        current_status = req.get("status", "pending")
+        if status != current_status and status not in cls._ALLOWED_TRANSITIONS.get(current_status, set()):
+            return False
         req["status"] = status
         if result:
             req["result"] = result

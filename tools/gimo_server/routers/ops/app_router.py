@@ -26,6 +26,10 @@ class AppRepoHandle(BaseModel):
 class AppRepoSelection(BaseModel):
     repo_id: str # Opaque handle
 
+def _require_existing_session(session_id: str):
+    if AppSessionService.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
 @router.get("/repos", response_model=List[AppRepoHandle])
 async def list_repos(
     auth: Annotated[AuthContext, Depends(verify_token)],
@@ -72,6 +76,7 @@ async def list_repo_files(
     path_handle: Optional[str] = Query(None)
 ):
     """P5.1 Recon: Lista archivos del repositorio vinculado usando handles opacos."""
+    _require_existing_session(id)
     try:
         return RepoReconService.list_files(id, path_handle)
     except Exception as e:
@@ -84,6 +89,7 @@ async def search_repo_files(
     q: str = Query(...)
 ):
     """P5.1 Recon: Busca contenido en el repositorio vinculado."""
+    _require_existing_session(id)
     try:
         return RepoReconService.search(id, q)
     except Exception as e:
@@ -96,6 +102,7 @@ async def read_repo_file(
     file_handle: str
 ):
     """P5.1 Recon: Lee un archivo y genera un ReadProof persistente."""
+    _require_existing_session(id)
     try:
         return RepoReconService.read_file(id, file_handle)
     except Exception as e:
@@ -109,6 +116,7 @@ async def create_draft(
     payload: DraftCreateRequest
 ):
     """P5.2 Validation: Valida el draft apoyándose en evidencia (ReadProofs) de Recon."""
+    _require_existing_session(id)
     try:
         return DraftValidationService.validate_draft(id, payload.model_dump())
     except ValueError as e:
@@ -124,6 +132,7 @@ async def create_context_request(
     data: ContextCreateRequest
 ):
     """P5.3 Context: Crea una solicitud persistente de contexto adicional."""
+    _require_existing_session(id)
     try:
         return ContextRequestService.create_request(id, data.description, data.metadata)
     except Exception as e:
@@ -136,6 +145,7 @@ async def list_context_requests(
     status: Optional[str] = Query(None)
 ):
     """P5.3 Context: Lista solicitudes de contexto de la sesión."""
+    _require_existing_session(id)
     return ContextRequestService.list_requests(id, status)
 
 @router.post("/sessions/{id}/context-requests/{req_id}/resolve")
@@ -146,6 +156,7 @@ async def resolve_context_request(
     data: ContextResolveRequest
 ):
     """P5.3 Context: Marca una solicitud como resuelta."""
+    _require_existing_session(id)
     if ContextRequestService.resolve_request(id, req_id, data.evidence):
         return {"status": "ok"}
     raise HTTPException(status_code=404, detail="Request not found")
@@ -158,6 +169,7 @@ async def cancel_context_request(
     data: ContextCancelRequest
 ):
     """P5.3 Context: Cancela una solicitud."""
+    _require_existing_session(id)
     if ContextRequestService.cancel_request(id, req_id, data.reason):
         return {"status": "ok"}
     raise HTTPException(status_code=404, detail="Request not found")

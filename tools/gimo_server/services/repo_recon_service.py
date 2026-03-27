@@ -1,9 +1,8 @@
 import hashlib
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import List, Dict, Any, Optional
 
 from tools.gimo_server.services.app_session_service import AppSessionService
@@ -32,8 +31,40 @@ class RepoReconService:
         repo_path_str = AppSessionService.get_path_from_handle(repo_handle)
         if not repo_path_str:
             raise ValueError(f"Invalid repo handle: {repo_handle}")
-        
-        return Path(repo_path_str)
+
+        repo_path = Path(repo_path_str).resolve()
+        if not repo_path.exists() or not repo_path.is_dir():
+            raise ValueError("Bound repository is unavailable")
+
+        return repo_path
+
+    @classmethod
+    def _normalize_rel_path(cls, rel_path: str, *, allow_root: bool = False) -> str:
+        raw = str(rel_path or "").replace("\\", "/").strip()
+        if not raw:
+            raise ValueError("Invalid handle")
+        if raw == ".":
+            if allow_root:
+                return "."
+            raise ValueError("Invalid handle")
+        normalized = PurePosixPath(raw)
+        if normalized.is_absolute() or ".." in normalized.parts:
+            raise ValueError("Access outside repository bounds")
+        cleaned = PurePosixPath(*[part for part in normalized.parts if part not in ("", ".")]).as_posix()
+        if not cleaned:
+            if allow_root:
+                return "."
+            raise ValueError("Invalid handle")
+        return cleaned
+
+    @classmethod
+    def _resolve_repo_target(cls, repo_path: Path, rel_path: str) -> Path:
+        target = (repo_path / rel_path).resolve()
+        try:
+            target.relative_to(repo_path.resolve())
+        except ValueError as exc:
+            raise ValueError("Access outside repository bounds") from exc
+        return target
 
     @classmethod
     def _generate_file_handle(cls, rel_path: str) -> str:
@@ -74,14 +105,14 @@ class RepoReconService:
             rel_path = cls._resolve_handle(session_id, path_handle)
             if rel_path is None:
                 raise ValueError("Invalid directory handle")
+            rel_path = cls._normalize_rel_path(rel_path)
 
-        target_dir = (repo_path / rel_path).resolve()
-        # Scope guard
-        if not str(target_dir).startswith(str(repo_path.resolve())):
-            raise ValueError("Access outside repository bounds")
+        target_dir = cls._resolve_repo_target(repo_path, rel_path)
 
-        if not target_dir.exists() or not target_dir.is_dir():
-            return []
+        if not target_dir.exists():
+            raise ValueError("Directory not found")
+        if not target_dir.is_dir():
+            raise ValueError("Handle does not refer to a directory")
 
         entries = []
         for item in target_dir.iterdir():
@@ -132,13 +163,14 @@ class RepoReconService:
         
         if not rel_path:
             raise ValueError("Invalid file handle")
-        
-        full_path = (repo_path / rel_path).resolve()
-        if not str(full_path).startswith(str(repo_path.resolve())):
-            raise ValueError("Access outside repository bounds")
-            
-        if not full_path.exists() or not full_path.is_file():
+
+        rel_path = cls._normalize_rel_path(rel_path)
+        full_path = cls._resolve_repo_target(repo_path, rel_path)
+
+        if not full_path.exists():
             raise ValueError("File not found")
+        if not full_path.is_file():
+            raise ValueError("Handle does not refer to a file")
 
         # Check size limits
         if full_path.stat().st_size > 500000: # 500KB limit for app recon
@@ -163,9 +195,10 @@ class RepoReconService:
         """
         session = AppSessionService.get_session(session_id)
         repo_path = cls._get_repo_path(session_id)
+        normalized_rel_path = cls._normalize_rel_path(rel_path)
         
         repo_handle = session.get("repo_id")
-        file_handle = cls._generate_file_handle(rel_path)
+        file_handle = cls._generate_file_handle(normalized_rel_path)
         
         # Get head commit for evidence consistency
         try:
@@ -175,11 +208,11 @@ class RepoReconService:
 
         # Read artifact hash for evidence
         try:
-            full_path = repo_path / rel_path
+            full_path = cls._resolve_repo_target(repo_path, normalized_rel_path)
             content_bytes = full_path.read_bytes()
             evidence_hash = hashlib.sha256(content_bytes).hexdigest()
         except Exception:
-            evidence_hash = hashlib.sha256(rel_path.encode()).hexdigest()
+            evidence_hash = hashlib.sha256(normalized_rel_path.encode()).hexdigest()
 
         proof = {
             "proof_id": str(uuid.uuid4()),

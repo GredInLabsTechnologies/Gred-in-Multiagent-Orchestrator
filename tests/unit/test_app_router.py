@@ -60,6 +60,37 @@ def test_missing_app_sessions_fail_honestly(test_client):
     assert res.status_code == 404
     assert res.json()["detail"] == "Session not found"
 
+def test_phase_5_routes_fail_honestly_for_missing_session(test_client):
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    missing_session_id = "missing-session"
+
+    res = test_client.get(f"/ops/app/sessions/{missing_session_id}/recon/list")
+    assert res.status_code == 404
+    assert res.json()["detail"] == "Session not found"
+
+    res = test_client.get(f"/ops/app/sessions/{missing_session_id}/recon/search", params={"q": "hello"})
+    assert res.status_code == 404
+    assert res.json()["detail"] == "Session not found"
+
+    res = test_client.get(f"/ops/app/sessions/{missing_session_id}/recon/read/handle123")
+    assert res.status_code == 404
+    assert res.json()["detail"] == "Session not found"
+
+    res = test_client.post(
+        f"/ops/app/sessions/{missing_session_id}/drafts",
+        json={"acceptance_criteria": "done", "allowed_paths": ["app.py"]},
+    )
+    assert res.status_code == 404
+    assert res.json()["detail"] == "Session not found"
+
+    res = test_client.post(
+        f"/ops/app/sessions/{missing_session_id}/context-requests",
+        json={"description": "need more"},
+    )
+    assert res.status_code == 404
+    assert res.json()["detail"] == "Session not found"
+
 def test_app_execute_run_route_uses_backend_service(test_client):
     """Verifica que /ops/app/runs/{run_id}/execute delega al backend canónico."""
     app.dependency_overrides[verify_token] = _auth("operator")

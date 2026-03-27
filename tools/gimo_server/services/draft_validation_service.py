@@ -1,5 +1,6 @@
 import hashlib
 import logging
+from pathlib import PurePosixPath
 from typing import Dict, Any, List, Optional
 from tools.gimo_server.services.app_session_service import AppSessionService
 
@@ -34,6 +35,9 @@ class DraftValidationService:
         # B2: Deterministic hash built from real evidence content, using stable ordering.
         # We use artifact_handle and kind for a stable, unique sort key.
         sorted_proofs = sorted(read_proofs, key=lambda p: (str(p.get("artifact_handle", "")), str(p.get("kind", ""))))
+        evidence_paths: List[str] = []
+        evidence_path_set: set[str] = set()
+        evidence_base_commits: set[str] = set()
         evidence_parts = []
         for p in sorted_proofs:
             # P5C-DELTA: Harden validation to ensure no missing or whitespace-only fields.
@@ -43,7 +47,19 @@ class DraftValidationService:
                 val = p.get(field)
                 if val is None or not str(val).strip():
                     raise ValueError(f"Draft creation rejected: Evidence record is invalid. Field '{field}' is missing or empty in proof.")
-            
+
+            proof_kind = str(p.get("kind")).strip()
+            if proof_kind != "read":
+                raise ValueError("Draft creation rejected: Evidence record kind must be 'read'.")
+            evidence_base_commits.add(str(p.get("base_commit")).strip())
+            rel_path = cls._get_path_from_handle(session, str(p.get("artifact_handle", "")))
+            if not rel_path:
+                raise ValueError("Draft creation rejected: Evidence record cannot be resolved to a reconnaissance artifact.")
+            normalized_path = cls._normalize_allowed_path(rel_path)
+            if normalized_path not in evidence_path_set:
+                evidence_path_set.add(normalized_path)
+                evidence_paths.append(normalized_path)
+
             # We use artifact_handle, kind, content_hash (evidence_hash), and base_commit.
             part = f"{p.get('artifact_handle')}:{p.get('kind')}:{p.get('evidence_hash')}:{p.get('base_commit')}"
             evidence_parts.append(part)
@@ -51,24 +67,32 @@ class DraftValidationService:
         if not evidence_content:
              # B2 Fail-Closed: Evidence set must contain content.
              raise ValueError("Draft validation failed: Reconnaissance evidence content is missing or empty.")
+        if len(evidence_base_commits) != 1:
+            raise ValueError("Draft creation rejected: Reconnaissance evidence spans multiple base commits.")
         evidence_hash = hashlib.sha256(evidence_content.encode("utf-8")).hexdigest()
         
         # 2. Preparation of Allowed Paths (never wildcard by default)
         raw_allowed_paths = payload.get("allowed_paths", [])
-        if not raw_allowed_paths:
-            # P5C-DELTA: Fallback to extraction from read_proofs in deterministic order.
-            # We use the same stable order as the evidence hash for fallback consistency.
-            seen = set()
-            raw_allowed_paths = []
-            for p in sorted_proofs:
-                if p.get("kind") == "read":
-                    path = cls._get_path_from_handle(session, p.get("artifact_handle", ""))
-                    if path and path not in seen:
-                        seen.add(path)
-                        raw_allowed_paths.append(path)
-            
-        allowed_paths = [str(p).replace("\\", "/") for p in raw_allowed_paths if p]
-        
+        if not evidence_paths:
+            raise ValueError("Draft creation rejected: No readable reconnaissance artifacts were recorded.")
+
+        if raw_allowed_paths:
+            requested_allowed_paths = {
+                cls._normalize_allowed_path(path)
+                for path in raw_allowed_paths
+                if path is not None and str(path).strip()
+            }
+            if not requested_allowed_paths:
+                raise ValueError("Draft creation rejected: allowed_paths must contain at least one valid repository path.")
+            invalid_paths = sorted(path for path in requested_allowed_paths if path not in evidence_path_set)
+            if invalid_paths:
+                raise ValueError(
+                    "Draft creation rejected: allowed_paths must be drawn from reconnaissance reads only."
+                )
+            allowed_paths = [path for path in evidence_paths if path in requested_allowed_paths]
+        else:
+            allowed_paths = evidence_paths.copy()
+
         # 3. Acceptance Criteria (mandatory)
         acceptance_criteria = payload.get("acceptance_criteria")
         if not acceptance_criteria:
@@ -76,8 +100,7 @@ class DraftValidationService:
             
         # 4. Generate ValidatedTaskSpec (Mandatory 5A contract)
         # base_commit from the latest read proof or session
-        latest_proof = read_proofs[-1]
-        base_commit = latest_proof.get("base_commit", "HEAD")
+        base_commit = next(iter(evidence_base_commits))
         
         validated_task_spec = {
             "base_commit": base_commit,
@@ -96,7 +119,7 @@ class DraftValidationService:
             "session_id": session_id,
             "repo_handle": repo_handle,
             "base_commit": base_commit,
-            "read_proofs": read_proofs,
+            "read_proofs": sorted_proofs,
             "allowed_paths": allowed_paths
         }
         
@@ -115,3 +138,16 @@ class DraftValidationService:
     def _get_path_from_handle(cls, session: Dict[str, Any], handle: str) -> Optional[str]:
         mapping = session.get("recon_handles", {})
         return mapping.get(handle)
+
+    @classmethod
+    def _normalize_allowed_path(cls, raw_path: str) -> str:
+        path = str(raw_path or "").replace("\\", "/").strip()
+        if not path or path == "*" or path == ".":
+            raise ValueError("Draft creation rejected: allowed_paths must contain explicit repository-relative paths.")
+        normalized = PurePosixPath(path)
+        if normalized.is_absolute() or ".." in normalized.parts:
+            raise ValueError("Draft creation rejected: allowed_paths cannot escape repository bounds.")
+        cleaned = PurePosixPath(*[part for part in normalized.parts if part not in ("", ".")]).as_posix()
+        if not cleaned:
+            raise ValueError("Draft creation rejected: allowed_paths must contain explicit repository-relative paths.")
+        return cleaned

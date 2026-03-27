@@ -8,6 +8,7 @@ from tools.gimo_server.main import app
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.app_session_service import AppSessionService
+from tools.gimo_server.services.context_request_service import ContextRequestService
 from tools.gimo_server.config import get_settings
 
 def _auth(role: str):
@@ -63,6 +64,10 @@ def test_recon_generates_read_proofs(test_client, session_with_repo):
     assert "proof" in data
     assert data["proof"]["kind"] == "read"
     assert "evidence_hash" in data["proof"]
+    session = AppSessionService.get_session(session_id)
+    assert session is not None
+    assert session["read_proofs"][0]["artifact_handle"] == file_handle
+    assert session["read_proofs"][0]["evidence_hash"] == data["proof"]["evidence_hash"]
 
 def test_recon_returns_opaque_handles_not_host_paths(test_client, session_with_repo):
     session_id, _ = session_with_repo
@@ -126,6 +131,7 @@ def test_validated_task_emits_context_pack_and_allowed_paths(test_client, sessio
     assert "repo_context_pack" in data
     assert "allowed_paths" in data["validated_task_spec"]
     assert "app.py" in data["validated_task_spec"]["allowed_paths"]
+    assert data["repo_context_pack"]["read_proofs"][0]["artifact_handle"] == file_handle
 
 def test_context_request_service_persists_pending_request(test_client, session_with_repo):
     session_id, _ = session_with_repo
@@ -195,3 +201,159 @@ def test_draft_validation_without_evidence_is_rejected(test_client, session_with
         "allowed_paths": []
     })
     assert res.status_code == 403
+
+def test_recon_rejects_invalid_file_handle(test_client, session_with_repo):
+    session_id, _ = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/read/not-a-real-handle")
+    assert res.status_code == 400
+    assert "invalid file handle" in res.json()["detail"].lower()
+
+def test_recon_search_route_returns_real_bounded_results(test_client, session_with_repo):
+    session_id, _ = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/search", params={"q": "hello"})
+    assert res.status_code == 200
+    results = res.json()
+    assert results
+    assert results[0]["line"] >= 1
+    assert "hello" in results[0]["content"]
+    assert len(results[0]["handle"]) == 16
+    assert "file" not in results[0]
+
+def test_recon_rejects_invalid_directory_handle(test_client, session_with_repo):
+    session_id, _ = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list", params={"path_handle": "not-a-real-dir"})
+    assert res.status_code == 400
+    assert "invalid directory handle" in res.json()["detail"].lower()
+
+def test_recon_rejects_out_of_bounds_handle_resolution(test_client, session_with_repo, tmp_path):
+    session_id, _ = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    sibling = tmp_path / "dummy_repo_escape"
+    sibling.mkdir()
+    (sibling / "secret.py").write_text("print('escape')", encoding="utf-8")
+
+    session = AppSessionService.get_session(session_id)
+    session["recon_handles"] = {
+        "evil-dir": "../dummy_repo_escape",
+        "evil-file": "../dummy_repo_escape/secret.py",
+    }
+    AppSessionService._save_session(session_id, session)
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list", params={"path_handle": "evil-dir"})
+    assert res.status_code == 400
+    assert "outside repository bounds" in res.json()["detail"].lower()
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/read/evil-file")
+    assert res.status_code == 400
+    assert "outside repository bounds" in res.json()["detail"].lower()
+
+def test_recon_rejects_oversized_file_reads(test_client, session_with_repo, tmp_path):
+    session_id, repo_handle = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    repo_dir = Path(AppSessionService.get_path_from_handle(repo_handle))
+    big_file = repo_dir / "large.py"
+    big_file.write_text("x" * 500001, encoding="utf-8")
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
+    large_handle = next(item["handle"] for item in res.json() if item["name"] == "large.py")
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/read/{large_handle}")
+    assert res.status_code == 400
+    assert "too large" in res.json()["detail"].lower()
+
+def test_draft_validation_rejects_untrusted_allowed_paths(test_client, session_with_repo):
+    session_id, _ = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
+    file_handle = res.json()[0]["handle"]
+    test_client.get(f"/ops/app/sessions/{session_id}/recon/read/{file_handle}")
+
+    for allowed_path in ("../secret.py", "*", "not-read.py"):
+        res = test_client.post(
+            f"/ops/app/sessions/{session_id}/drafts",
+            json={
+                "acceptance_criteria": "Bound to recon",
+                "allowed_paths": [allowed_path],
+            },
+        )
+        assert res.status_code == 403
+        assert "allowed_paths" in res.json()["detail"]
+
+def test_recon_with_invalid_bound_repo_handle_is_rejected(test_client):
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    res = test_client.post("/ops/app/sessions", json={})
+    session_id = res.json()["id"]
+    session = AppSessionService.get_session(session_id)
+    session["repo_id"] = "invalid-handle"
+    AppSessionService._save_session(session_id, session)
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
+    assert res.status_code == 400
+    assert "invalid repo handle" in res.json()["detail"].lower()
+
+def test_draft_validation_requires_acceptance_criteria_payload(test_client, session_with_repo):
+    session_id, _ = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
+    file_handle = res.json()[0]["handle"]
+    test_client.get(f"/ops/app/sessions/{session_id}/recon/read/{file_handle}")
+
+    res = test_client.post(f"/ops/app/sessions/{session_id}/drafts", json={"allowed_paths": ["app.py"]})
+    assert res.status_code == 422
+    assert res.json()["detail"] == "Invalid request payload."
+
+def test_context_request_routes_fail_honestly_for_missing_session_and_request(test_client):
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    res = test_client.get("/ops/app/sessions/missing-session/context-requests")
+    assert res.status_code == 404
+    assert res.json()["detail"] == "Session not found"
+
+    create = test_client.post("/ops/app/sessions", json={})
+    session_id = create.json()["id"]
+
+    res = test_client.post(
+        f"/ops/app/sessions/{session_id}/context-requests/missing-request/resolve",
+        json={"evidence": "done"},
+    )
+    assert res.status_code == 404
+    assert res.json()["detail"] == "Request not found"
+
+def test_context_request_active_and_history_views_are_coherent(test_client, session_with_repo):
+    session_id, _ = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    pending = ContextRequestService.create_request(session_id, "pending")
+    resolved = ContextRequestService.create_request(session_id, "resolved")
+    cancelled = ContextRequestService.create_request(session_id, "cancelled")
+
+    assert ContextRequestService.resolve_request(session_id, resolved["id"], "done")
+    assert ContextRequestService.cancel_request(session_id, cancelled["id"], "stop")
+    ContextRequestService.archive_resolved_requests(session_id)
+
+    active_ids = {item["id"] for item in ContextRequestService.get_active_requests(session_id)}
+    history_statuses = {item["id"]: item["status"] for item in ContextRequestService.get_request_history(session_id)}
+
+    assert pending["id"] in active_ids
+    assert resolved["id"] not in active_ids
+    assert cancelled["id"] not in active_ids
+    assert history_statuses[resolved["id"]] == "archived"
+    assert history_statuses[cancelled["id"]] == "cancelled"
+
+    res = test_client.post(
+        f"/ops/app/sessions/{session_id}/context-requests/missing-request/cancel",
+        json={"reason": "stop"},
+    )
+    assert res.status_code == 404
+    assert res.json()["detail"] == "Request not found"

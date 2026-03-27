@@ -192,3 +192,37 @@ def test_deterministic_allowed_paths_fallback(mock_session):
             
             # Should STILL be the same due to internal sorting before extraction
             assert paths == paths2
+
+def test_explicit_allowed_paths_are_bounded_to_recon_evidence(mock_session):
+    payload = {"acceptance_criteria": "done", "allowed_paths": ["file2.py", "file1.py"]}
+
+    with patch("tools.gimo_server.services.app_session_service.AppSessionService.get_session", return_value=mock_session):
+        with patch("tools.gimo_server.services.app_session_service.AppSessionService._save_session"):
+            res = DraftValidationService.validate_draft("sess_123", payload)
+            assert res["validated_task_spec"]["allowed_paths"] == ["file1.py", "file2.py"]
+
+    bad_payload = {"acceptance_criteria": "done", "allowed_paths": ["../secret.py"]}
+    with patch("tools.gimo_server.services.app_session_service.AppSessionService.get_session", return_value=mock_session):
+        with pytest.raises(ValueError, match="allowed_paths cannot escape repository bounds"):
+            DraftValidationService.validate_draft("sess_123", bad_payload)
+
+    bad_payload = {"acceptance_criteria": "done", "allowed_paths": ["not-read.py"]}
+    with patch("tools.gimo_server.services.app_session_service.AppSessionService.get_session", return_value=mock_session):
+        with pytest.raises(ValueError, match="allowed_paths must be drawn from reconnaissance reads only"):
+            DraftValidationService.validate_draft("sess_123", bad_payload)
+
+def test_mixed_base_commit_evidence_fails_closed(mock_session):
+    mock_session["read_proofs"][1]["base_commit"] = "c2"
+    payload = {"acceptance_criteria": "done"}
+
+    with patch("tools.gimo_server.services.app_session_service.AppSessionService.get_session", return_value=mock_session):
+        with pytest.raises(ValueError, match="spans multiple base commits"):
+            DraftValidationService.validate_draft("sess_123", payload)
+
+def test_non_read_evidence_kind_fails_closed(mock_session):
+    mock_session["read_proofs"][0]["kind"] = "search"
+    payload = {"acceptance_criteria": "done"}
+
+    with patch("tools.gimo_server.services.app_session_service.AppSessionService.get_session", return_value=mock_session):
+        with pytest.raises(ValueError, match="kind must be 'read'"):
+            DraftValidationService.validate_draft("sess_123", payload)
