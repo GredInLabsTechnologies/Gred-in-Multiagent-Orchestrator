@@ -409,18 +409,17 @@ class RunWorker:
 
             # Build bounded worker context (Phase 5B)
             try:
-                # If we have a repo_handle, we can resolve its path
-                repo_path = None
-                handle = task_spec.get("repo_handle")
-                if handle:
-                    path_str = AppSessionService.get_path_from_handle(handle)
-                    if path_str:
-                        repo_path = Path(path_str)
-
-                if not repo_path:
-                    msg = "[Phase 5B] Execution rejected: Could not resolve repo_handle to path."
+                workspace_path = str(task_spec.get("workspace_path") or "").strip()
+                if not workspace_path:
+                    msg = "[Phase 5B] Execution rejected: Missing canonical workspace_path."
                     OpsService.append_log(run_id, level="ERROR", msg=msg)
-                    OpsService.update_run_status(run_id, "error", msg="Repo resolution failed")
+                    OpsService.update_run_status(run_id, "error", msg="Workspace resolution failed")
+                    return
+                repo_path = Path(workspace_path)
+                if not repo_path.exists() or not repo_path.is_dir():
+                    msg = "[Phase 5B] Execution rejected: workspace_path does not exist."
+                    OpsService.append_log(run_id, level="ERROR", msg=msg)
+                    OpsService.update_run_status(run_id, "error", msg="Workspace resolution failed")
                     return
 
                 # Inject bounded context into the run context (Phase 5B 5.4)

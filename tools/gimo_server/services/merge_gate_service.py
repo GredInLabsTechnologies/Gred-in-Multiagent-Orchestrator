@@ -9,6 +9,7 @@ from typing import Any, Dict
 from ..config import get_settings
 from .git_service import GitService
 from .ops_service import OpsService
+from .review_purge_contract import resolve_workspace_path
 
 logger = logging.getLogger("orchestrator.merge_gate")
 
@@ -108,7 +109,11 @@ class MergeGateService:
         repo_id = str(run.repo_id or repo_context.get("repo_id") or "default")
         source_ref = str(context.get("source_ref") or "HEAD")
         target_ref = str(repo_context.get("target_branch") or "main")
-        workspace_path = context.get("workspace_path")
+        try:
+            workspace_path = str(resolve_workspace_path(run_id, run, context, required=True, require_exists=True))
+        except Exception as exc:
+            OpsService.update_run_status(run_id, "WORKER_CRASHED", msg=str(exc))
+            return True
 
         if not cls._validate_policy(run_id, context, run): return True
         if not cls._validate_risk(run_id, context, run): return True
@@ -207,13 +212,10 @@ class MergeGateService:
         approved = OpsService.get_approved(run.approved_id)
         draft = OpsService.get_draft(approved.draft_id)
         context = dict((draft.context if draft else {}) or {})
-        workspace_path = context.get("workspace_path")
         repo_context = dict(context.get("repo_context") or {})
         source_ref = str(context.get("source_ref") or "HEAD")
         target_ref = str(repo_context.get("target_branch") or "main")
-
-        if not workspace_path:
-            raise RuntimeError("Missing workspace_path for manual merge")
+        workspace_path = str(resolve_workspace_path(run_id, run, context, required=True, require_exists=True))
 
         base_dir = Path(workspace_path)
         commit_before = run.commit_before or GitService.get_head_commit(base_dir)

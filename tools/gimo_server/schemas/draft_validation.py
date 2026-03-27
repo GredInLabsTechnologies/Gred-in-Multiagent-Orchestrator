@@ -25,5 +25,6 @@ class RepoContextPack(BaseModel):
     allowed_paths: List[str]
 
 class DraftValidationResponse(BaseModel):
+    draft_id: Optional[str] = None
     validated_task_spec: ValidatedTaskSpec
     repo_context_pack: RepoContextPack

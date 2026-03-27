@@ -81,6 +81,9 @@ class AppSessionService:
             for r in repos:
                 # Opaque handle is a short hash of the path
                 path_str = str(r)
+                path = Path(path_str)
+                if not path.exists() or not path.is_dir():
+                    continue
                 handle = hashlib.sha256(path_str.encode("utf-8")).hexdigest()[:12]
                 mapping[handle] = path_str
             return mapping

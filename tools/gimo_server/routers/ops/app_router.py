@@ -129,10 +129,36 @@ async def create_draft(
     id: str,
     payload: DraftCreateRequest
 ):
-    """P5.2 Validation: Valida el draft apoyándose en evidencia (ReadProofs) de Recon."""
+    """P5.2 Validation: validate and persist the canonical OPS draft backed by recon evidence."""
     _require_existing_session(id)
     try:
-        return DraftValidationService.validate_draft(id, payload.model_dump())
+        result = DraftValidationService.validate_draft(id, payload.model_dump())
+        validated_task_spec = result["validated_task_spec"]
+        repo_context_pack = result["repo_context_pack"]
+        allowed_paths = validated_task_spec.get("allowed_paths", [])
+        acceptance_criteria = str(validated_task_spec.get("acceptance_criteria") or "").strip()
+        prompt = (
+            "Implement the validated task strictly within the approved repository scope.\n\n"
+            f"Acceptance criteria:\n{acceptance_criteria}\n\n"
+            f"Allowed paths:\n" + "\n".join(f"- {path}" for path in allowed_paths)
+        )
+        draft = OpsService.create_draft(
+            prompt=prompt,
+            content=prompt,
+            context={
+                "validated_task_spec": validated_task_spec,
+                "repo_context_pack": repo_context_pack,
+                "repo_context": {"repo_id": validated_task_spec.get("repo_handle")},
+                "execution_decision": "MANUAL_REVIEW_REQUIRED",
+                "intent_effective": "CODE_CHANGE",
+                "commit_base": validated_task_spec.get("base_commit"),
+            },
+        )
+        return {
+            "draft_id": draft.id,
+            "validated_task_spec": validated_task_spec,
+            "repo_context_pack": repo_context_pack,
+        }
     except ValueError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
