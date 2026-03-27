@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
+
 from tools.gimo_server.models.conversation import GimoItem
 from tools.gimo_server.services.conversation_service import ConversationService
 
@@ -71,5 +73,21 @@ def test_failed_append_item_does_not_bump_updated_at(tmp_path):
         assert ok is False
         assert after is not None
         assert after.updated_at == before_ts
+    finally:
+        ConversationService.THREADS_DIR = original_threads_dir
+
+
+def test_add_turn_rejects_unsupported_agent_id(tmp_path):
+    original_threads_dir = ConversationService.THREADS_DIR
+    ConversationService.THREADS_DIR = tmp_path / "threads"
+    try:
+        thread = ConversationService.create_thread(workspace_root=str(tmp_path), title="guard")
+
+        with pytest.raises(ValueError, match="Unsupported thread agent_id"):
+            ConversationService.add_turn(thread.id, agent_id="worker-rogue")
+
+        stored = ConversationService.get_thread(thread.id)
+        assert stored is not None
+        assert stored.turns == []
     finally:
         ConversationService.THREADS_DIR = original_threads_dir

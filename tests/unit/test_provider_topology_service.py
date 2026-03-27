@@ -118,6 +118,29 @@ def test_provider_entry_exposes_configured_model_id_without_collapsing_provider_
     assert entry.configured_model_id() == "gpt-4.1"
 
 
+def test_provider_config_derives_legacy_topology_fields_from_roles():
+    cfg = ProviderConfig(
+        active="orch-main",
+        providers={
+            "orch-main": ProviderEntry(type="openai", provider_type="openai", model="gpt-5.4"),
+            "worker-1": ProviderEntry(type="openai", provider_type="openai", model="gpt-4o-mini"),
+        },
+        roles=ProviderRolesConfig(
+            orchestrator=ProviderRoleBinding(provider_id="orch-main", model="gpt-5.4"),
+            workers=[ProviderRoleBinding(provider_id="worker-1", model="gpt-4o-mini")],
+        ),
+        orchestrator_provider="legacy-orch",
+        orchestrator_model="legacy-model",
+        worker_provider="legacy-worker",
+        worker_model="legacy-worker-model",
+    )
+
+    assert cfg.orchestrator_provider == "orch-main"
+    assert cfg.orchestrator_model == "gpt-5.4"
+    assert cfg.worker_provider == "worker-1"
+    assert cfg.worker_model == "gpt-4o-mini"
+
+
 def test_ensure_default_config_without_detected_cli_keeps_roles_unset(monkeypatch, tmp_path):
     config_file = tmp_path / "provider.json"
 

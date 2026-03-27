@@ -158,7 +158,7 @@ async def _shutdown_services(logger, app, hw_monitor, run_worker, tasks):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Perform infrastructure checks and initialization without side-effects on import
-    logger.info("Starting Repo Orchestrator...")
+    logger.info("Starting GIMO Orchestrator...")
 
     if not BASE_DIR.exists():
         logger.error(f"BASE_DIR {BASE_DIR} does not exist!")
@@ -213,7 +213,7 @@ async def lifespan(app: FastAPI):
             logger.warning("  Only /auth/cold-room/* endpoints are available")
             logger.warning("=" * 60)
             yield
-            logger.info("Shutting down Repo Orchestrator (limited mode)...")
+            logger.info("Shutting down GIMO Orchestrator (limited mode)...")
             return
         logger.critical("=" * 60)
         logger.critical("  LICENSE VALIDATION FAILED")
@@ -362,7 +362,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
-    logger.info("Shutting down Repo Orchestrator...")
+    logger.info("Shutting down GIMO Orchestrator...")
     try:
         tasks = [cleanup_task, threat_cleanup_task, ops_cleanup_task, mcp_sampling_task, integrity_task]
         await _shutdown_services(logger, app, hw_monitor, run_worker, tasks)
@@ -507,7 +507,7 @@ def _register_core_middlewares(app: FastAPI, actions_safe_targets: set):
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="Repo Orchestrator", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="GIMO Orchestrator", version=__version__, lifespan=lifespan)
     actions_safe_targets = {(method.upper(), path) for method, path in _ACTIONS_SAFE_PUBLIC_ENDPOINTS}
     
     _register_core_exception_handlers(app, actions_safe_targets)

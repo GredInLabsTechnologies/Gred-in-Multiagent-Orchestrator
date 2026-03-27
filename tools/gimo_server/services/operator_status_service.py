@@ -31,15 +31,15 @@ class OperatorStatusService:
         if not cfg:
             return None, None
 
-        roles = getattr(cfg, "roles", None)
-        orchestrator = getattr(roles, "orchestrator", None) if roles else None
+        orchestrator = cfg.primary_orchestrator_binding() if hasattr(cfg, "primary_orchestrator_binding") else None
         if orchestrator:
             return orchestrator.provider_id, orchestrator.model
-        return getattr(cfg, "orchestrator_provider", None) or getattr(cfg, "active", None), getattr(
-            cfg,
-            "orchestrator_model",
-            None,
-        ) or getattr(cfg, "model_id", None)
+
+        active_provider = getattr(cfg, "active", None)
+        providers = getattr(cfg, "providers", None) or {}
+        active_entry = providers.get(active_provider) if active_provider else None
+        active_model = active_entry.configured_model_id() if active_entry else getattr(cfg, "model_id", None)
+        return active_provider, active_model
 
     @classmethod
     def _thread_snapshot(

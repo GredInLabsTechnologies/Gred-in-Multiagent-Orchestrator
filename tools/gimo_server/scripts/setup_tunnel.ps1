@@ -1,6 +1,6 @@
-# Repo Orchestrator Tunnel Setup Helper
+# GIMO Orchestrator Tunnel Setup Helper
 
-Write-Host "--- Repo Orchestrator: Cloudflare Tunnel Setup ---" -ForegroundColor Cyan
+Write-Host "--- GIMO Orchestrator: Cloudflare Tunnel Setup ---" -ForegroundColor Cyan
 
 # 1. Check cloudflared
 if (!(Get-Command cloudflared -ErrorAction SilentlyContinue)) {

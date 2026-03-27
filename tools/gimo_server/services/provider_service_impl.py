@@ -405,8 +405,6 @@ class ProviderService:
             orchestrator=ProviderRoleBinding(provider_id=provider_id, model=resolved_model),
             workers=workers,
         )
-        cfg.orchestrator_provider = provider_id
-        cfg.orchestrator_model = resolved_model
         return cls.set_config(cfg)
 
     @classmethod

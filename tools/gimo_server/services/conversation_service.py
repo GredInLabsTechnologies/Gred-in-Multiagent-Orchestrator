@@ -23,6 +23,7 @@ class ConversationService:
     """
 
     THREADS_DIR: Path = OPS_DATA_DIR / "threads"
+    _ALLOWED_TURN_AGENT_IDS = frozenset({"user", "User", "system", "orchestrator"})
     _locks_guard = threading.Lock()
     _thread_locks: dict[str, threading.RLock] = {}
 
@@ -153,9 +154,23 @@ class ConversationService:
         cls._publish_thread_updated(thread)
 
     @classmethod
+    def _validate_turn_agent_id(cls, agent_id: str) -> str:
+        normalized = str(agent_id or "").strip()
+        if not normalized:
+            raise ValueError("agent_id is required")
+        if normalized not in cls._ALLOWED_TURN_AGENT_IDS:
+            allowed = ", ".join(sorted(cls._ALLOWED_TURN_AGENT_IDS))
+            raise ValueError(
+                f"Unsupported thread agent_id '{normalized}'. Allowed values: {allowed}"
+            )
+        return normalized
+
+    @classmethod
     def add_turn(cls, thread_id: str, agent_id: str) -> Optional[GimoTurn]:
+        validated_agent_id = cls._validate_turn_agent_id(agent_id)
+
         def _mutate(thread: GimoThread) -> GimoTurn:
-            turn = GimoTurn(agent_id=agent_id)
+            turn = GimoTurn(agent_id=validated_agent_id)
             thread.turns.append(turn)
             return turn
 

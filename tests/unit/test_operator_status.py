@@ -59,6 +59,37 @@ def test_operator_status_snapshot_unico_backend_authored(monkeypatch):
     assert "alerts" in snapshot
     assert "active_run" not in snapshot
 
+
+def test_operator_status_snapshot_ignores_conflicting_legacy_provider_fields(monkeypatch):
+    from tools.gimo_server.services.git_service import GitService
+    from tools.gimo_server.services.provider_service_impl import ProviderService
+    from tools.gimo_server.services.conversation_service import ConversationService
+    from tools.gimo_server.models import ProviderRolesConfig, ProviderRoleBinding, ProviderConfig
+
+    monkeypatch.setattr(GitService, "get_current_branch", lambda _base_dir: "main")
+    monkeypatch.setattr(GitService, "get_changed_files", lambda _base_dir: [])
+    monkeypatch.setattr(ConversationService, "list_threads", lambda *args, **kwargs: [])
+
+    def mock_get_config():
+        return ProviderConfig(
+            active="legacy-active",
+            providers={},
+            roles=ProviderRolesConfig(
+                orchestrator=ProviderRoleBinding(provider_id="openai-main", model="gpt-5.4"),
+                workers=[],
+            ),
+            orchestrator_provider="legacy-provider",
+            orchestrator_model="legacy-model",
+        )
+
+    monkeypatch.setattr(ProviderService, "get_config", mock_get_config)
+
+    snapshot = OperatorStatusService.get_status_snapshot()
+
+    assert snapshot["active_provider"] == "openai-main"
+    assert snapshot["active_model"] == "gpt-5.4"
+
+
 def test_operator_status_snapshot_strict_failure(monkeypatch):
     from tools.gimo_server.services.git_service import GitService
     from tools.gimo_server.services.provider_service_impl import ProviderService

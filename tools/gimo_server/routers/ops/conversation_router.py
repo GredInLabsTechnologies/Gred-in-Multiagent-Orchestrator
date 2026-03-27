@@ -60,7 +60,10 @@ async def add_turn(
 ):
     """Adds a new turn to a thread."""
     _require_role(auth, "operator")
-    turn = ConversationService.add_turn(thread_id, agent_id)
+    try:
+        turn = ConversationService.add_turn(thread_id, agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not turn:
         raise HTTPException(status_code=404, detail="Thread not found")
     return turn

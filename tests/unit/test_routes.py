@@ -9,6 +9,7 @@ from tools.gimo_server.main import app
 from tools.gimo_server.models import RepoEntry
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
+from tools.gimo_server.services.conversation_service import ConversationService
 
 
 # Mock token dependency for all route tests
@@ -219,6 +220,20 @@ def test_open_repo_success(client, tmp_path):
         repo.mkdir()
         response = client.post(f"/ops/repos/open?path={repo}")
         assert response.status_code == 200
+
+
+def test_add_turn_route_rejects_unsupported_agent_id(client, tmp_path):
+    original_threads_dir = ConversationService.THREADS_DIR
+    ConversationService.THREADS_DIR = tmp_path / "threads"
+    try:
+        thread = ConversationService.create_thread(workspace_root=str(tmp_path), title="turn-guard")
+
+        response = client.post(f"/ops/threads/{thread.id}/turns?agent_id=rogue-orchestrator")
+
+        assert response.status_code == 400
+        assert "Unsupported thread agent_id" in response.json()["detail"]
+    finally:
+        ConversationService.THREADS_DIR = original_threads_dir
 
 
 def test_open_repo_fail_outside(client, tmp_path):

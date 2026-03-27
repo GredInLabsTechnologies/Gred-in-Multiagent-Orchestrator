@@ -88,11 +88,50 @@ class ProviderConfig(BaseModel):
     last_validated_at: Optional[str] = None
     effective_state: Dict[str, Any] = Field(default_factory=dict)
     capabilities_snapshot: Dict[str, Any] = Field(default_factory=dict)
-    roles: Optional[ProviderRolesConfig] = None
-    orchestrator_provider: Optional[str] = None
-    worker_provider: Optional[str] = None
-    orchestrator_model: Optional[str] = None
-    worker_model: Optional[str] = None
+    roles: Optional[ProviderRolesConfig] = Field(
+        default=None,
+        description="Canonical provider/model topology for active agents. Prefer this over legacy compatibility fields.",
+    )
+    orchestrator_provider: Optional[str] = Field(
+        default=None,
+        description="Deprecated compatibility field derived from roles.orchestrator.provider_id when roles are present.",
+    )
+    worker_provider: Optional[str] = Field(
+        default=None,
+        description="Deprecated compatibility field derived from the first roles.workers entry when roles are present.",
+    )
+    orchestrator_model: Optional[str] = Field(
+        default=None,
+        description="Deprecated compatibility field derived from roles.orchestrator.model when roles are present.",
+    )
+    worker_model: Optional[str] = Field(
+        default=None,
+        description="Deprecated compatibility field derived from the first roles.workers model when roles are present.",
+    )
+
+    @model_validator(mode="after")
+    def _sync_legacy_role_fields(self) -> "ProviderConfig":
+        if not self.roles:
+            return self
+
+        self.orchestrator_provider = self.roles.orchestrator.provider_id
+        self.orchestrator_model = self.roles.orchestrator.model
+        if self.roles.workers:
+            first_worker = self.roles.workers[0]
+            self.worker_provider = first_worker.provider_id
+            self.worker_model = first_worker.model
+        else:
+            self.worker_provider = None
+            self.worker_model = None
+        return self
+
+    def primary_orchestrator_binding(self) -> ProviderRoleBinding | None:
+        return self.roles.orchestrator if self.roles else None
+
+    def primary_worker_binding(self) -> ProviderRoleBinding | None:
+        if not self.roles or not self.roles.workers:
+            return None
+        return self.roles.workers[0]
 
 
 class ProviderValidateRequest(BaseModel):

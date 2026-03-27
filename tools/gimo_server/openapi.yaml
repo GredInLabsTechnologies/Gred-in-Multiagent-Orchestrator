@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Repo Orchestrator API
+  title: GIMO Orchestrator API
   description: >
     Secure read-only access to a selected repository, plus UI/service operations.
     All endpoints require Bearer authentication.

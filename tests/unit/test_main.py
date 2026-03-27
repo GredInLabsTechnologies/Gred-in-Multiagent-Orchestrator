@@ -109,6 +109,10 @@ def test_root_route(test_client):
     assert response.headers.get("X-Correlation-ID")
 
 
+def test_app_metadata_uses_gimo_orchestrator_name():
+    assert app.title == "GIMO Orchestrator"
+
+
 @pytest.mark.asyncio
 async def test_snapshot_cleanup_loop_exit():
     from tools.gimo_server.main import snapshot_cleanup_loop

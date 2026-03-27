@@ -209,6 +209,28 @@ This means the following are related but distinct:
 
 They must not be collapsed into a single fuzzy concept.
 
+### 1.9 Technical debt still pending
+
+The following items remain as explicit technical debt after the current authority and topology hardening work.
+
+1. **Legacy provider topology fields still exist for compatibility.**
+   `ProviderConfig` still carries compatibility fields such as `orchestrator_provider`, `worker_provider`, `orchestrator_model`, and `worker_model`.
+   They are no longer the authoritative source of truth when `roles` is present, but they have not yet been fully removed from all external contracts.
+   Desired end state:
+   a roles-first public contract where provider/model topology is expressed only through canonical role bindings.
+
+2. **Historical naming cleanup is intentionally incomplete.**
+   Active server and OpenAPI surfaces now use `GIMO Orchestrator`, but archived docs, legacy plans, and historical artifacts may still contain `Repo Orchestrator`.
+   This is documentation debt, not live runtime authority debt.
+   Desired end state:
+   only historical archives retain the old product-role wording, with active system surfaces fully normalized.
+
+3. **Conversation turn validation is hardened at runtime insertion boundaries, not by backfill migration.**
+   Backend turn creation now restricts supported runtime `agent_id` values for the current release line.
+   However, previously stored thread JSON written outside the backend could still contain non-canonical agent identities.
+   Desired end state:
+   a canonical thread participant model plus migration or repair for non-conforming persisted turns when needed.
+
 ---
 
 ## 2) Runtime architecture (as implemented)
