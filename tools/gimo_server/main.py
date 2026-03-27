@@ -558,13 +558,8 @@ def create_app() -> FastAPI:
 
     # Mount FastMCP servers.
     try:
-        from tools.gimo_server.mcp_server import mcp as legacy_mcp
-        if legacy_mcp:
-            # [LEGACY/GENERAL BRIDGE] - Not the official App façade.
-            app.mount("/mcp", legacy_mcp.sse_app())
-            logger.info("General MCP Bridge mounted at /mcp [LEGACY]")
-        
-        # [OFFICIAL APP FAÇADE] - Profile-driven App façade for ChatGPT Apps.
+        # Mount the official App façade before the legacy bridge so `/mcp/app/*`
+        # does not get shadowed by the broader `/mcp` mount prefix.
         from tools.gimo_server.app_mcp.server import create_official_app_facade
 
         app_mcp, official_facade, streamable_http_context = create_official_app_facade(
@@ -581,6 +576,12 @@ def create_app() -> FastAPI:
             settings.app_mcp_profile,
             settings.app_mcp_streamable_http,
         )
+
+        from tools.gimo_server.mcp_server import mcp as legacy_mcp
+        if legacy_mcp:
+            # [LEGACY/GENERAL BRIDGE] - Not the official App façade.
+            app.mount("/mcp", legacy_mcp.sse_app())
+            logger.info("General MCP Bridge mounted at /mcp [LEGACY]")
     except Exception as e:
         logger.error(f"Failed to mount FastMCP Server: {e}")
 

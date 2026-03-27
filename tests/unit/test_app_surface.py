@@ -83,13 +83,26 @@ async def test_mcp_resources_registration():
     assert "gimo://app/review/{run_id}" in template_uris
 
 
-def test_official_app_facade_mount_exposes_dual_transport_routes():
+def test_official_app_facade_mount_exposes_dual_transport_routes(test_client):
     mount_paths = [getattr(route, "path", None) for route in app.routes]
     assert "/mcp/app" in mount_paths
+
+    official_mount_index = next(
+        index for index, route in enumerate(app.routes) if getattr(route, "path", None) == "/mcp/app"
+    )
+    legacy_mount_index = next(index for index, route in enumerate(app.routes) if getattr(route, "path", None) == "/mcp")
+    assert official_mount_index < legacy_mount_index
 
     official_mount = next(route for route in app.routes if getattr(route, "path", None) == "/mcp/app")
     subpaths = {getattr(route, "path", None) for route in official_mount.app.routes}
     assert {"/sse", "/messages", "/mcp"}.issubset(subpaths)
+
+    # A real request guards against `/mcp/app/*` being swallowed by the broader `/mcp` mount.
+    sse_response = test_client.get("/mcp/app/sse", headers={"host": "127.0.0.1"})
+    assert sse_response.status_code != 404
+
+    streamable_response = test_client.get("/mcp/app/mcp", headers={"host": "127.0.0.1"})
+    assert streamable_response.status_code != 404
 
 
 @pytest.mark.anyio
