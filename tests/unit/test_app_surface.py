@@ -27,6 +27,15 @@ async def test_mcp_tools_registration():
     assert "select_app_repo" in tool_names
     assert "list_app_repos" in tool_names
     assert "purge_app_session" in tool_names
+    assert "list_app_files" in tool_names
+    assert "search_app_repo" in tool_names
+    assert "read_app_file" in tool_names
+    assert "create_validated_app_draft" in tool_names
+    assert "create_app_context_request" in tool_names
+    assert "list_app_context_requests" in tool_names
+    assert "resolve_app_context_request" in tool_names
+    assert "get_app_run_review" in tool_names
+    assert "discard_app_run" in tool_names
 
 @pytest.mark.anyio
 async def test_mcp_resources_registration():
@@ -38,6 +47,8 @@ async def test_mcp_resources_registration():
     templates = await mcp.list_resource_templates()
     template_uris = [t.uriTemplate for t in templates]
     assert "gimo://app/session/{session_id}" in template_uris
+    assert "gimo://app/context-requests/{session_id}" in template_uris
+    assert "gimo://app/review/{run_id}" in template_uris
 
 def test_official_app_facade_is_mounted():
     """P4: Verifica que la fachada oficial esté montada en /mcp/app."""
@@ -100,3 +111,44 @@ async def test_app_surface_does_not_leak_paths():
     serialized_resource = repos_resource[0].content
     for host_path in host_paths:
         assert host_path not in serialized_resource
+
+@pytest.mark.anyio
+async def test_app_mcp_recon_and_context_roundtrip():
+    mapping = AppSessionService.get_handle_mapping()
+    assert mapping, "App surface requires at least one registered repo handle"
+    expected_handle = next(iter(mapping.keys()))
+
+    created = _parse_text_payload(
+        await mcp.call_tool("create_app_session", {"metadata": {"mcp": "recon"}})
+    )
+    session_id = created["id"]
+
+    selected = _parse_text_payload(
+        await mcp.call_tool("select_app_repo", {"session_id": session_id, "repo_id": expected_handle})
+    )
+    assert selected == {"status": "ok", "repo_id": expected_handle}
+
+    listing = _parse_text_payload(await mcp.call_tool("list_app_files", {"session_id": session_id}))
+    assert listing["status"] == "ok"
+    assert isinstance(listing["entries"], list)
+
+    request_payload = _parse_text_payload(
+        await mcp.call_tool(
+            "create_app_context_request",
+            {"session_id": session_id, "description": "Need clarification", "metadata": {"kind": "question"}},
+        )
+    )
+    assert request_payload["status"] == "ok"
+    request_id = request_payload["request"]["id"]
+
+    requests_payload = _parse_text_payload(await mcp.call_tool("list_app_context_requests", {"session_id": session_id}))
+    assert requests_payload["status"] == "ok"
+    assert any(req["id"] == request_id for req in requests_payload["requests"])
+
+    resolved_payload = _parse_text_payload(
+        await mcp.call_tool(
+            "resolve_app_context_request",
+            {"session_id": session_id, "request_id": request_id, "evidence": "Resolved by operator"},
+        )
+    )
+    assert resolved_payload == {"status": "ok", "request_id": request_id}

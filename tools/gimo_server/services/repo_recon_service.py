@@ -107,7 +107,10 @@ class RepoReconService:
                 raise ValueError("Invalid directory handle")
             rel_path = cls._normalize_rel_path(rel_path)
 
-        target_dir = cls._resolve_repo_target(repo_path, rel_path)
+        if rel_path == ".":
+            target_dir = repo_path
+        else:
+            target_dir = cls._resolve_repo_target(repo_path, rel_path)
 
         if not target_dir.exists():
             raise ValueError("Directory not found")

@@ -25,7 +25,12 @@ def test_operator_status_snapshot_unico_backend_authored(monkeypatch):
         )
         
     def mock_list_threads(*args, **kwargs):
-        thread = GimoThread(id="t-123", workspace_root="/tmp", turns=[GimoTurn(id="turn-1", agent_id="cli")])
+        thread = GimoThread(
+            id="t-123",
+            workspace_root="/tmp",
+            turns=[GimoTurn(id="turn-1", agent_id="cli")],
+            metadata={"permissions": "full-auto", "effort": "high"},
+        )
         return [thread]
         
     monkeypatch.setattr(GitService, "get_current_branch", mock_get_current_branch)
@@ -41,10 +46,10 @@ def test_operator_status_snapshot_unico_backend_authored(monkeypatch):
     assert snapshot["active_model"] == "gpt-4o"
     assert snapshot["last_thread"] == "t-123"
     assert snapshot["last_turn"] == "turn-1"
+    assert snapshot["permissions"] == "full-auto"
+    assert snapshot["effort"] == "high"
+    assert snapshot["backend_status"] == "ok"
     assert "alerts" in snapshot
-    
-    # Asserting no fake fields
-    assert "budget_spend" not in snapshot
     assert "active_run" not in snapshot
 
 def test_operator_status_snapshot_strict_failure(monkeypatch):

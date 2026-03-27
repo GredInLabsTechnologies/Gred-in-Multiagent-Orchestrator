@@ -154,13 +154,26 @@ async def test_app_surface_map_is_honest_about_rest_vs_mcp_capabilities():
         "select_app_repo",
         "list_app_repos",
         "purge_app_session",
+        "list_app_files",
+        "search_app_repo",
+        "read_app_file",
+        "create_validated_app_draft",
+        "create_app_context_request",
+        "list_app_context_requests",
+        "resolve_app_context_request",
+        "get_app_run_review",
+        "discard_app_run",
     }.issubset(tool_names)
-    assert not any(name for name in tool_names if "review" in name or "discard" in name or "execute" in name)
+    assert not any(name for name in tool_names if "execute" in name)
 
     resource_uris = {str(resource.uri) for resource in await mcp.list_resources()}
     template_uris = {template.uriTemplate for template in await mcp.list_resource_templates()}
     assert resource_uris == {"gimo://app/repos"}
-    assert template_uris == {"gimo://app/session/{session_id}"}
+    assert template_uris == {
+        "gimo://app/session/{session_id}",
+        "gimo://app/context-requests/{session_id}",
+        "gimo://app/review/{run_id}",
+    }
 
 
 def test_legacy_path_deprecations():
