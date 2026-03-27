@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+APP_MCP_ALLOWED_PROFILES = ("safe", "extended")
 
 
 def _get_base_dir() -> Path:
@@ -99,6 +100,8 @@ class Settings:
     gimo_model_cache_max_gb: float
     gimo_npu_enabled: bool
     gimo_max_oversized_ratio: float
+    app_mcp_profile: str
+    app_mcp_streamable_http: bool
 
 
 def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_TOKEN") -> str:
@@ -123,6 +126,21 @@ def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_T
         logger.warning("Failed to chmod token file %s", token_file)
     os.environ[env_key] = token
     return token
+
+
+def _read_bool_env(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("true", "1", "yes")
+
+
+def _normalize_app_mcp_profile(raw_profile: str | None) -> str:
+    profile = str(raw_profile or "safe").strip().lower() or "safe"
+    if profile not in APP_MCP_ALLOWED_PROFILES:
+        allowed = ", ".join(APP_MCP_ALLOWED_PROFILES)
+        raise ValueError(f"Invalid ORCH_APP_MCP_PROFILE '{raw_profile}'. Expected one of: {allowed}")
+    return profile
 
 
 def _build_settings() -> Settings:
@@ -202,6 +220,8 @@ def _build_settings() -> Settings:
     ops_run_ttl = int(os.environ.get("ORCH_OPS_RUN_TTL", "86400"))
     debug = os.environ.get("DEBUG", "false").lower() in ("true", "1", "yes")
     log_level = os.environ.get("LOG_LEVEL", "DEBUG" if debug else "INFO").upper()
+    app_mcp_profile = _normalize_app_mcp_profile(os.environ.get("ORCH_APP_MCP_PROFILE", "safe"))
+    app_mcp_streamable_http = _read_bool_env("ORCH_APP_MCP_STREAMABLE_HTTP", default=True)
     return Settings(
         base_dir=base_dir,
         repo_root_dir=repo_root_dir,
@@ -281,6 +301,8 @@ def _build_settings() -> Settings:
         gimo_npu_enabled=os.environ.get("GIMO_NPU_ENABLED", "true").lower()
         in ("true", "1", "yes"),
         gimo_max_oversized_ratio=float(os.environ.get("GIMO_MAX_OVERSIZED_RATIO", "3.0")),
+        app_mcp_profile=app_mcp_profile,
+        app_mcp_streamable_http=app_mcp_streamable_http,
     )
 
 
@@ -360,3 +382,5 @@ GIMO_MODEL_CACHE_DIR = _SETTINGS.gimo_model_cache_dir
 GIMO_MODEL_CACHE_MAX_GB = _SETTINGS.gimo_model_cache_max_gb
 GIMO_NPU_ENABLED = _SETTINGS.gimo_npu_enabled
 GIMO_MAX_OVERSIZED_RATIO = _SETTINGS.gimo_max_oversized_ratio
+APP_MCP_PROFILE = _SETTINGS.app_mcp_profile
+APP_MCP_STREAMABLE_HTTP = _SETTINGS.app_mcp_streamable_http

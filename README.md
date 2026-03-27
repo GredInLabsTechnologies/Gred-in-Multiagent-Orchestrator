@@ -82,8 +82,19 @@ cd apps/web && npm run dev
 | `ORCH_PROVIDER` | Proveedor LLM (`ollama`, `openai`, `anthropic`) | `ollama` |
 | `ORCH_MODEL` | Modelo por defecto | `qwen2.5-coder:7b` |
 | `DEBUG` | Modo debug con reload | `false` |
+| `ORCH_APP_MCP_PROFILE` | Perfil de la fachada oficial App MCP (`safe` o `extended`) | `safe` |
+| `ORCH_APP_MCP_STREAMABLE_HTTP` | Expone tambi&eacute;n streaming HTTP en la fachada App | `true` |
 
 Para variables de GIMO Web (Firebase, Stripe, licencias), ver `apps/web/.env.example`.
+
+### ChatGPT Developer Mode
+
+El surface oficial para ChatGPT Apps sigue siendo `/mcp/app`.
+
+- `gimo mcp` sirve la fachada oficial de App en `http://127.0.0.1:8000/mcp/app/sse`
+- si `ORCH_APP_MCP_STREAMABLE_HTTP=true`, tambi&eacute;n expone `http://127.0.0.1:8000/mcp/app/mcp`
+- el perfil por defecto es `safe`, pensado para Developer Mode personal con un subconjunto m&aacute;s restringido de tools
+- `extended` se deja como opt-in para dogfooding interno
 
 ## Documentaci&oacute;n
 

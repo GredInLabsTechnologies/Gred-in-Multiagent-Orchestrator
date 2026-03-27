@@ -5,7 +5,7 @@ import inspect
 import json
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,6 +25,8 @@ os.environ.setdefault("ORCH_REPO_ROOT", str(Path(__file__).parent.parent.resolve
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("ORCH_LICENSE_ALLOW_DEBUG_BYPASS", "true")
 os.environ.setdefault("ORCH_AUDIT_LOG_MAX_BYTES", str(50 * 1024 * 1024))
+os.environ.setdefault("ORCH_APP_MCP_PROFILE", "safe")
+os.environ.setdefault("ORCH_APP_MCP_STREAMABLE_HTTP", "true")
 
 from tools.gimo_server.main import app  # noqa: E402
 
@@ -32,7 +34,6 @@ from tools.gimo_server.main import app  # noqa: E402
 def _inject_fake_model_inventory(cls):
     """Inject a minimal fake model inventory so tests never make HTTP calls to Ollama."""
     import time
-    from dataclasses import field as _field
     from tools.gimo_server.services.model_inventory_service import ModelEntry
 
     if cls._cache:
@@ -269,9 +270,7 @@ def init_forensic_state():
     from tools.gimo_server import config
     from tools.gimo_server.ops_models import OpsConfig, ProviderConfig, ToolEntry, UserEconomyConfig
     from tools.gimo_server.services.tool_registry_service import ToolRegistryService
-    from tools.gimo_server.services.provider_service import ProviderService
     import json
-    import sys
 
     # 1. Ensure tokens are registered in global config
     test_tokens = {
@@ -291,7 +290,8 @@ def init_forensic_state():
     if registry_file.exists():
         try:
             registry_data = json.loads(registry_file.read_text(encoding="utf-8"))
-        except: pass
+        except Exception:
+            pass
     
     test_tool = ToolEntry(
         name="t1", 
@@ -316,7 +316,8 @@ def init_forensic_state():
             old_cfg = ProviderConfig.model_validate_json(provider_file.read_text(encoding="utf-8"))
             prov_cfg.providers.update(old_cfg.providers)
             prov_cfg.mcp_servers.update(old_cfg.mcp_servers)
-        except: pass
+        except Exception:
+            pass
     provider_file.write_text(prov_cfg.model_dump_json(indent=2), encoding="utf-8")
 
     # 5. Disable economy budgets for tests (including anthropic for CostService hardcoded checks)

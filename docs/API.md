@@ -35,10 +35,13 @@ All endpoints require `Authorization: Bearer <ORCH_TOKEN>`.
 - `GET /ops/openapi.json`: [LEGACY INTEGRATION] OpenAPI schema for external agents. Preferred: `/mcp/app`.
 
 ## 4. First-Class Client Façades [Phase 7B Verified]
-- `/mcp/app`: **[OFFICIAL]** High-privilege App façade for ChatGPT and other first-class consumers.
+- `/mcp/app`: **[OFFICIAL]** App façade for ChatGPT and other first-class consumers.
+- `/mcp/app/sse`: Official App MCP SSE transport for ChatGPT Developer Mode.
+- `/mcp/app/mcp`: Official App MCP streamable HTTP transport.
 - `/mcp`: **[LEGACY]** General-purpose MCP bridge.
 - `/ops/operator/status`: Canonical backend status for TUI/CLI parity.
 - `/ops/notices`: Canonical notification feed for all surfaces.
+- Default App MCP profile is `safe`; `extended` is opt-in for broader internal dogfooding.
 - `POST /ops/app/sessions`: Create App session.
 - `GET /ops/app/sessions/{id}`: Read App session state.
 - `POST /ops/app/sessions/{id}/repo/select`: Bind opaque repo handle to App session and provision an App-managed snapshot/clone. The App surface does not read the original repo directly.

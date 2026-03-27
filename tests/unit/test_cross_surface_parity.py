@@ -6,11 +6,11 @@ import pytest
 import gimo
 from gimo import _handle_chat_slash_command
 from gimo_tui import GimoApp
-from tools.gimo_server.app_mcp.server import mcp
+from tools.gimo_server.app_mcp.server import create_app_mcp, mcp
+from tools.gimo_server.app_mcp.tools import ALL_TOOL_NAMES, EXTENDED_ONLY_TOOL_NAMES, SAFE_TOOL_NAMES
 from tools.gimo_server.main import app
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
-from tools.gimo_server.services.app_session_service import AppSessionService
 
 
 def _auth(role: str):
@@ -145,24 +145,14 @@ async def test_app_surface_map_is_honest_about_rest_vs_mcp_capabilities():
     assert "/ops/app/runs/{run_id}/review" in route_paths
     assert "/ops/app/runs/{run_id}/discard" in route_paths
 
-    tool_names = {tool.name for tool in await mcp.list_tools()}
-    assert {
-        "create_app_session",
-        "get_app_session",
-        "select_app_repo",
-        "list_app_repos",
-        "purge_app_session",
-        "list_app_files",
-        "search_app_repo",
-        "read_app_file",
-        "create_validated_app_draft",
-        "create_app_context_request",
-        "list_app_context_requests",
-        "resolve_app_context_request",
-        "get_app_run_review",
-        "discard_app_run",
-    }.issubset(tool_names)
-    assert not any(name for name in tool_names if "execute" in name)
+    safe_tool_names = {tool.name for tool in await mcp.list_tools()}
+    assert safe_tool_names == SAFE_TOOL_NAMES
+    assert safe_tool_names.isdisjoint(EXTENDED_ONLY_TOOL_NAMES)
+
+    extended_mcp = create_app_mcp("extended")
+    extended_tool_names = {tool.name for tool in await extended_mcp.list_tools()}
+    assert extended_tool_names == ALL_TOOL_NAMES
+    assert not any(name for name in extended_tool_names if "execute" in name)
 
     resource_uris = {str(resource.uri) for resource in await mcp.list_resources()}
     template_uris = {template.uriTemplate for template in await mcp.list_resource_templates()}

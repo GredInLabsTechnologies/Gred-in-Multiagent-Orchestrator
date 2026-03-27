@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import time
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
@@ -228,155 +228,176 @@ async def lifespan(app: FastAPI):
     _asyncio.create_task(_guard.periodic_recheck())
     # ──────────────────────────────────────────────────────────────────
 
-    settings.ops_data_dir.mkdir(parents=True, exist_ok=True)
-    (settings.ops_data_dir / "drafts").mkdir(parents=True, exist_ok=True)
-    (settings.ops_data_dir / "approved").mkdir(parents=True, exist_ok=True)
-    (settings.ops_data_dir / "runs").mkdir(parents=True, exist_ok=True)
-    (settings.ops_data_dir / "threads").mkdir(parents=True, exist_ok=True)
-    # provider.json template
-    from tools.gimo_server.services.provider_service import ProviderService
+    async with AsyncExitStack() as app_mcp_exit_stack:
+        app.state.app_mcp_exit_stack = app_mcp_exit_stack
+        _refresh_app_mcp_facade(app, settings)
+        streamable_http_context = getattr(app.state, "app_mcp_streamable_http_context", None)
+        if streamable_http_context is not None:
+            await app_mcp_exit_stack.enter_async_context(streamable_http_context)
 
-    ProviderService.ensure_default_config()
-    
-    # Initialize GICS Daemon Service
-    gics_service = GicsService()
-    gics_service.start_daemon()
-    gics_service.start_health_check()
-    app.state.gics = gics_service
-    from tools.gimo_server.services.ops_service import OpsService
-    OpsService.set_gics(gics_service)
+        settings.ops_data_dir.mkdir(parents=True, exist_ok=True)
+        (settings.ops_data_dir / "drafts").mkdir(parents=True, exist_ok=True)
+        (settings.ops_data_dir / "approved").mkdir(parents=True, exist_ok=True)
+        (settings.ops_data_dir / "runs").mkdir(parents=True, exist_ok=True)
+        (settings.ops_data_dir / "threads").mkdir(parents=True, exist_ok=True)
+        # provider.json template
+        from tools.gimo_server.services.provider_service import ProviderService
 
-    # Initialize Security Threat Engine
-    from tools.gimo_server.security import save_security_db, threat_engine
-    threat_engine.clear_all()  # Start clean on boot
-    save_security_db()
+        ProviderService.ensure_default_config()
 
-    # Start background cleanup tasks
-    cleanup_task = asyncio.create_task(snapshot_cleanup_loop())
-    from tools.gimo_server.services.ops_service import OpsService
+        # Initialize GICS Daemon Service
+        gics_service = GicsService()
+        gics_service.start_daemon()
+        gics_service.start_health_check()
+        app.state.gics = gics_service
+        from tools.gimo_server.services.ops_service import OpsService
 
-    threat_cleanup_task = asyncio.create_task(_threat_decay_loop())
+        OpsService.set_gics(gics_service)
 
-    ops_cleanup_task = asyncio.create_task(_ops_runs_cleanup_loop())
-    integrity_task = asyncio.create_task(_integrity_recheck_loop(settings))
+        # Initialize Security Threat Engine
+        from tools.gimo_server.security import save_security_db, threat_engine
 
-    mcp_sampling_task = asyncio.create_task(_mcp_sampling_loop())
-    
-    # Startup reconcile + rotation for runtime consistency
-    try:
-        from tools.gimo_server.services.sub_agent_manager import SubAgentManager
-        await SubAgentManager.startup_reconcile()
-    except Exception as exc:
-        logger.warning("SubAgent startup reconcile warning: %s", exc)
-    try:
-        merge_wt_dir = settings.ops_data_dir / "worktrees"
-        if merge_wt_dir.exists():
-            import shutil
-            from tools.gimo_server.services.ops_service import OpsService as _OpsServiceWt
-            active_run_ids = {r.id for r in _OpsServiceWt.list_runs()
-                              if r.status not in _OpsServiceWt._TERMINAL_RUN_STATUSES}
-            for wt in merge_wt_dir.iterdir():
-                if wt.is_dir() and wt.name not in active_run_ids:
-                    shutil.rmtree(wt, ignore_errors=True)
-                    logger.info("Cleaned orphan merge worktree: %s", wt.name)
-    except Exception as exc:
-        logger.warning("Merge worktree reconcile warning: %s", exc)
-    try:
-        LogRotationService.run_rotation()
-    except Exception as exc:
-        logger.warning("Log rotation startup warning: %s", exc)
+        threat_engine.clear_all()  # Start clean on boot
+        save_security_db()
 
-    # ── STARTUP RUN RECONCILE ─────────────────────────────────────────
-    # Pass 1: Runs in non-terminal active states that survived a restart
-    # are zombies — mark them error so the operator can retry.
-    # Pass 2: Child runs still pending whose parent is now terminal
-    # (orphaned children) are also marked error to prevent them from
-    # executing without a valid parent context.
-    try:
-        from tools.gimo_server.services.ops_service import OpsService as _OpsServiceReconcile
-        _ZOMBIE_ACTIVE = {"running", "awaiting_subagents", "awaiting_review"}
-        _TERMINAL = _OpsServiceReconcile._TERMINAL_RUN_STATUSES
-        _all_runs = _OpsServiceReconcile.list_runs()
-        _run_status = {_r.id: _r.status for _r in _all_runs}
+        # Start background cleanup tasks
+        cleanup_task = asyncio.create_task(snapshot_cleanup_loop())
+        from tools.gimo_server.services.ops_service import OpsService
 
-        _zombie_count = 0
-        for _r in _all_runs:
-            if _r.status in _ZOMBIE_ACTIVE:
-                _OpsServiceReconcile.update_run_status(
-                    _r.id, "error",
-                    msg="Interrupted by server restart (startup reconcile)"
-                )
-                _zombie_count += 1
-            elif _r.status == "pending" and _r.parent_run_id:
-                # Orphaned child: parent is terminal
-                _parent_status = _run_status.get(_r.parent_run_id, "")
-                if _parent_status in _TERMINAL:
+        threat_cleanup_task = asyncio.create_task(_threat_decay_loop())
+
+        ops_cleanup_task = asyncio.create_task(_ops_runs_cleanup_loop())
+        integrity_task = asyncio.create_task(_integrity_recheck_loop(settings))
+
+        mcp_sampling_task = asyncio.create_task(_mcp_sampling_loop())
+
+        # Startup reconcile + rotation for runtime consistency
+        try:
+            from tools.gimo_server.services.sub_agent_manager import SubAgentManager
+
+            await SubAgentManager.startup_reconcile()
+        except Exception as exc:
+            logger.warning("SubAgent startup reconcile warning: %s", exc)
+        try:
+            merge_wt_dir = settings.ops_data_dir / "worktrees"
+            if merge_wt_dir.exists():
+                import shutil
+                from tools.gimo_server.services.ops_service import OpsService as _OpsServiceWt
+
+                active_run_ids = {
+                    r.id
+                    for r in _OpsServiceWt.list_runs()
+                    if r.status not in _OpsServiceWt._TERMINAL_RUN_STATUSES
+                }
+                for wt in merge_wt_dir.iterdir():
+                    if wt.is_dir() and wt.name not in active_run_ids:
+                        shutil.rmtree(wt, ignore_errors=True)
+                        logger.info("Cleaned orphan merge worktree: %s", wt.name)
+        except Exception as exc:
+            logger.warning("Merge worktree reconcile warning: %s", exc)
+        try:
+            LogRotationService.run_rotation()
+        except Exception as exc:
+            logger.warning("Log rotation startup warning: %s", exc)
+
+        # ── STARTUP RUN RECONCILE ─────────────────────────────────────────
+        # Pass 1: Runs in non-terminal active states that survived a restart
+        # are zombies — mark them error so the operator can retry.
+        # Pass 2: Child runs still pending whose parent is now terminal
+        # (orphaned children) are also marked error to prevent them from
+        # executing without a valid parent context.
+        try:
+            from tools.gimo_server.services.ops_service import OpsService as _OpsServiceReconcile
+
+            _ZOMBIE_ACTIVE = {"running", "awaiting_subagents", "awaiting_review"}
+            _TERMINAL = _OpsServiceReconcile._TERMINAL_RUN_STATUSES
+            _all_runs = _OpsServiceReconcile.list_runs()
+            _run_status = {_r.id: _r.status for _r in _all_runs}
+
+            _zombie_count = 0
+            for _r in _all_runs:
+                if _r.status in _ZOMBIE_ACTIVE:
                     _OpsServiceReconcile.update_run_status(
-                        _r.id, "error",
-                        msg=(
-                            f"Orphaned child (parent {_r.parent_run_id} is "
-                            f"'{_parent_status}') — startup reconcile"
-                        )
+                        _r.id,
+                        "error",
+                        msg="Interrupted by server restart (startup reconcile)",
                     )
                     _zombie_count += 1
+                elif _r.status == "pending" and _r.parent_run_id:
+                    # Orphaned child: parent is terminal
+                    _parent_status = _run_status.get(_r.parent_run_id, "")
+                    if _parent_status in _TERMINAL:
+                        _OpsServiceReconcile.update_run_status(
+                            _r.id,
+                            "error",
+                            msg=(
+                                f"Orphaned child (parent {_r.parent_run_id} is "
+                                f"'{_parent_status}') — startup reconcile"
+                            ),
+                        )
+                        _zombie_count += 1
 
-        if _zombie_count:
-            logger.warning(
-                "Startup reconcile: marked %d zombie/orphan run(s) as error.",
-                _zombie_count,
-            )
-    except Exception as exc:
-        logger.warning("Startup run reconcile warning: %s", exc)
-    # ─────────────────────────────────────────────────────────────────
+            if _zombie_count:
+                logger.warning(
+                    "Startup reconcile: marked %d zombie/orphan run(s) as error.",
+                    _zombie_count,
+                )
+        except Exception as exc:
+            logger.warning("Startup run reconcile warning: %s", exc)
+        # ─────────────────────────────────────────────────────────────────
 
-    # Start the Run Worker (processes pending runs in background)
-    from tools.gimo_server.services.run_worker import RunWorker
+        # Start the Run Worker (processes pending runs in background)
+        from tools.gimo_server.services.run_worker import RunWorker
 
-    run_worker = RunWorker()
-    await run_worker.start()
-    app.state.run_worker = run_worker
+        run_worker = RunWorker()
+        await run_worker.start()
+        app.state.run_worker = run_worker
 
-    # Start Hardware Monitor
-    from tools.gimo_server.services.hardware_monitor_service import HardwareMonitorService
-    hw_monitor = HardwareMonitorService.get_instance()
-    try:
-        from tools.gimo_server.services.ops_service import OpsService
-        cfg = OpsService.get_config()
-        if cfg.economy.hardware_thresholds:
-            hw_monitor.update_thresholds(cfg.economy.hardware_thresholds)
-    except Exception:
-        pass
-    await hw_monitor.start_monitoring()
+        # Start Hardware Monitor
+        from tools.gimo_server.services.hardware_monitor_service import HardwareMonitorService
 
-    # Single authority initialization (runtime critical services)
-    try:
-        from tools.gimo_server.services.authority import ExecutionAuthority
-        from tools.gimo_server.services.resource_governor import ResourceGovernor
-        governor = ResourceGovernor(hw_monitor)
-        ExecutionAuthority.initialize(run_worker, hw_monitor, governor)
-    except RuntimeError:
-        logger.debug("ExecutionAuthority already initialized")
-    except Exception as exc:
-        logger.warning("ExecutionAuthority init warning: %s", exc)
-
-    yield
-
-    # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
-    logger.info("Shutting down GIMO Orchestrator...")
-    try:
-        tasks = [cleanup_task, threat_cleanup_task, ops_cleanup_task, mcp_sampling_task, integrity_task]
-        await _shutdown_services(logger, app, hw_monitor, run_worker, tasks)
-        if hasattr(app.state, "run_worker"):
-            delattr(app.state, "run_worker")
+        hw_monitor = HardwareMonitorService.get_instance()
         try:
-            from tools.gimo_server.services.authority import ExecutionAuthority
-            ExecutionAuthority.reset()
+            from tools.gimo_server.services.ops_service import OpsService
+
+            cfg = OpsService.get_config()
+            if cfg.economy.hardware_thresholds:
+                hw_monitor.update_thresholds(cfg.economy.hardware_thresholds)
         except Exception:
             pass
-    except Exception as exc:
-        logger.debug("Lifespan shutdown suppressed exception: %s", exc)
-    except asyncio.CancelledError as exc:
-        logger.debug("Lifespan shutdown cancelled: %s", exc)
+        await hw_monitor.start_monitoring()
+
+        # Single authority initialization (runtime critical services)
+        try:
+            from tools.gimo_server.services.authority import ExecutionAuthority
+            from tools.gimo_server.services.resource_governor import ResourceGovernor
+
+            governor = ResourceGovernor(hw_monitor)
+            ExecutionAuthority.initialize(run_worker, hw_monitor, governor)
+        except RuntimeError:
+            logger.debug("ExecutionAuthority already initialized")
+        except Exception as exc:
+            logger.warning("ExecutionAuthority init warning: %s", exc)
+
+        yield
+
+        # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
+        logger.info("Shutting down GIMO Orchestrator...")
+        try:
+            tasks = [cleanup_task, threat_cleanup_task, ops_cleanup_task, mcp_sampling_task, integrity_task]
+            await _shutdown_services(logger, app, hw_monitor, run_worker, tasks)
+            if hasattr(app.state, "run_worker"):
+                delattr(app.state, "run_worker")
+            try:
+                from tools.gimo_server.services.authority import ExecutionAuthority
+
+                ExecutionAuthority.reset()
+            except Exception:
+                pass
+        except Exception as exc:
+            logger.debug("Lifespan shutdown suppressed exception: %s", exc)
+        except asyncio.CancelledError as exc:
+            logger.debug("Lifespan shutdown cancelled: %s", exc)
 
 
 
@@ -482,7 +503,8 @@ def _create_actions_safe_guard(actions_safe_targets: set):
     async def guard(request: Request, call_next):
         if _is_actions_safe_request(request, actions_safe_targets) and request.method.upper() in {"POST", "PUT", "PATCH"}:
             resp = await _check_payload_size(request)
-            if resp: return resp
+            if resp:
+                return resp
         return await call_next(request)
     return guard
 
@@ -505,6 +527,25 @@ def _register_core_middlewares(app: FastAPI, actions_safe_targets: set):
     app.middleware("http")(_limited_mode_guard)
     app.middleware("http")(_create_actions_safe_guard(actions_safe_targets))
 
+
+def _refresh_app_mcp_facade(app: FastAPI, settings) -> None:
+    from tools.gimo_server.app_mcp.server import create_official_app_facade
+
+    app_mcp, official_facade, streamable_http_context = create_official_app_facade(
+        profile=settings.app_mcp_profile,
+        enable_streamable_http=settings.app_mcp_streamable_http,
+    )
+
+    official_mount = next((route for route in app.routes if getattr(route, "path", None) == "/mcp/app"), None)
+    if official_mount is None:
+        raise RuntimeError("Official App façade mount /mcp/app is missing")
+
+    official_mount.app = official_facade
+    app.state.app_mcp = app_mcp
+    app.state.app_mcp_streamable_http_context = streamable_http_context
+    app.state.app_mcp_profile = settings.app_mcp_profile
+    app.state.app_mcp_streamable_http = settings.app_mcp_streamable_http
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="GIMO Orchestrator", version=__version__, lifespan=lifespan)
@@ -515,7 +556,7 @@ def create_app() -> FastAPI:
     register_middlewares(app)
     _register_core_middlewares(app, actions_safe_targets)
 
-    # Mount FastMCP SSE Server
+    # Mount FastMCP servers.
     try:
         from tools.gimo_server.mcp_server import mcp as legacy_mcp
         if legacy_mcp:
@@ -523,10 +564,23 @@ def create_app() -> FastAPI:
             app.mount("/mcp", legacy_mcp.sse_app())
             logger.info("General MCP Bridge mounted at /mcp [LEGACY]")
         
-        # [OFFICIAL APP FAÇADE] - Phase 4: official App façade
-        from tools.gimo_server.app_mcp.server import mcp as app_mcp
-        app.mount("/mcp/app", app_mcp.sse_app())
-        logger.info("Official App façade MCP Server mounted at /mcp/app")
+        # [OFFICIAL APP FAÇADE] - Profile-driven App façade for ChatGPT Apps.
+        from tools.gimo_server.app_mcp.server import create_official_app_facade
+
+        app_mcp, official_facade, streamable_http_context = create_official_app_facade(
+            profile=settings.app_mcp_profile,
+            enable_streamable_http=settings.app_mcp_streamable_http,
+        )
+        app.mount("/mcp/app", official_facade)
+        app.state.app_mcp = app_mcp
+        app.state.app_mcp_streamable_http_context = streamable_http_context
+        app.state.app_mcp_profile = settings.app_mcp_profile
+        app.state.app_mcp_streamable_http = settings.app_mcp_streamable_http
+        logger.info(
+            "Official App façade mounted at /mcp/app (profile=%s, streamable_http=%s)",
+            settings.app_mcp_profile,
+            settings.app_mcp_streamable_http,
+        )
     except Exception as e:
         logger.error(f"Failed to mount FastMCP Server: {e}")
 
