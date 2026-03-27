@@ -232,3 +232,55 @@ async def test_subagent_termination_does_not_remove_workspace(monkeypatch, tmp_p
     assert workspace.exists()
     assert SubAgentManager._sub_agents[agent.id].status == "terminated"
     assert persisted, "termination should still persist inventory changes"
+
+
+def test_create_run_provisions_workspace_and_copies_validated_task_spec(monkeypatch, tmp_path):
+    from tools.gimo_server.models.core import OpsApproved, OpsDraft
+    from tools.gimo_server.services.ops_service import OpsService
+
+    OpsService.OPS_DIR = tmp_path
+    OpsService.DRAFTS_DIR = tmp_path / "drafts"
+    OpsService.APPROVED_DIR = tmp_path / "approved"
+    OpsService.RUNS_DIR = tmp_path / "runs"
+    OpsService.RUN_EVENTS_DIR = tmp_path / "run_events"
+    OpsService.RUN_LOGS_DIR = tmp_path / "run_logs"
+    OpsService.LOCKS_DIR = tmp_path / "locks"
+    OpsService.LOCK_FILE = tmp_path / ".ops.lock"
+    OpsService.ensure_dirs()
+
+    draft = OpsDraft(
+        id="d_1",
+        prompt="validated prompt",
+        context={
+            "validated_task_spec": {
+                "base_commit": "abc123",
+                "repo_handle": "repo_h",
+                "allowed_paths": ["app.py"],
+                "acceptance_criteria": "ok",
+                "evidence_hash": "hash1",
+                "context_pack_id": "ctx1",
+                "worker_model": "gpt-4o",
+                "requires_manual_merge": True,
+            }
+        },
+    )
+    approved = OpsApproved(id="a_1", draft_id="d_1", prompt="validated prompt", content="validated prompt")
+    OpsService._draft_path(draft.id).write_text(draft.model_dump_json(indent=2), encoding="utf-8")
+    OpsService._approved_path(approved.id).write_text(approved.model_dump_json(indent=2), encoding="utf-8")
+
+    workspace = tmp_path / "ephemeral" / "run_workspace"
+    workspace.mkdir(parents=True)
+    monkeypatch.setattr(
+        "tools.gimo_server.services.app_session_service.AppSessionService.get_path_from_handle",
+        lambda handle: str(tmp_path / "repo"),
+    )
+    monkeypatch.setattr(
+        "tools.gimo_server.services.sandbox_service.SandboxService.create_worktree_handle",
+        lambda run_id, repo_path, base_ref="main": SimpleNamespace(worktree_path=workspace),
+    )
+
+    run = OpsService.create_run("a_1")
+
+    assert run.validated_task_spec is not None
+    assert run.validated_task_spec["workspace_path"] == str(workspace)
+    assert run.validated_task_spec["repo_handle"] == "repo_h"

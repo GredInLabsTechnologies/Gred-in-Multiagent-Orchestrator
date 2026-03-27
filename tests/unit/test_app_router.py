@@ -67,6 +67,54 @@ def test_missing_app_sessions_fail_honestly(test_client):
     assert res.json()["detail"] == "Session not found"
 
 
+def test_app_draft_route_persists_canonical_ops_draft(test_client):
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    validated = {
+        "validated_task_spec": {
+            "base_commit": "abc123",
+            "repo_handle": "repo_h",
+            "allowed_paths": ["app.py"],
+            "acceptance_criteria": "Make it work",
+            "evidence_hash": "hash1",
+            "context_pack_id": "ctx1",
+            "worker_model": "gpt-4o",
+            "requires_manual_merge": True,
+        },
+        "repo_context_pack": {
+            "id": "ctx1",
+            "session_id": "s1",
+            "repo_handle": "repo_h",
+            "base_commit": "abc123",
+            "read_proofs": [],
+            "allowed_paths": ["app.py"],
+        },
+    }
+    created_draft = SimpleNamespace(id="d_123")
+
+    with patch(
+        "tools.gimo_server.routers.ops.app_router.AppSessionService.get_session",
+        return_value={"id": "s1"},
+    ), patch(
+        "tools.gimo_server.routers.ops.app_router.DraftValidationService.validate_draft",
+        return_value=validated,
+    ) as mock_validate, patch(
+        "tools.gimo_server.routers.ops.app_router.OpsService.create_draft",
+        return_value=created_draft,
+    ) as mock_create:
+        res = test_client.post(
+            "/ops/app/sessions/s1/drafts",
+            json={"acceptance_criteria": "Make it work", "allowed_paths": ["app.py"]},
+        )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["draft_id"] == "d_123"
+    assert payload["validated_task_spec"]["repo_handle"] == "repo_h"
+    mock_validate.assert_called_once()
+    mock_create.assert_called_once()
+
+
 def test_phase_5_routes_fail_honestly_for_missing_session(test_client):
     app.dependency_overrides[verify_token] = _auth("operator")
 

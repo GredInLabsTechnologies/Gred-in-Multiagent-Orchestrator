@@ -186,9 +186,10 @@ class RunMixin:
 
             draft = cls.get_draft(approved.draft_id)
             context = dict((draft.context if draft else {}) or {})
+            validated_task_spec = dict(context.get("validated_task_spec") or {})
             repo_context = dict(context.get("repo_context") or {})
             repo_id = str(repo_context.get("repo_id") or repo_context.get("target_branch") or "default")
-            commit_base = str(context.get("commit_base") or "HEAD")
+            commit_base = str(validated_task_spec.get("base_commit") or context.get("commit_base") or "HEAD")
             run_key = cls._deterministic_run_id(approved.draft_id, commit_base)
             run_id = cls._new_run_id()
 
@@ -214,6 +215,18 @@ class RunMixin:
             if runs_for_key:
                 attempt = max(int(item.attempt or 1) for item in runs_for_key) + 1
 
+            if validated_task_spec:
+                from ..app_session_service import AppSessionService
+                from ..sandbox_service import SandboxService
+
+                repo_handle = str(validated_task_spec.get("repo_handle") or "").strip()
+                repo_path = AppSessionService.get_path_from_handle(repo_handle) if repo_handle else None
+                if not repo_path:
+                    raise RuntimeError("VALIDATED_TASK_SPEC_REPO_UNRESOLVABLE")
+
+                sandbox = SandboxService.create_worktree_handle(run_id, repo_path, base_ref=commit_base)
+                validated_task_spec["workspace_path"] = str(sandbox.worktree_path)
+
             run = OpsRun(
                 id=run_id,
                 approved_id=approved_id,
@@ -228,6 +241,7 @@ class RunMixin:
                 started_at=None,
                 created_at=_utcnow(),
                 attempt=attempt,
+                validated_task_spec=validated_task_spec or None,
             )
             entry = cls._append_run_log_entry(run.id, level="INFO", msg="Run created")
             run.log = [entry]

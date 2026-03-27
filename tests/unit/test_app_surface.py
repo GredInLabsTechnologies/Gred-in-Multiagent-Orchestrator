@@ -95,6 +95,8 @@ async def test_app_mcp_lifecycle_roundtrip():
 async def test_app_surface_does_not_leak_paths():
     """P4: Verifica que la superficie de App no expone host paths."""
     repos = _parse_text_payload(await mcp.call_tool("list_app_repos", {}))
+    if isinstance(repos, dict) and "repo_id" in repos:
+        repos = [repos]
     assert isinstance(repos, list), f"Se esperaba una lista de repositorios, se obtuvo {type(repos)}: {repos}"
 
     host_paths = set(AppSessionService.get_handle_mapping().values())

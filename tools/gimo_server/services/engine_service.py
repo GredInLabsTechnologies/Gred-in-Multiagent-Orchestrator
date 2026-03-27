@@ -255,6 +255,10 @@ class EngineService:
         approved = OpsService.get_approved(run.approved_id)
         draft = OpsService.get_draft(approved.draft_id) if approved else None
         context = dict((draft.context if draft else {}) or {})
+        validated_task_spec = dict(getattr(run, "validated_task_spec", None) or {})
+        workspace_path = str(validated_task_spec.get("workspace_path") or "").strip()
+        if workspace_path:
+            context["workspace_root"] = workspace_path
 
         # Inject draft prompt into context so LLM stages have access to it
         if draft and getattr(draft, "prompt", None) and "prompt" not in context:

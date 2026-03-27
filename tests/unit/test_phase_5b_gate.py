@@ -60,45 +60,41 @@ async def test_worker_context_is_scoped_by_task_spec(mock_ops_service, tmp_path)
     repo_dir.mkdir()
     (repo_dir / "file1.py").write_text("content1")
     (repo_dir / "file2.py").write_text("content2")
-    
-    # Mock AppSessionService.get_path_from_handle
-    with patch.object(AppSessionService, 'get_path_from_handle', return_value=str(repo_dir)):
-        # Create run with task spec
-        appr = OpsApproved(id="appr_2", draft_id="d_2", content="test", prompt="test")
-        _persist_approved_stub(appr)
-        
-        run = mock_ops_service.create_run(appr.id)
-        run.validated_task_spec = {
-            "base_commit": "HEAD",
-            "repo_handle": "h_repo",
-            "allowed_paths": ["file1.py"],
-            "acceptance_criteria": "test passes",
-            "evidence_hash": "h1",
-            "context_pack_id": "cp_1",
-            "worker_model": "gpt-4",
-            "requires_manual_merge": True
-        }
-        mock_ops_service._persist_run(run)
-        
-        worker = RunWorker()
-        
-        # Mock EngineService.execute_run in the MODULE where it's defined
-        with patch("tools.gimo_server.services.engine_service.EngineService.execute_run") as mock_exec:
-            mock_exec.return_value = asyncio.Future()
-            mock_exec.return_value.set_result({"status": "completed"})
-            
-            await worker._execute_run(run.id)
-            
-            # Re-read run to check child_context
-            final_run = mock_ops_service.get_run(run.id)
-            child_ctx = final_run.child_context
-            
-            assert child_ctx is not None
-            assert "gen_context" in child_ctx
-            assert "bounded_files" in child_ctx["gen_context"]
-            assert "allowed_paths" in child_ctx
-            assert "file1.py" in child_ctx["allowed_paths"]
-            assert any(f["path"] == "file1.py" for f in child_ctx["gen_context"]["bounded_files"])
+
+    appr = OpsApproved(id="appr_2", draft_id="d_2", content="test", prompt="test")
+    _persist_approved_stub(appr)
+
+    run = mock_ops_service.create_run(appr.id)
+    run.validated_task_spec = {
+        "base_commit": "HEAD",
+        "repo_handle": "h_repo",
+        "workspace_path": str(repo_dir),
+        "allowed_paths": ["file1.py"],
+        "acceptance_criteria": "test passes",
+        "evidence_hash": "h1",
+        "context_pack_id": "cp_1",
+        "worker_model": "gpt-4",
+        "requires_manual_merge": True
+    }
+    mock_ops_service._persist_run(run)
+
+    worker = RunWorker()
+
+    with patch("tools.gimo_server.services.engine_service.EngineService.execute_run") as mock_exec:
+        mock_exec.return_value = asyncio.Future()
+        mock_exec.return_value.set_result({"status": "completed"})
+
+        await worker._execute_run(run.id)
+
+        final_run = mock_ops_service.get_run(run.id)
+        child_ctx = final_run.child_context
+
+        assert child_ctx is not None
+        assert "gen_context" in child_ctx
+        assert "bounded_files" in child_ctx["gen_context"]
+        assert "allowed_paths" in child_ctx
+        assert "file1.py" in child_ctx["allowed_paths"]
+        assert any(f["path"] == "file1.py" for f in child_ctx["gen_context"]["bounded_files"])
 
 @pytest.mark.asyncio
 async def test_tool_executor_request_context_workflow(tmp_path):
@@ -274,31 +270,30 @@ async def test_allowed_paths_survives_engine_context_merge(mock_ops_service, tmp
     repo_dir = tmp_path / "repo_merge"
     repo_dir.mkdir()
     (repo_dir / "target.py").write_text("print('hello')")
-    
-    with patch.object(AppSessionService, 'get_path_from_handle', return_value=str(repo_dir)):
-        appr = OpsApproved(id="appr_4", draft_id="d_4", content="test", prompt="test")
-        _persist_approved_stub(appr)
-        
-        run = mock_ops_service.create_run(appr.id)
-        run.validated_task_spec = {
-            "base_commit": "HEAD",
-            "repo_handle": "h1",
-            "allowed_paths": ["target.py"],
-            "acceptance_criteria": "done",
-            "evidence_hash": "abc",
-            "context_pack_id": "cp1",
-            "worker_model": "m1",
-            "requires_manual_merge": True
-        }
-        mock_ops_service._persist_run(run)
-        
-        worker = RunWorker()
-        with patch("tools.gimo_server.services.engine_service.EngineService.execute_run") as mock_exec:
-            await worker._execute_run(run.id)
-            
-            # Check session state before engine call
-            final_run = mock_ops_service.get_run(run.id)
-            assert final_run.child_context["allowed_paths"] == ["target.py"]
+
+    appr = OpsApproved(id="appr_4", draft_id="d_4", content="test", prompt="test")
+    _persist_approved_stub(appr)
+
+    run = mock_ops_service.create_run(appr.id)
+    run.validated_task_spec = {
+        "base_commit": "HEAD",
+        "repo_handle": "h1",
+        "workspace_path": str(repo_dir),
+        "allowed_paths": ["target.py"],
+        "acceptance_criteria": "done",
+        "evidence_hash": "abc",
+        "context_pack_id": "cp1",
+        "worker_model": "m1",
+        "requires_manual_merge": True
+    }
+    mock_ops_service._persist_run(run)
+
+    worker = RunWorker()
+    with patch("tools.gimo_server.services.engine_service.EngineService.execute_run") as mock_exec:
+        await worker._execute_run(run.id)
+
+        final_run = mock_ops_service.get_run(run.id)
+        assert final_run.child_context["allowed_paths"] == ["target.py"]
 
 @pytest.mark.asyncio
 async def test_run_stream_propagates_session_id():
@@ -349,7 +344,7 @@ async def test_agentic_loop_does_not_delegate_free_recon_to_worker(mock_ops_serv
 
 @pytest.mark.asyncio
 async def test_execution_without_repo_context_pack_is_rejected_or_blocked(mock_ops_service):
-    # If repo_handle cannot be resolved, block.
+    # If canonical workspace_path is absent, block instead of falling back to source repo resolution.
     appr = OpsApproved(id="appr_6", draft_id="d_6", content="test", prompt="test")
     _persist_approved_stub(appr)
     
@@ -366,13 +361,12 @@ async def test_execution_without_repo_context_pack_is_rejected_or_blocked(mock_o
     }
     mock_ops_service._persist_run(run)
     
-    with patch.object(AppSessionService, 'get_path_from_handle', return_value=None):
-        worker = RunWorker()
-        await worker._execute_run(run.id)
-        
-        updated_run = mock_ops_service.get_run(run.id)
-        assert updated_run.status == "error"
-        assert any("repo_handle to path" in entry["msg"] for entry in updated_run.log)
+    worker = RunWorker()
+    await worker._execute_run(run.id)
+    
+    updated_run = mock_ops_service.get_run(run.id)
+    assert updated_run.status == "error"
+    assert any("Missing canonical workspace_path" in entry["msg"] for entry in updated_run.log)
 
 @pytest.mark.asyncio
 async def test_execution_with_out_of_scope_path_is_rejected(mock_ops_service, tmp_path):
