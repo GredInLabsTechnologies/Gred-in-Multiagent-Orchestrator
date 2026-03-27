@@ -284,3 +284,58 @@ def test_create_run_provisions_workspace_and_copies_validated_task_spec(monkeypa
     assert run.validated_task_spec is not None
     assert run.validated_task_spec["workspace_path"] == str(workspace)
     assert run.validated_task_spec["repo_handle"] == "repo_h"
+
+
+def test_create_run_can_target_source_repo_for_sovereign_surface(monkeypatch, tmp_path):
+    from tools.gimo_server.models.core import OpsApproved, OpsDraft
+    from tools.gimo_server.services.ops_service import OpsService
+
+    OpsService.OPS_DIR = tmp_path
+    OpsService.DRAFTS_DIR = tmp_path / "drafts"
+    OpsService.APPROVED_DIR = tmp_path / "approved"
+    OpsService.RUNS_DIR = tmp_path / "runs"
+    OpsService.RUN_EVENTS_DIR = tmp_path / "run_events"
+    OpsService.RUN_LOGS_DIR = tmp_path / "run_logs"
+    OpsService.LOCKS_DIR = tmp_path / "locks"
+    OpsService.LOCK_FILE = tmp_path / ".ops.lock"
+    OpsService.ensure_dirs()
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    draft = OpsDraft(
+        id="d_2",
+        prompt="validated prompt",
+        context={
+            "surface": "operator",
+            "workspace_mode": "source_repo",
+            "validated_task_spec": {
+                "base_commit": "abc123",
+                "repo_handle": "repo_h",
+                "allowed_paths": ["app.py"],
+                "acceptance_criteria": "ok",
+                "evidence_hash": "hash1",
+                "context_pack_id": "ctx1",
+                "worker_model": "gpt-4o",
+                "requires_manual_merge": True,
+            },
+        },
+    )
+    approved = OpsApproved(id="a_2", draft_id="d_2", prompt="validated prompt", content="validated prompt")
+    OpsService._draft_path(draft.id).write_text(draft.model_dump_json(indent=2), encoding="utf-8")
+    OpsService._approved_path(approved.id).write_text(approved.model_dump_json(indent=2), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "tools.gimo_server.services.app_session_service.AppSessionService.get_path_from_handle",
+        lambda handle: str(repo_root),
+    )
+    monkeypatch.setattr(
+        "tools.gimo_server.services.sandbox_service.SandboxService.create_worktree_handle",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("sandbox must not be created")),
+    )
+
+    run = OpsService.create_run("a_2")
+
+    assert run.validated_task_spec is not None
+    assert run.validated_task_spec["workspace_mode"] == "source_repo"
+    assert run.validated_task_spec["workspace_path"] == str(repo_root)

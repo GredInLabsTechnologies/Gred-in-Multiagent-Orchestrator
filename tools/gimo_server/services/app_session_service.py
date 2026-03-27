@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from tools.gimo_server.config import get_settings
+from tools.gimo_server.services.workspace_policy_service import WorkspacePolicyService
 
 logger = logging.getLogger("orchestrator.services.app_session")
 
@@ -25,13 +26,19 @@ class AppSessionService:
     def create_session(cls, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         session_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
+        session_metadata = dict(metadata or {})
+        session_metadata.update(
+            WorkspacePolicyService.default_metadata_for_surface(
+                WorkspacePolicyService.SURFACE_CHATGPT_APP
+            )
+        )
         session_data = {
             "id": session_id,
             "repo_id": None, # handle opaco
             "status": "idle",
             "created_at": now,
             "updated_at": now,
-            "metadata": metadata or {}
+            "metadata": session_metadata
         }
         cls._save_session(session_id, session_data)
         return session_data

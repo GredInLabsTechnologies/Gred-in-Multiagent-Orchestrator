@@ -367,7 +367,10 @@ async def config_thread(
 ):
     """P2: Updates thread session configuration like effort and permission modes."""
     _require_role(auth, "operator")
-    success = ThreadSessionService.update_config(thread_id, config_data)
+    try:
+        success = ThreadSessionService.update_config(thread_id, config_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not success:
         raise HTTPException(status_code=404, detail="Thread not found")
     return {"status": "ok"}

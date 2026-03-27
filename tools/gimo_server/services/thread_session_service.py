@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict, Optional
 from ..ops_models import GimoThread
 from .conversation_service import ConversationService
+from .workspace_policy_service import WorkspacePolicyService
 
 logger = logging.getLogger("orchestrator.services.thread_session")
 
@@ -17,10 +18,18 @@ class ThreadSessionService:
     @classmethod
     def update_config(cls, thread_id: str, config_data: Dict[str, Any]) -> bool:
         def _mutate(thread: GimoThread) -> bool:
+            if "surface" in config_data or "orchestrator_authority" in config_data:
+                raise ValueError("surface and orchestrator_authority are backend-controlled and cannot be overridden")
             if "effort" in config_data:
                 thread.metadata["effort"] = config_data["effort"]
             if "permissions" in config_data:
                 thread.metadata["permissions"] = config_data["permissions"]
+            if "workspace_mode" in config_data:
+                surface = str(thread.metadata.get("surface") or WorkspacePolicyService.SURFACE_OPERATOR)
+                thread.metadata["workspace_mode"] = WorkspacePolicyService.resolve_effective_mode(
+                    requested_mode=str(config_data["workspace_mode"]),
+                    surface=surface,
+                )
             return True
         return bool(ConversationService.mutate_thread(thread_id, _mutate))
 

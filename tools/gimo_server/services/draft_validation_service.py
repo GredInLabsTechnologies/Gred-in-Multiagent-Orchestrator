@@ -21,7 +21,7 @@ class DraftValidationService:
         session = AppSessionService.get_session(session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found")
-            
+
         read_proofs = session.get("read_proofs", [])
         if not read_proofs:
             # 5A: No ValidatedTaskSpec without evidence.
@@ -102,6 +102,8 @@ class DraftValidationService:
         # base_commit from the latest read proof or session
         base_commit = next(iter(evidence_base_commits))
         
+        worker_model = str(payload.get("worker_model") or "").strip() or "gpt-4o"
+
         validated_task_spec = {
             "base_commit": base_commit,
             "repo_handle": repo_handle,
@@ -109,7 +111,7 @@ class DraftValidationService:
             "acceptance_criteria": acceptance_criteria,
             "evidence_hash": evidence_hash,
             "context_pack_id": f"ctx_{session_id[:8]}_{evidence_hash[:8]}", # Opaque handle
-            "worker_model": payload.get("worker_model", "gpt-4o"), # Default worker model
+            "worker_model": worker_model,
             "requires_manual_merge": True # Hard rule 5A
         }
         

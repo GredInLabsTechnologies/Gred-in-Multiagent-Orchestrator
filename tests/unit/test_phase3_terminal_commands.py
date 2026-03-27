@@ -154,6 +154,44 @@ def test_shared_executor_effort_and_permissions_use_thread_config_contract():
     ]
 
 
+def test_shared_executor_workspace_mode_uses_thread_config_contract():
+    calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    def api_request(config, method, path, **kwargs):
+        del config
+        calls.append((method, path, kwargs["json_body"]))
+        return 200, {}
+
+    surface = _surface()
+    callbacks = build_terminal_command_callbacks(_context(api_request), surface)
+
+    handled, _ = dispatch_slash_command("/workspace-mode", "source_repo", callbacks)
+
+    assert handled is True
+    assert calls == [
+        ("POST", "/ops/threads/thread-123/config", {"workspace_mode": "source_repo"}),
+    ]
+
+
+def test_shared_executor_workspace_mode_without_arg_reads_authoritative_status():
+    calls: list[tuple[str, str]] = []
+    snapshot = {"workspace_mode": "ephemeral", "orchestrator_authority": "gimo"}
+
+    def api_request(config, method, path, **kwargs):
+        del config, kwargs
+        calls.append((method, path))
+        return 200, snapshot
+
+    surface = _surface()
+    callbacks = build_terminal_command_callbacks(_context(api_request), surface)
+
+    handled, _ = dispatch_slash_command("/mode", "", callbacks)
+
+    assert handled is True
+    assert calls == [("GET", "/ops/operator/status")]
+    assert surface.rendered
+
+
 def test_shared_executor_add_uses_thread_context_contract():
     calls: list[tuple[str, str, dict[str, Any]]] = []
 

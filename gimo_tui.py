@@ -65,10 +65,12 @@ class TextualTerminalSurface(TerminalSurfaceAdapter):
         self._app._safe_call(self._app._apply_status_snapshot, snapshot)
         provider = snapshot.get("active_provider", "?")
         model = snapshot.get("active_model", "?")
+        workspace_mode = snapshot.get("workspace_mode", "ephemeral")
+        orchestrator_authority = snapshot.get("orchestrator_authority", "gimo")
         self._app._safe_call(
             self._app._write_log,
             Panel(
-                f"Provider: [cyan]{provider}[/cyan]\nModel: [dim]{model}[/dim]",
+                f"Provider: [cyan]{provider}[/cyan]\nModel: [dim]{model}[/dim]\nWorkspace mode: [bold]{workspace_mode}[/bold]\nOrchestrator: [bold]{orchestrator_authority}[/bold]",
                 title="Authoritative Status",
                 border_style="green",
             ),

@@ -30,6 +30,34 @@ def test_context_add_persists_attached_file(tmp_path):
     assert len(attached) == 1
     assert attached[0]["path"] == "docs.md"
 
+
+def test_thread_config_persists_workspace_mode(tmp_path):
+    ConversationService.THREADS_DIR = tmp_path
+    thread = ConversationService.create_thread(workspace_root="/tmp", title="test")
+
+    res = ThreadSessionService.update_config(thread.id, {"workspace_mode": "source_repo"})
+
+    assert res is True
+    updated = ConversationService.get_thread(thread.id)
+    assert updated.metadata["workspace_mode"] == "source_repo"
+
+
+def test_thread_creation_sets_backend_authored_surface_and_orchestrator(tmp_path):
+    ConversationService.THREADS_DIR = tmp_path
+    thread = ConversationService.create_thread(workspace_root="/tmp", title="test")
+
+    assert thread.metadata["surface"] == "operator"
+    assert thread.metadata["orchestrator_authority"] == "gimo"
+    assert thread.metadata["orchestrator_selection_allowed"] is True
+
+
+def test_thread_config_rejects_orchestrator_override(tmp_path):
+    ConversationService.THREADS_DIR = tmp_path
+    thread = ConversationService.create_thread(workspace_root="/tmp", title="test")
+
+    with pytest.raises(ValueError, match="backend-controlled"):
+        ThreadSessionService.update_config(thread.id, {"orchestrator_authority": "chatgpt_app"})
+
 def test_get_usage_explains_absence_if_not_authoritative(tmp_path):
     ConversationService.THREADS_DIR = tmp_path
     thread = ConversationService.create_thread(workspace_root="/tmp", title="Test")
@@ -52,13 +80,12 @@ def test_operator_status_reads_real_backend_sources_and_avoids_stubs(monkeypatch
     snapshot = OperatorStatusService.get_status_snapshot()
     
     assert snapshot["branch"] == "feature/test-branch"
-    
-    # Verify that unintegrated Phase 3 fields are completely absent rather than mocked
-    assert "backend_status" not in snapshot
+
+    # Verify the snapshot is backend-authored and avoids fake aggregated stubs.
+    assert snapshot["backend_status"] == "ok"
     assert "active_run" not in snapshot
-    assert "budget_spend" not in snapshot
-    assert "budget_limit" not in snapshot
     assert "context_percentage" not in snapshot
+    assert snapshot["dirty_files"] == ["a.py"]
 
 def test_notice_policy_budget_percentage_handles_missing_fields():
     notices = NoticePolicyService.evaluate_all({})

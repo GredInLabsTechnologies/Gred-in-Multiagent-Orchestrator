@@ -29,7 +29,12 @@ def test_operator_status_snapshot_unico_backend_authored(monkeypatch):
             id="t-123",
             workspace_root="/tmp",
             turns=[GimoTurn(id="turn-1", agent_id="cli")],
-            metadata={"permissions": "full-auto", "effort": "high"},
+            metadata={
+                "permissions": "full-auto",
+                "effort": "high",
+                "workspace_mode": "source_repo",
+                "orchestrator_authority": "gimo",
+            },
         )
         return [thread]
         
@@ -48,6 +53,8 @@ def test_operator_status_snapshot_unico_backend_authored(monkeypatch):
     assert snapshot["last_turn"] == "turn-1"
     assert snapshot["permissions"] == "full-auto"
     assert snapshot["effort"] == "high"
+    assert snapshot["workspace_mode"] == "source_repo"
+    assert snapshot["orchestrator_authority"] == "gimo"
     assert snapshot["backend_status"] == "ok"
     assert "alerts" in snapshot
     assert "active_run" not in snapshot

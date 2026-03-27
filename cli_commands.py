@@ -32,6 +32,7 @@ COMMAND_REGISTRY: list[SlashCommand] = [
     SlashCommand("/reset", "Reset backend thread context (prompts y/N confirmation)", "/reset"),
     SlashCommand("/tokens", "Show token usage: input, output, cost, ctx window %, breakdown", "/tokens"),
     SlashCommand("/diff", "Show current diff from backend (/ops/files/diff)", "/diff"),
+    SlashCommand("/workspace-mode", "Show or change workspace mode: ephemeral | source_repo", "/workspace-mode [ephemeral|source_repo]", aliases=("/mode",)),
     SlashCommand("/effort", "Set orchestrator effort level: low | high | max", "/effort <low|high|max>"),
     SlashCommand("/permissions", "Change HITL mode live: suggest | auto-edit | full-auto", "/permissions <suggest|auto-edit|full-auto>"),
     SlashCommand("/add", "Add a file to the active thread context", "/add <path>"),
@@ -43,6 +44,7 @@ COMMAND_REGISTRY: list[SlashCommand] = [
 
 EFFORT_VALUES: frozenset[str] = frozenset({"low", "high", "max"})
 PERMISSION_VALUES: frozenset[str] = frozenset({"suggest", "auto-edit", "full-auto"})
+WORKSPACE_MODE_VALUES: frozenset[str] = frozenset({"ephemeral", "isolated", "source_repo", "original", "original_repo"})
 
 
 def get_autocomplete_dict() -> dict[str, str]:
@@ -113,6 +115,16 @@ def dispatch_slash_command(
 
             if cmd_name == "/diff":
                 return True, callbacks["show_diff"]()
+
+            if cmd_name in {"/workspace-mode", "/mode"}:
+                mode_val = arg_str.strip().lower()
+                if not mode_val:
+                    return True, callbacks["handle_workspace_mode"]("")
+                if mode_val not in WORKSPACE_MODE_VALUES:
+                    return True, callbacks["invalid_arg"](
+                        f"/workspace-mode requires one of: ephemeral, source_repo, isolated, original, original_repo — got: '{mode_val}'"
+                    )
+                return True, callbacks["handle_workspace_mode"](mode_val)
 
             if cmd_name == "/effort":
                 effort_val = arg_str.strip().lower()

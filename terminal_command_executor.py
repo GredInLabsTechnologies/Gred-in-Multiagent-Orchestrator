@@ -415,6 +415,47 @@ def build_terminal_command_callbacks(
         _render_backend_error(surface, "Set permissions failed", status_code, payload)
         return None
 
+    def handle_workspace_mode(mode_val: str) -> None:
+        if not context.thread_id:
+            surface.render_message("[red]Workspace mode requires an active thread.[/red]")
+            return None
+
+        if not mode_val:
+            snapshot = _require_status_snapshot(
+                context,
+                surface,
+                error_prefix="Failed to fetch authoritative status",
+            )
+            if snapshot is None:
+                return None
+            current_mode = str(snapshot.get("workspace_mode") or "ephemeral")
+            orchestrator_authority = str(snapshot.get("orchestrator_authority") or "gimo")
+            surface.render(
+                Panel(
+                    "\n".join(
+                        [
+                            f"Workspace mode: [bold]{current_mode}[/bold]",
+                            f"Orchestrator authority: [bold]{orchestrator_authority}[/bold]",
+                        ]
+                    ),
+                    title="Workspace Mode",
+                    border_style="cyan",
+                )
+            )
+            return None
+
+        status_code, payload = context.api_request(
+            context.config,
+            "POST",
+            f"/ops/threads/{context.thread_id}/config",
+            json_body={"workspace_mode": mode_val},
+        )
+        if status_code in {200, 204}:
+            surface.render_message(f"[green]Workspace mode set to [bold]{mode_val}[/bold].[/green]")
+            return None
+        _render_backend_error(surface, "Set workspace mode failed", status_code, payload)
+        return None
+
     def add_file(path_val: str) -> None:
         if not context.thread_id:
             surface.render_message("[red]Adding context requires an active thread.[/red]")
@@ -503,6 +544,7 @@ def build_terminal_command_callbacks(
         "reset_context": reset_context,
         "show_tokens": show_tokens,
         "show_diff": show_diff,
+        "handle_workspace_mode": handle_workspace_mode,
         "set_effort": set_effort,
         "set_permissions": set_permissions,
         "add_file": add_file,

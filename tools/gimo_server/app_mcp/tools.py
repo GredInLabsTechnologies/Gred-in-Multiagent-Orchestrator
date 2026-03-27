@@ -81,7 +81,7 @@ def register_tools(mcp: FastMCP):
             "acceptance_criteria": acceptance_criteria,
             "allowed_paths": allowed_paths or [],
         }
-        if worker_model:
+        if worker_model is not None:
             payload["worker_model"] = worker_model
         try:
             result = DraftValidationService.validate_draft(session_id, payload)

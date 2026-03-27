@@ -313,6 +313,26 @@ def test_draft_validation_requires_acceptance_criteria_payload(test_client, sess
     assert res.status_code == 422
     assert res.json()["detail"] == "Invalid request payload."
 
+
+def test_draft_validation_allows_worker_model_for_chatgpt_app_workers(test_client, session_with_repo):
+    session_id, _ = session_with_repo
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    res = test_client.get(f"/ops/app/sessions/{session_id}/recon/list")
+    file_handle = res.json()[0]["handle"]
+    test_client.get(f"/ops/app/sessions/{session_id}/recon/read/{file_handle}")
+
+    res = test_client.post(
+        f"/ops/app/sessions/{session_id}/drafts",
+        json={
+            "acceptance_criteria": "Bound to app surface",
+            "allowed_paths": ["app.py"],
+            "worker_model": "gpt-4o",
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["validated_task_spec"]["worker_model"] == "gpt-4o"
+
 def test_context_request_routes_fail_honestly_for_missing_session_and_request(test_client):
     app.dependency_overrides[verify_token] = _auth("operator")
 

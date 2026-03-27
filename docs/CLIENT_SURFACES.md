@@ -36,6 +36,8 @@ All domain logic, execution authority, and state persistence lives strictly in t
 - **Consumption**: A hardened, purpose-built façade mounted at `/mcp/app` (**[OFFICIAL FAÇADE]**).
 - **Parity**: Shares the same backend authority as CLI and Web via Canonical Contracts.
 - **Note**: This is the primary entry point for modern external agents.
+- **Authority note**: ChatGPT Apps is not a sovereign operator surface. From the user perspective, the conversational ChatGPT-side agent acts as the outer orchestrator, so this surface must remain more constrained than first-party GIMO surfaces.
+- **Agent note**: ChatGPT Apps may request or trigger worker execution through GIMO, but it must not expose orchestrator selection or create a second orchestrator authority for the same session.
 
 ---
 
@@ -49,6 +51,12 @@ All domain logic, execution authority, and state persistence lives strictly in t
 | Execution | `RunWorker` (Backend) | `RunWorker` (Backend) | `RunWorker` (Backend) |
 
 All surfaces are strictly **thin clients** consuming the same **Canonical Backend**. No surface-specific domain logic is permitted.
+
+Additional invariant:
+
+- there is exactly one orchestrator authority per active session
+- workers may be multiple
+- ChatGPT Apps must not introduce a second independent orchestrator authority inside the same session
 
 ---
 

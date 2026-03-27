@@ -24,7 +24,190 @@ Core principles:
 
 ---
 
-## 1) Runtime architecture (as implemented)
+## 1) Canonical terminology and authority
+
+This section is authoritative. It exists to stop recurring ambiguity between provider, model, agent, orchestrator, and worker.
+
+### 1.1 Provider
+
+A **provider** is the external service or runtime that gives GIMO access to AI capability.
+
+Examples:
+
+- OpenAI
+- Anthropic
+- Google
+- Ollama
+- an OpenAI-compatible endpoint
+
+A provider is **not** a model and **not** an agent.
+
+A single provider may expose **multiple models** through its API, subscription, connector, or runtime.
+
+Short version:
+
+- provider = who gives access to AI service
+
+### 1.2 Model
+
+A **model** is the concrete LLM exposed by a provider.
+
+A provider can expose many models. Those models may differ in:
+
+- coding strength
+- reasoning strength
+- multimodal capability
+- design or aesthetic capability
+- latency
+- cost
+- context window
+
+Short version:
+
+- provider = who gives access
+- model = which concrete LLM is being used
+
+### 1.3 Agent
+
+In GIMO, an **agent** is an active AI unit operating inside the system.
+
+In practice, an agent is usually:
+
+- a concrete model
+- assigned a role
+- given a goal, scope, or responsibility
+
+This means that in casual conversation people may sometimes blur `model` and `agent`, and that is acceptable. But when precision matters:
+
+- model = the LLM itself
+- agent = that model as an active unit inside GIMO with a role and operational responsibility
+
+Short version:
+
+- every agent uses a model
+- not every mention of a model implies an active agent instance
+
+### 1.4 Orchestrator
+
+The **orchestrator** is the highest non-human agent authority in GIMO.
+
+Authority ladder:
+
+- human
+- orchestrator
+- workers
+
+An orchestrator is an agent designated to coordinate the full agentic flow under human authority.
+
+Its responsibilities may include:
+
+- understanding the user objective
+- mapping the repository
+- planning and decomposing work
+- deciding which workers to use
+- spawning, replacing, or stopping agents
+- validating worker outputs
+- requesting more context
+- researching externally when allowed
+- programming directly when appropriate
+- deciding when a session is operationally complete
+
+The orchestrator operates under:
+
+- human authority
+- backend or server authority
+- GICS policy
+- configured permission and autonomy mode
+
+The orchestrator may operate in:
+
+- fully audited mode
+- semi-automatic mode
+- fully automatic mode
+
+depending on configuration and policy.
+
+Important distinction:
+
+- the orchestrator is a kind of agent
+- not every agent is an orchestrator
+
+### 1.5 Worker
+
+A **worker** is the lowest-authority active agent tier in GIMO.
+
+Workers are delegated executors selected by the orchestrator for specific tasks.
+
+Typical worker responsibilities:
+
+- implement code
+- edit files
+- analyze a bounded subsystem
+- review or validate a bounded artifact
+- perform specialized design or multimodal work
+
+Workers do not define top-level operational authority. They execute within the scope delegated by the orchestrator.
+
+Short version:
+
+- orchestrator = coordinates and decides
+- worker = executes delegated work
+
+### 1.6 Single-orchestrator invariant
+
+For a given GIMO session, thread, or active agentic execution context, there must be **exactly one orchestrator authority**.
+
+This is a system invariant.
+
+Allowed:
+
+- one orchestrator
+- zero or more workers
+
+Not allowed:
+
+- multiple orchestrators competing within the same active session
+- multiple parallel orchestrator authorities for the same user thread
+
+Future concepts such as helper, chronicler, or assistant-orchestrator are explicitly out of scope for the current release line and must not weaken the single-orchestrator invariant.
+
+### 1.7 Surface note: ChatGPT Apps
+
+For ChatGPT Apps, the conversational ChatGPT-side agent acts as the outer interactive orchestrator from the user's point of view.
+
+Because ChatGPT Apps run through a third-party-controlled surface, they are more restricted than sovereign first-party surfaces such as CLI/TUI, MCP, or internal operator UIs.
+
+Implications:
+
+- ChatGPT Apps must remain more constrained
+- ChatGPT Apps must not gain unrestricted operator powers
+- ChatGPT Apps must not be treated as a sovereign repo-control surface
+- App-facing controls may be intentionally narrower than first-party surfaces
+- ChatGPT Apps may still cause GIMO to deploy workers
+- ChatGPT Apps must not choose or replace the session orchestrator authority
+
+### 1.8 Practical selection logic
+
+The orchestrator should select workers according to task fitness, not by treating all providers or models as equivalent.
+
+Examples:
+
+- choose a strong coding model for heavy implementation work
+- choose a strong multimodal or design-capable model for visual work
+- choose a cheaper or lighter model for narrow bounded tasks when sufficient
+
+This means the following are related but distinct:
+
+- provider choice
+- model choice
+- agent role
+- orchestrator authority
+
+They must not be collapsed into a single fuzzy concept.
+
+---
+
+## 2) Runtime architecture (as implemented)
 
 High level:
 
@@ -66,7 +249,7 @@ Durability model:
 
 ---
 
-## 2) Security model (roles, tokens, and guardrails)
+## 3) Security model (roles, tokens, and guardrails)
 
 ### 2.1 Tokens and roles
 
@@ -102,7 +285,7 @@ These are invariants of the system:
 
 ---
 
-## 3) OPS/GIMO operational objects (storage)
+## 4) OPS/GIMO operational objects (storage)
 
 Directory: `.orch_data/ops/`
 
@@ -115,9 +298,9 @@ Directory: `.orch_data/ops/`
 
 ---
 
-## 4) API contract (implemented today)
+## 5) API contract (implemented today)
 
-### 4.1 Key endpoints
+### 5.1 Key endpoints
 
 All endpoints require `Authorization: Bearer <TOKEN>` unless explicitly public.
 
@@ -169,13 +352,13 @@ All endpoints require `Authorization: Bearer <TOKEN>` unless explicitly public.
 - `GET /ops/config` (operator+) — read
 - `PUT /ops/config` (admin) — update
 
-### 4.2 Filtered OpenAPI for integrations
+### 5.2 Filtered OpenAPI for integrations
 
 - `GET /ops/openapi.json` returns a **filtered** OpenAPI spec suitable for external tools.
 
 ---
 
-## 5) Configuration (OpsConfig)
+## 6) Configuration (OpsConfig)
 
 Persisted in `.orch_data/ops/config.json`.
 
@@ -188,7 +371,7 @@ Fields:
 
 ---
 
-## 6) Background loops and cleanup
+## 7) Background loops and cleanup
 
 Background tasks started from FastAPI lifespan:
 
@@ -199,7 +382,7 @@ Background tasks started from FastAPI lifespan:
 
 ---
 
-## 7) UI contract (current)
+## 8) UI contract (current)
 
 The Orchestrator UI is served from `tools/orchestrator_ui/dist/` when built (dev server on port 5173).
 
@@ -222,7 +405,7 @@ The UI:
 
 ---
 
-## 8) Multi-agent direction (frozen specification boundary)
+## 9) Multi-agent direction (frozen specification boundary)
 
 GIMO is being used as the operational substrate for multi-agent execution.
 

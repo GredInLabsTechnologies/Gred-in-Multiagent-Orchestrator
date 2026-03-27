@@ -16,6 +16,7 @@ from tools.gimo_server.services.lifecycle_errors import (
 from tools.gimo_server.services.merge_gate_service import MergeGateService
 from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.review_merge_service import ReviewMergeService
+from tools.gimo_server.services.workspace_policy_service import WorkspacePolicyService
 
 from tools.gimo_server.schemas.repo_recon import ReconEntry, FileContentResponse
 from tools.gimo_server.schemas.draft_validation import DraftCreateRequest, DraftValidationResponse
@@ -152,6 +153,8 @@ async def create_draft(
                 "execution_decision": "MANUAL_REVIEW_REQUIRED",
                 "intent_effective": "CODE_CHANGE",
                 "commit_base": validated_task_spec.get("base_commit"),
+                "surface": WorkspacePolicyService.SURFACE_CHATGPT_APP,
+                "workspace_mode": WorkspacePolicyService.MODE_EPHEMERAL,
             },
         )
         return {

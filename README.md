@@ -88,6 +88,7 @@ Para variables de GIMO Web (Firebase, Stripe, licencias), ver `apps/web/.env.exa
 ## Documentaci&oacute;n
 
 - [Arquitectura del Sistema](docs/SYSTEM.md)
+- [Terminolog&iacute;a can&oacute;nica e invariantes de autoridad](docs/SYSTEM.md#1-canonical-terminology-and-authority)
 - [Instalaci&oacute;n y Configuraci&oacute;n](docs/SETUP.md)
 - [Referencia API](docs/API.md)
 - [Seguridad](docs/SECURITY.md)

@@ -296,6 +296,8 @@ class ConsoleTerminalSurface(TerminalSurfaceAdapter):
         provider = str(snapshot.get("active_provider") or "unknown")
         model = str(snapshot.get("active_model") or "unknown")
         permissions = str(snapshot.get("permissions") or "suggest")
+        workspace_mode = str(snapshot.get("workspace_mode") or "ephemeral")
+        orchestrator_authority = str(snapshot.get("orchestrator_authority") or "gimo")
         branch = str(snapshot.get("branch") or "?")
         budget_status = str(snapshot.get("budget_status") or "unknown")
         budget_pct = snapshot.get("budget_percentage")
@@ -312,6 +314,8 @@ class ConsoleTerminalSurface(TerminalSurfaceAdapter):
             f"System: [bold]v{version}[/bold]",
             f"Provider: [cyan]{provider}[/cyan] / {model}",
             f"Permissions: [bold]{permissions}[/bold]",
+            f"Workspace mode: [bold]{workspace_mode}[/bold]",
+            f"Orchestrator authority: [bold]{orchestrator_authority}[/bold]",
             f"Workspace: [dim]{self._workspace_root}[/dim]",
             f"Branch: [cyan]{branch}[/cyan]",
             f"Budget: [bold]{budget_status}[/bold]"

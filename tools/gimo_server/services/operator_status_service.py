@@ -42,16 +42,20 @@ class OperatorStatusService:
         ) or getattr(cfg, "model_id", None)
 
     @classmethod
-    def _thread_snapshot(cls) -> tuple[str | None, str | None, str | None, str | None, float | None]:
+    def _thread_snapshot(
+        cls,
+    ) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None, float | None]:
         threads = ConversationService.list_threads()
         if not threads:
-            return None, None, None, None, None
+            return None, None, None, None, None, None, None
 
         thread = threads[0]
         metadata = thread.metadata if isinstance(thread.metadata, dict) else {}
         last_turn_id = thread.turns[-1].id if thread.turns else None
         permissions = metadata.get("permissions")
         effort = metadata.get("effort")
+        workspace_mode = metadata.get("workspace_mode")
+        orchestrator_authority = metadata.get("orchestrator_authority")
 
         ctx_pct = None
         usage = metadata.get("usage")
@@ -61,7 +65,7 @@ class OperatorStatusService:
             if isinstance(used, (int, float)) and isinstance(limit, (int, float)) and limit > 0:
                 ctx_pct = min(100.0, (float(used) / float(limit)) * 100.0)
 
-        return thread.id, last_turn_id, permissions, effort, ctx_pct
+        return thread.id, last_turn_id, permissions, effort, workspace_mode, orchestrator_authority, ctx_pct
 
     @classmethod
     def _active_run_snapshot(cls) -> tuple[str | None, str | None, str | None]:
@@ -101,7 +105,15 @@ class OperatorStatusService:
         dirty_files = GitService.get_changed_files(repo_root)
 
         active_provider, active_model = cls._provider_snapshot()
-        last_thread_id, last_turn_id, permissions, effort, context_percentage = cls._thread_snapshot()
+        (
+            last_thread_id,
+            last_turn_id,
+            permissions,
+            effort,
+            workspace_mode,
+            orchestrator_authority,
+            context_percentage,
+        ) = cls._thread_snapshot()
         active_run_id, active_run_status, active_run_stage = cls._active_run_snapshot()
         budget_percentage, budget_status, budget_spend, budget_limit = cls._budget_snapshot()
 
@@ -119,6 +131,10 @@ class OperatorStatusService:
             snapshot["permissions"] = permissions
         if effort is not None:
             snapshot["effort"] = effort
+        if workspace_mode is not None:
+            snapshot["workspace_mode"] = workspace_mode
+        if orchestrator_authority is not None:
+            snapshot["orchestrator_authority"] = orchestrator_authority
         if last_thread_id is not None:
             snapshot["last_thread"] = last_thread_id
         if last_turn_id is not None:

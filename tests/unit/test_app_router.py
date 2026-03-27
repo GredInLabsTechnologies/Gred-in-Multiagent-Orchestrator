@@ -115,6 +115,75 @@ def test_app_draft_route_persists_canonical_ops_draft(test_client):
     mock_create.assert_called_once()
 
 
+def test_app_draft_route_accepts_worker_model_for_workers(test_client):
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    validated = {
+        "validated_task_spec": {
+            "base_commit": "abc123",
+            "repo_handle": "repo_h",
+            "allowed_paths": ["app.py"],
+            "acceptance_criteria": "Make it work",
+            "evidence_hash": "hash1",
+            "context_pack_id": "ctx1",
+            "worker_model": "gpt-4o",
+            "requires_manual_merge": True,
+        },
+        "repo_context_pack": {
+            "id": "ctx1",
+            "session_id": "s1",
+            "repo_handle": "repo_h",
+            "base_commit": "abc123",
+            "read_proofs": [],
+            "allowed_paths": ["app.py"],
+        },
+    }
+
+    with patch(
+        "tools.gimo_server.routers.ops.app_router.AppSessionService.get_session",
+        return_value={"id": "s1"},
+    ), patch(
+        "tools.gimo_server.routers.ops.app_router.DraftValidationService.validate_draft",
+        return_value=validated,
+    ) as mock_validate, patch(
+        "tools.gimo_server.routers.ops.app_router.OpsService.create_draft",
+        return_value=SimpleNamespace(id="d_124"),
+    ):
+        res = test_client.post(
+            "/ops/app/sessions/s1/drafts",
+            json={
+                "acceptance_criteria": "Make it work",
+                "allowed_paths": ["app.py"],
+                "worker_model": "gpt-4o",
+            },
+        )
+
+    assert res.status_code == 200
+    assert res.json()["validated_task_spec"]["worker_model"] == "gpt-4o"
+    mock_validate.assert_called_once()
+    assert mock_validate.call_args.args[1]["worker_model"] == "gpt-4o"
+
+
+def test_app_draft_route_rejects_orchestrator_model_override(test_client):
+    app.dependency_overrides[verify_token] = _auth("operator")
+
+    with patch(
+        "tools.gimo_server.routers.ops.app_router.AppSessionService.get_session",
+        return_value={"id": "s1"},
+    ):
+        res = test_client.post(
+            "/ops/app/sessions/s1/drafts",
+            json={
+                "acceptance_criteria": "Make it work",
+                "allowed_paths": ["app.py"],
+                "orchestrator_model": "gpt-5.4",
+            },
+        )
+
+    assert res.status_code == 422
+    assert res.json()["detail"] == "Invalid request payload."
+
+
 def test_phase_5_routes_fail_honestly_for_missing_session(test_client):
     app.dependency_overrides[verify_token] = _auth("operator")
 

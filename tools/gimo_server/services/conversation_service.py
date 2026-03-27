@@ -11,6 +11,7 @@ from typing import Any, Callable, List, Optional, TypeVar
 from .notification_service import NotificationService
 from ..config import OPS_DATA_DIR
 from ..ops_models import GimoItem, GimoThread, GimoTurn
+from .workspace_policy_service import WorkspacePolicyService
 
 logger = logging.getLogger("orchestrator.services.conversation")
 _MutationResultT = TypeVar("_MutationResultT")
@@ -136,7 +137,10 @@ class ConversationService:
         cls._ensure_dir()
         thread = GimoThread(
             workspace_root=workspace_root,
-            title=title
+            title=title,
+            metadata=WorkspacePolicyService.default_metadata_for_surface(
+                WorkspacePolicyService.SURFACE_OPERATOR
+            ),
         )
         cls.save_thread(thread)
         return thread
