@@ -51,6 +51,8 @@ def llm_response_to_plan_nodes(
 ) -> tuple[List[PlanNode], List[PlanEdge]]:
     """Convert plan tasks into canonical PlanNode/PlanEdge objects."""
     normalized_plan = TaskDescriptorService.normalize_plan_data(plan_data)
+    raw_tasks = plan_data.get("tasks") or []
+    plan_context = dict(plan_data.get("context") or {})
     tasks = normalized_plan.get("tasks", [])
     if not tasks:
         raise ValueError("Plan data contains no tasks")
@@ -62,26 +64,33 @@ def llm_response_to_plan_nodes(
     depth_map, layer_index = _calculate_layout(tasks, task_ids)
 
     for i, task in enumerate(tasks):
+        raw_task = raw_tasks[i] if i < len(raw_tasks) and isinstance(raw_tasks[i], dict) else {}
+        task_context = {**plan_context, **raw_task, **task}
         tid = task.get("id", f"t_{i}")
         title = task.get("title", f"Task {i}")
         desc = task.get("description", "")
         depends = [d for d in (task.get("depends_on") or []) if d in task_ids]
-        descriptor = TaskDescriptorService.descriptor_from_task(task)
-        constraints = ConstraintCompilerService.compile_for_descriptor(descriptor)
+        descriptor = TaskDescriptorService.descriptor_from_task(task_context)
+        constraints = ConstraintCompilerService.compile_for_descriptor(descriptor, task_context=task_context)
         routing = ProfileRouterService.route(
             descriptor=descriptor,
             constraints=constraints,
             requested_preset=task.get("agent_preset"),
             legacy_mood=task.get("legacy_mood"),
         )
-        binding = ProfileBindingService.resolve_binding(
+        binding_resolution = ProfileBindingService.resolve_binding_decision(
+            descriptor=descriptor,
             requested_provider=task.get("requested_provider"),
             requested_model=task.get("requested_model"),
             binding_mode=routing.binding_mode,
+            constraints=constraints,
         )
+        binding = binding_resolution.binding
         task_fingerprint = TaskFingerprintService.fingerprint_for_descriptor(descriptor)
         role_definition = task.get("role_definition", "")
         prompt_parts = [part for part in [desc, role_definition] if str(part).strip()]
+        routing_summary = routing.summary.model_copy(update={"provider": binding.provider, "model": binding.model})
+        routing_reason = f"{routing.routing_reason}|binding={binding_resolution.reason}"
 
         task_role = routing.resolved_profile.task_role
         node_type = {
@@ -116,8 +125,8 @@ def llm_response_to_plan_nodes(
             task_fingerprint=task_fingerprint,
             task_descriptor=descriptor,
             resolved_profile=routing.resolved_profile,
-            routing_decision_summary=routing.summary,
-            routing_reason=routing.routing_reason,
+            routing_decision_summary=routing_summary,
+            routing_reason=routing_reason,
             execution_hints=PlanNodeExecutionHints(
                 legacy_mood=task.get("legacy_mood"),
                 requested_model=task.get("requested_model"),
@@ -303,7 +312,13 @@ class CustomPlanService:
         nodes, edges = llm_response_to_plan_nodes(plan_data)
         plan_name = name or plan_data.get("title", "AI Generated Plan")
         plan_desc = description or plan_data.get("objective", "")
-        req = CreatePlanRequest(name=plan_name, description=plan_desc, nodes=nodes, edges=edges)
+        req = CreatePlanRequest(
+            name=plan_name,
+            description=plan_desc,
+            context=dict(plan_data.get("context") or {}),
+            nodes=nodes,
+            edges=edges,
+        )
         return cls.create_plan(req)
 
     # ── CRUD ──

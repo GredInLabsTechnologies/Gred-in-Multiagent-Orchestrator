@@ -4,6 +4,8 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .provider import ProviderRoleBinding
+
 TaskRole = Literal["orchestrator", "executor", "researcher", "reviewer", "tool", "human_gate"]
 MoodName = Literal["neutral", "assertive", "calm", "analytical", "exploratory", "cautious", "collaborative", "didactic"]
 ExecutionPolicyName = Literal[
@@ -55,6 +57,14 @@ class TaskConstraints(BaseModel):
     allowed_policies: List[ExecutionPolicyName] = Field(default_factory=list)
     allowed_binding_modes: List[BindingMode] = Field(default_factory=lambda: ["plan_time"])
     requires_human_approval: bool = False
+    allowed_bindings: List[ProviderRoleBinding] = Field(default_factory=list)
+    surface: str = "operator"
+    workspace_mode: str = "ephemeral"
+    policy_decision: str = "allow"
+    policy_status_code: str = "POLICY_ALLOW"
+    intent_effective: str = ""
+    budget_mode: str = "standard"
+    compiler_notes: List[str] = Field(default_factory=list)
 
 
 class ResolvedAgentProfile(BaseModel):

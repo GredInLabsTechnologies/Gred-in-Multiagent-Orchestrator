@@ -16,10 +16,10 @@ para el plan oficial en:
 | 0 | Canon del nodo y del routing | `DONE` | Cerrada |
 | 1 | Separar `mood` de permisos | `DONE` | Cerrada |
 | 2 | Descriptor de tarea y fingerprint | `DONE` | Cerrada |
-| 3 | Compilador de constraints | `PARTIAL` | Abierta y siguiente |
-| 4 | `ProfileRouter` y binding real | `PARTIAL` | Abierta, bloqueada por F3 |
-| 5 | Materializacion correcta de planes y threads | `PARTIAL` | Abierta, bloqueada por F3 |
-| 6 | `CustomPlanService` ejecuta perfiles reales | `PARTIAL` | Abierta, bloqueada por F3 |
+| 3 | Compilador de constraints | `DONE` | Cerrada |
+| 4 | `ProfileRouter` y binding real | `DONE` | Cerrada |
+| 5 | Materializacion correcta de planes y threads | `PARTIAL` | Abierta y siguiente |
+| 6 | `CustomPlanService` ejecuta perfiles reales | `PARTIAL` | Abierta, bloqueada por F5 |
 | 7 | `GraphEngine` y `WorkflowGraph` | `NOT_STARTED` | No iniciada |
 | 8 | Learning GICS por fingerprint y perfil | `NOT_STARTED` | No iniciada |
 | 9 | Surface parity y catalogo canonico | `NOT_STARTED` | No iniciada |
@@ -59,25 +59,52 @@ para el plan oficial en:
 - `tools/gimo_server/services/plan_graph_builder.py` y lectores MCP aceptan
   shape vieja y canonica
 
-## Lo Que Falta
-
 ### Fase 3
 
-- integrar el compilador de constraints con:
-  - `runtime_policy_service.py`
-  - `intent_classification_service.py`
-  - `workspace_policy_service.py`
-  - `provider_topology_service.py`
-- introducir allowlist real para `binding_mode="runtime"`
-- demostrar que ningun ranking o binding posterior rompe el envelope compilado
+- `ConstraintCompilerService` ya compila un envelope duro por nodo usando
+  runtime policy, intent classification, workspace policy y topology
+- requests invalidos de `workspace_mode` por surface ya fallan cerrado; no hay
+  degradacion silenciosa a defaults
+- `TaskConstraints` ya conserva `allowed_bindings`, surface/workspace y notas
+  de compilacion
+- `ProfileRouterService` ya falla cerrado cuando el compilador devuelve
+  `allowed_policies=[]`
+- `ProfileRouterService` ya no puede emitir `executor` si el envelope compilado
+  solo permite politicas de lectura
+- `ProfileBindingService` ya no puede elegir `provider`, `model` o
+  `binding_mode` fuera del envelope compilado
+- la allowlist real de `binding_mode="runtime"` ya existe y esta probada
+- `TaskDescriptorService`, `conversation_router.py` y
+  `custom_plan_service.py` ya preservan y propagan el `context` del plan hasta
+  la compilacion por nodo
 
 ### Fase 4
 
-- convertir `ProfileRouterService` en router completo constraints-first
-- subordinar binding a `ModelRouterService` sin romper constraints
-- fijar la function objective explicita:
-  `seguridad -> exito -> calidad -> latencia -> coste`
-- dejar GICS solo como ajuste advisory
+- `ProfileRouterService` ya hace ranking constraints-first sobre candidatos de
+  preset validos
+- `ProfileRouterService` ya usa priors locales `task_semantic -> preset` y
+  emite razon auditable con `candidate_count` filtrado
+- `ProfileBindingService` ya subordina provider/model a
+  `ModelRouterService` sin salir del envelope compilado
+- `ProfileBindingService` ya falla cerrado cuando el compilador devuelve
+  `allowed_bindings=[]`; no puede escapar a topology
+- `ModelRouterService` ya fija orden explicito de decision para binding:
+  `constraints -> success -> quality -> latency -> cost`
+- `ModelRouterService` ya filtra por capacidad requerida y quality floor antes
+  de aplicar topology, latencia o coste
+- GICS ya solo ajusta score dentro del set valido y no reroutea despues del
+  ranking
+- `provider_service_impl.py` ya usa `ModelRouterService` para auto-binding
+- `provider_service_impl.py` ya preserva `selected_model` explicito y no lo
+  sobreescribe con auto-routing
+- `custom_plan_service.py` ya persiste `provider` y `model` en
+  `routing_decision_summary` y concatena la razon de binding al `routing_reason`
+
+## Lo Que Falta
+
+### Fase 4
+
+- nada; cerrada con evidencia abajo
 
 ### Fase 5
 
@@ -94,7 +121,7 @@ para el plan oficial en:
 ### Fases 7 a 11
 
 - siguen abiertas conforme al plan oficial
-- no deben empezarse antes de cerrar Fase 3
+- no deben cerrarse antes de cerrar Fase 5
 
 ## Evidencia Utilizada
 
@@ -135,17 +162,96 @@ python -m pytest -q `
   tests/unit/test_agentic_loop.py
 ```
 
-Ultimo resultado focal registrado:
+Verificacion nueva ejecutada para el cierre de Fase 3:
 
-- `118 passed`
+```powershell
+python -m pytest -q `
+  tests/unit/test_constraint_compiler_service.py `
+  tests/unit/test_profile_router_service.py `
+  tests/unit/test_task_descriptor_service.py `
+  tests/test_plan_approval.py `
+  tests/unit/test_provider_topology_service.py `
+  tests/unit/test_runtime_policy_service.py `
+  tests/unit/test_workspace_policy.py
+```
+
+Resultado:
+
+- `44 passed`
+
+Cobertura de cierre de Fase 3 demostrada:
+
+- `ConstraintCompilerService` ya usa `RuntimePolicyService`,
+  `IntentClassificationService`, `WorkspacePolicyService` y
+  `ProviderTopologyService`
+- `workspace_mode` invalido para la surface ya se rechaza con fail-closed
+- `runtime` queda bloqueado fuera del allowlist y probado
+- `ProfileRouterService` ya rechaza `allowed_policies=[]`
+- `ProfileRouterService` ya rebaja presets incompatibles al primer preset
+  compatible con el envelope compilado
+- `ProfileBindingService` ya no puede salir del allowlist de bindings
+- `surface`, `workspace_mode`, `budget` y topology a nivel de plan ya llegan al
+  compilador durante `approve` y `modify`
+
+Verificacion de no regresion sobre flows de plan:
+
+```powershell
+python -m pytest -q `
+  tests/unit/test_phase4_ops_routes.py `
+  tests/unit/test_routes.py `
+  tests/unit/test_plan_graph_builder.py `
+  tests/test_plan_approval.py
+```
+
+Resultado:
+
+- `71 passed`
+
+Verificacion nueva ejecutada para el cierre de Fase 4:
+
+```powershell
+python -m pytest -q `
+  tests/unit/test_constraint_compiler_service.py `
+  tests/unit/test_profile_router_service.py `
+  tests/unit/test_profile_binding_service.py `
+  tests/unit/test_task_descriptor_service.py `
+  tests/test_plan_approval.py `
+  tests/unit/test_phase4_ops_routes.py `
+  tests/unit/test_routes.py `
+  tests/unit/test_plan_graph_builder.py `
+  tests/unit/test_services.py `
+  tests/unit/test_adapters.py
+```
+
+Resultado:
+
+- `144 passed, 1 skipped`
+
+Cobertura de cierre de Fase 4 demostrada:
+
+- `ProfileRouterService` ya rankea solo presets compatibles con
+  `TaskConstraints`
+- `ProfileBindingService` ya delega provider/model a
+  `ModelRouterService.choose_binding_from_candidates(...)`
+- `ProfileBindingService` ya falla cerrado con `allowed_bindings=[]`
+- el objective ordering de binding ya es explicito y auditable:
+  `constraints -> success -> quality -> latency -> cost`
+- `ModelRouterService` ya hace gating por capacidad requerida y quality floor
+  antes de scorear latencia/coste
+- GICS ya solo ajusta score dentro del set valido y no puede ampliar
+  candidatos
+- `provider_service_impl.py` ya no hace reroute post-ranking por fiabilidad
+- `provider_service_impl.py` ya preserva `selected_model` explicito
+- `custom_plan_service.py` ya persiste `provider` y `model` en el summary de
+  routing del nodo
 
 ## Siguiente Fase Obligatoria
 
 La siguiente fase a cerrar es:
 
-- `Fase 3 - Compilador De Constraints`
+- `Fase 5 - Materializacion correcta de planes y threads`
 
-No debe cerrarse Fase 4, 5, 6, 7, 8, 9, 10 u 11 antes de cerrar Fase 3.
+No debe cerrarse Fase 6, 7, 8, 9, 10 u 11 antes de cerrar Fase 5.
 
 ## Regla Para El Siguiente Agente
 
@@ -154,6 +260,6 @@ El siguiente agente debe:
 1. leer primero el plan oficial en
    `docs/refactor/AGENT_PROFILE_ROUTING_MIGRATION_CANONICAL_PLAN_2026-03-28.md`
 2. usar este archivo solo como dashboard de estado
-3. trabajar solo Fase 3
-4. detenerse si descubre que Fase 3 depende de reabrir una fase marcada como
+3. trabajar solo Fase 5
+4. detenerse si descubre que Fase 5 depende de reabrir una fase marcada como
    `DONE`

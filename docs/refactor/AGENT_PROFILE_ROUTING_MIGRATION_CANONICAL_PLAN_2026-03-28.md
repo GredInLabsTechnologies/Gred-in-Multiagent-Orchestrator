@@ -13,7 +13,7 @@ Regla operativa:
 - `docs/refactor/AGENT_PROFILE_ROUTING_MIGRATION_STATUS_2026-03-27.md` es el
   dashboard de estado y evidencia
 - no se salta ninguna fase
-- el siguiente cierre obligatorio es la Fase 3
+- el siguiente cierre obligatorio es la Fase 4
 
 ## Estado Verificado Del Repo
 
@@ -22,8 +22,8 @@ Estado actual contra este plan oficial:
 - Fase 0: `DONE`
 - Fase 1: `DONE`
 - Fase 2: `DONE`
-- Fase 3: `PARTIAL`
-- Fase 4: `PARTIAL`
+- Fase 3: `DONE`
+- Fase 4: `DONE`
 - Fase 5: `PARTIAL`
 - Fase 6: `PARTIAL`
 - Fase 7: `NOT_STARTED`
@@ -34,9 +34,9 @@ Estado actual contra este plan oficial:
 
 Phase lock:
 
-1. No reabrir Fase 0, 1 o 2 salvo evidencia nueva de regresion real.
-2. El siguiente cierre obligatorio es Fase 3.
-3. Trabajo parcial en fases posteriores no autoriza saltarse Fase 3.
+1. No reabrir Fase 0, 1, 2 o 3 salvo evidencia nueva de regresion real.
+2. El siguiente cierre obligatorio es Fase 5.
+3. Trabajo parcial en fases posteriores no autoriza saltarse Fase 5.
 
 ## Resumen
 
@@ -349,7 +349,7 @@ Estado actual del repo: `DONE`
 
 ## Fase 3 - Compilador De Constraints
 
-Estado actual del repo: `PARTIAL`
+Estado actual del repo: `DONE`
 
 ### Objetivo
 
@@ -396,19 +396,38 @@ Estado actual del repo: `PARTIAL`
 - `tools/gimo_server/services/constraint_compiler_service.py` existe
 - `custom_plan_service.py` ya llama al compilador antes de `ProfileRouterService`
 - el default actual de `binding_mode` es `plan_time`
+- `ConstraintCompilerService` ya compila el envelope por nodo usando:
+  - `RuntimePolicyService` para deny/review duro sobre scope mutante
+  - `IntentClassificationService` para escalado de riesgo y core runtime
+  - `WorkspacePolicyService` para clamping de `workspace_experiment`
+  - `ProviderTopologyService` para el allowlist de bindings provider/model
+- `TaskConstraints` ya persiste `allowed_bindings`, surface/workspace y audit
+  basica del compilador
+- requests invalidos de `workspace_mode` por surface ya no degradan en silencio;
+  el compilador falla cerrado con `allowed_policies=[]` y
+  `policy_status_code="WORKSPACE_MODE_NOT_ALLOWED"`
+- `ProviderTopologyService` ya expone helpers para:
+  - resolver bindings validos por descriptor
+  - estrechar el envelope ante requests de provider/model sin salir del sobre
+- `ProfileRouterService` ya rechaza routing cuando el compilador devuelve
+  `allowed_policies=[]`
+- `ProfileRouterService` ya no puede devolver un preset mutante cuando el
+  envelope compilado solo permite `read_only` o `security_audit`
+- `ProfileBindingService` ya clampa `provider`, `model` y `binding_mode` al
+  envelope compilado
+- `custom_plan_service.py` ya pasa contexto de task al compilador y al binding,
+  de forma que el clamp ocurre antes de persistir el nodo
+- `conversation_router.py` y `task_descriptor_service.py` ya preservan el
+  `context` de plan para que `surface`, `workspace_mode`, `budget` y topology
+  lleguen al compilador en approve/modify
 
 ### Falta para cierre
 
-- integrar constraints con `RuntimePolicyService`
-- integrar constraints con `IntentClassificationService`
-- integrar constraints con `WorkspacePolicyService`
-- integrar constraints con `ProviderTopologyService`
-- introducir y probar la allowlist real de `binding_mode="runtime"`
-- demostrar que ningun ranking posterior puede escapar del envelope compilado
+- nada; la fase queda cerrada con evidencia en el status doc
 
 ## Fase 4 - ProfileRouter Y Binding Real
 
-Estado actual del repo: `PARTIAL`
+Estado actual del repo: `DONE`
 
 ### Objetivo
 
@@ -469,13 +488,39 @@ Orden de decision:
 - `tools/gimo_server/services/profile_binding_service.py` existe
 - `custom_plan_service.py` ya usa ambos servicios para materializar nodos
 - el nodo persiste `routing_decision_summary`, `routing_reason` y binding
+- `ProfileRouterService` ya genera candidatos por preset solo dentro del set
+  permitido por `TaskConstraints`
+- `ProfileRouterService` ya aplica priors locales `task_semantic -> preset`,
+  ranking determinista y `candidate_count` filtrado, con razon auditable
+- el hook advisory de GICS para ranking de preset ya existe y falla honesto a
+  `0.0` cuando no hay telemetria de preset en el repo
+- `ProfileBindingService` ya subordina provider/model a
+  `ModelRouterService.choose_binding_from_candidates(...)` sin salir del
+  envelope compilado
+- `ProfileBindingService` ya falla cerrado cuando el compilador entrega
+  `allowed_bindings=[]`; no puede escapar a topology global
+- `ModelRouterService` ya normaliza `task_type` de plan a categorias canonicas
+  de routing de modelo
+- `ModelRouterService` ya filtra candidatos de binding por capacidad requerida y
+  quality floor antes de aplicar topology, latencia o coste
+- el ranking de binding ya explicita el orden:
+  - constraints
+  - success
+  - quality
+  - latency
+  - cost
+- el ajuste de GICS ya ocurre solo como score advisory dentro del set de
+  candidatos validos; no anade candidatos ni reroutea post-ranking
+- `provider_service_impl.py` ya delega el auto-binding a `ModelRouterService`
+  y ya no hace reroute post-ranking por fiabilidad
+- `provider_service_impl.py` ya preserva `selected_model` explicito y solo
+  auto-routea cuando no existe modelo pedido por el caller
+- `custom_plan_service.py` ya persiste `provider` y `model` en
+  `routing_decision_summary` y agrega la razon de binding al `routing_reason`
 
 ### Falta para cierre
 
-- subordinacion real a `ModelRouterService`
-- objective ordering explicito en el ranking
-- integracion honesta con `provider_topology_service`
-- hook advisory de GICS sin capacidad de romper constraints
+- nada; la fase queda cerrada con evidencia en el status doc
 
 ## Fase 5 - Materializacion Correcta De Planes Y Threads
 
@@ -870,6 +915,6 @@ Debe:
 1. tomar este archivo como plan oficial
 2. tomar `docs/refactor/AGENT_PROFILE_ROUTING_MIGRATION_STATUS_2026-03-27.md`
    como dashboard de estado y evidencia
-3. empezar por Fase 3
-4. detenerse si Fase 3 no puede cerrarse sin reabrir una fase ya marcada como
+3. empezar por Fase 4
+4. detenerse si Fase 4 no puede cerrarse sin reabrir una fase ya marcada como
    `DONE`

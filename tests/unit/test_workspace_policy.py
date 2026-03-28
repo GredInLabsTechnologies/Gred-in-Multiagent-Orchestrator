@@ -55,3 +55,8 @@ def test_operator_surface_uses_gimo_orchestrator_authority():
     assert WorkspacePolicyService.can_surface_select_worker_model(
         WorkspacePolicyService.SURFACE_OPERATOR
     ) is True
+
+
+def test_only_source_repo_workspace_allows_experimental_policy():
+    assert WorkspacePolicyService.allows_experimental_policy("source_repo") is True
+    assert WorkspacePolicyService.allows_experimental_policy("ephemeral") is False

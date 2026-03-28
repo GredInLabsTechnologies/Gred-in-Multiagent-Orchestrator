@@ -595,21 +595,30 @@ class ProviderService:
         cls, cfg: ProviderConfig, context: Dict[str, Any], task_type: str
     ) -> tuple[str, str | None]:
         requested_model = context.get("model") or context.get("selected_model")
-        effective_provider = cfg.active
-        
-        if not context.get("model"):
-            tier_prov, tier_model = ModelRouterService.resolve_tier_routing(task_type, cfg)
-            if tier_prov:
-                effective_provider = tier_prov
-                requested_model = tier_model or requested_model
+        requested_provider = context.get("provider") or context.get("selected_provider")
+        effective_provider = str(requested_provider or cfg.active or "").strip() or cfg.active
+
+        if not requested_model:
+            default_entry = cfg.providers.get(effective_provider)
+            default_model = str((default_entry.model if default_entry else "") or "").strip()
+            candidate_bindings = [
+                ProviderRoleBinding(provider_id=provider_id, model=model)
+                for provider_id, _provider_type, model in cls._collect_role_bindings(cfg, effective_provider, default_model)
+            ]
+            binding_decision = ModelRouterService.choose_binding_from_candidates(
+                task_type=task_type,
+                candidates=candidate_bindings,
+                requested_provider=requested_provider,
+                requested_model=requested_model,
+            )
+            effective_provider = binding_decision.provider_id or effective_provider
+            requested_model = binding_decision.model or requested_model
 
         default_entry = cfg.providers.get(effective_provider)
         default_model = str(requested_model or (default_entry.model if default_entry else "") or "").strip()
-        if default_model:
-            effective_provider, requested_model = cls._select_runtime_binding_with_reliability(
-                cfg, provider_id=effective_provider, model_id=default_model,
-            )
-        return effective_provider, requested_model
+        # Fase 4: GICS solo ajusta score dentro de ModelRouterService. No se permite
+        # reroute post-ranking que pueda cambiar el binding fuera del orden objetivo.
+        return effective_provider, (default_model or requested_model)
 
     @classmethod
     def _check_cache(

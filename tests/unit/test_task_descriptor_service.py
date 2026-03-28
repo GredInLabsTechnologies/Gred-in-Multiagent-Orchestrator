@@ -36,6 +36,7 @@ def test_canonicalize_plan_data_adds_descriptor_and_fingerprint_to_conversationa
     plan = {
         "title": "Ship feature",
         "objective": "Implement change",
+        "context": {"surface": "chatgpt_app", "workspace_mode": "ephemeral", "budget_mode": "tight"},
         "tasks": [
             {
                 "id": "t1",
@@ -53,6 +54,7 @@ def test_canonicalize_plan_data_adds_descriptor_and_fingerprint_to_conversationa
     task = canonical["tasks"][0]
     descriptor = TaskDescriptor.model_validate(task["task_descriptor"])
 
+    assert canonical["context"] == {"surface": "chatgpt_app", "workspace_mode": "ephemeral", "budget_mode": "tight"}
     assert task["depends_on"] == ["t0"]
     assert task["legacy_mood"] == "forensic"
     assert task["requested_model"] == "gpt-4o"
@@ -116,6 +118,7 @@ def test_canonicalize_plan_content_serializes_write_new_shape():
     plan = {
         "title": "Ship feature",
         "objective": "Implement change",
+        "context": {"surface": "operator", "workspace_mode": "source_repo"},
         "tasks": [
             {
                 "id": "t1",
@@ -132,6 +135,7 @@ def test_canonicalize_plan_content_serializes_write_new_shape():
 
     assert '"task_descriptor"' in content
     assert '"task_fingerprint"' in content
+    assert '"context"' in content
 
 
 def test_maybe_canonicalize_plan_content_leaves_non_plan_json_unchanged():

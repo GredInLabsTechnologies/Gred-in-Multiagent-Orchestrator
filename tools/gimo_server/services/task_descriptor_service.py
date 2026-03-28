@@ -9,6 +9,10 @@ from .task_fingerprint_service import TaskFingerprintService
 
 class TaskDescriptorService:
     @staticmethod
+    def _dict(value: Any) -> Dict[str, Any]:
+        return dict(value) if isinstance(value, dict) else {}
+
+    @staticmethod
     def coerce_plan_data(plan_data: Any) -> Dict[str, Any]:
         if hasattr(plan_data, "model_dump"):
             candidate = plan_data.model_dump(mode="json")
@@ -77,6 +81,7 @@ class TaskDescriptorService:
         return {
             "title": str(plan_data.get("title") or "").strip(),
             "objective": str(plan_data.get("objective") or "").strip(),
+            "context": cls._dict(plan_data.get("context")),
             "tasks": tasks,
         }
 
@@ -102,6 +107,7 @@ class TaskDescriptorService:
         return {
             "title": str(plan_data.get("title") or "").strip(),
             "objective": str(plan_data.get("objective") or "").strip(),
+            "context": cls._dict(plan_data.get("context")),
             "tasks": [cls.canonicalize_task(task) for task in tasks],
         }
 

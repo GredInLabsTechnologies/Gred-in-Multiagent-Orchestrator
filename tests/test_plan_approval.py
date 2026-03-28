@@ -40,6 +40,34 @@ def _create_thread_with_plan(test_client, valid_token, workspace_root, plan=None
 
 
 class TestPlanApproval:
+    def test_approve_merges_thread_context_into_plan_before_materialization(self, test_client, valid_token, tmp_path):
+        plan_with_context = {
+            **SAMPLE_PLAN,
+            "context": {"budget_mode": "tight", "topology_mode": "dynamic"},
+        }
+        thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path), plan=plan_with_context)
+
+        mock_plan = MagicMock()
+        mock_plan.id = "plan_test123"
+
+        with patch("tools.gimo_server.services.custom_plan_service.CustomPlanService") as mock_cps:
+            mock_cps.create_plan_from_llm.return_value = mock_plan
+            mock_cps.execute_plan = AsyncMock()
+
+            resp = test_client.post(
+                f"/ops/threads/{thread_id}/plan/respond",
+                params={"action": "approve"},
+                headers={"Authorization": f"Bearer {valid_token}"},
+            )
+
+        assert resp.status_code == 200
+        approved_plan = mock_cps.create_plan_from_llm.call_args.kwargs["plan_data"]
+        assert approved_plan["context"]["budget_mode"] == "tight"
+        assert approved_plan["context"]["topology_mode"] == "dynamic"
+        assert approved_plan["context"]["surface"] == "operator"
+        assert approved_plan["context"]["workspace_mode"] == "ephemeral"
+        assert approved_plan["context"]["workspace_root"] == str(tmp_path)
+
     def test_approve_transitions_to_executing_phase(self, test_client, valid_token, tmp_path):
         thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path))
 
@@ -155,7 +183,11 @@ class TestPlanApproval:
 
         assert resp.status_code == 200
         approved_plan = mock_cps.create_plan_from_llm.call_args.kwargs["plan_data"]
-        assert approved_plan == canonical_plan
+        assert approved_plan["title"] == canonical_plan["title"]
+        assert approved_plan["objective"] == canonical_plan["objective"]
+        assert approved_plan["tasks"] == canonical_plan["tasks"]
+        assert approved_plan["context"]["surface"] == "operator"
+        assert approved_plan["context"]["workspace_mode"] == "ephemeral"
 
     def test_404_thread_not_found(self, test_client, valid_token):
         resp = test_client.post(

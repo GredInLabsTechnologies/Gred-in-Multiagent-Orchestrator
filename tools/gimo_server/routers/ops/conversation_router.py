@@ -13,6 +13,28 @@ from ...services.thread_session_service import ThreadSessionService
 
 router = APIRouter(prefix="/threads", tags=["conversation"])
 
+
+def _merge_plan_context(thread: GimoThread, plan_data: dict) -> dict:
+    merged = dict(plan_data or {})
+    current_context = dict(merged.get("context") or {})
+    thread_context = {
+        key: value
+        for key, value in (thread.metadata or {}).items()
+        if key
+        in {
+            "surface",
+            "workspace_mode",
+            "orchestrator_authority",
+            "orchestrator_selection_allowed",
+            "worker_model_selection_allowed",
+        }
+    }
+    if thread.workspace_root:
+        thread_context["workspace_root"] = thread.workspace_root
+    if current_context or thread_context:
+        merged["context"] = {**current_context, **thread_context}
+    return merged
+
 @router.get("", response_model=List[GimoThread])
 async def list_threads(
     auth: Annotated[AuthContext, Depends(verify_token)],
@@ -276,7 +298,7 @@ async def respond_to_plan(
         from ...services.custom_plan_service import CustomPlanService
 
         try:
-            proposed_plan = thread.proposed_plan or {}
+            proposed_plan = _merge_plan_context(thread, thread.proposed_plan or {})
             canonical_plan = TaskDescriptorService.canonicalize_plan_data(proposed_plan)
             persisted = ConversationService.mutate_thread(
                 thread_id,
@@ -344,7 +366,7 @@ async def respond_to_plan(
 
         # Update proposed plan with user modifications
         try:
-            canonical_plan = TaskDescriptorService.canonicalize_plan_data(modified_plan)
+            canonical_plan = TaskDescriptorService.canonicalize_plan_data(_merge_plan_context(thread, modified_plan))
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid modified plan: {str(e)}") from e
         ConversationService.mutate_thread(
