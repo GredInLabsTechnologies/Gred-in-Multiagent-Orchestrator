@@ -516,17 +516,18 @@ class ToolExecutor:
                     "error",
                     f"Task {task.get('id')} missing 'agent_rationale' (explain WHY you chose this profile)",
                 )
-            if not task.get("agent_preset") and not task.get("agent_mood") and not task.get("mood"):
-                return ToolExecutionResult(
-                    "error",
-                    f"Task {task.get('id')} must include either 'agent_preset' or a legacy mood hint",
-                )
         try:
             canonical_plan = TaskDescriptorService.canonicalize_plan_data(
                 {"title": title, "objective": objective, "tasks": tasks}
             )
         except Exception as exc:
             return ToolExecutionResult("error", f"Invalid plan proposal: {exc}")
+        for task in canonical_plan.get("tasks", []):
+            if not task.get("agent_preset"):
+                return ToolExecutionResult(
+                    "error",
+                    f"Task {task.get('id')} must include 'agent_preset'; legacy mood hints are accepted only for read compatibility",
+                )
         return ToolExecutionResult(
             "plan_proposed",
             f"Proposed plan: {title}",

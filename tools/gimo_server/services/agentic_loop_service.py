@@ -44,14 +44,14 @@ Workflow phase: {workflow_phase}
 Project structure:
 {tree}
 
-Available tools: read_file, write_file, patch_file, search_replace, list_files, search_text, shell_exec, create_dir, ask_user, propose_plan, web_search
+Available tools: read_file, write_file, patch_file, search_replace, list_files, search_text, shell_exec, create_dir, ask_user, propose_plan, request_context, web_search
 
 ## Conversational Planning
 
 For COMPLEX tasks (3+ files, new projects, structural refactors):
 1. Ask clarifying questions with ask_user if anything is ambiguous
 2. Investigate the workspace and research if needed (read_file, list_files, web_search)
-3. Propose a plan with propose_plan and explain why you chose each mood and model
+3. Propose a plan with propose_plan and explain why you chose each agent preset and model
 4. Wait for user approval before executing
 
 For SIMPLE tasks (1-2 files, quick fixes):
@@ -918,10 +918,12 @@ class AgenticLoopService:
                         stop_loop = True
                         break
                     if thread_id:
-                        updated = ConversationService.mutate_thread(
-                            thread_id,
-                            lambda current: setattr(current, "proposed_plan", canonical_plan) or True,
-                        )
+                        def _store_proposed_plan(current: Any) -> bool:
+                            current.proposed_plan = canonical_plan
+                            current.workflow_phase = "awaiting_approval"
+                            return True
+
+                        updated = ConversationService.mutate_thread(thread_id, _store_proposed_plan)
                         if updated is None:
                             final_response = f"Thread {thread_id} not found while saving proposed plan"
                             finish_reason = "error"

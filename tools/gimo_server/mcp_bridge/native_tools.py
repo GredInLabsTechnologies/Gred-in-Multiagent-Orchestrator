@@ -474,10 +474,16 @@ def register_native_tools(mcp: FastMCP):
                 )
                 thread_state = thread_resp.json() if thread_resp.status_code == 200 else {}
                 proposed_plan = thread_state.get("proposed_plan")
-                mood = thread_state.get("mood", "neutral")
+                workflow_phase = thread_state.get("workflow_phase", "intake")
+                profile_summary = thread_state.get("profile_summary") or {}
+                agent_preset = (
+                    profile_summary.get("agent_preset")
+                    or thread_state.get("agent_preset")
+                    or "plan_orchestrator"
+                )
 
                 # Format output
-                parts = [f"Thread: {thread_id} | Mood: {mood}"]
+                parts = [f"Thread: {thread_id} | Preset: {agent_preset} | Workflow phase: {workflow_phase}"]
                 if tool_calls:
                     parts.append(f"\nTool calls ({len(tool_calls)}):")
                     for tc in tool_calls:
@@ -511,7 +517,7 @@ def register_native_tools(mcp: FastMCP):
     async def gimo_approve_plan(thread_id: str) -> str:
         """Approve the proposed execution plan in the given thread.
 
-        P2: The agent will transition to executor mood and begin executing the plan.
+        P2: The thread transitions to the executing workflow phase and begins running the approved plan.
         """
         from .bridge import _get_auth_token, BACKEND_URL
         import httpx
@@ -544,7 +550,7 @@ def register_native_tools(mcp: FastMCP):
     async def gimo_reject_plan(thread_id: str, feedback: str = "") -> str:
         """Reject the proposed plan and ask the agent to revise.
 
-        P2: The agent will transition back to dialoger mood and revise the plan based on feedback.
+        P2: The thread transitions back to the planning workflow phase so the agent can revise the proposal.
         """
         from .bridge import _get_auth_token, BACKEND_URL
         import httpx

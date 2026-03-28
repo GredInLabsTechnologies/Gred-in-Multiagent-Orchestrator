@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from typing import List, Optional, Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -318,7 +319,7 @@ async def respond_to_plan(
                     setattr(current, "proposed_plan", canonical_plan),
                     setattr(current, "workflow_phase", "executing"),
                     current.metadata.__setitem__("plan_approved", True),
-                    current.metadata.__setitem__("plan_approved_at", json.dumps({"time": "now"})),
+                    current.metadata.__setitem__("plan_approved_at", datetime.now(timezone.utc).isoformat()),
                 ),
             )
             if updated is None:
@@ -338,14 +339,15 @@ async def respond_to_plan(
             raise HTTPException(status_code=500, detail=f"Failed to create plan: {str(e)}")
 
     elif action == "reject":
-        # Clear proposed plan, add rejection feedback to thread
-        ConversationService.mutate_thread(
+        # Keep the proposed plan for revision context; only move the thread back to planning.
+        updated = ConversationService.mutate_thread(
             thread_id,
             lambda current: (
-                setattr(current, "proposed_plan", None),
                 setattr(current, "workflow_phase", "planning"),
             ),
         )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Thread not found")
 
         # Add rejection as user message so agent can re-plan
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
@@ -371,7 +373,10 @@ async def respond_to_plan(
             raise HTTPException(status_code=400, detail=f"Invalid modified plan: {str(e)}") from e
         ConversationService.mutate_thread(
             thread_id,
-            lambda current: setattr(current, "proposed_plan", canonical_plan),
+            lambda current: (
+                setattr(current, "proposed_plan", canonical_plan),
+                setattr(current, "workflow_phase", "awaiting_approval"),
+            ),
         )
 
         return {

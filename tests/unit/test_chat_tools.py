@@ -20,8 +20,8 @@ class TestChatToolsSchema:
     """Tests for tool definitions."""
 
     def test_chat_tools_count(self):
-        """Should have 11 tools defined (8 base + 3 P2 meta-tools)."""
-        assert len(CHAT_TOOLS) == 11
+        """Should expose the full conversational tool surface."""
+        assert len(CHAT_TOOLS) == 12
 
     def test_all_tools_have_required_fields(self):
         """Each tool should have proper OpenAI function format."""
@@ -48,6 +48,7 @@ class TestChatToolsSchema:
             "create_dir",
             "ask_user",
             "propose_plan",
+            "request_context",
             "web_search",
         }
         assert names == expected
@@ -64,6 +65,12 @@ class TestChatToolsSchema:
         assert get_tool_risk_level("create_dir") == "MEDIUM"
 
         assert get_tool_risk_level("shell_exec") == "HIGH"
+
+    def test_propose_plan_schema_marks_agent_mood_as_legacy_compatibility(self):
+        propose_plan = next(tool for tool in CHAT_TOOLS if tool["function"]["name"] == "propose_plan")
+        task_properties = propose_plan["function"]["parameters"]["properties"]["tasks"]["items"]["properties"]
+        assert "legacy" in task_properties["agent_mood"]["description"].lower()
+        assert "prefer agent_preset" in task_properties["agent_mood"]["description"].lower()
 
 
 class TestToolExecutorExtensions:

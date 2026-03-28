@@ -41,6 +41,20 @@ class TestHandleProposePlan:
         assert result["data"]["title"] == "Refactor auth"
         assert len(result["data"]["tasks"]) == 1
 
+    def test_legacy_mood_input_is_backfilled_to_agent_preset(self):
+        executor = ToolExecutor(workspace_root="/tmp", mood="neutral")
+        args = {
+            "title": "Refactor auth",
+            "objective": "Improve security",
+            "tasks": [
+                {"id": "t1", "title": "Review code", "agent_mood": "forensic", "agent_rationale": "Need forensic analysis"}
+            ],
+        }
+        result = asyncio.run(executor.handle_propose_plan(args))
+        assert result["status"] == "plan_proposed"
+        assert result["data"]["tasks"][0]["agent_preset"] == "researcher"
+        assert result["data"]["tasks"][0]["legacy_mood"] == "forensic"
+
     def test_missing_title_returns_error(self):
         executor = ToolExecutor(workspace_root="/tmp", mood="neutral")
         result = asyncio.run(executor.handle_propose_plan({"objective": "x", "tasks": []}))

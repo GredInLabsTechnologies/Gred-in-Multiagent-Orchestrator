@@ -564,6 +564,8 @@ async def test_run_loop_plan_proposed_preserves_conversation_turns(tmp_path: Pat
         assert stored is not None
         assert stored.proposed_plan["title"] == "Ship it"
         assert stored.proposed_plan["objective"] == "Deliver safely"
+        assert stored.workflow_phase == "awaiting_approval"
+        assert stored.proposed_plan["tasks"][0]["agent_preset"] == "researcher"
         assert stored.proposed_plan["tasks"][0]["source_shape"] == "conversational_plan"
         assert "task_descriptor" in stored.proposed_plan["tasks"][0]
         assert "task_fingerprint" in stored.proposed_plan["tasks"][0]

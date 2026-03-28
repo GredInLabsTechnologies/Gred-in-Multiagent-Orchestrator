@@ -249,7 +249,8 @@ CHAT_TOOLS: List[Dict[str, Any]] = [
             "description": (
                 "Propose an execution plan for a complex task. "
                 "Use this when the task requires 3+ file changes, structural refactors, "
-                "or new project setup. Include rationale for why you chose each preset, mood, and model. "
+                "or new project setup. Include rationale for why you chose each preset and model. "
+                "Use legacy mood hints only when mirroring pre-existing input. "
                 "The loop will pause for user approval before execution."
             ),
             "parameters": {
@@ -283,11 +284,11 @@ CHAT_TOOLS: List[Dict[str, Any]] = [
                                 },
                                 "agent_mood": {
                                     "type": "string",
-                                    "description": "Optional legacy mood hint for this task.",
+                                    "description": "Optional legacy mood hint for read compatibility only; prefer agent_preset for new plans.",
                                 },
                                 "agent_rationale": {
                                     "type": "string",
-                                    "description": "WHY you chose this preset, mood hint, and model for this task.",
+                                    "description": "WHY you chose this preset and model for this task.",
                                 },
                                 "model": {
                                     "type": "string",
@@ -324,6 +325,35 @@ CHAT_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "Search the web for current information when repository context is insufficient "
+                "and network access is allowed by policy."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query.",
+                    },
+                    "providers": {
+                        "type": "array",
+                        "description": "Optional search providers to use.",
+                        "items": {"type": "string"},
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return.",
+                    },
+                },
+                "required": ["query"],
             },
         },
     },

@@ -117,7 +117,8 @@ class TestPlanApproval:
 
         thread = ConversationService.get_thread(thread_id)
         assert thread.workflow_phase == "planning"
-        assert thread.proposed_plan is None
+        assert thread.proposed_plan is not None
+        assert thread.proposed_plan["title"] == SAMPLE_PLAN["title"]
 
     def test_approve_failure_does_not_mark_thread_as_approved(self, test_client, valid_token, tmp_path):
         thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path))
@@ -134,7 +135,7 @@ class TestPlanApproval:
         assert resp.status_code == 500
         thread = ConversationService.get_thread(thread_id)
         assert thread is not None
-        assert thread.workflow_phase == "intake"
+        assert thread.workflow_phase == "awaiting_approval"
         assert thread.metadata.get("plan_approved") is None
         assert thread.proposed_plan["title"] == SAMPLE_PLAN["title"]
         assert "task_descriptor" in thread.proposed_plan["tasks"][0]
@@ -161,6 +162,7 @@ class TestPlanApproval:
 
         thread = ConversationService.get_thread(thread_id)
         assert thread.proposed_plan["title"] == "Smaller plan"
+        assert thread.workflow_phase == "awaiting_approval"
         assert "task_descriptor" in thread.proposed_plan["tasks"][0]
         assert "task_fingerprint" in thread.proposed_plan["tasks"][0]
 

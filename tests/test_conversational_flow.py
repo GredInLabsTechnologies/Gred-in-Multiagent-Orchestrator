@@ -42,13 +42,24 @@ class TestThreadCreation:
         thread_path = ConversationService.THREADS_DIR / f"{thread_id}.json"
         data = json.loads(thread_path.read_text(encoding="utf-8"))
         data["mood"] = "creative"
-        data["proposed_plan"] = {"title": "Creative Plan", "objective": "Explore", "tasks": []}
+        data.pop("agent_preset", None)
+        data.pop("profile_summary", None)
+        data["proposed_plan"] = {
+            "title": "Creative Plan",
+            "objective": "Explore",
+            "tasks": [{"id": "t1", "title": "Explore options", "agent_rationale": "Need breadth", "agent_mood": "creative"}],
+        }
         thread_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
         loaded = ConversationService.get_thread(thread_id)
         assert loaded is not None
         assert loaded.mood == "creative"
         assert loaded.proposed_plan["title"] == "Creative Plan"
+        assert loaded.agent_preset == "researcher"
+        assert loaded.workflow_phase == "awaiting_approval"
+        assert loaded.profile_summary is not None
+        assert loaded.profile_summary.agent_preset == "researcher"
+        assert loaded.proposed_plan["tasks"][0]["agent_preset"] == "researcher"
 
 
 class TestGetThreadEndpoint:
@@ -65,7 +76,13 @@ class TestGetThreadEndpoint:
         thread_path = ConversationService.THREADS_DIR / f"{thread_id}.json"
         data = json.loads(thread_path.read_text(encoding="utf-8"))
         data["mood"] = "guardian"
-        data["proposed_plan"] = {"title": "Guard Plan", "objective": "Secure", "tasks": []}
+        data.pop("agent_preset", None)
+        data.pop("profile_summary", None)
+        data["proposed_plan"] = {
+            "title": "Guard Plan",
+            "objective": "Secure",
+            "tasks": [{"id": "t1", "title": "Audit config", "agent_rationale": "Need hardening review", "agent_mood": "guardian"}],
+        }
         thread_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
         # GET should include P2 fields
@@ -77,14 +94,30 @@ class TestGetThreadEndpoint:
         data = get_resp.json()
         assert data["mood"] == "guardian"
         assert data["proposed_plan"]["title"] == "Guard Plan"
+        assert data["agent_preset"] == "safety_reviewer"
+        assert data["workflow_phase"] == "awaiting_approval"
+        assert data["profile_summary"]["agent_preset"] == "safety_reviewer"
+        assert data["proposed_plan"]["tasks"][0]["agent_preset"] == "safety_reviewer"
 
     def test_list_threads_includes_p2_fields(self, test_client, valid_token, tmp_path):
-        # Create a thread
-        test_client.post(
+        create_resp = test_client.post(
             "/ops/threads",
             params={"workspace_root": str(tmp_path), "title": "List Test"},
             headers={"Authorization": f"Bearer {valid_token}"},
         )
+        thread_id = create_resp.json()["id"]
+
+        thread_path = ConversationService.THREADS_DIR / f"{thread_id}.json"
+        data = json.loads(thread_path.read_text(encoding="utf-8"))
+        data["mood"] = "forensic"
+        data.pop("agent_preset", None)
+        data.pop("profile_summary", None)
+        data["proposed_plan"] = {
+            "title": "Legacy Plan",
+            "objective": "Inspect auth",
+            "tasks": [{"id": "t1", "title": "Review code", "agent_rationale": "Need forensic analysis", "mood": "forensic"}],
+        }
+        thread_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
         list_resp = test_client.get(
             "/ops/threads",
@@ -93,10 +126,75 @@ class TestGetThreadEndpoint:
         assert list_resp.status_code == 200
         threads = list_resp.json()
         assert len(threads) > 0
-        # All threads should have mood field
-        for t in threads:
-            assert "mood" in t
-            assert "proposed_plan" in t
+        thread = next(t for t in threads if t["id"] == thread_id)
+        assert "mood" in thread
+        assert "proposed_plan" in thread
+        assert thread["agent_preset"] == "researcher"
+        assert thread["workflow_phase"] == "awaiting_approval"
+        assert thread["profile_summary"]["agent_preset"] == "researcher"
+        assert thread["proposed_plan"]["tasks"][0]["agent_preset"] == "researcher"
+        assert "mood" not in thread["proposed_plan"]["tasks"][0]
+
+    def test_thread_mutation_writes_back_canonical_shape_for_legacy_thread(self, test_client, valid_token, tmp_path):
+        create_resp = test_client.post(
+            "/ops/threads",
+            params={"workspace_root": str(tmp_path), "title": "Legacy Write Test"},
+            headers={"Authorization": f"Bearer {valid_token}"},
+        )
+        thread_id = create_resp.json()["id"]
+
+        thread_path = ConversationService.THREADS_DIR / f"{thread_id}.json"
+        data = json.loads(thread_path.read_text(encoding="utf-8"))
+        data["mood"] = "forensic"
+        data.pop("agent_preset", None)
+        data.pop("profile_summary", None)
+        data["proposed_plan"] = {
+            "title": "Legacy Plan",
+            "objective": "Inspect auth",
+            "tasks": [{"id": "t1", "title": "Review code", "agent_rationale": "Need forensic analysis", "mood": "forensic"}],
+        }
+        thread_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+
+        turn = ConversationService.add_turn(thread_id, agent_id="user")
+        assert turn is not None
+
+        rewritten = json.loads(thread_path.read_text(encoding="utf-8"))
+        assert rewritten["agent_preset"] == "researcher"
+        assert rewritten["workflow_phase"] == "awaiting_approval"
+        assert rewritten["profile_summary"]["agent_preset"] == "researcher"
+        assert rewritten["proposed_plan"]["tasks"][0]["agent_preset"] == "researcher"
+        assert "mood" not in rewritten["proposed_plan"]["tasks"][0]
+
+    def test_fork_thread_preserves_thread_surface_state(self, test_client, valid_token, tmp_path):
+        create_resp = test_client.post(
+            "/ops/threads",
+            params={"workspace_root": str(tmp_path), "title": "Fork Source"},
+            headers={"Authorization": f"Bearer {valid_token}"},
+        )
+        thread_id = create_resp.json()["id"]
+
+        thread_path = ConversationService.THREADS_DIR / f"{thread_id}.json"
+        data = json.loads(thread_path.read_text(encoding="utf-8"))
+        data["mood"] = "forensic"
+        data.pop("agent_preset", None)
+        data.pop("profile_summary", None)
+        data["proposed_plan"] = {
+            "title": "Legacy Plan",
+            "objective": "Inspect auth",
+            "tasks": [{"id": "t1", "title": "Review code", "agent_rationale": "Need forensic analysis", "mood": "forensic"}],
+        }
+        thread_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+
+        turn = ConversationService.add_turn(thread_id, agent_id="user")
+        assert turn is not None
+
+        forked = ConversationService.fork_thread(thread_id, turn.id, "Fork Copy")
+        assert forked is not None
+        assert forked.agent_preset == "researcher"
+        assert forked.workflow_phase == "awaiting_approval"
+        assert forked.metadata["surface"] == "operator"
+        assert forked.metadata["forked_from"] == thread_id
+        assert forked.proposed_plan["tasks"][0]["agent_preset"] == "researcher"
 
     def test_get_thread_proofs_returns_verified_chain(self, test_client, valid_token, tmp_path, monkeypatch):
         create_resp = test_client.post(

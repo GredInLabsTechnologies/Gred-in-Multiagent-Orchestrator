@@ -24,7 +24,7 @@ Estado actual contra este plan oficial:
 - Fase 2: `DONE`
 - Fase 3: `DONE`
 - Fase 4: `DONE`
-- Fase 5: `PARTIAL`
+- Fase 5: `DONE`
 - Fase 6: `PARTIAL`
 - Fase 7: `NOT_STARTED`
 - Fase 8: `NOT_STARTED`
@@ -35,8 +35,8 @@ Estado actual contra este plan oficial:
 Phase lock:
 
 1. No reabrir Fase 0, 1, 2 o 3 salvo evidencia nueva de regresion real.
-2. El siguiente cierre obligatorio es Fase 5.
-3. Trabajo parcial en fases posteriores no autoriza saltarse Fase 5.
+2. El siguiente cierre obligatorio es Fase 6.
+3. Trabajo parcial en fases posteriores no autoriza saltarse Fase 6.
 
 ## Resumen
 
@@ -524,7 +524,7 @@ Orden de decision:
 
 ## Fase 5 - Materializacion Correcta De Planes Y Threads
 
-Estado actual del repo: `PARTIAL`
+Estado actual del repo: `DONE`
 
 ### Objetivo
 
@@ -567,16 +567,30 @@ Estado actual del repo: `PARTIAL`
 
 - el thread ya persiste `agent_preset`, `workflow_phase`, `profile_summary` y
   `proposed_plan`
-- aprobar y modificar plan ya preservan la shape canonica del plan
+- `ConversationService` ya hidrata threads legacy en `get/list/mutate/save/fork`
+  sin hacer backfill masivo por detras
+- `ConversationService` ya reescribe threads mutados en shape nueva con
+  `agent_preset`, `profile_summary`, `workflow_phase` honesto y
+  `proposed_plan` canonico
+- `TaskDescriptorService` ya backfillea `agent_preset` desde `legacy_mood`
+  durante canonicalizacion para que el write nuevo no dependa de `mood`
+- `agentic_loop_service.py` ya mueve el thread a `awaiting_approval` cuando se
+  propone un plan
+- aprobar y modificar plan ya preservan la shape canonica del plan y mantienen
+  `workflow_phase` coherente con el estado conversacional
+- rechazar plan ya no borra `proposed_plan`; solo mueve `workflow_phase` a
+  `planning`
+- `conversation_router.py` ya registra `plan_approved_at` con timestamp real,
+  no placeholder
+- `chat_tools_schema.py`, `executor.py` y `mcp_bridge/native_tools.py` ya
+  exponen `agent_preset` + `workflow_phase` como contrato conversacional y
+  dejan los hints legacy de mood solo en compatibilidad de lectura
 - `mcp_bridge/native_tools.py` ya resume el flujo conversacional usando
   `workflow_phase`
 
 ### Falta para cierre
 
-- lazy hydration sistematica para threads legacy
-- enforcement completo de `read-old/write-new` en todos los caminos de
-  persistencia de thread
-- retirar el resto de semantica legacy de fase en todas las surfaces
+- nada; la fase queda cerrada con evidencia en el status doc
 
 ## Fase 6 - CustomPlanService Ejecuta Perfiles Reales
 
@@ -915,6 +929,6 @@ Debe:
 1. tomar este archivo como plan oficial
 2. tomar `docs/refactor/AGENT_PROFILE_ROUTING_MIGRATION_STATUS_2026-03-27.md`
    como dashboard de estado y evidencia
-3. empezar por Fase 4
-4. detenerse si Fase 4 no puede cerrarse sin reabrir una fase ya marcada como
+3. empezar por Fase 6
+4. detenerse si Fase 6 no puede cerrarse sin reabrir una fase ya marcada como
    `DONE`

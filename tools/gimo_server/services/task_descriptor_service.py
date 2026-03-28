@@ -4,6 +4,7 @@ import json
 from typing import Any, Dict, List
 
 from ..models.agent_routing import TaskDescriptor
+from .agent_catalog_service import AgentCatalogService
 from .task_fingerprint_service import TaskFingerprintService
 
 
@@ -45,6 +46,11 @@ class TaskDescriptorService:
         role_definition = task.get("role_definition") or agent.get("system_prompt") or ""
         requested_role = task.get("requested_role") or task.get("role") or agent.get("role") or task.get("node_type") or "worker"
         agent_preset = str(task.get("agent_preset") or "").strip() or None
+        if not agent_preset and legacy_mood:
+            try:
+                agent_preset = AgentCatalogService.resolve_preset_name(legacy_mood=str(legacy_mood).strip())
+            except KeyError:
+                agent_preset = None
         return {
             "id": str(task.get("id") or "").strip(),
             "title": str(task.get("title") or "").strip(),

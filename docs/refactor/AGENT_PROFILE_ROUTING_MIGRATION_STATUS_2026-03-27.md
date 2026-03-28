@@ -18,8 +18,8 @@ para el plan oficial en:
 | 2 | Descriptor de tarea y fingerprint | `DONE` | Cerrada |
 | 3 | Compilador de constraints | `DONE` | Cerrada |
 | 4 | `ProfileRouter` y binding real | `DONE` | Cerrada |
-| 5 | Materializacion correcta de planes y threads | `PARTIAL` | Abierta y siguiente |
-| 6 | `CustomPlanService` ejecuta perfiles reales | `PARTIAL` | Abierta, bloqueada por F5 |
+| 5 | Materializacion correcta de planes y threads | `DONE` | Cerrada |
+| 6 | `CustomPlanService` ejecuta perfiles reales | `PARTIAL` | Abierta y siguiente |
 | 7 | `GraphEngine` y `WorkflowGraph` | `NOT_STARTED` | No iniciada |
 | 8 | Learning GICS por fingerprint y perfil | `NOT_STARTED` | No iniciada |
 | 9 | Surface parity y catalogo canonico | `NOT_STARTED` | No iniciada |
@@ -100,17 +100,29 @@ para el plan oficial en:
 - `custom_plan_service.py` ya persiste `provider` y `model` en
   `routing_decision_summary` y concatena la razon de binding al `routing_reason`
 
+### Fase 5
+
+- `ConversationService` ya hidrata threads legacy en `get`, `list`, `mutate`,
+  `save` y `fork` sin migracion masiva silenciosa
+- el shape canonico del thread ya se reescribe en el siguiente cambio real con
+  `agent_preset`, `profile_summary`, `workflow_phase` honesto y
+  `proposed_plan` canonico
+- `TaskDescriptorService` ya rellena `agent_preset` desde `legacy_mood` para
+  completar `read-old/write-new` en planes conversacionales
+- `agentic_loop_service.py` ya mueve threads con plan propuesto a
+  `awaiting_approval`
+- `conversation_router.py` ya conserva `proposed_plan` al rechazar y solo mueve
+  `workflow_phase` a `planning`
+- `conversation_router.py` ya escribe `plan_approved_at` con timestamp real
+- `chat_tools_schema.py`, `executor.py` y `mcp_bridge/native_tools.py` ya
+  presentan `agent_preset` y `workflow_phase` como contrato conversacional
+  primario; los hints legacy de mood quedan solo como compatibilidad de lectura
+
 ## Lo Que Falta
 
 ### Fase 4
 
 - nada; cerrada con evidencia abajo
-
-### Fase 5
-
-- cerrar hidratacion lazy de threads legacy
-- completar `read-old/write-new` en todos los caminos de persistencia de thread
-- retirar el resto de semantica legacy de fase de las surfaces
 
 ### Fase 6
 
@@ -245,13 +257,58 @@ Cobertura de cierre de Fase 4 demostrada:
 - `custom_plan_service.py` ya persiste `provider` y `model` en el summary de
   routing del nodo
 
+Verificacion nueva ejecutada para el cierre de Fase 5:
+
+```powershell
+python -m pytest -q `
+  tests/test_conversational_flow.py `
+  tests/test_plan_approval.py `
+  tests/test_meta_tools.py `
+  tests/unit/test_agentic_loop.py `
+  tests/unit/test_task_descriptor_service.py `
+  tests/unit/test_chat_tools.py
+```
+
+Resultado:
+
+- `77 passed`
+
+Verificacion minima compartida de no regresion:
+
+```powershell
+python -m pytest -q `
+  tests/unit/test_phase4_ops_routes.py `
+  tests/unit/test_routes.py `
+  tests/unit/test_plan_graph_builder.py `
+  tests/test_plan_approval.py
+```
+
+Resultado:
+
+- `71 passed`
+
+Cobertura de cierre de Fase 5 demostrada:
+
+- `ConversationService` ya hidrata threads legacy en lectura y preserva el
+  shape canonico en el siguiente write real
+- `list_threads()` ya usa la misma carga/hidratacion que `get_thread()`
+- `fork_thread()` ya preserva metadata conversacional, plan propuesto y summary
+  sin compartir referencias mutables
+- el flujo `plan_proposed -> awaiting_approval -> approve/modify/reject` ya usa
+  `workflow_phase` como verdad conversacional
+- `reject` ya no destruye `proposed_plan`
+- el contrato de `propose_plan` ya escribe `agent_preset` aun cuando el input
+  llegue con `agent_mood` o `mood` legacy
+- la surface MCP ya deja de resumir threads como `Mood: ...` y usa
+  `Preset + Workflow phase`
+
 ## Siguiente Fase Obligatoria
 
 La siguiente fase a cerrar es:
 
-- `Fase 5 - Materializacion correcta de planes y threads`
+- `Fase 6 - CustomPlanService ejecuta perfiles reales`
 
-No debe cerrarse Fase 6, 7, 8, 9, 10 u 11 antes de cerrar Fase 5.
+No debe cerrarse Fase 7, 8, 9, 10 u 11 antes de cerrar Fase 6.
 
 ## Regla Para El Siguiente Agente
 
@@ -260,6 +317,6 @@ El siguiente agente debe:
 1. leer primero el plan oficial en
    `docs/refactor/AGENT_PROFILE_ROUTING_MIGRATION_CANONICAL_PLAN_2026-03-28.md`
 2. usar este archivo solo como dashboard de estado
-3. trabajar solo Fase 5
-4. detenerse si descubre que Fase 5 depende de reabrir una fase marcada como
+3. trabajar solo Fase 6
+4. detenerse si descubre que Fase 6 depende de reabrir una fase marcada como
    `DONE`

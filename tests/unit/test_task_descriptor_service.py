@@ -26,6 +26,7 @@ def test_normalize_plan_data_preserves_conversational_shape_fields():
     task = normalized["tasks"][0]
 
     assert task["depends_on"] == ["t0"]
+    assert task["agent_preset"] == "researcher"
     assert task["legacy_mood"] == "forensic"
     assert task["requested_model"] == "gpt-4o"
     assert task["agent_rationale"] == "Need careful analysis"
@@ -56,6 +57,7 @@ def test_canonicalize_plan_data_adds_descriptor_and_fingerprint_to_conversationa
 
     assert canonical["context"] == {"surface": "chatgpt_app", "workspace_mode": "ephemeral", "budget_mode": "tight"}
     assert task["depends_on"] == ["t0"]
+    assert task["agent_preset"] == "researcher"
     assert task["legacy_mood"] == "forensic"
     assert task["requested_model"] == "gpt-4o"
     assert task["agent_rationale"] == "Need careful analysis"
@@ -94,6 +96,7 @@ def test_descriptor_and_fingerprint_match_across_structured_and_conversational_s
 
     assert structured_descriptor.task_semantic == conversational_descriptor.task_semantic == "research"
     assert structured_descriptor.mutation_mode == conversational_descriptor.mutation_mode == "none"
+    assert conversational_task["agent_preset"] == "researcher"
     assert structured_task["task_fingerprint"] == conversational_task["task_fingerprint"]
 
 
