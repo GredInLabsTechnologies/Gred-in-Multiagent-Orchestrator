@@ -203,18 +203,18 @@ def register_native_tools(mcp: FastMCP):
 
     def _generate_mermaid_graph(plan_data: Any) -> str:
         try:
-            from tools.gimo_server.ops_models import OpsPlan
-            import json
-            if isinstance(plan_data, str):
-                plan_data = json.loads(plan_data)
-            plan = OpsPlan.model_validate(plan_data) if isinstance(plan_data, dict) else plan_data
+            from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
 
+            payload = TaskDescriptorService.coerce_plan_data(plan_data)
+            raw_tasks = payload.get("tasks") or []
+            normalized_plan = TaskDescriptorService.normalize_plan_data(payload)
             lines = ["graph TD"]
-            for task in plan.tasks:
-                node_id = task.id.replace("-", "_")
-                label = f'"{task.title}<br/>[{task.status}]"'
+            for index, task in enumerate(normalized_plan.get("tasks", [])):
+                raw_task = raw_tasks[index] if index < len(raw_tasks) and isinstance(raw_tasks[index], dict) else {}
+                node_id = str(task.get("id") or f"task_{index}").replace("-", "_")
+                label = f'"{task.get("title") or node_id}<br/>[{raw_task.get("status") or "pending"}]"'
                 lines.append(f"    {node_id}[{label}]")
-                for dep in task.depends:
+                for dep in task.get("depends_on") or []:
                     lines.append(f"    {dep.replace('-', '_')} --> {node_id}")
             return "\\n".join(lines)
         except Exception as e:
@@ -264,9 +264,15 @@ def register_native_tools(mcp: FastMCP):
         """Generates a structured multi-step plan with task dependencies and Mermaid graph."""
         try:
             from tools.gimo_server.services.ops_service import OpsService
+            from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
             plan_data = await _generate_plan_for_task(task_instructions)
             graph = _generate_mermaid_graph(plan_data)
-            draft = OpsService.create_draft(prompt=task_instructions, content=plan_data.model_dump_json(indent=2), context={"structured": True, "mermaid": graph}, provider="mcp_planner")
+            draft = OpsService.create_draft(
+                prompt=task_instructions,
+                content=TaskDescriptorService.canonicalize_plan_content(plan_data),
+                context={"structured": True, "mermaid": graph},
+                provider="mcp_planner",
+            )
             return f"🚀 Plan propuesto (Draft: {draft.id}):\\n```mermaid\\n{graph}\\n```"
         except Exception as e: return f"Error: {e}"
 
@@ -275,9 +281,15 @@ def register_native_tools(mcp: FastMCP):
         """Creates an Ops Draft based on task instructions with Mermaid planning"""
         try:
             from tools.gimo_server.services.ops_service import OpsService
+            from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
             plan_data = await _generate_plan_for_task(task_instructions)
             graph = _generate_mermaid_graph(plan_data)
-            draft = OpsService.create_draft(prompt=task_instructions, content=plan_data.model_dump_json(indent=2), context={"structured": True, "mermaid": graph}, provider="mcp")
+            draft = OpsService.create_draft(
+                prompt=task_instructions,
+                content=TaskDescriptorService.canonicalize_plan_content(plan_data),
+                context={"structured": True, "mermaid": graph},
+                provider="mcp",
+            )
             return f"Draft: {draft.id}\\n```mermaid\\n{graph}\\n```"
         except Exception as e: return str(e)
 
@@ -286,9 +298,15 @@ def register_native_tools(mcp: FastMCP):
         """Automatically create and execute a whole plan based on instructions."""
         try:
             from tools.gimo_server.services.ops_service import OpsService
+            from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
             plan_data = await _generate_plan_for_task(task_instructions)
             graph = _generate_mermaid_graph(plan_data)
-            draft = OpsService.create_draft(prompt=task_instructions, content=plan_data.model_dump_json(indent=2), context={"structured": True, "mermaid": graph}, provider="mcp_auto")
+            draft = OpsService.create_draft(
+                prompt=task_instructions,
+                content=TaskDescriptorService.canonicalize_plan_content(plan_data),
+                context={"structured": True, "mermaid": graph},
+                provider="mcp_auto",
+            )
             appr = OpsService.approve_draft(draft.id, approved_by="auto")
             run = OpsService.create_run(appr.id)
             return f"Running. Run ID: {run.id}\\nPlan:\\n```mermaid\\n{graph}\\n```"
@@ -517,7 +535,7 @@ def register_native_tools(mcp: FastMCP):
 
                 result = resp.json()
                 plan_id = result.get("plan_id", "")
-                return f"✓ Plan approved. Execution started (plan_id: {plan_id}). Mood transitioned to: {result.get('mood_transition', 'executor')}"
+            return f"✓ Plan approved. Execution started (plan_id: {plan_id}). Workflow phase: {result.get('workflow_phase', 'executing')}"
 
         except Exception as e:
             return f"gimo_approve_plan error: {e}"
@@ -548,7 +566,7 @@ def register_native_tools(mcp: FastMCP):
                     return f"Failed to reject plan: HTTP {resp.status_code} {resp.text[:200]}"
 
                 result = resp.json()
-                return f"✗ Plan rejected. Agent will revise. Mood transitioned to: {result.get('mood_transition', 'dialoger')}"
+            return f"✗ Plan rejected. Agent will revise. Workflow phase: {result.get('workflow_phase', 'planning')}"
 
         except Exception as e:
             return f"gimo_reject_plan error: {e}"

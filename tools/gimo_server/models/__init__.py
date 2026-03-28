@@ -39,6 +39,15 @@ from .workflow import (
     WorkflowNode, WorkflowEdge, WorkflowGraph, WorkflowCheckpoint,
     WorkflowState, WorkflowExecuteRequest, ContractCheck, WorkflowContract
 )
+from .plan import (
+    PlanNodePosition, PlanNodeBinding, PlanNodeRoutingSummary, PlanNodeExecutionHints,
+    PlanNode, PlanEdge, CustomPlan, CreatePlanRequest, UpdatePlanRequest
+)
+from .agent_routing import (
+    TaskRole, MoodName, ExecutionPolicyName, WorkflowPhase, AgentPresetName,
+    BindingMode, TaskFingerprintParts, TaskDescriptor, TaskConstraints,
+    ResolvedAgentProfile, RoutingDecisionSummary, RoutingDecision, ProfileSummary
+)
 from .eval import (
     EvalGoldenCase, EvalDataset, EvalJudgeConfig, EvalGateConfig,
     EvalRunRequest, EvalCaseResult, EvalRunReport, EvalRunSummary, EvalRunDetail

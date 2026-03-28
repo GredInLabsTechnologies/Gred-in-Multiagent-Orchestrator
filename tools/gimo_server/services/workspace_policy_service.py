@@ -53,6 +53,10 @@ class WorkspacePolicyService:
         return str(surface or "").strip().lower() != cls.SURFACE_CHATGPT_APP
 
     @classmethod
+    def allows_experimental_policy(cls, mode: str | None) -> bool:
+        return cls.normalize_mode(mode) == cls.MODE_SOURCE_REPO
+
+    @classmethod
     def default_metadata_for_surface(cls, surface: str | None) -> dict[str, str | bool]:
         normalized_surface = str(surface or "").strip().lower() or cls.SURFACE_OPERATOR
         return {

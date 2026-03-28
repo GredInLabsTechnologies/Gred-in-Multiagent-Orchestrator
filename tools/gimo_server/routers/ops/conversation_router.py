@@ -5,12 +5,35 @@ from fastapi.responses import StreamingResponse
 from ...ops_models import GimoThread, GimoTurn, GimoItem, GimoItemType
 from ...services.conversation_service import ConversationService
 from ...services.agentic_loop_service import AgenticLoopService, ThreadExecutionBusyError
+from ...services.task_descriptor_service import TaskDescriptorService
 from ...security import verify_token
 from ...security.auth import AuthContext
 from .common import _require_role
 from ...services.thread_session_service import ThreadSessionService
 
 router = APIRouter(prefix="/threads", tags=["conversation"])
+
+
+def _merge_plan_context(thread: GimoThread, plan_data: dict) -> dict:
+    merged = dict(plan_data or {})
+    current_context = dict(merged.get("context") or {})
+    thread_context = {
+        key: value
+        for key, value in (thread.metadata or {}).items()
+        if key
+        in {
+            "surface",
+            "workspace_mode",
+            "orchestrator_authority",
+            "orchestrator_selection_allowed",
+            "worker_model_selection_allowed",
+        }
+    }
+    if thread.workspace_root:
+        thread_context["workspace_root"] = thread.workspace_root
+    if current_context or thread_context:
+        merged["context"] = {**current_context, **thread_context}
+    return merged
 
 @router.get("", response_model=List[GimoThread])
 async def list_threads(
@@ -275,17 +298,25 @@ async def respond_to_plan(
         from ...services.custom_plan_service import CustomPlanService
 
         try:
-            proposed_plan = thread.proposed_plan or {}
+            proposed_plan = _merge_plan_context(thread, thread.proposed_plan or {})
+            canonical_plan = TaskDescriptorService.canonicalize_plan_data(proposed_plan)
+            persisted = ConversationService.mutate_thread(
+                thread_id,
+                lambda current: setattr(current, "proposed_plan", canonical_plan) or True,
+            )
+            if persisted is None:
+                raise HTTPException(status_code=404, detail="Thread not found")
             plan = CustomPlanService.create_plan_from_llm(
-                plan_data={"tasks": proposed_plan.get("tasks", [])},
-                name=proposed_plan.get("title", "Approved Plan"),
-                description=proposed_plan.get("objective", ""),
+                plan_data=canonical_plan,
+                name=canonical_plan.get("title", "Approved Plan"),
+                description=canonical_plan.get("objective", ""),
             )
 
             updated = ConversationService.mutate_thread(
                 thread_id,
                 lambda current: (
-                    setattr(current, "mood", "executor"),
+                    setattr(current, "proposed_plan", canonical_plan),
+                    setattr(current, "workflow_phase", "executing"),
                     current.metadata.__setitem__("plan_approved", True),
                     current.metadata.__setitem__("plan_approved_at", json.dumps({"time": "now"})),
                 ),
@@ -301,7 +332,7 @@ async def respond_to_plan(
                 "status": "approved",
                 "message": "Plan approved and execution started",
                 "plan_id": plan.id,
-                "mood_transition": "executor",
+                "workflow_phase": "executing",
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to create plan: {str(e)}")
@@ -312,7 +343,7 @@ async def respond_to_plan(
             thread_id,
             lambda current: (
                 setattr(current, "proposed_plan", None),
-                setattr(current, "mood", "dialoger"),
+                setattr(current, "workflow_phase", "planning"),
             ),
         )
 
@@ -326,7 +357,7 @@ async def respond_to_plan(
         return {
             "status": "rejected",
             "message": "Plan rejected. Agent will revise.",
-            "mood_transition": "dialoger",
+            "workflow_phase": "planning",
         }
 
     elif action == "modify":
@@ -334,15 +365,19 @@ async def respond_to_plan(
             raise HTTPException(status_code=400, detail="modified_plan required for 'modify' action")
 
         # Update proposed plan with user modifications
+        try:
+            canonical_plan = TaskDescriptorService.canonicalize_plan_data(_merge_plan_context(thread, modified_plan))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid modified plan: {str(e)}") from e
         ConversationService.mutate_thread(
             thread_id,
-            lambda current: setattr(current, "proposed_plan", modified_plan),
+            lambda current: setattr(current, "proposed_plan", canonical_plan),
         )
 
         return {
             "status": "modified",
             "message": "Plan updated with your changes. Review again or approve.",
-            "modified_plan": modified_plan,
+            "modified_plan": canonical_plan,
         }
 
     else:

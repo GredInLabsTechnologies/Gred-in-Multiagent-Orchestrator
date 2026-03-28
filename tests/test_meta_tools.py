@@ -33,7 +33,7 @@ class TestHandleProposePlan:
             "title": "Refactor auth",
             "objective": "Improve security",
             "tasks": [
-                {"id": "t1", "title": "Review code", "agent_rationale": "Need forensic analysis"}
+                {"id": "t1", "title": "Review code", "agent_preset": "researcher", "agent_rationale": "Need forensic analysis"}
             ],
         }
         result = asyncio.run(executor.handle_propose_plan(args))
@@ -91,11 +91,11 @@ class TestHandleWebSearch:
 
 class TestMoodToolConstraints:
     def test_whitelist_blocks_unlisted_tool(self):
-        """forensic mood only allows read_file, list_files, search_text, ask_user."""
+        """forensic legacy mood resolves to a restrictive docs_research policy."""
         executor = ToolExecutor(workspace_root="/tmp", mood="forensic")
         allowed, reason = executor._is_tool_allowed("write_file")
         assert not allowed
-        assert "whitelist" in reason.lower()
+        assert "allowed by execution policy" in reason.lower()
 
     def test_whitelist_allows_listed_tool(self):
         executor = ToolExecutor(workspace_root="/tmp", mood="forensic")
@@ -110,20 +110,17 @@ class TestMoodToolConstraints:
         assert allowed
 
     def test_requires_confirmation_detected(self):
-        """forensic mood requires confirmation for write_file."""
-        executor = ToolExecutor(workspace_root="/tmp", mood="forensic")
-        # write_file is not in whitelist so it would be blocked first,
-        # but requires_confirmation is checked separately
+        """dialoger legacy mood resolves to propose_only, which requires confirmation for writes."""
+        executor = ToolExecutor(workspace_root="/tmp", mood="dialoger")
         assert executor._requires_confirmation("write_file")
         assert not executor._requires_confirmation("read_file")
 
     def test_execute_tool_call_returns_requires_confirmation(self):
-        """dialoger mood requires confirmation for shell_exec, but shell_exec IS in whitelist."""
+        """dialoger legacy mood resolves to propose_only, which blocks shell execution."""
         executor = ToolExecutor(workspace_root="/tmp", mood="dialoger")
-        # shell_exec is NOT in dialoger whitelist, so it should be blocked
         result = asyncio.run(executor.execute_tool_call("shell_exec", {"command": "ls"}))
         assert result["status"] == "error"
-        assert "whitelist" in result["message"].lower()
+        assert "allowed by execution policy" in result["message"].lower()
 
     def test_invalid_mood_falls_back_to_neutral(self):
         executor = ToolExecutor(workspace_root="/tmp", mood="nonexistent")

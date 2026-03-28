@@ -71,3 +71,13 @@ def test_runtime_policy_forbidden_scope(monkeypatch, tmp_path):
     assert decision.decision == "deny"
     assert decision.status_code == "DRAFT_REJECTED_FORBIDDEN_SCOPE"
     assert any("forbidden_path" in rule for rule in decision.triggered_rules)
+
+
+def test_runtime_policy_estimate_change_scope_uses_complexity_defaults():
+    files_changed, loc_changed = RuntimePolicyService.estimate_change_scope(
+        path_scope=["src/main.py", "src/util.py"],
+        complexity_band="high",
+    )
+
+    assert files_changed == 2
+    assert loc_changed == 640

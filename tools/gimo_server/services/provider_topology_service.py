@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from typing import Any, Callable, Dict
 
+from ..models.agent_routing import TaskDescriptor
 from ..ops_models import ProviderConfig, ProviderEntry, ProviderRoleBinding, ProviderRolesConfig
 
 
@@ -175,3 +176,64 @@ class ProviderTopologyService:
 
         workers = cls._deduplicate_workers(orchestrator, worker_bindings)
         return ProviderRolesConfig(orchestrator=orchestrator, workers=workers)
+
+    @classmethod
+    def bindings_for_descriptor(
+        cls,
+        cfg: ProviderConfig | None,
+        descriptor: TaskDescriptor,
+    ) -> list[ProviderRoleBinding]:
+        if not cfg:
+            return [ProviderRoleBinding(provider_id="auto", model="auto")]
+
+        providers = dict(cfg.providers or {})
+        if not providers:
+            return [ProviderRoleBinding(provider_id="auto", model="auto")]
+
+        roles = cls.normalize_roles(cfg, providers)
+        if descriptor.task_semantic in {"planning", "approval"} or descriptor.task_type == "orchestrator":
+            return [roles.orchestrator]
+        if roles.workers:
+            return list(roles.workers)
+        return [roles.orchestrator]
+
+    @classmethod
+    def constrain_bindings(
+        cls,
+        bindings: list[ProviderRoleBinding],
+        *,
+        requested_provider: str | None = None,
+        requested_model: str | None = None,
+    ) -> list[ProviderRoleBinding]:
+        candidates = list(bindings or [])
+        if not candidates:
+            return [ProviderRoleBinding(provider_id="auto", model="auto")]
+
+        provider = str(requested_provider or "").strip()
+        model = str(requested_model or "").strip()
+        provider_requested = bool(provider and provider != "auto")
+        model_requested = bool(model and model != "auto")
+
+        if not provider_requested and not model_requested:
+            return candidates
+
+        filtered = [
+            binding
+            for binding in candidates
+            if (not provider_requested or binding.provider_id == provider)
+            and (not model_requested or binding.model == model)
+        ]
+        if filtered:
+            return filtered
+
+        if provider_requested:
+            provider_only = [binding for binding in candidates if binding.provider_id == provider]
+            if provider_only:
+                return provider_only
+
+        if model_requested:
+            model_only = [binding for binding in candidates if binding.model == model]
+            if model_only:
+                return model_only
+
+        return candidates

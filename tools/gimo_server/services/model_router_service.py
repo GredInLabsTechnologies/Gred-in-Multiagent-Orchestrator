@@ -9,9 +9,9 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING, Tuple
 if TYPE_CHECKING:
     from .storage_service import StorageService
 
-from ..ops_models import WorkflowNode
+from ..ops_models import ProviderRoleBinding, WorkflowNode
 from .cost_service import CostService
-from .model_inventory_service import ModelInventoryService, ModelEntry
+from .model_inventory_service import ModelInventoryService, ModelEntry, _infer_capabilities, _infer_tier
 from .hardware_monitor_service import HardwareMonitorService
 
 logger = logging.getLogger("orchestrator.model_router")
@@ -67,8 +67,37 @@ class ModelRouterService:
     """Agnostic model router that uses only the user's configured providers."""
 
     @classmethod
+    def normalize_task_type(cls, task_type: Optional[str]) -> str:
+        normalized = str(task_type or "").strip().lower()
+        mapping = {
+            "orchestrator": "analysis",
+            "planning": "analysis",
+            "research": "analysis",
+            "review": "analysis",
+            "analysis": "analysis",
+            "security": "security_review",
+            "security_review": "security_review",
+            "human_gate": "classification",
+            "approval": "classification",
+            "classification": "classification",
+            "execution": "code_generation",
+            "implementation": "code_generation",
+            "worker": "code_generation",
+            "coding": "code_generation",
+            "code_generation": "code_generation",
+            "test": "code_generation",
+            "formatting": "formatting",
+            "summarization": "summarization",
+            "translation": "translation",
+        }
+        if normalized in TASK_REQUIREMENTS:
+            return normalized
+        return mapping.get(normalized, "default")
+
+    @classmethod
     def resolve_tier_routing(cls, task_type: str, config: Any) -> Tuple[Optional[str], Optional[str]]:
         """Phase C: Returns (provider_id, model_id) based on configuration and task_type."""
+        canonical_task_type = cls.normalize_task_type(task_type)
         orchestrator_tasks = {"contract", "review", "orchestrator", "intent_classification", "classification", "analysis", "security_review", "disruptive_planning"}
         worker_tasks = {"coding", "code_generation", "test", "worker", "formatting", "doc_generation"}
         
@@ -80,7 +109,7 @@ class ModelRouterService:
         orchestrator_binding = config.primary_orchestrator_binding() if hasattr(config, "primary_orchestrator_binding") else None
         worker_binding = config.primary_worker_binding() if hasattr(config, "primary_worker_binding") else None
 
-        if task_type in orchestrator_tasks:
+        if canonical_task_type in orchestrator_tasks:
             if orchestrator_binding:
                 orch = orchestrator_binding
                 if orch.provider_id in providers:
@@ -94,7 +123,7 @@ class ModelRouterService:
             elif getattr(config, "orchestrator_provider", None) and config.orchestrator_provider in providers:
                 effective_provider = config.orchestrator_provider
                 requested_model = getattr(config, "orchestrator_model", None)
-        elif task_type in worker_tasks:
+        elif canonical_task_type in worker_tasks:
             if worker_binding:
                 first_worker = worker_binding
                 if first_worker.provider_id in providers:
@@ -110,6 +139,208 @@ class ModelRouterService:
                 requested_model = getattr(config, "worker_model", None)
                 
         return effective_provider, requested_model
+
+    @classmethod
+    def _inventory_entry_for_binding(cls, binding: ProviderRoleBinding) -> ModelEntry:
+        from .provider_service import ProviderService
+
+        for entry in ModelInventoryService.get_available_models():
+            if entry.provider_id == binding.provider_id and entry.model_id == binding.model:
+                return entry
+
+        cfg = ProviderService.get_config()
+        provider_entry = cfg.providers.get(binding.provider_id) if cfg and cfg.providers else None
+        provider_type = ProviderService.normalize_provider_type(
+            provider_entry.provider_type if provider_entry else binding.provider_id
+        )
+        is_local = False
+        if provider_entry is not None:
+            capabilities = getattr(provider_entry, "capabilities", None) or {}
+            is_local = not bool(capabilities.get("requires_remote_api", True))
+        pricing = CostService.get_pricing(binding.model)
+        return ModelEntry(
+            model_id=binding.model,
+            provider_id=binding.provider_id,
+            provider_type=provider_type,
+            is_local=is_local,
+            quality_tier=_infer_tier(binding.model),
+            capabilities=_infer_capabilities(binding.model),
+            cost_input=pricing.get("input", 0.0),
+            cost_output=pricing.get("output", 0.0),
+        )
+
+    @classmethod
+    def _filter_binding_candidates_for_task(
+        cls,
+        *,
+        task_type: str,
+        candidates: list[tuple[ProviderRoleBinding, ModelEntry]],
+    ) -> tuple[list[tuple[ProviderRoleBinding, ModelEntry]], list[str], str, int]:
+        normalized_task_type = cls.normalize_task_type(task_type)
+        cap_needed, tier_min = TASK_REQUIREMENTS.get(normalized_task_type, TASK_REQUIREMENTS["default"])
+
+        fully_qualified = [
+            (binding, entry)
+            for binding, entry in candidates
+            if cap_needed in entry.capabilities and entry.quality_tier >= tier_min
+        ]
+        if fully_qualified:
+            return fully_qualified, [], cap_needed, tier_min
+
+        capability_only = [
+            (binding, entry)
+            for binding, entry in candidates
+            if cap_needed in entry.capabilities
+        ]
+        if capability_only:
+            return capability_only, ["quality_floor_relaxed_no_candidate"], cap_needed, tier_min
+
+        if cap_needed != "chat":
+            chat_floor = [
+                (binding, entry)
+                for binding, entry in candidates
+                if "chat" in entry.capabilities and entry.quality_tier >= tier_min
+            ]
+            if chat_floor:
+                return chat_floor, [f"capability_relaxed:{cap_needed}->chat"], cap_needed, tier_min
+
+            chat_only = [
+                (binding, entry)
+                for binding, entry in candidates
+                if "chat" in entry.capabilities
+            ]
+            if chat_only:
+                return chat_only, [f"capability_relaxed:{cap_needed}->chat", "quality_floor_relaxed_no_candidate"], cap_needed, tier_min
+
+        return list(candidates), ["capability_and_quality_floor_unavailable"], cap_needed, tier_min
+
+    @classmethod
+    def _gics_success_adjustment(cls, task_type: str, entry: ModelEntry) -> tuple[float, list[str]]:
+        from .capability_profile_service import CapabilityProfileService
+        from .ops_service import OpsService
+
+        reasons: list[str] = []
+        adjustment = 0.0
+
+        reliability = OpsService.get_model_reliability(provider_type=entry.provider_type, model_id=entry.model_id) or {}
+        if reliability:
+            score = max(0.0, min(1.0, float(reliability.get("score", 0.5) or 0.5)))
+            adjustment += (score - 0.5) * 0.4
+            reasons.append(f"gics_reliability={score:.2f}")
+            if reliability.get("anomaly"):
+                adjustment -= 0.25
+                reasons.append("gics_anomaly_penalty=0.25")
+
+        capability = CapabilityProfileService.get_capability(
+            provider_type=entry.provider_type,
+            model_id=entry.model_id,
+            task_type=task_type,
+        )
+        if capability and capability.samples >= 2:
+            capability_adjust = max(-0.2, min(0.2, (capability.success_rate - 0.5) * 0.4))
+            adjustment += capability_adjust
+            reasons.append(
+                f"gics_task_success={capability.success_rate:.2f}/samples={capability.samples}"
+            )
+
+        return adjustment, reasons
+
+    @classmethod
+    def choose_binding_from_candidates(
+        cls,
+        *,
+        task_type: str,
+        candidates: list[ProviderRoleBinding],
+        requested_provider: str | None = None,
+        requested_model: str | None = None,
+    ) -> RoutingDecision:
+        from .provider_service import ProviderService
+        from .provider_topology_service import ProviderTopologyService
+
+        constrained_candidates = ProviderTopologyService.constrain_bindings(
+            list(candidates or []),
+            requested_provider=requested_provider,
+            requested_model=requested_model,
+        )
+        if not constrained_candidates:
+            return RoutingDecision(
+                model="auto",
+                provider_id="auto",
+                reason="objective=constraints>success>quality>latency>cost|selected=auto/auto|no_candidates",
+            )
+
+        evaluated_candidates = [
+            (binding, cls._inventory_entry_for_binding(binding))
+            for binding in constrained_candidates
+        ]
+        ranked_candidates, eligibility_notes, cap_needed, tier_min = cls._filter_binding_candidates_for_task(
+            task_type=task_type,
+            candidates=evaluated_candidates,
+        )
+        normalized_task_type = cls.normalize_task_type(task_type)
+        cfg = ProviderService.get_config()
+        preferred_provider, preferred_model = (None, None)
+        if cfg is not None:
+            preferred_provider, preferred_model = cls.resolve_tier_routing(normalized_task_type, cfg)
+
+        ranked: list[tuple[tuple[float, float, float, float, str, str], RoutingDecision]] = []
+        for binding, entry in ranked_candidates:
+            topology_bonus = 0.0
+            if preferred_provider and binding.provider_id == preferred_provider:
+                topology_bonus = 1.0 if not preferred_model or binding.model == preferred_model else 0.7
+            gics_adjustment, gics_reasons = cls._gics_success_adjustment(normalized_task_type, entry)
+            success_score = topology_bonus + gics_adjustment
+            quality_score = (1.0 if entry.quality_tier >= tier_min else 0.0) + (entry.quality_tier / 100.0)
+            latency_score = (1.0 if entry.is_local else 0.0) + (0.0 if not entry.size_gb else max(0.0, 0.5 - (entry.size_gb / 100.0)))
+            total_cost = max(0.0, entry.cost_input) + max(0.0, entry.cost_output)
+            cost_score = 1.0 if total_cost <= 0 else max(0.0, 1.0 - min(total_cost, 1000.0) / 1000.0)
+            reason_parts = [
+                "objective=constraints>success>quality>latency>cost",
+                f"task={normalized_task_type}(cap={cap_needed},tier>={tier_min})",
+                f"selected={binding.provider_id}/{binding.model}",
+                f"success={success_score:.2f}",
+                f"quality={quality_score:.2f}",
+                f"latency={latency_score:.2f}",
+                f"cost={cost_score:.2f}",
+            ]
+            if preferred_provider:
+                reason_parts.append(f"topology_preference={preferred_provider}/{preferred_model or 'auto'}")
+            reason_parts.extend(eligibility_notes)
+            reason_parts.extend(gics_reasons)
+
+            ranked.append(
+                (
+                    (
+                        success_score,
+                        quality_score,
+                        latency_score,
+                        cost_score,
+                        binding.provider_id,
+                        binding.model,
+                    ),
+                    RoutingDecision(
+                        model=binding.model,
+                        provider_id=binding.provider_id,
+                        reason="|".join(reason_parts),
+                        tier=entry.quality_tier,
+                        hardware_state="safe",
+                    ),
+                )
+            )
+
+        ranked.sort(
+            key=lambda item: (
+                -item[0][0],
+                -item[0][1],
+                -item[0][2],
+                -item[0][3],
+                item[0][4],
+                item[0][5],
+            )
+        )
+        selected = ranked[0][1]
+        selected.alternatives = [candidate.model for _, candidate in ranked[1:4]]
+        return selected
 
     # Keep for backwards compat with CascadeService and tests
     _TIERS = _LEGACY_TIERS

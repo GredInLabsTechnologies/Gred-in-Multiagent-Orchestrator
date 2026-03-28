@@ -1,3 +1,4 @@
+import json
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -29,6 +30,66 @@ def test_get_status(client):
     response = client.get("/status")
     assert response.status_code == 200
     assert "version" in response.json()
+
+
+def test_ui_plan_create_writes_canonical_plan_content(client):
+    raw_plan = {
+        "id": "plan_1",
+        "title": "Ship feature",
+        "workspace": ".",
+        "created": "2026-03-28",
+        "objective": "Implement change",
+        "tasks": [
+            {
+                "id": "t1",
+                "title": "Investigate API",
+                "description": "Read docs and understand the endpoint",
+                "scope": "file_write",
+                "depends": [],
+                "status": "pending",
+                "agent_assignee": {
+                    "role": "worker",
+                    "goal": "Understand the API shape",
+                    "backstory": "Senior investigator",
+                    "model": "gpt-4o",
+                    "system_prompt": "Be thorough.",
+                    "instructions": ["Inspect the API carefully."],
+                },
+            }
+        ],
+    }
+
+    captured = {}
+
+    def _capture_create_draft(**kwargs):
+        captured["content"] = kwargs["content"]
+        return type(
+            "Draft",
+            (),
+            {
+                "id": "d_ui_1",
+                "status": "draft",
+                "prompt": kwargs["prompt"],
+                "content": kwargs["content"],
+            },
+        )()
+
+    async def _fake_generate(*_args, **_kwargs):
+        return {"content": json.dumps(raw_plan)}
+
+    with patch(
+        "tools.gimo_server.routes.ProviderService.static_generate",
+        new=_fake_generate,
+    ), patch(
+        "tools.gimo_server.routes.OpsService.create_draft",
+        side_effect=_capture_create_draft,
+    ):
+        response = client.post("/ui/plan/create", json={"prompt": "ship p2"})
+
+    assert response.status_code == 200
+    payload = json.loads(captured["content"])
+    assert payload["tasks"][0]["task_descriptor"]["task_id"] == "t1"
+    assert "task_fingerprint" in payload["tasks"][0]
 
 
 def test_get_health_deep(client, tmp_path):

@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import pytest
 
 from tools.gimo_server.services.conversation_service import ConversationService
+from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
 
 
 SAMPLE_PLAN = {
@@ -18,7 +19,7 @@ SAMPLE_PLAN = {
 }
 
 
-def _create_thread_with_plan(test_client, valid_token, workspace_root):
+def _create_thread_with_plan(test_client, valid_token, workspace_root, plan=None):
     """Create a thread via API, then patch its JSON to add a proposed plan."""
     resp = test_client.post(
         "/ops/threads",
@@ -28,10 +29,10 @@ def _create_thread_with_plan(test_client, valid_token, workspace_root):
     assert resp.status_code == 201
     thread_id = resp.json()["id"]
 
-    # Patch the thread file directly to add proposed_plan and mood
+    # Patch the thread file directly to add proposed_plan and legacy mood hint
     thread_path = ConversationService.THREADS_DIR / f"{thread_id}.json"
     data = json.loads(thread_path.read_text(encoding="utf-8"))
-    data["proposed_plan"] = SAMPLE_PLAN
+    data["proposed_plan"] = plan or SAMPLE_PLAN
     data["mood"] = "dialoger"
     thread_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
@@ -39,7 +40,35 @@ def _create_thread_with_plan(test_client, valid_token, workspace_root):
 
 
 class TestPlanApproval:
-    def test_approve_transitions_to_executor(self, test_client, valid_token, tmp_path):
+    def test_approve_merges_thread_context_into_plan_before_materialization(self, test_client, valid_token, tmp_path):
+        plan_with_context = {
+            **SAMPLE_PLAN,
+            "context": {"budget_mode": "tight", "topology_mode": "dynamic"},
+        }
+        thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path), plan=plan_with_context)
+
+        mock_plan = MagicMock()
+        mock_plan.id = "plan_test123"
+
+        with patch("tools.gimo_server.services.custom_plan_service.CustomPlanService") as mock_cps:
+            mock_cps.create_plan_from_llm.return_value = mock_plan
+            mock_cps.execute_plan = AsyncMock()
+
+            resp = test_client.post(
+                f"/ops/threads/{thread_id}/plan/respond",
+                params={"action": "approve"},
+                headers={"Authorization": f"Bearer {valid_token}"},
+            )
+
+        assert resp.status_code == 200
+        approved_plan = mock_cps.create_plan_from_llm.call_args.kwargs["plan_data"]
+        assert approved_plan["context"]["budget_mode"] == "tight"
+        assert approved_plan["context"]["topology_mode"] == "dynamic"
+        assert approved_plan["context"]["surface"] == "operator"
+        assert approved_plan["context"]["workspace_mode"] == "ephemeral"
+        assert approved_plan["context"]["workspace_root"] == str(tmp_path)
+
+    def test_approve_transitions_to_executing_phase(self, test_client, valid_token, tmp_path):
         thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path))
 
         # CustomPlanService is imported lazily inside the handler, so we patch
@@ -59,15 +88,20 @@ class TestPlanApproval:
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         data = resp.json()
         assert data["status"] == "approved"
-        assert data["mood_transition"] == "executor"
+        assert data["workflow_phase"] == "executing"
         assert "plan_id" in data
+        approved_plan = mock_cps.create_plan_from_llm.call_args.kwargs["plan_data"]
+        assert "task_descriptor" in approved_plan["tasks"][0]
+        assert "task_fingerprint" in approved_plan["tasks"][0]
 
         # Verify thread state updated
         thread = ConversationService.get_thread(thread_id)
-        assert thread.mood == "executor"
+        assert thread.workflow_phase == "executing"
         assert thread.metadata.get("plan_approved") is True
+        assert "task_descriptor" in thread.proposed_plan["tasks"][0]
+        assert "task_fingerprint" in thread.proposed_plan["tasks"][0]
 
-    def test_reject_transitions_to_dialoger(self, test_client, valid_token, tmp_path):
+    def test_reject_transitions_to_planning_phase(self, test_client, valid_token, tmp_path):
         thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path))
 
         resp = test_client.post(
@@ -79,10 +113,10 @@ class TestPlanApproval:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "rejected"
-        assert data["mood_transition"] == "dialoger"
+        assert data["workflow_phase"] == "planning"
 
         thread = ConversationService.get_thread(thread_id)
-        assert thread.mood == "dialoger"
+        assert thread.workflow_phase == "planning"
         assert thread.proposed_plan is None
 
     def test_approve_failure_does_not_mark_thread_as_approved(self, test_client, valid_token, tmp_path):
@@ -100,9 +134,11 @@ class TestPlanApproval:
         assert resp.status_code == 500
         thread = ConversationService.get_thread(thread_id)
         assert thread is not None
-        assert thread.mood == "dialoger"
+        assert thread.workflow_phase == "intake"
         assert thread.metadata.get("plan_approved") is None
-        assert thread.proposed_plan == SAMPLE_PLAN
+        assert thread.proposed_plan["title"] == SAMPLE_PLAN["title"]
+        assert "task_descriptor" in thread.proposed_plan["tasks"][0]
+        assert "task_fingerprint" in thread.proposed_plan["tasks"][0]
 
     def test_modify_updates_plan(self, test_client, valid_token, tmp_path):
         thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path))
@@ -120,9 +156,38 @@ class TestPlanApproval:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "modified"
+        assert "task_descriptor" in data["modified_plan"]["tasks"][0]
+        assert "task_fingerprint" in data["modified_plan"]["tasks"][0]
 
         thread = ConversationService.get_thread(thread_id)
         assert thread.proposed_plan["title"] == "Smaller plan"
+        assert "task_descriptor" in thread.proposed_plan["tasks"][0]
+        assert "task_fingerprint" in thread.proposed_plan["tasks"][0]
+
+    def test_approve_preserves_existing_canonical_plan(self, test_client, valid_token, tmp_path):
+        canonical_plan = TaskDescriptorService.canonicalize_plan_data(SAMPLE_PLAN)
+        thread_id = _create_thread_with_plan(test_client, valid_token, str(tmp_path), plan=canonical_plan)
+
+        mock_plan = MagicMock()
+        mock_plan.id = "plan_test123"
+
+        with patch("tools.gimo_server.services.custom_plan_service.CustomPlanService") as mock_cps:
+            mock_cps.create_plan_from_llm.return_value = mock_plan
+            mock_cps.execute_plan = AsyncMock()
+
+            resp = test_client.post(
+                f"/ops/threads/{thread_id}/plan/respond",
+                params={"action": "approve"},
+                headers={"Authorization": f"Bearer {valid_token}"},
+            )
+
+        assert resp.status_code == 200
+        approved_plan = mock_cps.create_plan_from_llm.call_args.kwargs["plan_data"]
+        assert approved_plan["title"] == canonical_plan["title"]
+        assert approved_plan["objective"] == canonical_plan["objective"]
+        assert approved_plan["tasks"] == canonical_plan["tasks"]
+        assert approved_plan["context"]["surface"] == "operator"
+        assert approved_plan["context"]["workspace_mode"] == "ephemeral"
 
     def test_404_thread_not_found(self, test_client, valid_token):
         resp = test_client.post(

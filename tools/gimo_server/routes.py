@@ -22,6 +22,7 @@ from tools.gimo_server.security.auth import AuthContext, SESSION_COOKIE_NAME, se
 from tools.gimo_server.services.file_service import FileService
 from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
 from tools.gimo_server.version import __version__
 
 READ_ONLY_ACTIONS_PATHS = {
@@ -290,9 +291,10 @@ async def create_plan_handler(
             lines.append(f"    {dep.replace('-', '_')} --> {node_id}")
     graph = "\n".join(lines)
 
+    canonical_plan = TaskDescriptorService.canonicalize_plan_data(plan_data)
     draft = OpsService.create_draft(
         prompt=prompt,
-        content=plan_data.model_dump_json(indent=2),
+        content=TaskDescriptorService.canonicalize_plan_content(canonical_plan),
         context={"structured": True, "mermaid": graph},
         provider="ui_plan_builder"
     )

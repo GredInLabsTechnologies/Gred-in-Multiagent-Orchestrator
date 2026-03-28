@@ -10,7 +10,7 @@ from tools.gimo_server.services.ops.ops_service import OpsService
 from tools.gimo_server.services.app_session_service import AppSessionService
 from tools.gimo_server.services.provider_service_impl import ProviderService
 from tools.gimo_server.engine.tools.executor import ToolExecutor, ToolExecutionResult
-from tools.gimo_server.engine.moods import MoodProfile, MoodContract
+from tools.gimo_server.engine.moods import MoodProfile
 
 def _persist_approved_stub(approved: OpsApproved):
     path = OpsService._approved_path(approved.id)
@@ -142,8 +142,6 @@ async def test_agentic_loop_pauses_on_context_request(tmp_path):
     mock_mood_profile = MagicMock(spec=MoodProfile)
     mock_mood_profile.max_turns = 5
     mock_mood_profile.temperature = 0.7
-    mock_mood_profile.contract = MagicMock(spec=MoodContract)
-    mock_mood_profile.contract.max_cost_per_turn_usd = 0.1
     
     # Mock ContextRequestService.create_request
     with patch("tools.gimo_server.services.context_request_service.ContextRequestService.create_request") as mock_create:
@@ -157,6 +155,7 @@ async def test_agentic_loop_pauses_on_context_request(tmp_path):
             workspace_root=str(tmp_path),
             token="t1",
             mood="neutral",
+            execution_policy="read_only",
             mood_profile=mock_mood_profile,
             messages=[],
             max_turns=5,

@@ -7,6 +7,7 @@ Merged from:
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -206,6 +207,79 @@ def test_phase7_approve_draft_is_idempotent(tmp_path):
     assert appr1.id == appr2.id
     assert appr1.draft_id == draft.id
     assert len([a for a in OpsService.list_approved() if a.draft_id == draft.id]) == 1
+
+
+def test_phase7_approve_draft_canonicalizes_legacy_structured_content(tmp_path):
+    _setup_ops_dirs(tmp_path)
+    legacy_plan = {
+        "id": "plan_1",
+        "title": "Plan",
+        "objective": "Objective",
+        "tasks": [
+            {
+                "id": "t1",
+                "title": "Investigate",
+                "description": "Read the module",
+                "depends": [],
+                "status": "pending",
+                "agent_assignee": {
+                    "role": "researcher",
+                    "model": "gpt-4o",
+                    "system_prompt": "Review carefully.",
+                },
+            }
+        ],
+    }
+    draft = OpsDraft(
+        id="d_structured",
+        prompt="p",
+        context={"structured": True},
+        content=json.dumps(legacy_plan, indent=2),
+        status="draft",
+    )
+    OpsService._draft_path(draft.id).write_text(draft.model_dump_json(indent=2), encoding="utf-8")
+
+    approved = OpsService.approve_draft(draft.id, approved_by="op")
+    approved_payload = json.loads(approved.content)
+    persisted_draft = OpsService.get_draft(draft.id)
+
+    assert approved_payload["tasks"][0]["task_descriptor"]["task_id"] == "t1"
+    assert "task_fingerprint" in approved_payload["tasks"][0]
+    assert persisted_draft is not None
+    assert json.loads(persisted_draft.content)["tasks"][0]["task_fingerprint"] == approved_payload["tasks"][0]["task_fingerprint"]
+
+
+def test_phase7_create_draft_canonicalizes_structured_plan_content(tmp_path):
+    _setup_ops_dirs(tmp_path)
+    legacy_plan = {
+        "id": "plan_1",
+        "title": "Plan",
+        "objective": "Objective",
+        "tasks": [
+            {
+                "id": "t1",
+                "title": "Investigate",
+                "description": "Read the module",
+                "depends": [],
+                "status": "pending",
+                "agent_assignee": {
+                    "role": "researcher",
+                    "model": "gpt-4o",
+                    "system_prompt": "Review carefully.",
+                },
+            }
+        ],
+    }
+
+    draft = OpsService.create_draft(
+        prompt="p",
+        context={"structured": True},
+        content=json.dumps(legacy_plan, indent=2),
+    )
+
+    payload = json.loads(draft.content)
+    assert payload["tasks"][0]["task_descriptor"]["task_id"] == "t1"
+    assert "task_fingerprint" in payload["tasks"][0]
 
 
 def test_phase7_rerun_creates_new_instance_with_parent_link(tmp_path):

@@ -16,6 +16,20 @@ class FileWrite(ExecutionStage):
         return "file_write"
 
     @staticmethod
+    def _resolve_execution_policy(context: Dict[str, Any]) -> str:
+        explicit_policy = context.get("execution_policy")
+        if isinstance(explicit_policy, str) and explicit_policy.strip():
+            return explicit_policy.strip()
+
+        gen_context = context.get("gen_context")
+        if isinstance(gen_context, dict):
+            nested_policy = gen_context.get("execution_policy")
+            if isinstance(nested_policy, str) and nested_policy.strip():
+                return nested_policy.strip()
+
+        return "workspace_safe"
+
+    @staticmethod
     def _assert_within_workspace(path: str, workspace_root: str) -> None:
         """Raise ValueError if path resolves outside workspace_root."""
         ws = Path(workspace_root).resolve()
@@ -68,7 +82,12 @@ class FileWrite(ExecutionStage):
                 policy = RuntimePolicyService.load_policy_config()
 
         workspace_root = input.context.get("workspace_root", ".")
-        executor = ToolExecutor(workspace_root=workspace_root, policy=policy)
+        execution_policy = self._resolve_execution_policy(input.context)
+        executor = ToolExecutor(
+            workspace_root=workspace_root,
+            policy=policy,
+            execution_policy=execution_policy,
+        )
         
         results = []
         artifacts_out = {}

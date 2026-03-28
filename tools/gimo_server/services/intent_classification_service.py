@@ -10,6 +10,14 @@ class IntentClassificationService:
 
     _LOW_RISK_AUTORUN = {"DOC_UPDATE", "TEST_ADD", "SAFE_REFACTOR"}
     _ALWAYS_REVIEW = {"FEATURE_ADD_LOW_RISK", "ARCH_CHANGE", "SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"}
+    _DEFAULT_INTENT_BY_SEMANTIC = {
+        "planning": "SAFE_REFACTOR",
+        "research": "DOC_UPDATE",
+        "security": "SAFE_REFACTOR",
+        "review": "SAFE_REFACTOR",
+        "approval": "ARCH_CHANGE",
+        "implementation": "SAFE_REFACTOR",
+    }
 
     _SECURITY_HINTS = (
         "tools/gimo_server/security",
@@ -98,6 +106,15 @@ class IntentClassificationService:
             reasons.append("test_add_scope_not_tests_only")
 
         return effective, reasons
+
+    @classmethod
+    def default_intent_for_descriptor(cls, *, task_semantic: str, mutation_mode: str) -> str:
+        semantic = str(task_semantic or "").strip().lower()
+        if semantic in cls._DEFAULT_INTENT_BY_SEMANTIC:
+            return cls._DEFAULT_INTENT_BY_SEMANTIC[semantic]
+        if str(mutation_mode or "").strip().lower() == "none":
+            return "DOC_UPDATE"
+        return "SAFE_REFACTOR"
 
     @classmethod
     def evaluate(

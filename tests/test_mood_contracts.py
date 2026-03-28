@@ -103,3 +103,44 @@ async def test_executor_write_file_reports_successful_auto_checks(tmp_path):
 
     assert result["status"] == "success"
     assert result["data"]["checks"] == fake_results
+
+
+@pytest.mark.asyncio
+async def test_explicit_execution_policy_overrides_mood_permissions(tmp_path):
+    executor = ToolExecutor(workspace_root=str(tmp_path), mood="executor", execution_policy="read_only")
+
+    result = await executor.execute_tool_call("write_file", {"path": "x.txt", "content": "hello"})
+
+    assert result["status"] == "error"
+    assert "read-only" in result["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_explicit_execution_policy_keeps_permissions_stable_across_moods(tmp_path):
+    forensic_executor = ToolExecutor(
+        workspace_root=str(tmp_path),
+        mood="forensic",
+        execution_policy="workspace_safe",
+    )
+    dialoger_executor = ToolExecutor(
+        workspace_root=str(tmp_path),
+        mood="dialoger",
+        execution_policy="workspace_safe",
+    )
+
+    forensic_result = await forensic_executor.execute_tool_call("write_file", {"path": "a.txt", "content": "hello"})
+    dialoger_result = await dialoger_executor.execute_tool_call("write_file", {"path": "b.txt", "content": "world"})
+
+    assert forensic_result["status"] == "success"
+    assert dialoger_result["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_legacy_mood_compatibility_still_resolves_policy_when_missing(tmp_path):
+    executor = ToolExecutor(workspace_root=str(tmp_path), mood="forensic")
+
+    result = await executor.execute_tool_call("write_file", {"path": "x.txt", "content": "hello"})
+
+    assert executor.execution_policy == "docs_research"
+    assert result["status"] == "error"
+    assert "read-only" in result["message"].lower()

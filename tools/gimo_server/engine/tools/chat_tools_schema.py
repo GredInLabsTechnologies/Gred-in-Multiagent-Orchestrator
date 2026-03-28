@@ -249,7 +249,7 @@ CHAT_TOOLS: List[Dict[str, Any]] = [
             "description": (
                 "Propose an execution plan for a complex task. "
                 "Use this when the task requires 3+ file changes, structural refactors, "
-                "or new project setup. Include rationale for why you chose each mood and model. "
+                "or new project setup. Include rationale for why you chose each preset, mood, and model. "
                 "The loop will pause for user approval before execution."
             ),
             "parameters": {
@@ -277,20 +277,24 @@ CHAT_TOOLS: List[Dict[str, Any]] = [
                                     "description": "IDs of tasks that must complete first.",
                                     "items": {"type": "string"},
                                 },
+                                "agent_preset": {
+                                    "type": "string",
+                                    "description": "High-level agent preset for this task (plan_orchestrator, researcher, executor, reviewer, safety_reviewer, human_gate).",
+                                },
                                 "agent_mood": {
                                     "type": "string",
-                                    "description": "Mood for this task (neutral, forensic, executor, dialoger, creative, guardian, mentor).",
+                                    "description": "Optional legacy mood hint for this task.",
                                 },
                                 "agent_rationale": {
                                     "type": "string",
-                                    "description": "WHY you chose this mood and model for this task.",
+                                    "description": "WHY you chose this preset, mood hint, and model for this task.",
                                 },
                                 "model": {
                                     "type": "string",
                                     "description": "Model to use ('auto' or specific like 'gpt-4o').",
                                 },
                             },
-                            "required": ["id", "title", "description", "agent_mood", "agent_rationale"],
+                            "required": ["id", "title", "description", "agent_rationale"],
                         },
                     },
                 },

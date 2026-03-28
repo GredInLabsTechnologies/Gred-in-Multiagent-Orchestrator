@@ -24,6 +24,11 @@ class RuntimePolicyService:
 
     POLICY_PATH: Path = OPS_DATA_DIR / "state" / "policy.json"
     BASELINE_PATH: Path = OPS_DATA_DIR / "runtime" / "baseline_manifest.json"
+    _COMPLEXITY_LOC_ESTIMATES: Dict[str, int] = {
+        "low": 30,
+        "medium": 120,
+        "high": 320,
+    }
 
     @classmethod
     def _default_policy(cls) -> RuntimePolicyConfig:
@@ -97,6 +102,33 @@ class RuntimePolicyService:
             if p == pat or p.startswith(f"{pat}/"):
                 return True
         return False
+
+    @classmethod
+    def estimate_change_scope(
+        cls,
+        *,
+        path_scope: Iterable[str],
+        complexity_band: str | None,
+        estimated_files_changed: Optional[int] = None,
+        estimated_loc_changed: Optional[int] = None,
+    ) -> tuple[int, int]:
+        normalized_scope = [_normalize_path(p) for p in (path_scope or []) if _normalize_path(p)]
+
+        files_changed = int(estimated_files_changed) if estimated_files_changed is not None else 0
+        if files_changed < 0:
+            files_changed = 0
+        if files_changed == 0 and normalized_scope:
+            files_changed = len(normalized_scope)
+
+        loc_changed = int(estimated_loc_changed) if estimated_loc_changed is not None else 0
+        if loc_changed < 0:
+            loc_changed = 0
+        if loc_changed == 0:
+            per_file = cls._COMPLEXITY_LOC_ESTIMATES.get(str(complexity_band or "").strip().lower(), 120)
+            effective_files = files_changed or (1 if normalized_scope else 0)
+            loc_changed = effective_files * per_file
+
+        return files_changed, loc_changed
 
     @classmethod
     def evaluate_draft_policy(

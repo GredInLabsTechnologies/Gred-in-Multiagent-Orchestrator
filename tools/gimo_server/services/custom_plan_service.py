@@ -10,11 +10,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
 from ..config import OPS_DATA_DIR
+from ..models.plan import (
+    CreatePlanRequest,
+    CustomPlan,
+    PlanEdge,
+    PlanNode,
+    PlanNodeBinding,
+    PlanNodeExecutionHints,
+    PlanNodePosition,
+    UpdatePlanRequest,
+)
 from ..ops_models import CostEvent
+from .constraint_compiler_service import ConstraintCompilerService
 from .git_service import GitService
+from .profile_binding_service import ProfileBindingService
+from .profile_router_service import ProfileRouterService
 from .sandbox_service import SandboxHandle, SandboxService
+from .task_descriptor_service import TaskDescriptorService
+from .task_fingerprint_service import TaskFingerprintService
 
 logger = logging.getLogger("orchestrator.custom_plans")
 
@@ -29,84 +43,17 @@ class PlanExecutionBusyError(RuntimeError):
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-class PlanNodePosition(BaseModel):
-    """Define las coordenadas de un nodo en el plano 2D visual."""
-    x: float = 0
-    y: float = 0
-
-
-class PlanNode(BaseModel):
-    """A single node in the execution graph."""
-    id: str
-    label: str
-    prompt: str = ""
-    model: str = "auto"                          # "auto", "qwen2.5-coder:32b", "gpt-4o", etc.
-    provider: str = "auto"                       # "auto", "ollama", "openai", etc.
-    role: str = "worker"                         # "worker", "reviewer", "researcher"
-    node_type: str = "worker"                    # orchestrator | worker | reviewer | researcher | tool | human_gate
-    role_definition: str = ""
-    is_orchestrator: bool = False
-    depends_on: List[str] = Field(default_factory=list)  # IDs of upstream nodes
-    status: str = "pending"                      # pending | running | done | error | skipped
-    output: Optional[str] = None
-    error: Optional[str] = None
-    position: PlanNodePosition = Field(default_factory=PlanNodePosition)
-    config: Dict[str, Any] = Field(default_factory=dict)  # extra config per node
-
-
-class PlanEdge(BaseModel):
-    """Dependency edge between nodes."""
-    id: str
-    source: str   # node ID
-    target: str   # node ID
-
-
-class CustomPlan(BaseModel):
-    """A user-defined execution graph."""
-    id: str
-    name: str
-    description: str = ""
-    context: Dict[str, Any] = Field(default_factory=dict)
-    nodes: List[PlanNode] = Field(default_factory=list)
-    edges: List[PlanEdge] = Field(default_factory=list)
-    status: str = "draft"   # draft | approved | running | done | error
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    run_log: List[Dict[str, Any]] = Field(default_factory=list)
-
-
-class CreatePlanRequest(BaseModel):
-    """Esquema para crear un plan de ejecucion (CustomPlan)."""
-    name: str
-    description: str = ""
-    context: Dict[str, Any] = Field(default_factory=dict)
-    nodes: List[PlanNode] = Field(default_factory=list)
-    edges: List[PlanEdge] = Field(default_factory=list)
-
-
-class UpdatePlanRequest(BaseModel):
-    """Esquema para actualizar metadatos de un CustomPlan."""
-    name: Optional[str] = None
-    description: Optional[str] = None
-    nodes: Optional[List[PlanNode]] = None
-    edges: Optional[List[PlanEdge]] = None
-
-
 # Service
 # ──────────────────────────────────────────────────────────────────────────────
 
 def llm_response_to_plan_nodes(
     plan_data: Dict[str, Any],
 ) -> tuple[List[PlanNode], List[PlanEdge]]:
-    """Convert LLM-generated JSON plan (tasks[].agent_assignee) to PlanNode[]+PlanEdge[].
-
-    Accepts the standard OpsPlan-shaped dict:
-      { "tasks": [ { "id", "title", "description", "depends",
-                      "agent_assignee": { "role", "model", "system_prompt", ... } } ] }
-
-    Returns (nodes, edges) ready for CustomPlan creation.
-    """
-    tasks = plan_data.get("tasks", [])
+    """Convert plan tasks into canonical PlanNode/PlanEdge objects."""
+    normalized_plan = TaskDescriptorService.normalize_plan_data(plan_data)
+    raw_tasks = plan_data.get("tasks") or []
+    plan_context = dict(plan_data.get("context") or {})
+    tasks = normalized_plan.get("tasks", [])
     if not tasks:
         raise ValueError("Plan data contains no tasks")
 
@@ -117,32 +64,43 @@ def llm_response_to_plan_nodes(
     depth_map, layer_index = _calculate_layout(tasks, task_ids)
 
     for i, task in enumerate(tasks):
+        raw_task = raw_tasks[i] if i < len(raw_tasks) and isinstance(raw_tasks[i], dict) else {}
+        task_context = {**plan_context, **raw_task, **task}
         tid = task.get("id", f"t_{i}")
         title = task.get("title", f"Task {i}")
         desc = task.get("description", "")
-        agent = task.get("agent_assignee") or {}
-        depends = [d for d in (task.get("depends") or []) if d in task_ids]
-        scope = task.get("scope", "")
+        depends = [d for d in (task.get("depends_on") or []) if d in task_ids]
+        descriptor = TaskDescriptorService.descriptor_from_task(task_context)
+        constraints = ConstraintCompilerService.compile_for_descriptor(descriptor, task_context=task_context)
+        routing = ProfileRouterService.route(
+            descriptor=descriptor,
+            constraints=constraints,
+            requested_preset=task.get("agent_preset"),
+            legacy_mood=task.get("legacy_mood"),
+        )
+        binding_resolution = ProfileBindingService.resolve_binding_decision(
+            descriptor=descriptor,
+            requested_provider=task.get("requested_provider"),
+            requested_model=task.get("requested_model"),
+            binding_mode=routing.binding_mode,
+            constraints=constraints,
+        )
+        binding = binding_resolution.binding
+        task_fingerprint = TaskFingerprintService.fingerprint_for_descriptor(descriptor)
+        role_definition = task.get("role_definition", "")
+        prompt_parts = [part for part in [desc, role_definition] if str(part).strip()]
+        routing_summary = routing.summary.model_copy(update={"provider": binding.provider, "model": binding.model})
+        routing_reason = f"{routing.routing_reason}|binding={binding_resolution.reason}"
 
-        role_raw = (agent.get("role") or "worker").lower()
-        role_map = {
-            "lead orchestrator": "orchestrator",
+        task_role = routing.resolved_profile.task_role
+        node_type = {
             "orchestrator": "orchestrator",
             "reviewer": "reviewer",
             "researcher": "researcher",
             "tool": "tool",
             "human_gate": "human_gate",
-        }
-        node_type = role_map.get(role_raw, "worker")
-        is_orch = node_type == "orchestrator" or scope == "bridge"
-        if is_orch:
-            node_type = "orchestrator"
-
-        prompt_parts = []
-        if desc:
-            prompt_parts.append(desc)
-        if agent.get("system_prompt"):
-            prompt_parts.append(agent["system_prompt"])
+        }.get(task_role, "worker")
+        is_orch = node_type == "orchestrator"
 
         depth = depth_map.get(tid, 0)
         idx_in_layer = layer_index.get(tid, 0)
@@ -151,15 +109,40 @@ def llm_response_to_plan_nodes(
             id=tid,
             label=title,
             prompt="\n\n".join(prompt_parts),
-            model=agent.get("model", "auto"),
-            provider="auto",
+            model=binding.model,
+            provider=binding.provider,
             role=node_type,
             node_type=node_type,
-            role_definition=agent.get("system_prompt", ""),
+            role_definition=role_definition,
             is_orchestrator=is_orch,
             depends_on=depends,
             status="pending",
             position=PlanNodePosition(x=250 * depth, y=140 * idx_in_layer),
+            agent_preset=routing.resolved_profile.agent_preset,
+            binding_mode=routing.binding_mode,
+            execution_policy=routing.resolved_profile.execution_policy,
+            workflow_phase=routing.resolved_profile.workflow_phase,
+            task_fingerprint=task_fingerprint,
+            task_descriptor=descriptor,
+            resolved_profile=routing.resolved_profile,
+            routing_decision_summary=routing_summary,
+            routing_reason=routing_reason,
+            execution_hints=PlanNodeExecutionHints(
+                legacy_mood=task.get("legacy_mood"),
+                requested_model=task.get("requested_model"),
+                requested_provider=task.get("requested_provider"),
+                agent_rationale=task.get("agent_rationale"),
+            ),
+            binding=PlanNodeBinding(
+                provider=binding.provider,
+                model=binding.model,
+                binding_mode=binding.binding_mode,
+            ),
+            config={
+                "legacy_mood": task.get("legacy_mood"),
+                "agent_rationale": task.get("agent_rationale"),
+                "requested_role": task.get("requested_role"),
+            },
         )
         nodes.append(node)
 
@@ -185,7 +168,7 @@ def _calculate_layout(tasks: List[Dict[str, Any]], task_ids: set) -> tuple[Dict[
         task = next((t for t in tasks if t.get("id") == tid), None)
         if not task:
             return 0
-        deps = [d for d in (task.get("depends") or []) if d in task_ids]
+        deps = [d for d in (task.get("depends_on") or task.get("depends") or []) if d in task_ids]
         d = 0 if not deps else max(_get_depth(dep, visited) for dep in deps) + 1
         depth_map[tid] = d
         return d
@@ -329,7 +312,13 @@ class CustomPlanService:
         nodes, edges = llm_response_to_plan_nodes(plan_data)
         plan_name = name or plan_data.get("title", "AI Generated Plan")
         plan_desc = description or plan_data.get("objective", "")
-        req = CreatePlanRequest(name=plan_name, description=plan_desc, nodes=nodes, edges=edges)
+        req = CreatePlanRequest(
+            name=plan_name,
+            description=plan_desc,
+            context=dict(plan_data.get("context") or {}),
+            nodes=nodes,
+            edges=edges,
+        )
         return cls.create_plan(req)
 
     # ── CRUD ──
@@ -800,14 +789,30 @@ class CustomPlanService:
             storage_service_cls = StorageService
             ops_service_cls = OpsService
 
-            # Determine mood from node config or role
-            node_mood = node.config.get("mood", "executor")  # Default to executor for plan nodes
+            resolved_profile = node.resolved_profile
+            node_mood = resolved_profile.mood if resolved_profile else (node.execution_hints.legacy_mood or "assertive")
+            execution_policy = (
+                resolved_profile.execution_policy
+                if resolved_profile is not None and node.execution_policy is None
+                else (node.execution_policy or (resolved_profile.execution_policy if resolved_profile else "workspace_safe"))
+            )
+            task_role = resolved_profile.task_role if resolved_profile else ("orchestrator" if node.is_orchestrator else "executor")
+            workflow_phase = resolved_profile.workflow_phase if resolved_profile else (node.workflow_phase or "executing")
+            provider_binding = node.binding.provider if node.binding else node.provider
+            model_binding = node.binding.model if node.binding else node.model
             if not execution_workspace:
                 sandbox_run_id = f"{plan.id}_{execution_id or 'run'}_{node.id}"
                 sandbox_handle = SandboxService.create_worktree_handle(sandbox_run_id, str(repo_root), base_ref=base_ref)
                 execution_workspace = str(sandbox_handle.worktree_path)
 
-            logger.info(f"[plan-node] Executing {node.id} with mood={node_mood}")
+            logger.info(
+                "[plan-node] Executing %s with mood=%s policy=%s provider=%s model=%s",
+                node.id,
+                node_mood,
+                execution_policy,
+                provider_binding,
+                model_binding,
+            )
 
             # Execute node with agentic loop
             result = await asyncio.wait_for(
@@ -815,6 +820,11 @@ class CustomPlanService:
                     workspace_root=execution_workspace,
                     node_prompt=final_prompt,
                     mood=node_mood,
+                    execution_policy=execution_policy,
+                    provider=provider_binding,
+                    model=model_binding,
+                    task_role=task_role,
+                    workflow_phase=workflow_phase,
                     max_turns=10,  # Shorter than main loop
                     temperature=None,  # Use mood default
                     tools=None,  # Use all tools
@@ -1001,6 +1011,15 @@ class CustomPlanService:
     @classmethod
     def _build_node_prompt(cls, node: PlanNode, dep_outputs: List[str]) -> str:
         parts = []
+        if node.resolved_profile:
+            parts.append(
+                "Execution profile:\n"
+                f"- preset: {node.resolved_profile.agent_preset}\n"
+                f"- role: {node.resolved_profile.task_role}\n"
+                f"- mood: {node.resolved_profile.mood}\n"
+                f"- policy: {node.resolved_profile.execution_policy}\n"
+                f"- phase: {node.resolved_profile.workflow_phase}"
+            )
         if node.role_definition.strip():
             parts.append(f"Role definition:\n{node.role_definition.strip()}")
         if dep_outputs:

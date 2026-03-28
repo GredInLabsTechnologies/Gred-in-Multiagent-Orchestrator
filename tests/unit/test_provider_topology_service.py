@@ -4,6 +4,7 @@ import json
 import shutil
 
 from tools.gimo_server.ops_models import ProviderConfig, ProviderEntry, ProviderRoleBinding, ProviderRolesConfig
+from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
 from tools.gimo_server.services.provider_service_impl import ProviderService
 from tools.gimo_server.services.provider_topology_service import ProviderTopologyService
 
@@ -155,3 +156,46 @@ def test_ensure_default_config_without_detected_cli_keeps_roles_unset(monkeypatc
 
     assert cfg.providers == {}
     assert cfg.roles is None
+
+
+def test_bindings_for_descriptor_prefers_workers_for_execution_tasks():
+    providers = {
+        "orch-main": ProviderEntry(type="openai", provider_type="openai", model="gpt-5.4"),
+        "worker-1": ProviderEntry(type="openai", provider_type="openai", model="gpt-4o-mini"),
+    }
+    cfg = ProviderConfig(
+        active="orch-main",
+        providers=providers,
+        roles=ProviderRolesConfig(
+            orchestrator=ProviderRoleBinding(provider_id="orch-main", model="gpt-5.4"),
+            workers=[ProviderRoleBinding(provider_id="worker-1", model="gpt-4o-mini")],
+        ),
+    )
+    descriptor = TaskDescriptorService.descriptor_from_task(
+        {
+            "id": "t1",
+            "title": "Implement fix",
+            "description": "Apply code changes in the workspace",
+        }
+    )
+
+    bindings = ProviderTopologyService.bindings_for_descriptor(cfg, descriptor)
+
+    assert len(bindings) == 1
+    assert bindings[0].provider_id == "worker-1"
+    assert bindings[0].model == "gpt-4o-mini"
+
+
+def test_constrain_bindings_keeps_envelope_when_request_is_outside_topology():
+    candidates = [
+        ProviderRoleBinding(provider_id="worker-1", model="gpt-4o-mini"),
+        ProviderRoleBinding(provider_id="worker-2", model="gpt-4.1-mini"),
+    ]
+
+    constrained = ProviderTopologyService.constrain_bindings(
+        candidates,
+        requested_provider="orch-main",
+        requested_model="gpt-5.4",
+    )
+
+    assert constrained == candidates
