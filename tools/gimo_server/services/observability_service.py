@@ -426,6 +426,37 @@ class ObservabilityService:
                 }
             )
 
+        # P9: Anomaly detection
+        from .anomaly_detection_service import AnomalyDetectionService
+
+        anomalies = AnomalyDetectionService.detect_anomalies()
+        for anomaly in anomalies:
+            alerts.append(
+                {
+                    "severity": "SEV-1",
+                    "code": "PRESET_QUALITY_ANOMALY",
+                    "message": (
+                        f"Preset '{anomaly['preset']}' quality anomaly in {anomaly['task_semantic']}: "
+                        f"current {anomaly['current_quality']:.1f} < baseline "
+                        f"{anomaly['baseline_mean']:.1f} - {AnomalyDetectionService.ANOMALY_THRESHOLD_SIGMA}σ "
+                        f"({anomaly['threshold']:.1f}), gap={anomaly['gap']:.1f}"
+                    ),
+                    "metadata": anomaly,
+                }
+            )
+
+        # P9: Downgraded presets
+        downgraded = AnomalyDetectionService.get_downgrade_list()
+        if downgraded:
+            alerts.append(
+                {
+                    "severity": "SEV-1",
+                    "code": "PRESETS_DOWNGRADED",
+                    "message": f"{len(downgraded)} preset(s) auto-downgraded due to failure_streak ≥ 5: {', '.join(downgraded)}",
+                    "metadata": {"downgraded_presets": downgraded},
+                }
+            )
+
         return alerts
 
     @classmethod

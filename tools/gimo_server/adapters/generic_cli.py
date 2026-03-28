@@ -19,7 +19,7 @@ from ..services.storage_service import StorageService
 from ..services.trust_engine import TrustEngine
 from ..services.tool_registry_service import ToolRegistryService
 from ..services.hitl_gate_service import HitlGateService
-from ..services.role_profiles import assert_tool_allowed, get_role_profile
+from ..models.agent_routing import RoutingDecisionSummary
 
 logger = logging.getLogger("orchestrator.adapters.generic_cli")
 
@@ -47,6 +47,7 @@ class GenericCLISession(AgentSession):
         task_type: str = "agent_task",
         actor: str = "agent:generic_cli",
         role_profile: Optional[str] = None,
+        routing_summary: Optional[RoutingDecisionSummary] = None,
         hitl_enabled: bool = False,
         hitl_timeout_seconds: float = 300.0,
     ):
@@ -64,10 +65,27 @@ class GenericCLISession(AgentSession):
         self._model_name = model_name
         self._task_type = task_type
         self._actor = actor
-        self._role_profile = role_profile
+
+        # F7.1: Derive execution_policy from routing_summary or legacy role_profile
+        if routing_summary:
+            from ..services.execution_policy_service import ExecutionPolicyService
+            self._execution_policy = ExecutionPolicyService.get_policy(routing_summary.execution_policy)
+            self._role_profile = routing_summary.mood  # For legacy compatibility
+        elif role_profile:
+            # Backward compatibility: derive from role_profile
+            from ..services.execution_policy_service import ExecutionPolicyService
+            policy_name = ExecutionPolicyService.policy_name_from_legacy_mood(role_profile)
+            self._execution_policy = ExecutionPolicyService.get_policy(policy_name)
+            self._role_profile = role_profile
+        else:
+            # Default fallback
+            from ..services.execution_policy_service import ExecutionPolicyService
+            self._execution_policy = ExecutionPolicyService.get_policy("workspace_safe")
+            self._role_profile = "executor"
+
         self._hitl_enabled = hitl_enabled
         self._hitl_timeout_seconds = float(hitl_timeout_seconds)
-        
+
         # Start background readers
         self._read_task = asyncio.create_task(self._read_streams())
 
@@ -164,28 +182,28 @@ class GenericCLISession(AgentSession):
             raise ValueError(f"Unknown proposal id: {action_id}")
         action = self._proposal_index[action_id]
 
-        if self._role_profile:
-            try:
-                assert_tool_allowed(self._role_profile, action.tool)
-            except PermissionError:
-                self._decision_log[action_id] = "blocked:role_profile_denied"
-                await self._send_stdin_line(f"{self.DENY_CMD_PREFIX} {action_id} reason=role_profile_denied")
-                self._emit_trust_event(action_id=action_id, outcome="rejected")
-                raise
+        # F7.1: Use execution_policy directly instead of role_profiles
+        try:
+            self._execution_policy.assert_tool_allowed(action.tool)
+        except PermissionError:
+            self._decision_log[action_id] = "blocked:execution_policy_denied"
+            await self._send_stdin_line(f"{self.DENY_CMD_PREFIX} {action_id} reason=execution_policy_denied")
+            self._emit_trust_event(action_id=action_id, outcome="rejected")
+            raise
 
-            profile = get_role_profile(self._role_profile)
-            if profile.hitl_required and self._hitl_enabled:
-                gate_decision = await HitlGateService.gate_tool_call(
-                    agent_id=self._actor,
-                    tool=action.tool,
-                    params=dict(action.params or {}),
-                    timeout_seconds=self._hitl_timeout_seconds,
-                )
-                if gate_decision != "allow":
-                    self._decision_log[action_id] = "blocked:hitl_rejected"
-                    await self._send_stdin_line(f"{self.DENY_CMD_PREFIX} {action_id} reason=hitl_rejected")
-                    self._emit_trust_event(action_id=action_id, outcome="rejected")
-                    raise PermissionError(f"HITL denied tool execution: {action.tool}")
+        # Check HITL requirement (if execution_policy enforces it)
+        if self._execution_policy.hitl_required and self._hitl_enabled:
+            gate_decision = await HitlGateService.gate_tool_call(
+                agent_id=self._actor,
+                tool=action.tool,
+                params=dict(action.params or {}),
+                timeout_seconds=self._hitl_timeout_seconds,
+            )
+            if gate_decision != "allow":
+                self._decision_log[action_id] = "blocked:hitl_rejected"
+                await self._send_stdin_line(f"{self.DENY_CMD_PREFIX} {action_id} reason=hitl_rejected")
+                self._emit_trust_event(action_id=action_id, outcome="rejected")
+                raise PermissionError(f"HITL denied tool execution: {action.tool}")
         
         await self._validate_tool_registry(action, action_id)
         tool_entry = ToolRegistryService.get_tool(action.tool)
@@ -342,31 +360,36 @@ class GenericCLIAdapter(AgentAdapter):
         self.hitl_timeout_seconds: float = 300.0
 
     async def spawn(
-        self, 
-        task: str, 
-        context: Optional[Dict[str, Any]] = None, 
-        policy: Optional[Dict[str, Any]] = None
+        self,
+        task: str,
+        context: Optional[Dict[str, Any]] = None,
+        policy: Optional[Dict[str, Any]] = None,
+        routing_summary: Optional[RoutingDecisionSummary] = None,
     ) -> AgentSession:
         logger.info(f"Spawning generic CLI: {' '.join(self.command)}")
-        
+
         process = await asyncio.create_subprocess_exec(
             *self.command,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        
+
         # Feed task to stdin
         if process.stdin:
             maybe_awaitable = process.stdin.write(f"{task}\n".encode())
             if inspect.isawaitable(maybe_awaitable):
                 await maybe_awaitable
             await process.stdin.drain()
-            
+
+        # F7.1: Extract role_profile for backward compatibility if no routing_summary
         task_type = str((context or {}).get("task_type") or (policy or {}).get("task_type") or "agent_task")
-        role_profile = str((context or {}).get("role_profile") or (policy or {}).get("role_profile") or "").strip() or None
+        role_profile = None
+        if not routing_summary:
+            role_profile = str((context or {}).get("role_profile") or (policy or {}).get("role_profile") or "").strip() or None
         hitl_enabled = bool((context or {}).get("hitl_enabled") or (policy or {}).get("hitl_enabled") or self.hitl_enabled)
         hitl_timeout = float((context or {}).get("hitl_timeout_seconds") or (policy or {}).get("hitl_timeout_seconds") or self.hitl_timeout_seconds)
+
         return GenericCLISession(
             process,
             task,
@@ -375,6 +398,7 @@ class GenericCLIAdapter(AgentAdapter):
             task_type=task_type,
             actor=self.actor,
             role_profile=role_profile,
+            routing_summary=routing_summary,
             hitl_enabled=hitl_enabled,
             hitl_timeout_seconds=hitl_timeout,
         )

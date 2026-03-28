@@ -116,6 +116,9 @@ class CostEvent(BaseModel):
     cache_hit: bool = False
     duration_ms: int = 0
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    agent_preset: str = ""
+    task_role: str = ""
+    execution_policy_name: str = ""
 
 class BudgetForecast(BaseModel):
     scope: str = "global"

@@ -789,29 +789,26 @@ class CustomPlanService:
             storage_service_cls = StorageService
             ops_service_cls = OpsService
 
-            resolved_profile = node.resolved_profile
-            node_mood = resolved_profile.mood if resolved_profile else (node.execution_hints.legacy_mood or "assertive")
-            execution_policy = (
-                resolved_profile.execution_policy
-                if resolved_profile is not None and node.execution_policy is None
-                else (node.execution_policy or (resolved_profile.execution_policy if resolved_profile else "workspace_safe"))
-            )
-            task_role = resolved_profile.task_role if resolved_profile else ("orchestrator" if node.is_orchestrator else "executor")
-            workflow_phase = resolved_profile.workflow_phase if resolved_profile else (node.workflow_phase or "executing")
-            provider_binding = node.binding.provider if node.binding else node.provider
-            model_binding = node.binding.model if node.binding else node.model
+            # Use routing_decision_summary if available (canonical), fallback to legacy fields
+            routing_summary = node.routing_decision_summary
+            if not routing_summary and node.resolved_profile:
+                # Build summary from resolved_profile for backward compatibility
+                from ..models.agent_routing import RoutingDecisionSummary
+                routing_summary = RoutingDecisionSummary(
+                    **node.resolved_profile.model_dump(),
+                    provider=node.binding.provider if node.binding else node.provider,
+                    model=node.binding.model if node.binding else node.model,
+                )
+
             if not execution_workspace:
                 sandbox_run_id = f"{plan.id}_{execution_id or 'run'}_{node.id}"
                 sandbox_handle = SandboxService.create_worktree_handle(sandbox_run_id, str(repo_root), base_ref=base_ref)
                 execution_workspace = str(sandbox_handle.worktree_path)
 
             logger.info(
-                "[plan-node] Executing %s with mood=%s policy=%s provider=%s model=%s",
+                "[plan-node] Executing %s with summary=%s",
                 node.id,
-                node_mood,
-                execution_policy,
-                provider_binding,
-                model_binding,
+                routing_summary.model_dump() if routing_summary else "legacy",
             )
 
             # Execute node with agentic loop
@@ -819,12 +816,7 @@ class CustomPlanService:
                 AgenticLoopService.run_node(
                     workspace_root=execution_workspace,
                     node_prompt=final_prompt,
-                    mood=node_mood,
-                    execution_policy=execution_policy,
-                    provider=provider_binding,
-                    model=model_binding,
-                    task_role=task_role,
-                    workflow_phase=workflow_phase,
+                    routing_summary=routing_summary,
                     max_turns=10,  # Shorter than main loop
                     temperature=None,  # Use mood default
                     tools=None,  # Use all tools
@@ -880,6 +872,19 @@ class CustomPlanService:
             if storage_service_cls is None or ops_service_cls is None:
                 raise RuntimeError("Plan economy services unavailable")
             storage = storage_service_cls(ops_service_cls._gics)
+            # Extract profile metadata from routing_summary or resolved_profile
+            agent_preset = ""
+            task_role = ""
+            execution_policy_name = ""
+            if routing_summary:
+                agent_preset = routing_summary.agent_preset
+                task_role = routing_summary.task_role
+                execution_policy_name = routing_summary.execution_policy
+            elif node.resolved_profile:
+                agent_preset = node.resolved_profile.agent_preset
+                task_role = node.resolved_profile.task_role
+                execution_policy_name = node.resolved_profile.execution_policy
+
             storage.cost.save_cost_event(CostEvent(
                 id=f"ce_{uuid.uuid4().hex[:12]}",
                 workflow_id=plan_id,
@@ -894,7 +899,29 @@ class CustomPlanService:
                 quality_score=quality_score,
                 cascade_level=cascade_level,
                 cache_hit=False,
+                agent_preset=agent_preset,
+                task_role=task_role,
+                execution_policy_name=execution_policy_name,
             ))
+
+            # F8.1: Registrar outcome en preset telemetry
+            if routing_summary and agent_preset:
+                from ..services.preset_telemetry_service import PresetTelemetryService
+
+                # Derivar task_semantic desde descriptor o default
+                task_semantic = "general"
+                if node.task_descriptor:
+                    task_semantic = node.task_descriptor.task_semantic
+
+                PresetTelemetryService.record_outcome(
+                    task_semantic=task_semantic,
+                    preset_name=agent_preset,
+                    success=(node.error is None),
+                    quality_score=quality_score,
+                    latency_ms=duration_ms,
+                    cost_usd=cost_usd,
+                )
+
             cfg = ops_service_cls.get_config()
             snap = storage.cost.get_plan_snapshot(
                 plan_id=plan_id,

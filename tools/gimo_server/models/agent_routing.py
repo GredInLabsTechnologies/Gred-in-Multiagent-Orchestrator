@@ -75,12 +75,7 @@ class ResolvedAgentProfile(BaseModel):
     workflow_phase: WorkflowPhase
 
 
-class RoutingDecisionSummary(BaseModel):
-    agent_preset: AgentPresetName
-    task_role: TaskRole
-    mood: MoodName
-    execution_policy: ExecutionPolicyName
-    workflow_phase: WorkflowPhase
+class RoutingDecisionSummary(ResolvedAgentProfile):
     provider: str = "auto"
     model: str = "auto"
 

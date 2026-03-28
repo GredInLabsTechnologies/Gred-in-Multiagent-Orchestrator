@@ -8,14 +8,14 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from .base import (
-    AgentAdapter, 
-    AgentResult, 
-    AgentSession, 
-    AgentStatus, 
+    AgentAdapter,
+    AgentResult,
+    AgentSession,
+    AgentStatus,
     ProposedAction
 )
-from ..services.role_profiles import assert_tool_allowed, get_role_profile
 from ..services.hitl_gate_service import HitlGateService
+from ..models.agent_routing import RoutingDecisionSummary
 
 logger = logging.getLogger("orchestrator.adapters.openai_compatible")
 
@@ -30,6 +30,7 @@ class OpenAICompatibleSession(AgentSession):
         context: Optional[Dict[str, Any]] = None,
         system_prompt: str = "You are a helpful AI assistant.",
         role_profile: Optional[str] = None,
+        routing_summary: Optional[RoutingDecisionSummary] = None,
         hitl_enabled: bool = False,
         hitl_timeout_seconds: float = 300.0,
     ):
@@ -38,20 +39,37 @@ class OpenAICompatibleSession(AgentSession):
         self.task = task
         self.status = AgentStatus.RUNNING
         self.created_at = time.perf_counter()
-        
+
         self.messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Task: {task}\nContext: {json.dumps(context or {})}"}
         ]
-        
+
         self._proposals: List[ProposedAction] = []
         self._proposal_index: Dict[str, ProposedAction] = {}
         self._decision_log: Dict[str, str] = {}
         self._metrics: Dict[str, Any] = {"tokens_used": 0, "cost_usd": 0.0}
-        self._role_profile = role_profile
+
+        # F7.1: Derive execution_policy from routing_summary or legacy role_profile
+        if routing_summary:
+            from ..services.execution_policy_service import ExecutionPolicyService
+            self._execution_policy = ExecutionPolicyService.get_policy(routing_summary.execution_policy)
+            self._role_profile = routing_summary.mood  # For legacy compatibility
+        elif role_profile:
+            # Backward compatibility: derive from role_profile
+            from ..services.execution_policy_service import ExecutionPolicyService
+            policy_name = ExecutionPolicyService.policy_name_from_legacy_mood(role_profile)
+            self._execution_policy = ExecutionPolicyService.get_policy(policy_name)
+            self._role_profile = role_profile
+        else:
+            # Default fallback
+            from ..services.execution_policy_service import ExecutionPolicyService
+            self._execution_policy = ExecutionPolicyService.get_policy("workspace_safe")
+            self._role_profile = "executor"
+
         self._hitl_enabled = bool(hitl_enabled)
         self._hitl_timeout_seconds = float(hitl_timeout_seconds)
-        
+
         self._background_task = asyncio.create_task(self._process_turn())
 
     async def _process_turn(self):
@@ -118,21 +136,23 @@ class OpenAICompatibleSession(AgentSession):
     async def allow(self, action_id: str) -> None:
         if action_id not in self._proposal_index:
             raise ValueError(f"Unknown proposal id: {action_id}")
-        
+
         action = self._proposal_index[action_id]
 
-        if self._role_profile:
-            assert_tool_allowed(self._role_profile, action.tool)
-            profile = get_role_profile(self._role_profile)
-            if profile.hitl_required and self._hitl_enabled:
-                decision = await HitlGateService.gate_tool_call(
-                    agent_id=f"agent:{self.model_name}",
-                    tool=action.tool,
-                    params=dict(action.params or {}),
-                    timeout_seconds=self._hitl_timeout_seconds,
-                )
-                if decision != "allow":
-                    raise PermissionError(f"HITL denied tool execution: {action.tool}")
+        # F7.1: Use execution_policy directly instead of role_profiles
+        self._execution_policy.assert_tool_allowed(action.tool)
+
+        # Check HITL requirement (if execution_policy enforces it)
+        if self._execution_policy.hitl_required and self._hitl_enabled:
+            decision = await HitlGateService.gate_tool_call(
+                agent_id=f"agent:{self.model_name}",
+                tool=action.tool,
+                params=dict(action.params or {}),
+                timeout_seconds=self._hitl_timeout_seconds,
+            )
+            if decision != "allow":
+                raise PermissionError(f"HITL denied tool execution: {action.tool}")
+
         self._decision_log[action_id] = "allowed"
         
         # Execute tool (Mock execution for now, or via ToolRegistry)
@@ -235,19 +255,27 @@ class OpenAICompatibleAdapter(AgentAdapter):
         self.system_prompt = system_prompt
 
     async def spawn(
-        self, 
-        task: str, 
-        context: Optional[Dict[str, Any]] = None, 
-        policy: Optional[Dict[str, Any]] = None
+        self,
+        task: str,
+        context: Optional[Dict[str, Any]] = None,
+        policy: Optional[Dict[str, Any]] = None,
+        routing_summary: Optional[RoutingDecisionSummary] = None,
     ) -> AgentSession:
         logger.info(f"Spawning OpenAI-compatible LLM Session: {self.model_name}")
+
+        # F7.1: Extract role_profile for backward compatibility if no routing_summary
+        role_profile = None
+        if not routing_summary:
+            role_profile = str((context or {}).get("role_profile") or (policy or {}).get("role_profile") or "").strip() or None
+
         return OpenAICompatibleSession(
             base_url=self.base_url,
             model_name=self.model_name,
             task=task,
             context=context,
             system_prompt=self.system_prompt,
-            role_profile=str((context or {}).get("role_profile") or (policy or {}).get("role_profile") or "").strip() or None,
+            role_profile=role_profile,
+            routing_summary=routing_summary,
             hitl_enabled=bool((context or {}).get("hitl_enabled") or (policy or {}).get("hitl_enabled") or False),
             hitl_timeout_seconds=float((context or {}).get("hitl_timeout_seconds") or (policy or {}).get("hitl_timeout_seconds") or 300.0),
         )

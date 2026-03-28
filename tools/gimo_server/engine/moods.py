@@ -66,11 +66,11 @@ MOOD_PROMPTS: Dict[str, str] = {
 
 
 def get_mood_profile(mood: str) -> MoodProfile:
-    canonical = LEGACY_MOOD_ALIASES.get(mood, mood)
+    catalog_entry = AgentCatalogService.get_mood(mood)
     return MoodProfile(
-        name=AgentCatalogService.get_mood(mood).name,
-        prompt_prefix=MOOD_PROFILES[canonical].prompt_prefix,
-        temperature=MOOD_PROFILES[canonical].temperature,
-        max_turns=MOOD_PROFILES[canonical].max_turns,
-        response_style=MOOD_PROFILES[canonical].response_style,
+        name=catalog_entry.name,
+        prompt_prefix=catalog_entry.prompt_prefix,
+        temperature=catalog_entry.temperature,
+        max_turns=catalog_entry.max_turns,
+        response_style=catalog_entry.response_style,
     )

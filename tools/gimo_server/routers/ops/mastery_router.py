@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
-from typing import Annotated, Any, Dict, List
+from typing import Annotated, Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError, Field
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from ...ops_models import (
@@ -15,6 +15,13 @@ from ...ops_models import (
 )
 from ...services.model_router_service import ModelRouterService
 from ...services.budget_forecast_service import BudgetForecastService
+
+
+# F8.3: User feedback model
+class UserFeedbackRequest(BaseModel):
+    """Request model for user feedback."""
+    score: float = Field(..., ge=1.0, le=5.0, description="User rating (1-5 stars)")
+    comment: Optional[str] = Field(None, max_length=500, description="Optional user comment")
 
 router = APIRouter(prefix="/mastery", tags=["ops", "mastery"])
 
@@ -291,3 +298,213 @@ async def get_budget_forecast(auth: Annotated[AuthContext, Depends(verify_token)
     
     forecaster = BudgetForecastService(storage)
     return forecaster.forecast(config.economy)
+
+
+# F8.3: User Feedback Endpoints
+
+
+@router.post("/feedback/{workflow_id}/{node_id}", response_model=Dict[str, Any])
+async def submit_feedback(
+    workflow_id: str,
+    node_id: str,
+    feedback: UserFeedbackRequest,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+):
+    """Permite al usuario evaluar la calidad de un nodo ejecutado.
+
+    El score se normaliza de 1-5 estrellas a 0-100 para consistencia interna.
+
+    Args:
+        workflow_id: ID del workflow/plan
+        node_id: ID del nodo ejecutado
+        feedback: Objeto con score (1-5) y comentario opcional
+
+    Returns:
+        Estado de la operación y score normalizado
+    """
+    from ...services.feedback_collector import FeedbackCollector
+
+    # Convertir 1-5 a 0-100
+    score_normalized = (feedback.score - 1) * 25.0  # 1→0, 5→100
+
+    FeedbackCollector.record_user_feedback(
+        workflow_id=workflow_id,
+        node_id=node_id,
+        feedback_score=score_normalized,
+        feedback_text=feedback.comment,
+    )
+
+    return {
+        "status": "recorded",
+        "score_normalized": score_normalized,
+        "workflow_id": workflow_id,
+        "node_id": node_id,
+    }
+
+
+@router.get("/feedback/{workflow_id}/{node_id}", response_model=Dict[str, Any])
+async def get_feedback(
+    workflow_id: str,
+    node_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+):
+    """Obtiene el feedback del usuario para un nodo específico.
+
+    Args:
+        workflow_id: ID del workflow/plan
+        node_id: ID del nodo
+
+    Returns:
+        Feedback registrado o 404 si no existe
+    """
+    from ...services.feedback_collector import FeedbackCollector
+
+    feedback = FeedbackCollector.get_user_feedback(workflow_id, node_id)
+
+    if not feedback:
+        raise HTTPException(status_code=404, detail="No feedback found for this node")
+
+    return feedback
+
+
+@router.get("/preset-telemetry/{task_semantic}", response_model=List[Dict[str, Any]])
+async def get_preset_telemetry_for_semantic(
+    task_semantic: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+):
+    """Obtiene telemetría de TODOS los presets para un semantic dado.
+
+    Útil para dashboard de observabilidad del sistema de routing adaptativo.
+
+    Args:
+        task_semantic: Tipo de tarea semántica ("planning", "research", etc)
+
+    Returns:
+        Lista de telemetría de todos los presets para ese semantic
+    """
+    from ...services.preset_telemetry_service import PresetTelemetryService
+
+    telemetry = PresetTelemetryService.get_all_for_semantic(task_semantic)
+
+    return telemetry
+
+
+@router.get(
+    "/preset-telemetry/{task_semantic}/{preset_name}",
+    response_model=Dict[str, Any],
+)
+async def get_preset_telemetry(
+    task_semantic: str,
+    preset_name: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+):
+    """Obtiene telemetría de un preset específico para un semantic.
+
+    Args:
+        task_semantic: Tipo de tarea semántica
+        preset_name: Nombre del preset
+
+    Returns:
+        Telemetría del preset o 404 si no existe
+    """
+    from ...services.preset_telemetry_service import PresetTelemetryService
+
+    telemetry = PresetTelemetryService.get_telemetry(task_semantic, preset_name)
+
+    if not telemetry:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No telemetry found for semantic={task_semantic}, preset={preset_name}",
+        )
+
+    return telemetry
+
+
+# P9: Anomaly Detection & Auto-Downgrade Endpoints
+
+@router.get("/anomalies")
+async def get_anomalies(auth: Annotated[AuthContext, Depends(verify_token)]) -> Dict[str, Any]:
+    """Obtiene lista de anomalías detectadas en preset performance.
+
+    Returns:
+        {
+            "anomalies": [
+                {
+                    "preset": str,
+                    "task_semantic": str,
+                    "current_quality": float,
+                    "baseline_mean": float,
+                    "threshold": float,
+                    "gap": float,
+                    "severity": str,
+                    ...
+                },
+                ...
+            ],
+            "count": int
+        }
+    """
+    from ...services.anomaly_detection_service import AnomalyDetectionService
+
+    anomalies = AnomalyDetectionService.detect_anomalies()
+
+    return {
+        "anomalies": anomalies,
+        "count": len(anomalies),
+    }
+
+
+@router.get("/baselines/{task_semantic}/{preset_name}")
+async def get_baseline(
+    task_semantic: str,
+    preset_name: str,
+    auth: Annotated[AuthContext, Depends(verify_token)]
+) -> Dict[str, Any]:
+    """Obtiene baseline estadístico (μ, σ) de un preset específico.
+
+    Returns:
+        {
+            "task_semantic": str,
+            "preset_name": str,
+            "mean": float,
+            "stdev": float,
+            "samples": int,
+            "confidence": str,
+            "min_quality": float,
+            "max_quality": float,
+        }
+        O 404 si no hay baseline confiable
+    """
+    from ...services.anomaly_detection_service import AnomalyDetectionService
+
+    baseline = AnomalyDetectionService.compute_baseline(task_semantic, preset_name)
+
+    if not baseline:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No baseline found for {preset_name} in {task_semantic} (insufficient data)",
+        )
+
+    return baseline
+
+
+@router.get("/downgraded")
+async def get_downgraded_presets(auth: Annotated[AuthContext, Depends(verify_token)]) -> Dict[str, Any]:
+    """Lista presets actualmente auto-downgraded por failure_streak ≥ 5.
+
+    Returns:
+        {
+            "downgraded": ["preset1", "preset2", ...],
+            "count": int,
+            "threshold": int  # failure_streak threshold
+        }
+    """
+    from ...services.anomaly_detection_service import AnomalyDetectionService
+
+    downgraded = AnomalyDetectionService.get_downgrade_list()
+
+    return {
+        "downgraded": downgraded,
+        "count": len(downgraded),
+        "threshold": AnomalyDetectionService.DOWNGRADE_FAILURE_STREAK,
+    }

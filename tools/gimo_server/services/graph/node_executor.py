@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from tools.gimo_server.services.tool_registry_service import ToolRegistryService
-from tools.gimo_server.services.role_profiles import assert_tool_allowed, get_role_profile
 from tools.gimo_server.services.hitl_gate_service import HitlGateService
+from tools.gimo_server.services.execution_policy_service import ExecutionPolicyService
+from tools.gimo_server.services.profile_router_service import ProfileRouterService
+from tools.gimo_server.models.agent_routing import TaskDescriptor
 
 if TYPE_CHECKING:
     from tools.gimo_server.ops_models import WorkflowGraph, WorkflowNode
@@ -39,6 +41,49 @@ class NodeExecutorMixin:
         return {"status": "ok", "msg": "noop"}
 
     async def _execute_llm_call(self, node) -> Dict[str, Any]:
+        # If node has agent_preset, use ProfileRouterService for canonical routing
+        agent_preset = node.config.get("agent_preset")
+        if agent_preset and not node.config.get("routing_decision_summary"):
+            # Build task descriptor from node config
+            descriptor = TaskDescriptor(
+                task_id=node.id,
+                title=getattr(node, "label", node.id),
+                task_type=node.config.get("task_type", "general"),
+                complexity_band=node.config.get("complexity", "medium"),
+                risk_band=node.config.get("risk_level", "low"),
+            )
+
+            # Build task context
+            task_context = {
+                "cost_ceiling": node.config.get("cost_ceiling"),
+                "binding_mode": "runtime",
+                "budget_mode": node.config.get("budget_mode", "standard"),
+            }
+
+            # Route via canonical pipeline
+            workflow_phase = node.config.get("workflow_phase", "executing")
+            routing_decision = ProfileRouterService.route(
+                task_descriptor=descriptor,
+                task_context=task_context,
+                agent_preset=agent_preset,
+                workflow_phase=workflow_phase,
+            )
+
+            # Store routing summary in node config for observability
+            node.config["routing_decision_summary"] = routing_decision.summary.model_dump()
+
+            # Override selected_model and execution_policy from routing
+            node.config["selected_model"] = routing_decision.summary.model
+            node.config["execution_policy"] = routing_decision.summary.execution_policy
+
+            logger.info(
+                "Node %s routed via ProfileRouterService: preset=%s, model=%s, policy=%s",
+                node.id,
+                agent_preset,
+                routing_decision.summary.model,
+                routing_decision.summary.execution_policy,
+            )
+
         prompt, context = self._prepare_llm_payload(node)
 
         resp = await self._provider_service.generate(prompt, context)
@@ -129,14 +174,44 @@ class NodeExecutorMixin:
         raise NotImplementedError(f"Local tool execution for {tool_name} not implemented yet")
 
     async def _enforce_tool_governance(self, *, node, tool_name: str, args: Dict[str, Any]) -> None:
+        # Prefer execution_policy (canonical), fallback to role_profile (legacy)
+        execution_policy = str(node.config.get("execution_policy") or "").strip()
         role_profile = str(node.config.get("role_profile") or node.config.get("role") or "").strip()
-        if not role_profile:
+
+        hitl_required = False
+
+        if execution_policy:
+            # Use canonical execution policy
+            try:
+                policy = ExecutionPolicyService.get_policy(execution_policy)
+                # Check if tool is in allowed_tools
+                if policy.allowed_tools and tool_name not in policy.allowed_tools:
+                    raise PermissionError(f"Tool '{tool_name}' not in allowed_tools")
+                hitl_required = bool(tool_name in policy.requires_confirmation)
+            except (KeyError, PermissionError) as e:
+                raise PermissionError(f"Execution policy '{execution_policy}' denied tool '{tool_name}': {e}")
+        elif role_profile:
+            # F7.2: Legacy fallback - derive execution_policy from role_profile
+            logger.warning(
+                "Node %s uses legacy role_profile='%s'. Migrate to execution_policy.",
+                node.id,
+                role_profile,
+            )
+            # Derive execution policy from legacy role_profile
+            policy_name = ExecutionPolicyService.policy_name_from_legacy_mood(role_profile)
+            try:
+                policy = ExecutionPolicyService.get_policy(policy_name)
+                # Check if tool is in allowed_tools
+                if policy.allowed_tools and tool_name not in policy.allowed_tools:
+                    raise PermissionError(f"Tool '{tool_name}' not in allowed_tools")
+                hitl_required = bool(tool_name in policy.requires_confirmation)
+            except (KeyError, PermissionError) as e:
+                raise PermissionError(f"Derived policy '{policy_name}' from role '{role_profile}' denied tool '{tool_name}': {e}")
+        else:
+            # No governance configured
             return
 
-        assert_tool_allowed(role_profile, tool_name)
-
-        profile = get_role_profile(role_profile)
-        if profile.hitl_required:
+        if hitl_required:
             decision = await HitlGateService.gate_tool_call(
                 agent_id=str(node.agent or node.id),
                 tool=tool_name,

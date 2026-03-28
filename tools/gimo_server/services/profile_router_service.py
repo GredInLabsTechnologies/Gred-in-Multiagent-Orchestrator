@@ -31,10 +31,20 @@ class ProfileRouterService:
 
     @classmethod
     def _allowed_presets(cls, constraints: TaskConstraints) -> list[str]:
+        """Returns presets compatible with constraints, excluding downgraded.
+
+        P9: Filtra presets con failure_streak ≥ 5 (auto-downgrade).
+        """
+        from .anomaly_detection_service import AnomalyDetectionService
+
+        # Get downgrade list
+        downgraded = AnomalyDetectionService.get_downgrade_list()
+
         return [
             preset.name
             for preset in PRESET_CATALOG.values()
             if preset.execution_policy in constraints.allowed_policies
+            and preset.name not in downgraded  # P9: Exclude downgraded
         ]
 
     @classmethod
@@ -44,10 +54,26 @@ class ProfileRouterService:
         descriptor: TaskDescriptor,
         preset_name: str,
     ) -> tuple[float, str]:
-        # Fase 4 mantiene el hook advisory explícito, pero no inventa un
-        # namespace de telemetría nuevo para presets si el repo aún no lo tiene.
-        _ = (descriptor, preset_name)
-        return 0.0, "gics_advisory=0.00(unavailable_for_preset_ranking)"
+        """Calcula adjustment desde GICS advisory system (F8.2).
+
+        Combina prior semántico hardcodeado con telemetría real para
+        ranking adaptativo de presets.
+        """
+        from .advisory_engine import AdvisoryEngine
+
+        task_semantic = descriptor.task_semantic
+
+        # Obtener prior semántico hardcodeado
+        prior_score = cls._SEMANTIC_PRIORS.get(task_semantic, {}).get(preset_name, 0.0)
+
+        # Calcular score adaptativo desde telemetría
+        adjustment, reason = AdvisoryEngine.get_preset_score(
+            task_semantic=task_semantic,
+            preset_name=preset_name,
+            prior_score=prior_score,
+        )
+
+        return adjustment, reason
 
     @classmethod
     def _select_ranked_candidate(
@@ -133,13 +159,7 @@ class ProfileRouterService:
             workflow_phase=workflow_phase,
         )
         resolved = resolved.model_copy(update={"execution_policy": execution_policy})
-        summary = RoutingDecisionSummary(
-            agent_preset=resolved.agent_preset,
-            task_role=resolved.task_role,
-            mood=resolved.mood,
-            execution_policy=resolved.execution_policy,
-            workflow_phase=resolved.workflow_phase,
-        )
+        summary = RoutingDecisionSummary(**resolved.model_dump())
         return RoutingDecision(
             summary=summary,
             resolved_profile=resolved,

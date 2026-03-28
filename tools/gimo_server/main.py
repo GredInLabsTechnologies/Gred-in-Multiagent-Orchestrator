@@ -379,6 +379,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("ExecutionAuthority init warning: %s", exc)
 
+        # F8.1: Seed initial preset telemetry for adaptive routing
+        try:
+            from tools.gimo_server.services.preset_telemetry_service import PresetTelemetryService
+
+            PresetTelemetryService.seed_initial_priors()
+        except Exception as exc:
+            logger.warning("Preset telemetry seed warning: %s", exc)
+
         yield
 
         # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
@@ -596,11 +604,13 @@ def create_app() -> FastAPI:
     from tools.gimo_server.routers.ops.graph_router import router as graph_router
     from tools.gimo_server.routers.ops.ui_security_router import router as sec_router
     from tools.gimo_server.routers.ops.service_router import router as svc_router
+    from tools.gimo_server.routers.ops.ide_context_router import router as ide_context_router
     app.include_router(file_router)
     app.include_router(repo_router)
     app.include_router(graph_router)
     app.include_router(sec_router)
     app.include_router(svc_router)
+    app.include_router(ide_context_router)
 
     mount_static(app)
 

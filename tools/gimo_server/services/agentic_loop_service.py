@@ -14,7 +14,7 @@ from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List
 from ..engine.moods import MoodProfile, get_mood_profile
 from ..engine.tools.chat_tools_schema import CHAT_TOOLS, get_tool_risk_level
 from ..engine.tools.executor import ToolExecutor
-from ..models.agent_routing import WorkflowPhase
+from ..models.agent_routing import RoutingDecisionSummary, WorkflowPhase
 from ..ops_models import GimoItem, GimoTurn
 from ..providers.base import ProviderAdapter
 from ..security.execution_proof import ExecutionProof, ExecutionProofChain
@@ -198,12 +198,23 @@ def _resolve_orchestrator_adapter() -> tuple[ProviderAdapter, str, str]:
     return adapter, provider_id, model
 
 
-def _resolve_bound_adapter(provider_id: str, model: str) -> tuple[ProviderAdapter, str, str]:
+def _resolve_bound_adapter(
+    provider_id: str,
+    model: str,
+    allow_orchestrator_fallback: bool = True,
+) -> tuple[ProviderAdapter, str, str]:
     cfg = ProviderService.get_config()
     if not cfg:
         raise RuntimeError("Provider config not found. Run gimo init or configure providers.")
     if provider_id in {"", "auto"}:
-        return _resolve_orchestrator_adapter()
+        if allow_orchestrator_fallback:
+            return _resolve_orchestrator_adapter()
+        # Plan node: intentar resolver via topology
+        from .profile_binding_service import ProfileBindingService
+        binding = ProfileBindingService.resolve_binding(binding_mode="plan_time")
+        if binding.provider not in {"", "auto"}:
+            return _resolve_bound_adapter(binding.provider, binding.model, True)
+        return _resolve_orchestrator_adapter()  # ultimo recurso
     entry = cfg.providers.get(provider_id)
     if not entry:
         raise RuntimeError(f"Provider '{provider_id}' not found in providers")
@@ -850,6 +861,56 @@ class AgenticLoopService:
                         )
                         continue
 
+                # Enforce execution policy permissions
+                if resolved_execution_policy:
+                    try:
+                        policy = ExecutionPolicyService.get_policy(resolved_execution_policy)
+                        # Check if tool is in allowed_tools
+                        if policy.allowed_tools and tool_name not in policy.allowed_tools:
+                            raise PermissionError(f"Tool '{tool_name}' not in allowed_tools for policy '{resolved_execution_policy}'")
+                    except PermissionError as policy_err:
+                        denial_msg = f"Tool '{tool_name}' denied by execution policy '{resolved_execution_policy}': {policy_err}"
+                        logger.warning(denial_msg)
+                        if persist_conversation and thread_id and orch_turn:
+                            ConversationService.append_item(
+                                thread_id,
+                                orch_turn.id,
+                                GimoItem(
+                                    type="tool_result",
+                                    content=denial_msg,
+                                    status="error",
+                                    metadata={
+                                        "tool_call_id": tool_call_id,
+                                        "tool_name": tool_name,
+                                        "duration": 0.0,
+                                        "policy_denied": resolved_execution_policy,
+                                    },
+                                ),
+                            )
+                        messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": denial_msg})
+                        all_tool_logs.append(
+                            {
+                                "name": tool_name,
+                                "arguments": tool_args,
+                                "status": "policy_denied",
+                                "message": denial_msg,
+                                "risk": risk,
+                                "duration": 0.0,
+                            }
+                        )
+                        await emit_event(
+                            "tool_call_end",
+                            {
+                                "tool_call_id": tool_call_id,
+                                "tool_name": tool_name,
+                                "status": "policy_denied",
+                                "duration": 0.0,
+                                "risk": risk,
+                                "policy": resolved_execution_policy,
+                            },
+                        )
+                        continue
+
                 start_time = time.monotonic()
                 try:
                     result = await asyncio.wait_for(
@@ -1379,8 +1440,21 @@ class AgenticLoopService:
         temperature: float | None = None,
         tools: List[Dict[str, Any]] | None = None,
         token: str = "system",
+        routing_summary: RoutingDecisionSummary | None = None,
     ) -> AgenticResult:
-        adapter, provider_id, resolved_model = _resolve_bound_adapter(provider, model)
+        # Si routing_summary está presente, extraer valores de allí
+        if routing_summary:
+            mood = routing_summary.mood
+            execution_policy = routing_summary.execution_policy
+            provider = routing_summary.provider
+            model = routing_summary.model
+            task_role = routing_summary.task_role
+            workflow_phase = routing_summary.workflow_phase
+            allow_fallback = False
+        else:
+            allow_fallback = True
+
+        adapter, provider_id, resolved_model = _resolve_bound_adapter(provider, model, allow_fallback)
         try:
             mood_profile = get_mood_profile(mood)
         except KeyError:

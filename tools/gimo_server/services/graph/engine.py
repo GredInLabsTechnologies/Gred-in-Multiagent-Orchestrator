@@ -24,7 +24,9 @@ from tools.gimo_server.ops_models import (
     WorkflowNode,
     WorkflowState,
 )
+from tools.gimo_server.models.agent_routing import TaskDescriptor, RoutingDecisionSummary
 from tools.gimo_server.services.model_router_service import ModelRouterService
+from tools.gimo_server.services.profile_router_service import ProfileRouterService
 from tools.gimo_server.services.observability_service import ObservabilityService
 from tools.gimo_server.services.storage_service import StorageService
 from tools.gimo_server.services.provider_service import ProviderService
@@ -320,19 +322,55 @@ class GraphEngine(
 
         execute_callable = self._execute_node
         if node.type in {"llm_call", "agent_task"}:
-            routing = await self._model_router.choose_model(node, self.state.data)
+            # F7.3: Use ProfileRouterService for canonical routing
+            # Build task descriptor from node config
+            descriptor = TaskDescriptor(
+                task_id=node.id,
+                title=node.name or node.id,
+                description=str(node.config.get("description", "")),
+                task_type=str(node.config.get("task_type", "general")),
+                task_semantic=str(node.config.get("task_semantic", "general")),
+                complexity_band=str(node.config.get("complexity", "medium")),
+                risk_band=str(node.config.get("risk_level", "low")),
+            )
+
+            # Build task context
+            task_context = {
+                "cost_ceiling": node.config.get("cost_ceiling"),
+                "binding_mode": "runtime",
+                "budget_mode": node.config.get("budget_mode", "standard"),
+            }
+
+            # Get agent_preset and workflow_phase from node config
+            agent_preset = str(node.config.get("agent_preset", "executor"))
+            workflow_phase = str(node.config.get("workflow_phase", "executing"))
+
+            # Route via canonical pipeline
+            routing_decision = ProfileRouterService.route(
+                task_descriptor=descriptor,
+                task_context=task_context,
+                agent_preset=agent_preset,
+                workflow_phase=workflow_phase,
+            )
+
+            # Extract provider/model from routing_decision.summary
+            routing_summary = routing_decision.summary
+
+            # Store routing summary in node config for observability and executor
+            if isinstance(node.config, dict):
+                node.config["routing_decision_summary"] = routing_summary.model_dump()
+                node.config["selected_model"] = routing_summary.model
+
+            # Update state tracking (legacy compat)
             self.state.data["model_router_last"] = {
                 "node_id": node.id,
-                "selected_model": routing.model,
-                "reason": routing.reason,
-                "provider_id": getattr(routing, "provider_id", ""),
-                "hardware_state": getattr(routing, "hardware_state", "safe"),
-                "tier": getattr(routing, "tier", 3),
+                "selected_model": routing_summary.model,
+                "reason": routing_decision.routing_reason,
+                "provider_id": routing_summary.provider,
+                "agent_preset": routing_summary.agent_preset,
+                "execution_policy": routing_summary.execution_policy,
             }
             self.state.data.setdefault("model_router_trace", []).append(self.state.data["model_router_last"])
-
-            if isinstance(node.config, dict):
-                node.config["selected_model"] = routing.model
 
         params = inspect.signature(execute_callable).parameters
         if len(params) >= 2:
