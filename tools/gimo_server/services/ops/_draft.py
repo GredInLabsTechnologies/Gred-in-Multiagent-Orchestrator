@@ -7,6 +7,7 @@ from datetime import timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from ...ops_models import OpsApproved, OpsDraft
+from ..task_descriptor_service import TaskDescriptorService
 from ._base import _utcnow
 
 logger = logging.getLogger("orchestrator.ops")
@@ -14,6 +15,18 @@ logger = logging.getLogger("orchestrator.ops")
 
 class DraftMixin:
     """Draft CRUD + approve/reject lifecycle."""
+
+    @staticmethod
+    def _canonicalize_structured_content(
+        content: Optional[str],
+        context: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        if not isinstance(content, str):
+            return content
+        ctx = context or {}
+        if not (ctx.get("structured") or ctx.get("custom_plan_id")):
+            return content
+        return TaskDescriptorService.maybe_canonicalize_plan_content(content)
 
     @classmethod
     def list_drafts(
@@ -54,12 +67,13 @@ class DraftMixin:
     ) -> OpsDraft:
         cls.ensure_dirs()
         draft_id = f"d_{int(time.time() * 1000)}_{os.urandom(3).hex()}"
+        canonical_content = cls._canonicalize_structured_content(content, context)
         draft = OpsDraft(
             id=draft_id,
             prompt=prompt,
             context=context or {},
             provider=provider,
-            content=content,
+            content=canonical_content,
             status=status,  # type: ignore[arg-type]
             error=error,
             created_at=_utcnow(),
@@ -85,12 +99,15 @@ class DraftMixin:
             draft = cls.get_draft(draft_id)
             if not draft:
                 raise ValueError(f"Draft {draft_id} not found")
+            effective_context = context if context is not None else draft.context
             if prompt is not None:
                 draft.prompt = prompt
             if content is not None:
-                draft.content = content
+                draft.content = cls._canonicalize_structured_content(content, effective_context)
             if context is not None:
                 draft.context = context
+                if content is None:
+                    draft.content = cls._canonicalize_structured_content(draft.content, draft.context)
             cls._draft_path(draft_id).write_text(draft.model_dump_json(indent=2), encoding="utf-8")
             return draft
 
@@ -118,6 +135,8 @@ class DraftMixin:
                 existing = cls._find_latest_approved_for_draft(draft.id)
                 if existing:
                     return existing
+
+            draft.content = cls._canonicalize_structured_content(draft.content, draft.context)
 
             approved_id = f"a_{int(time.time() * 1000)}_{os.urandom(3).hex()}"
             approved = OpsApproved(

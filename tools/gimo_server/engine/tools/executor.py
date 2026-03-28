@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from ...services.file_service import FileService
 from ...services.execution_policy_service import ExecutionPolicyProfile, ExecutionPolicyService
+from ...services.task_descriptor_service import TaskDescriptorService
 from ..moods import get_mood_profile
 
 logger = logging.getLogger(__name__)
@@ -43,16 +44,13 @@ class ToolExecutor:
         self.policy = policy or {}
         self.token = token
         self.mood = mood
-        self.execution_policy = ExecutionPolicyService.resolve_policy_name(
-            execution_policy=execution_policy,
-            legacy_mood=mood,
-        )
+        if execution_policy:
+            self.execution_policy = ExecutionPolicyService.canonical_policy_name(execution_policy)
+        else:
+            self.execution_policy = ExecutionPolicyService.policy_name_from_legacy_mood(mood)
         self.session_id = session_id
         try:
-            self._policy_profile = ExecutionPolicyService.resolve_policy(
-                execution_policy=execution_policy,
-                legacy_mood=mood,
-            )
+            self._policy_profile = ExecutionPolicyService.get_policy(self.execution_policy)
         except KeyError:
             logger.warning("Invalid execution policy '%s' for mood '%s', using workspace_safe", execution_policy, mood)
             self.execution_policy = "workspace_safe"
@@ -523,10 +521,16 @@ class ToolExecutor:
                     "error",
                     f"Task {task.get('id')} must include either 'agent_preset' or a legacy mood hint",
                 )
+        try:
+            canonical_plan = TaskDescriptorService.canonicalize_plan_data(
+                {"title": title, "objective": objective, "tasks": tasks}
+            )
+        except Exception as exc:
+            return ToolExecutionResult("error", f"Invalid plan proposal: {exc}")
         return ToolExecutionResult(
             "plan_proposed",
             f"Proposed plan: {title}",
-            {"title": title, "objective": objective, "tasks": tasks},
+            canonical_plan,
         )
 
     async def handle_request_context(self, args: Dict[str, Any]) -> ToolExecutionResult:

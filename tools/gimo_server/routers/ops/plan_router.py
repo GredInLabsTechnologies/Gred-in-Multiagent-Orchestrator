@@ -11,6 +11,7 @@ from tools.gimo_server.services.provider_service import ProviderService
 from tools.gimo_server.services.runtime_policy_service import RuntimePolicyService
 from tools.gimo_server.services.intent_classification_service import IntentClassificationService
 from tools.gimo_server.services.custom_plan_service import CustomPlanService
+from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
 from .common import _require_role, _actor_label
 
 router = APIRouter()
@@ -247,15 +248,16 @@ async def generate_structured_plan(
 
         # Validate with OpsPlan for backwards compat
         plan = OpsPlan.model_validate(plan_data)
+        canonical_plan = TaskDescriptorService.canonicalize_plan_data(plan_data)
 
         # Create unified CustomPlan from LLM response
         custom_plan = CustomPlanService.create_plan_from_llm(
-            plan_data, name=plan.title, description=plan.objective,
+            canonical_plan, name=plan.title, description=plan.objective,
         )
 
         draft = OpsService.create_draft(
             prompt,
-            content=plan.model_dump_json(indent=2),
+            content=TaskDescriptorService.canonicalize_plan_content(canonical_plan),
             context={
                 "structured": True,
                 "custom_plan_id": custom_plan.id,
@@ -293,9 +295,7 @@ async def _process_cognitive_generation(prompt: str, decision: Any, context_payl
     
     resp = await ProviderService.static_generate(prompt, context={})
     provider_name = resp["provider"]
-    content = resp["content"]
-    
-    _try_parse_custom_plan(content, prompt, context_payload)
+    content = _try_parse_custom_plan(resp["content"], prompt, context_payload)
 
     return OpsService.create_draft(
         prompt,
@@ -305,18 +305,21 @@ async def _process_cognitive_generation(prompt: str, decision: Any, context_payl
         status="draft",
     )
 
-def _try_parse_custom_plan(content: str, prompt: str, context_payload: dict) -> None:
+def _try_parse_custom_plan(content: str, prompt: str, context_payload: dict) -> str:
     import json as _json
     try:
         raw_content = content.strip()
         if raw_content.startswith("{") or raw_content.startswith("["):
             parsed = _json.loads(raw_content)
             if isinstance(parsed, dict) and "tasks" in parsed:
-                cp = CustomPlanService.create_plan_from_llm(parsed, name=prompt[:80])
+                canonical_plan = TaskDescriptorService.canonicalize_plan_data(parsed)
+                cp = CustomPlanService.create_plan_from_llm(canonical_plan, name=prompt[:80])
                 context_payload["structured"] = True
                 context_payload["custom_plan_id"] = cp.id
+                return TaskDescriptorService.canonicalize_plan_content(canonical_plan)
     except Exception:
         pass
+    return content
 
 @router.post("/generate", response_model=OpsDraft, status_code=201)
 async def generate_draft(

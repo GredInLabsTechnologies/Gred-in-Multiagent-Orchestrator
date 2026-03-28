@@ -63,7 +63,9 @@ class ConversationService:
             return None
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            return GimoThread.model_validate(data)
+            thread = GimoThread.model_validate(data)
+            thread._legacy_missing_agent_preset = not bool(str(data.get("agent_preset") or "").strip())
+            return thread
         except Exception as e:
             logger.error(f"Error loading thread {thread_id}: {e}")
             return None

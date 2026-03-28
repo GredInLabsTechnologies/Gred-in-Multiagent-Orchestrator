@@ -108,10 +108,20 @@ class ExecutionPolicyService:
         return EXECUTION_POLICIES[policy_name]  # type: ignore[index]
 
     @classmethod
+    def canonical_policy_name(cls, execution_policy: str | None) -> ExecutionPolicyName:
+        if not execution_policy:
+            raise KeyError("execution_policy")
+        return cls.get_policy(execution_policy).name
+
+    @classmethod
+    def policy_name_from_legacy_mood(cls, legacy_mood: str | None = None) -> ExecutionPolicyName:
+        return LEGACY_MOOD_TO_POLICY.get(legacy_mood or "neutral", "workspace_safe")
+
+    @classmethod
     def resolve_policy_name(cls, *, execution_policy: str | None = None, legacy_mood: str | None = None) -> ExecutionPolicyName:
         if execution_policy:
-            return cls.get_policy(execution_policy).name
-        return LEGACY_MOOD_TO_POLICY.get(legacy_mood or "neutral", "workspace_safe")
+            return cls.canonical_policy_name(execution_policy)
+        return cls.policy_name_from_legacy_mood(legacy_mood)
 
     @classmethod
     def resolve_policy(cls, *, execution_policy: str | None = None, legacy_mood: str | None = None) -> ExecutionPolicyProfile:

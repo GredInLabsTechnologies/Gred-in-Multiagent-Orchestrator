@@ -2,20 +2,16 @@ from __future__ import annotations
 
 from tools.gimo_server.ops_models import RoleProfile
 
+from .agent_catalog_service import AgentCatalogService
 from .execution_policy_service import ExecutionPolicyService
 
 
-ROLE_TO_POLICY = {
-    "explorer": "docs_research",
-    "auditor": "security_audit",
-    "executor": "workspace_safe",
-}
-
-
 def get_role_profile(role_name: str) -> RoleProfile:
-    policy_name = ROLE_TO_POLICY.get(role_name)
-    if policy_name is None:
+    try:
+        preset_name = AgentCatalogService.preset_for_role_profile(role_name)
+    except KeyError:
         raise PermissionError(f"unknown role profile '{role_name}'")
+    policy_name = AgentCatalogService.get_preset(preset_name).execution_policy
     policy = ExecutionPolicyService.get_policy(policy_name)
     return RoleProfile(
         tools_allowed=set(policy.allowed_tools),

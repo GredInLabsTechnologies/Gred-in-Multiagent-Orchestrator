@@ -18,6 +18,7 @@ from ..models.agent_routing import WorkflowPhase
 from ..ops_models import GimoItem, GimoTurn
 from ..providers.base import ProviderAdapter
 from ..security.execution_proof import ExecutionProof, ExecutionProofChain
+from .agent_catalog_service import AgentCatalogService
 from .conversation_service import ConversationService
 from .cost_service import CostService
 from .execution_policy_service import ExecutionPolicyService
@@ -25,6 +26,7 @@ from .notification_service import NotificationService
 from .provider_auth_service import ProviderAuthService
 from .provider_service_adapter_registry import build_provider_adapter
 from .provider_service_impl import ProviderService
+from .task_descriptor_service import TaskDescriptorService
 
 logger = logging.getLogger("orchestrator.agentic_loop")
 
@@ -564,6 +566,67 @@ class AgenticLoopService:
         return None
 
     @staticmethod
+    def _resolve_mood_profile(mood: str | None, *, fallback_mood: str) -> tuple[str, MoodProfile]:
+        candidate = mood or fallback_mood
+        try:
+            profile = get_mood_profile(candidate)
+        except KeyError:
+            logger.warning("Invalid mood '%s', using %s", candidate, fallback_mood)
+            profile = get_mood_profile(fallback_mood)
+        return profile.name, profile
+
+    @classmethod
+    def _resolve_thread_runtime_context(
+        cls,
+        thread: Any,
+    ) -> tuple[str, MoodProfile, str, WorkflowPhase | str, str]:
+        workflow_phase = getattr(thread, "workflow_phase", "intake") or "intake"
+        explicit_policy = None
+        metadata = getattr(thread, "metadata", {}) or {}
+        explicit_policy_raw = metadata.get("execution_policy")
+        if isinstance(explicit_policy_raw, str) and explicit_policy_raw.strip():
+            try:
+                explicit_policy = ExecutionPolicyService.canonical_policy_name(explicit_policy_raw.strip())
+            except KeyError:
+                logger.warning(
+                    "Invalid execution policy '%s' on thread %s; using catalog-derived policy",
+                    explicit_policy_raw,
+                    getattr(thread, "id", "<unknown>"),
+                )
+
+        agent_preset = str(getattr(thread, "agent_preset", "") or "").strip() or None
+        if getattr(thread, "_legacy_missing_agent_preset", False):
+            agent_preset = None
+
+        raw_mood = str(getattr(thread, "mood", "") or "").strip() or None
+        try:
+            profile = AgentCatalogService.resolve_profile(
+                agent_preset=agent_preset,
+                legacy_mood=None if agent_preset else raw_mood,
+                workflow_phase=workflow_phase,
+            )
+        except KeyError:
+            profile = AgentCatalogService.resolve_profile(
+                legacy_mood=raw_mood or "neutral",
+                workflow_phase=workflow_phase,
+            )
+
+        if explicit_policy:
+            profile = profile.model_copy(update={"execution_policy": explicit_policy})
+
+        normalized_mood, mood_profile = cls._resolve_mood_profile(
+            raw_mood if agent_preset is None else profile.mood,
+            fallback_mood=profile.mood,
+        )
+        return (
+            normalized_mood,
+            mood_profile,
+            profile.task_role,
+            profile.workflow_phase,
+            profile.execution_policy,
+        )
+
+    @staticmethod
     def _build_system_prompt(
         workspace_root: str,
         mood_profile: MoodProfile,
@@ -605,11 +668,11 @@ class AgenticLoopService:
         session_id: str | None = None,
     ) -> AgenticResult:
         emit_event = emit or cls._noop_emit
-        resolved_execution_policy = ExecutionPolicyService.resolve_policy_name(
-            execution_policy=execution_policy,
-            legacy_mood=mood,
-        )
-        policy_profile = ExecutionPolicyService.resolve_policy(execution_policy=resolved_execution_policy, legacy_mood=mood)
+        if execution_policy:
+            resolved_execution_policy = ExecutionPolicyService.canonical_policy_name(execution_policy)
+        else:
+            resolved_execution_policy = ExecutionPolicyService.policy_name_from_legacy_mood(mood)
+        policy_profile = ExecutionPolicyService.get_policy(resolved_execution_policy)
         executor = ToolExecutor(
             workspace_root=workspace_root,
             token=token,
@@ -846,10 +909,18 @@ class AgenticLoopService:
                     break
 
                 if result_status == "plan_proposed":
+                    try:
+                        canonical_plan = TaskDescriptorService.canonicalize_plan_data(result_data)
+                    except Exception as exc:
+                        final_response = f"Invalid proposed plan: {exc}"
+                        finish_reason = "error"
+                        await emit_event("error", {"message": final_response})
+                        stop_loop = True
+                        break
                     if thread_id:
                         updated = ConversationService.mutate_thread(
                             thread_id,
-                            lambda current: setattr(current, "proposed_plan", result_data) or True,
+                            lambda current: setattr(current, "proposed_plan", canonical_plan) or True,
                         )
                         if updated is None:
                             final_response = f"Thread {thread_id} not found while saving proposed plan"
@@ -864,16 +935,16 @@ class AgenticLoopService:
                             orch_turn.id,
                             GimoItem(
                                 type="text",
-                                content=f"[PLAN PROPOSED] {result_data.get('title', 'Execution Plan')}",
+                                content=f"[PLAN PROPOSED] {canonical_plan.get('title', 'Execution Plan')}",
                                 status="completed",
-                                metadata={"plan": result_data},
+                                metadata={"plan": canonical_plan},
                             ),
                         )
                     try:
-                        await NotificationService.publish("plan_proposed", {"thread_id": thread_id, "plan": result_data})
+                        await NotificationService.publish("plan_proposed", {"thread_id": thread_id, "plan": canonical_plan})
                     except Exception:
                         pass
-                    await emit_event("plan_proposed", result_data)
+                    await emit_event("plan_proposed", canonical_plan)
                     final_response = "Plan proposed. Please review and approve to continue."
                     finish_reason = "plan_proposed"
                     stop_loop = True
@@ -1022,16 +1093,7 @@ class AgenticLoopService:
         if not thread:
             raise RuntimeError(f"Thread {thread_id} not found")
 
-        mood = thread.mood or "neutral"
-        try:
-            mood_profile = get_mood_profile(mood)
-        except KeyError:
-            logger.warning("Invalid mood '%s', using neutral", mood)
-            mood = "neutral"
-            mood_profile = get_mood_profile(mood)
-        execution_policy = thread.metadata.get("execution_policy") or ExecutionPolicyService.resolve_policy_name(legacy_mood=mood)
-        workflow_phase = getattr(thread, "workflow_phase", "intake") or "intake"
-        task_role = "orchestrator"
+        mood, mood_profile, task_role, workflow_phase, execution_policy = cls._resolve_thread_runtime_context(thread)
 
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
         if not user_turn:
@@ -1113,16 +1175,7 @@ class AgenticLoopService:
             yield {"event": "error", "data": {"message": f"Thread {thread_id} not found"}}
             return
 
-        mood = thread.mood or "neutral"
-        try:
-            mood_profile = get_mood_profile(mood)
-        except KeyError:
-            logger.warning("Invalid mood '%s', using neutral", mood)
-            mood = "neutral"
-            mood_profile = get_mood_profile(mood)
-        execution_policy = thread.metadata.get("execution_policy") or ExecutionPolicyService.resolve_policy_name(legacy_mood=mood)
-        workflow_phase = getattr(thread, "workflow_phase", "intake") or "intake"
-        task_role = "orchestrator"
+        mood, mood_profile, task_role, workflow_phase, execution_policy = cls._resolve_thread_runtime_context(thread)
 
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
         if not user_turn:
@@ -1173,7 +1226,7 @@ class AgenticLoopService:
                     emit=emit,
                     persist_conversation=True,
                     allow_hitl=True,
-            session_id=session_id,
+                    session_id=session_id,
                 )
             except Exception as exc:
                 logger.exception("Streaming agentic loop failed")
@@ -1237,6 +1290,7 @@ class AgenticLoopService:
         thread = ConversationService.get_thread(thread_id)
         if not thread:
             return AgenticResult(response=f"Thread {thread_id} not found.", finish_reason="error")
+        runtime_context = cls._resolve_thread_runtime_context(thread)
 
         # Mark thread as executing
         try:
@@ -1273,14 +1327,13 @@ class AgenticLoopService:
 
             # Reload thread to get merged messages for the LLM
             thread = ConversationService.get_thread(thread_id)
-            mood = getattr(thread, "mood", "neutral")
-            mood_profile = get_mood_profile(mood)
-            execution_policy = thread.metadata.get("execution_policy") or ExecutionPolicyService.resolve_policy_name(legacy_mood=mood)
-            workflow_phase = getattr(thread, "workflow_phase", "intake") or "intake"
+            if not thread:
+                return AgenticResult(response=f"Thread {thread_id} not found after recovery write.", finish_reason="error")
+            mood, mood_profile, task_role, workflow_phase, execution_policy = runtime_context
             system_prompt = cls._build_system_prompt(
                 workspace_root,
                 mood_profile,
-                task_role="orchestrator",
+                task_role=task_role,
                 workflow_phase=workflow_phase,
             )
             messages = _build_messages_from_thread(thread.turns, system_prompt)
@@ -1333,10 +1386,10 @@ class AgenticLoopService:
             mood = "executor"
             mood_profile = get_mood_profile(mood)
 
-        resolved_policy = ExecutionPolicyService.resolve_policy_name(
-            execution_policy=execution_policy,
-            legacy_mood=mood,
-        )
+        if execution_policy:
+            resolved_policy = ExecutionPolicyService.canonical_policy_name(execution_policy)
+        else:
+            resolved_policy = ExecutionPolicyService.policy_name_from_legacy_mood(mood)
         resolved_temperature = mood_profile.temperature if temperature is None else temperature
         system_prompt = AgenticLoopService._build_system_prompt(
             workspace_root,

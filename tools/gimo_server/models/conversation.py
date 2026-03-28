@@ -2,7 +2,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from .agent_routing import ProfileSummary, WorkflowPhase
 
@@ -26,6 +26,8 @@ class GimoTurn(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class GimoThread(BaseModel):
+    _legacy_missing_agent_preset: bool = PrivateAttr(default=False)
+
     id: str = Field(default_factory=lambda: f"thread_{uuid.uuid4().hex[:8]}")
     title: str = "New Conversation"
     workspace_root: str

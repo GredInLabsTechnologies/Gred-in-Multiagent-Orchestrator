@@ -115,6 +115,17 @@ LEGACY_MOOD_TO_CANONICAL: Dict[str, MoodName] = {
 
 CANONICAL_MOOD_NAMES: FrozenSet[str] = frozenset(MOOD_CATALOG.keys())
 LEGACY_MOOD_NAMES: FrozenSet[str] = frozenset(LEGACY_MOOD_TO_PRESET.keys())
+ROLE_PROFILE_TO_PRESET: Dict[str, AgentPresetName] = {
+    "explorer": "researcher",
+    "researcher": "researcher",
+    "auditor": "safety_reviewer",
+    "safety_reviewer": "safety_reviewer",
+    "executor": "executor",
+    "reviewer": "reviewer",
+    "orchestrator": "plan_orchestrator",
+    "plan_orchestrator": "plan_orchestrator",
+    "human_gate": "human_gate",
+}
 
 
 class AgentCatalogService:
@@ -139,6 +150,26 @@ class AgentCatalogService:
         return preset
 
     @classmethod
+    def resolve_preset_name(
+        cls,
+        *,
+        agent_preset: str | None = None,
+        legacy_mood: str | None = None,
+    ) -> AgentPresetName:
+        if agent_preset:
+            return cls.get_preset(agent_preset).name
+        return cls.preset_for_legacy_mood(legacy_mood or "neutral")
+
+    @classmethod
+    def preset_for_role_profile(cls, role_name: str) -> AgentPresetName:
+        if role_name in PRESET_CATALOG:
+            return cls.get_preset(role_name).name
+        preset = ROLE_PROFILE_TO_PRESET.get(role_name)
+        if not preset:
+            raise KeyError(role_name)
+        return preset
+
+    @classmethod
     def resolve_profile(
         cls,
         *,
@@ -146,7 +177,7 @@ class AgentCatalogService:
         legacy_mood: str | None = None,
         workflow_phase: WorkflowPhase | None = None,
     ) -> ResolvedAgentProfile:
-        preset_name = agent_preset or cls.preset_for_legacy_mood(legacy_mood or "neutral")
+        preset_name = cls.resolve_preset_name(agent_preset=agent_preset, legacy_mood=legacy_mood)
         preset = cls.get_preset(preset_name)
         return ResolvedAgentProfile(
             agent_preset=preset.name,

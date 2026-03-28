@@ -109,6 +109,60 @@ class TestAgenticLoopHelpers:
         assert len(tool_messages) == 1
         assert tool_messages[0]["content"] == "file content"
 
+    def test_thread_runtime_context_prefers_agent_preset_catalog(self, tmp_path: Path):
+        thread = GimoThread(
+            workspace_root=str(tmp_path),
+            title="Preset thread",
+            mood="neutral",
+            agent_preset="researcher",
+            workflow_phase="planning",
+        )
+
+        mood, mood_profile, task_role, workflow_phase, execution_policy = AgenticLoopService._resolve_thread_runtime_context(
+            thread
+        )
+
+        assert mood == "analytical"
+        assert mood_profile.name == "analytical"
+        assert task_role == "researcher"
+        assert workflow_phase == "planning"
+        assert execution_policy == "docs_research"
+
+    def test_thread_runtime_context_uses_legacy_mood_only_at_compat_edge(self, tmp_path: Path):
+        thread = GimoThread(
+            workspace_root=str(tmp_path),
+            title="Legacy thread",
+            mood="forensic",
+            workflow_phase="planning",
+        )
+        thread._legacy_missing_agent_preset = True
+
+        mood, mood_profile, task_role, workflow_phase, execution_policy = AgenticLoopService._resolve_thread_runtime_context(
+            thread
+        )
+
+        assert mood == "analytical"
+        assert mood_profile.name == "analytical"
+        assert task_role == "researcher"
+        assert workflow_phase == "planning"
+        assert execution_policy == "docs_research"
+
+    def test_thread_runtime_context_prefers_explicit_execution_policy_metadata(self, tmp_path: Path):
+        thread = GimoThread(
+            workspace_root=str(tmp_path),
+            title="Explicit policy thread",
+            mood="neutral",
+            agent_preset="researcher",
+            workflow_phase="planning",
+            metadata={"execution_policy": "read_only"},
+        )
+
+        _, _, task_role, workflow_phase, execution_policy = AgenticLoopService._resolve_thread_runtime_context(thread)
+
+        assert task_role == "researcher"
+        assert workflow_phase == "planning"
+        assert execution_policy == "read_only"
+
 
 class TestAgenticResult:
     """Tests for AgenticResult dataclass."""
@@ -158,6 +212,40 @@ class _FakeGics:
             if key.startswith(prefix):
                 out.append({"key": key, "fields": value})
         return out
+
+
+@pytest.mark.asyncio
+async def test_run_reserved_passes_explicit_policy_from_thread_context(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(ConversationService, "THREADS_DIR", tmp_path / "threads")
+    thread = GimoThread(
+        workspace_root=str(tmp_path),
+        title="Conversation",
+        agent_preset="researcher",
+        workflow_phase="planning",
+    )
+    ConversationService.save_thread(thread)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run_loop(**kwargs):
+        captured.update(kwargs)
+        return AgenticResult(response="ok")
+
+    monkeypatch.setattr(
+        "tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter",
+        lambda: (object(), "provider", "model"),
+    )
+    monkeypatch.setattr(AgenticLoopService, "_run_loop", _fake_run_loop)
+
+    result = await AgenticLoopService._run_reserved(
+        thread_id=thread.id,
+        user_message="Investigate docs",
+        workspace_root=str(tmp_path),
+    )
+
+    assert result.response == "ok"
+    assert captured["execution_policy"] == "docs_research"
+    assert captured["mood"] == "analytical"
 
 
 @pytest.mark.asyncio
@@ -433,7 +521,19 @@ async def test_run_loop_plan_proposed_preserves_conversation_turns(tmp_path: Pat
                 return_value={
                     "status": "plan_proposed",
                     "message": "Plan proposed",
-                    "data": {"title": "Ship it", "tasks": []},
+                    "data": {
+                        "title": "Ship it",
+                        "objective": "Deliver safely",
+                        "tasks": [
+                            {
+                                "id": "t1",
+                                "title": "Investigate auth flow",
+                                "description": "Inspect the current flow",
+                                "agent_mood": "forensic",
+                                "agent_rationale": "Need careful analysis",
+                            }
+                        ],
+                    },
                 }
             ),
         ), patch(
@@ -462,7 +562,11 @@ async def test_run_loop_plan_proposed_preserves_conversation_turns(tmp_path: Pat
         stored = ConversationService.get_thread(thread.id)
         assert result.finish_reason == "plan_proposed"
         assert stored is not None
-        assert stored.proposed_plan == {"title": "Ship it", "tasks": []}
+        assert stored.proposed_plan["title"] == "Ship it"
+        assert stored.proposed_plan["objective"] == "Deliver safely"
+        assert stored.proposed_plan["tasks"][0]["source_shape"] == "conversational_plan"
+        assert "task_descriptor" in stored.proposed_plan["tasks"][0]
+        assert "task_fingerprint" in stored.proposed_plan["tasks"][0]
         assert len(stored.turns) == 2
         assert any(item.type == "tool_call" for turn in stored.turns for item in turn.items)
         assert any(item.content == "Plan proposed. Please review and approve to continue." for turn in stored.turns for item in turn.items)

@@ -13,7 +13,7 @@ from tools.gimo_server.routers.ops import run_router
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.hitl_gate_service import HitlGateService
-from tools.gimo_server.services.role_profiles import assert_tool_allowed
+from tools.gimo_server.services.role_profiles import assert_tool_allowed, get_role_profile
 from tools.gimo_server.services.critic_service import CriticService
 
 
@@ -88,6 +88,19 @@ async def test_hitl_approve_resumes(monkeypatch):
 def test_role_enforcement_explorer_denies_write_tool():
     with pytest.raises(PermissionError):
         assert_tool_allowed("explorer", "write_to_file")
+
+
+def test_role_profiles_reflect_canonical_policy_catalog():
+    explorer = get_role_profile("explorer")
+    auditor = get_role_profile("auditor")
+    executor = get_role_profile("executor")
+
+    assert explorer.capability == "docs_research"
+    assert explorer.trust_tier == "t1"
+    assert auditor.capability == "security_audit"
+    assert auditor.hitl_required is True
+    assert executor.capability == "workspace_safe"
+    assert executor.trust_tier == "t2"
 
 
 def test_action_drafts_endpoints(monkeypatch):

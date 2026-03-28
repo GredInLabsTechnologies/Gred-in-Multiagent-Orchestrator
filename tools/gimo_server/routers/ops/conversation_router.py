@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 from ...ops_models import GimoThread, GimoTurn, GimoItem, GimoItemType
 from ...services.conversation_service import ConversationService
 from ...services.agentic_loop_service import AgenticLoopService, ThreadExecutionBusyError
+from ...services.task_descriptor_service import TaskDescriptorService
 from ...security import verify_token
 from ...security.auth import AuthContext
 from .common import _require_role
@@ -276,15 +277,23 @@ async def respond_to_plan(
 
         try:
             proposed_plan = thread.proposed_plan or {}
+            canonical_plan = TaskDescriptorService.canonicalize_plan_data(proposed_plan)
+            persisted = ConversationService.mutate_thread(
+                thread_id,
+                lambda current: setattr(current, "proposed_plan", canonical_plan) or True,
+            )
+            if persisted is None:
+                raise HTTPException(status_code=404, detail="Thread not found")
             plan = CustomPlanService.create_plan_from_llm(
-                plan_data=proposed_plan,
-                name=proposed_plan.get("title", "Approved Plan"),
-                description=proposed_plan.get("objective", ""),
+                plan_data=canonical_plan,
+                name=canonical_plan.get("title", "Approved Plan"),
+                description=canonical_plan.get("objective", ""),
             )
 
             updated = ConversationService.mutate_thread(
                 thread_id,
                 lambda current: (
+                    setattr(current, "proposed_plan", canonical_plan),
                     setattr(current, "workflow_phase", "executing"),
                     current.metadata.__setitem__("plan_approved", True),
                     current.metadata.__setitem__("plan_approved_at", json.dumps({"time": "now"})),
@@ -334,15 +343,19 @@ async def respond_to_plan(
             raise HTTPException(status_code=400, detail="modified_plan required for 'modify' action")
 
         # Update proposed plan with user modifications
+        try:
+            canonical_plan = TaskDescriptorService.canonicalize_plan_data(modified_plan)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid modified plan: {str(e)}") from e
         ConversationService.mutate_thread(
             thread_id,
-            lambda current: setattr(current, "proposed_plan", modified_plan),
+            lambda current: setattr(current, "proposed_plan", canonical_plan),
         )
 
         return {
             "status": "modified",
             "message": "Plan updated with your changes. Review again or approve.",
-            "modified_plan": modified_plan,
+            "modified_plan": canonical_plan,
         }
 
     else:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -155,6 +157,71 @@ def test_phase4_prompt_mode_allows_missing_intent_class_in_context(client):
 
     res = client.post("/ops/drafts", json=body)
     assert res.status_code == 201
+
+
+def test_phase4_generate_plan_writes_canonical_plan_content(monkeypatch, client):
+    from tools.gimo_server.routers.ops import plan_router
+
+    raw_plan = {
+        "id": "plan_1",
+        "title": "Ship feature",
+        "workspace": ".",
+        "created": "2026-03-28",
+        "objective": "Implement change",
+        "tasks": [
+            {
+                "id": "t1",
+                "title": "Investigate API",
+                "description": "Read docs and understand the endpoint",
+                "scope": "file_write",
+                "depends": [],
+                "status": "pending",
+                "agent_assignee": {
+                    "role": "worker",
+                    "goal": "Understand the API shape",
+                    "backstory": "Senior investigator",
+                    "model": "gpt-4o",
+                    "system_prompt": "Be thorough.",
+                    "instructions": ["Inspect the API carefully."],
+                },
+            }
+        ],
+        "constraints": [],
+    }
+
+    async def _fake_generate(*_args, **_kwargs):
+        return {
+            "provider": "mock_provider",
+            "content": json.dumps(raw_plan),
+        }
+
+    monkeypatch.setattr(plan_router.ProviderService, "static_generate", _fake_generate)
+    monkeypatch.setattr(
+        plan_router.CustomPlanService,
+        "create_plan_from_llm",
+        lambda *args, **kwargs: type("Plan", (), {"id": "cp_1"})(),
+    )
+
+    captured = {}
+
+    def _capture_create_draft(prompt, **kwargs):
+        captured["content"] = kwargs["content"]
+        return OpsDraft(
+            id="d_generated",
+            prompt=prompt,
+            content=kwargs["content"],
+            context=kwargs.get("context") or {},
+            status=kwargs.get("status", "draft"),
+        )
+
+    monkeypatch.setattr(plan_router.OpsService, "create_draft", _capture_create_draft)
+
+    res = client.post("/ops/generate-plan", params={"prompt": "ship p2"})
+
+    assert res.status_code == 201
+    payload = json.loads(captured["content"])
+    assert payload["tasks"][0]["task_descriptor"]["task_id"] == "t1"
+    assert "task_fingerprint" in payload["tasks"][0]
 
 
 def test_phase4_create_run_returns_409_when_active_run_exists(monkeypatch, client):
