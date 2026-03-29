@@ -230,7 +230,9 @@ async def lifespan(app: FastAPI):
 
     async with AsyncExitStack() as app_mcp_exit_stack:
         app.state.app_mcp_exit_stack = app_mcp_exit_stack
-        _refresh_app_mcp_facade(app, settings)
+        # Lazy MCP init: Set up callback, will be invoked on first request to MCP endpoints
+        app.state._mcp_lazy_init = lambda: _refresh_app_mcp_facade(app, settings)
+        app.state._mcp_initialized = False
         streamable_http_context = getattr(app.state, "app_mcp_streamable_http_context", None)
         if streamable_http_context is not None:
             await app_mcp_exit_stack.enter_async_context(streamable_http_context)

@@ -223,21 +223,31 @@ def register_native_tools(mcp: FastMCP):
     async def _generate_plan_for_task(task_instructions: str):
         from tools.gimo_server.services.provider_service import ProviderService
         from tools.gimo_server.ops_models import OpsPlan
+        from tools.gimo_server.models.contract import extract_valid_roles
         import json, time, re
+
+        # Extract valid roles from schema (SINGLE SOURCE OF TRUTH)
+        valid_roles = extract_valid_roles()
+        roles_str = " | ".join(f'"{role}"' for role in valid_roles)
+
+        # Get active model from provider config
+        cfg = ProviderService.get_config()
+        model_id = cfg.providers[cfg.active].model if cfg and cfg.active and cfg.active in cfg.providers else "qwen2.5-coder:3b"
 
         sys_prompt = (
             "You are a senior systems architect. Generate a JSON execution plan.\n"
             "RULES:\n"
-            "- tasks[0] MUST have role 'Lead Orchestrator' with scope 'bridge'\n"
-            "- Each worker task must have a unique id, title, description, and agent_assignee\n"
-            "- agent_assignee must have: role, goal, backstory, model, system_prompt, instructions\n"
+            f"- agent_assignee.role MUST be exactly one of: {roles_str}\n"
+            f"- agent_assignee.model MUST be: \"{model_id}\"\n"
+            "- Each task needs: id, title, scope, description, agent_assignee\n"
+            "- agent_assignee needs: role, goal, backstory, model, system_prompt, instructions\n"
             "- Output ONLY valid JSON, no markdown, no explanations\n\n"
             f"Task: {task_instructions}\n\n"
             'JSON schema:\n'
             '{"id":"plan_...","title":"...","workspace":"...","created":"...","objective":"...",'
             '"tasks":[{"id":"t_orch","title":"[ORCH] ...","scope":"bridge","depends":[],"status":"pending",'
-            '"description":"...","agent_assignee":{"role":"Lead Orchestrator","goal":"...","backstory":"...",'
-            '"model":"qwen2.5-coder:3b","system_prompt":"...","instructions":["..."]}},'
+            f'"description":"...","agent_assignee":{{"role":"{valid_roles[0]}","goal":"...","backstory":"...",'
+            f'"model":"{model_id}","system_prompt":"...","instructions":["..."]}},'
             '{"id":"t_worker_1","title":"[WORKER] ...","scope":"file_write","depends":["t_orch"],'
         )
         try:

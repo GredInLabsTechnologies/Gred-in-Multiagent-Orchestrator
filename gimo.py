@@ -136,17 +136,63 @@ def _read_token_from_env_file() -> str | None:
     return None
 
 
-def _resolve_token() -> str | None:
-    for env_name in ("GIMO_TOKEN", "ORCH_TOKEN"):
+def _resolve_token(role: str = "operator") -> str | None:
+    """Resolve token for the given role.
+
+    Args:
+        role: "admin", "operator", or "actions"
+
+    Priority:
+    1. Environment variables (GIMO_TOKEN/ORCH_TOKEN for admin, ORCH_OPERATOR_TOKEN, ORCH_ACTIONS_TOKEN)
+    2. Unified .gimo_credentials file (new format)
+    3. Legacy separate token files
+    4. .env file
+
+    Returns:
+        Token string or None if not found
+    """
+    # Map role to env var names
+    env_vars = {
+        "admin": ["GIMO_TOKEN", "ORCH_TOKEN"],
+        "operator": ["ORCH_OPERATOR_TOKEN"],
+        "actions": ["ORCH_ACTIONS_TOKEN"],
+    }
+
+    # Try environment variables first
+    for env_name in env_vars.get(role, []):
         token = os.environ.get(env_name)
         if token:
             return token.strip()
 
-    token_path = _project_root() / "tools" / "gimo_server" / ".orch_token"
-    if token_path.exists():
-        return token_path.read_text(encoding="utf-8").strip()
+    # Try unified credentials file
+    unified_creds = _project_root() / "tools" / "gimo_server" / ".gimo_credentials"
+    if unified_creds.exists():
+        try:
+            import yaml
+            creds = yaml.safe_load(unified_creds.read_text(encoding="utf-8"))
+            if isinstance(creds, dict) and role in creds:
+                token = str(creds[role]).strip()
+                if token:
+                    return token
+        except Exception:
+            pass
 
-    return _read_token_from_env_file()
+    # Try legacy token files
+    legacy_files = {
+        "admin": ".orch_token",
+        "operator": ".orch_operator_token",
+        "actions": ".orch_actions_token",
+    }
+    if role in legacy_files:
+        token_path = _project_root() / "tools" / "gimo_server" / legacy_files[role]
+        if token_path.exists():
+            return token_path.read_text(encoding="utf-8").strip()
+
+    # Fall back to .env file (only for admin/ORCH_TOKEN)
+    if role == "admin":
+        return _read_token_from_env_file()
+
+    return None
 
 
 def _api_settings(config: dict[str, Any]) -> tuple[str, float]:
@@ -163,10 +209,28 @@ def _api_request(
     *,
     params: dict[str, Any] | None = None,
     json_body: dict[str, Any] | None = None,
+    extra_headers: dict[str, str] | None = None,
+    role: str = "operator",
 ) -> tuple[int, Any]:
+    """Make an API request to the GIMO backend.
+
+    Args:
+        config: Configuration dict
+        method: HTTP method
+        path: API endpoint path
+        params: Query parameters
+        json_body: JSON request body
+        extra_headers: Additional headers to include
+        role: Token role to use ("admin", "operator", or "actions")
+
+    Returns:
+        Tuple of (status_code, response_payload)
+    """
     base_url, timeout_seconds = _api_settings(config)
-    token = _resolve_token()
+    token = _resolve_token(role)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
+    if extra_headers:
+        headers.update(extra_headers)
     url = f"{base_url}{path}"
 
     with httpx.Client(timeout=timeout_seconds) as client:
@@ -1487,11 +1551,25 @@ def status(
 @app.command()
 def plan(
     description: str = typer.Argument(..., help="Goal or task description"),
+    workspace: str = typer.Option(None, "--workspace", "-w", help="Target workspace directory"),
     confirm: bool = typer.Option(True, "--confirm/--no-confirm", help="Confirm local persistence when interactive."),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
 ) -> None:
     """Create a structured draft plan and persist it under .gimo/plans."""
     config = _load_config()
+
+    # Resolve workspace (explicit or current directory)
+    ws_path = Path(workspace or ".").resolve()
+
+    # Auto-confirm if not in TTY (CI/CD, pipes)
+    if not sys.stdin.isatty():
+        confirm = False
+
+    # Confirm workspace if interactive
+    if confirm:
+        console.print(f"[yellow]Workspace:[/yellow] {ws_path}")
+        if not typer.confirm("Proceed?", default=True):
+            raise typer.Exit(0)
 
     with console.status("[bold green]Generating plan..."):
         status_code, payload = _api_request(
@@ -1499,6 +1577,8 @@ def plan(
             "POST",
             "/ops/generate-plan",
             params={"prompt": description},
+            extra_headers={"X-Gimo-Workspace": str(ws_path)},
+            role="operator",
         )
 
     if status_code != 201 or not isinstance(payload, dict):

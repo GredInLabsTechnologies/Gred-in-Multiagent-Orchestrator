@@ -50,6 +50,11 @@ nvidia-ml-py>=12.0.0 # NVIDIA GPU memory monitoring (replaces deprecated pynvml)
 # ASN.1 Support (dependency of cryptography)
 pyasn1>=0.6.2  # Security fix CVE-2026-23490
 
+# MCP Support (for App façade and bridge)
+fastmcp>=3.1.0              # MCP server implementation
+mcp>=1.26.0                 # MCP protocol types
+sse-starlette>=3.3.0        # Server-Sent Events for MCP streaming
+
 # Note: Removed 128+ unused dependencies including:
 # - ML/AI: torch, transformers, opencv, onnxruntime-gpu (not used)
 # - PDF: pypdf, xhtml2pdf, reportlab (not used, have vulnerabilities)

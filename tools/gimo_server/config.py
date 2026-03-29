@@ -105,10 +105,45 @@ class Settings:
 
 
 def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_TOKEN") -> str:
+    """Load or create a token. Supports both unified .gimo_credentials and legacy separate files.
+
+    Priority:
+    1. Environment variable (ORCH_TOKEN, ORCH_ACTIONS_TOKEN, ORCH_OPERATOR_TOKEN)
+    2. Unified .gimo_credentials file (new format)
+    3. Legacy separate token files (.orch_token, .orch_actions_token, .orch_operator_token)
+    4. Generate new token and write to appropriate file
+    """
     token_file = token_file or ORCH_TOKEN_FILE
     env_token = os.environ.get(env_key, "").strip()
     if env_token:
         return env_token
+
+    # Try unified credentials file first (new format)
+    base_dir = Path(__file__).parent
+    unified_creds = base_dir / ".gimo_credentials"
+    if unified_creds.exists():
+        try:
+            import yaml
+            creds_data = yaml.safe_load(unified_creds.read_text(encoding="utf-8"))
+            if isinstance(creds_data, dict):
+                # Map env_key to credential key
+                role_key = None
+                if env_key == "ORCH_TOKEN":
+                    role_key = "admin"
+                elif env_key == "ORCH_ACTIONS_TOKEN":
+                    role_key = "actions"
+                elif env_key == "ORCH_OPERATOR_TOKEN":
+                    role_key = "operator"
+
+                if role_key and role_key in creds_data:
+                    token = str(creds_data[role_key]).strip()
+                    if token:
+                        os.environ[env_key] = token
+                        return token
+        except Exception as exc:
+            logger.warning("Failed to read unified credentials file: %s", exc)
+
+    # Fall back to legacy separate token file
     if token_file.exists():
         try:
             file_token = token_file.read_text(encoding="utf-8").strip()
@@ -117,6 +152,8 @@ def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_T
                 return file_token
         except Exception:
             logger.warning("Failed to read token file %s", token_file)
+
+    # Generate new token
     token = secrets.token_urlsafe(48)
     token_file.parent.mkdir(parents=True, exist_ok=True)
     token_file.write_text(token, encoding="utf-8")
@@ -143,7 +180,83 @@ def _normalize_app_mcp_profile(raw_profile: str | None) -> str:
     return profile
 
 
+def _migrate_to_unified_credentials() -> None:
+    """Migrate legacy separate token files to unified .gimo_credentials format.
+
+    Only runs if .gimo_credentials doesn't exist and legacy files do exist.
+    Creates a YAML file with all three tokens clearly labeled.
+    """
+    base_dir = Path(__file__).parent
+    unified_creds = base_dir / ".gimo_credentials"
+
+    # Skip if unified file already exists
+    if unified_creds.exists():
+        return
+
+    # Check for legacy token files
+    admin_token_file = base_dir / ".orch_token"
+    actions_token_file = base_dir / ".orch_actions_token"
+    operator_token_file = base_dir / ".orch_operator_token"
+
+    # Collect existing tokens
+    tokens = {}
+    if admin_token_file.exists():
+        try:
+            tokens["admin"] = admin_token_file.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    if actions_token_file.exists():
+        try:
+            tokens["actions"] = actions_token_file.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    if operator_token_file.exists():
+        try:
+            tokens["operator"] = operator_token_file.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+
+    # Only migrate if we have at least one legacy token
+    if not tokens:
+        return
+
+    # Generate missing tokens
+    if "admin" not in tokens:
+        tokens["admin"] = secrets.token_urlsafe(48)
+    if "actions" not in tokens:
+        tokens["actions"] = secrets.token_urlsafe(48)
+    if "operator" not in tokens:
+        tokens["operator"] = secrets.token_urlsafe(48)
+
+    # Write unified credentials file
+    try:
+        content = (
+            "# GIMO Unified Credentials\n"
+            "# Auto-generated from legacy token files. DO NOT share the admin token.\n"
+            "#\n"
+            "# Roles:\n"
+            "#   admin    - Full access (only for system owner)\n"
+            "#   operator - CLI/daily ops (safe for terminals)\n"
+            "#   actions  - Read-only (safe for webhooks/integrations)\n"
+            "\n"
+            f"admin: \"{tokens['admin']}\"\n"
+            f"operator: \"{tokens['operator']}\"\n"
+            f"actions: \"{tokens['actions']}\"\n"
+        )
+        unified_creds.write_text(content, encoding="utf-8")
+        try:
+            os.chmod(unified_creds, 0o600)
+        except Exception:
+            pass
+        logger.info("Migrated legacy tokens to .gimo_credentials")
+    except Exception as exc:
+        logger.warning("Failed to migrate tokens to unified format: %s", exc)
+
+
 def _build_settings() -> Settings:
+    # Migrate legacy tokens to unified format if needed
+    _migrate_to_unified_credentials()
+
     base_dir = _get_base_dir()
     repo_root_dir = Path(os.environ.get("ORCH_REPO_ROOT", str(base_dir.parent))).resolve()
     repo_registry_path = Path(

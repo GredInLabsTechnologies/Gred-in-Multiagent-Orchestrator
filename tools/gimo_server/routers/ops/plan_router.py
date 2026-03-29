@@ -218,19 +218,26 @@ async def generate_structured_plan(
     _require_role(auth, "operator")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
 
+    # Build contract to ensure schema alignment
+    from tools.gimo_server.services.contract_factory import ContractFactory
+    contract = ContractFactory.build(auth, request)
+
+    # Generate system prompt from contract schema (SINGLE SOURCE OF TRUTH)
+    roles_str = contract.format_roles_for_prompt()
     sys_prompt = (
         "You are a senior systems architect. Generate a JSON execution plan.\n"
         "RULES:\n"
-        "- tasks[0] MUST have role 'Lead Orchestrator' with scope 'bridge'\n"
-        "- Each worker task must have a unique id, title, description, and agent_assignee\n"
-        "- agent_assignee must have: role, goal, backstory, model, system_prompt, instructions\n"
+        f"- agent_assignee.role MUST be exactly one of: {roles_str}\n"
+        f"- agent_assignee.model MUST be: \"{contract.model_id}\"\n"
+        "- Each task needs: id, title, scope, description, agent_assignee\n"
+        "- agent_assignee needs: role, goal, backstory, model, system_prompt, instructions\n"
         "- Output ONLY valid JSON, no markdown, no explanations\n\n"
         f"Task: {prompt}\n\n"
         'JSON schema:\n'
         '{"id":"plan_...","title":"...","workspace":"...","created":"...","objective":"...",'
         '"tasks":[{"id":"t_orch","title":"[ORCH] ...","scope":"bridge","depends":[],"status":"pending",'
-        '"description":"...","agent_assignee":{"role":"Lead Orchestrator","goal":"...","backstory":"...",'
-        '"model":"qwen2.5-coder:3b","system_prompt":"...","instructions":["..."]}},'
+        f'"description":"...","agent_assignee":{{"role":"{contract.valid_roles[0]}","goal":"...","backstory":"...",'
+        f'"model":"{contract.model_id}","system_prompt":"...","instructions":["..."]}},'
         '{"id":"t_worker_1","title":"[WORKER] ...","scope":"file_write","depends":["t_orch"],'
         '"status":"pending","description":"...","agent_assignee":{...}}],"constraints":[]}\n'
     )
