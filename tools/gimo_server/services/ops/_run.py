@@ -245,6 +245,22 @@ class RunMixin:
                     sandbox = SandboxService.create_worktree_handle(run_id, repo_path, base_ref=commit_base)
                     validated_task_spec["workspace_path"] = str(sandbox.worktree_path)
 
+            # P10: Extract routing metadata before draft expires
+            routing_decision_raw = context.get("routing_decision")
+            _rd = routing_decision_raw if isinstance(routing_decision_raw, dict) else None
+            _rd_profile = (_rd or {}).get("profile") or {}
+            agent_preset = (
+                context.get("agent_preset")
+                or _rd_profile.get("agent_preset")
+                or None
+            )
+            execution_policy_name = (
+                context.get("execution_policy_name")
+                or _rd_profile.get("execution_policy")
+                or None
+            )
+            routing_snapshot = _rd  # None if absent
+
             run = OpsRun(
                 id=run_id,
                 approved_id=approved_id,
@@ -260,6 +276,9 @@ class RunMixin:
                 created_at=_utcnow(),
                 attempt=attempt,
                 validated_task_spec=validated_task_spec or None,
+                agent_preset=agent_preset,
+                execution_policy_name=execution_policy_name,
+                routing_snapshot=routing_snapshot,
             )
             entry = cls._append_run_log_entry(run.id, level="INFO", msg="Run created")
             run.log = [entry]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..models.agent_routing import RoutingDecision, RoutingDecisionSummary, TaskConstraints, TaskDescriptor
+from ..models.agent_routing import RoutingDecision, RoutingDecisionSummary, TaskConstraints, TaskDescriptor, ModelBinding
 from .agent_catalog_service import AgentCatalogService, PRESET_CATALOG
 from .execution_policy_service import LEGACY_MOOD_TO_POLICY
 
@@ -159,11 +159,18 @@ class ProfileRouterService:
             workflow_phase=workflow_phase,
         )
         resolved = resolved.model_copy(update={"execution_policy": execution_policy})
-        summary = RoutingDecisionSummary(**resolved.model_dump())
-        return RoutingDecision(
-            summary=summary,
-            resolved_profile=resolved,
+
+        # Build binding (provider/model resolved later by ProfileBindingService)
+        binding = ModelBinding(
+            provider="auto",
+            model="auto",
             binding_mode=(constraints.allowed_binding_modes[0] if constraints.allowed_binding_modes else "plan_time"),
+            binding_reason="pending_binding_resolution"
+        )
+
+        return RoutingDecision(
+            profile=resolved,
+            binding=binding,
             routing_reason=(
                 f"objective=constraints>requested>legacy>semantic>gics_advisory"
                 f"|task_semantic={descriptor.task_semantic}"

@@ -2,12 +2,12 @@
 from .hardware_scheduler import ExecutionTicket, HardwareScheduler
 from .load_balancer import LoadBalancer
 from .model_selector import ModelSelector, SelectionResult
-from .task_router import TASK_AFFINITY, RoutingDecision, TaskRouter
+from .task_router import TASK_AFFINITY, HardwareRoutingDecision, TaskRouter
 
 __all__ = [
     "TaskRouter",
     "TASK_AFFINITY",
-    "RoutingDecision",
+    "HardwareRoutingDecision",
     "HardwareScheduler",
     "ExecutionTicket",
     "ModelSelector",

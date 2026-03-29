@@ -25,6 +25,7 @@ from tools.gimo_server.ops_models import (
     WorkflowState,
 )
 from tools.gimo_server.models.agent_routing import TaskDescriptor, RoutingDecisionSummary
+from tools.gimo_server.services.constraint_compiler_service import ConstraintCompilerService
 from tools.gimo_server.services.model_router_service import ModelRouterService
 from tools.gimo_server.services.profile_router_service import ProfileRouterService
 from tools.gimo_server.services.observability_service import ObservabilityService
@@ -334,41 +335,41 @@ class GraphEngine(
                 risk_band=str(node.config.get("risk_level", "low")),
             )
 
-            # Build task context
+            # Build task context for constraint compilation
             task_context = {
                 "cost_ceiling": node.config.get("cost_ceiling"),
                 "binding_mode": "runtime",
                 "budget_mode": node.config.get("budget_mode", "standard"),
             }
 
-            # Get agent_preset and workflow_phase from node config
+            # Get agent_preset from node config
             agent_preset = str(node.config.get("agent_preset", "executor"))
-            workflow_phase = str(node.config.get("workflow_phase", "executing"))
 
-            # Route via canonical pipeline
+            # Compile constraints then route via canonical pipeline
+            constraints = ConstraintCompilerService.compile_for_descriptor(descriptor, task_context=task_context)
             routing_decision = ProfileRouterService.route(
-                task_descriptor=descriptor,
-                task_context=task_context,
-                agent_preset=agent_preset,
-                workflow_phase=workflow_phase,
+                descriptor=descriptor,
+                constraints=constraints,
+                requested_preset=agent_preset,
             )
 
-            # Extract provider/model from routing_decision.summary
+            # Extract provider/model from routing_decision (v2.0 canonical fields)
+            # Keep routing_summary for backward compat only
             routing_summary = routing_decision.summary
 
             # Store routing summary in node config for observability and executor
             if isinstance(node.config, dict):
-                node.config["routing_decision_summary"] = routing_summary.model_dump()
-                node.config["selected_model"] = routing_summary.model
+                node.config["routing_decision_summary"] = routing_summary.model_dump()  # Backward compat
+                node.config["selected_model"] = routing_decision.binding.model  # v2.0 canonical
 
-            # Update state tracking (legacy compat)
+            # Update state tracking (v2.0 canonical)
             self.state.data["model_router_last"] = {
                 "node_id": node.id,
-                "selected_model": routing_summary.model,
+                "selected_model": routing_decision.binding.model,
                 "reason": routing_decision.routing_reason,
-                "provider_id": routing_summary.provider,
-                "agent_preset": routing_summary.agent_preset,
-                "execution_policy": routing_summary.execution_policy,
+                "provider_id": routing_decision.binding.provider,
+                "agent_preset": routing_decision.profile.agent_preset,
+                "execution_policy": routing_decision.profile.execution_policy,
             }
             self.state.data.setdefault("model_router_trace", []).append(self.state.data["model_router_last"])
 

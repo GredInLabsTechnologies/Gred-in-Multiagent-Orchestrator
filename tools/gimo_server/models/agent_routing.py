@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .provider import ProviderRoleBinding
 
@@ -76,20 +76,91 @@ class ResolvedAgentProfile(BaseModel):
 
 
 class RoutingDecisionSummary(ResolvedAgentProfile):
+    """Legacy compatibility: extends ResolvedAgentProfile with binding info."""
     provider: str = "auto"
     model: str = "auto"
+
+
+class ModelBinding(BaseModel):
+    """Contract for model binding decision."""
+    provider: str = Field(default="auto", description="Provider ID or 'auto'")
+    model: str = Field(default="auto", description="Model ID or 'auto'")
+    binding_mode: BindingMode = "plan_time"
+    binding_reason: str = Field(default="auto", description="Why this binding was chosen")
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider_known(cls, v: str) -> str:
+        """Validate provider is known or 'auto'."""
+        if v != "auto":
+            # Lazy import to avoid circular dependency
+            from ..services.provider_service_impl import ProviderService
+            cfg = ProviderService.get_config()
+            if cfg and v not in cfg.providers:
+                import logging
+                logging.warning(f"Unknown provider: {v}. Known: {list(cfg.providers.keys())}")
+        return v
 
 
 class RoutingDecision(BaseModel):
-    summary: RoutingDecisionSummary
-    resolved_profile: ResolvedAgentProfile
-    binding_mode: BindingMode = "plan_time"
-    routing_reason: str = ""
-    provider: str = "auto"
-    model: str = "auto"
-    candidate_count: int = 0
-    routing_schema_version: str = "1.0"
-    profile_schema_version: str = "1.0"
+    """Output of ProfileRouterService.route() - SINGLE SOURCE OF TRUTH."""
+    profile: ResolvedAgentProfile = Field(..., description="Resolved agent profile (5 core fields)")
+    binding: ModelBinding = Field(..., description="Model binding decision")
+    routing_reason: str = Field(..., description="Human-readable explanation of routing")
+    candidate_count: int = Field(ge=1, description="Number of candidates evaluated")
+
+    # Schema version WITH validation
+    schema_version: str = Field(default="2.0", frozen=True, description="Contract version")
+
+    @model_validator(mode="after")
+    def validate_consistency(self) -> "RoutingDecision":
+        """Validate internal consistency of routing decision."""
+        # Ensure profile and binding are aligned
+        if self.binding.binding_mode == "runtime" and self.profile.execution_policy not in ["workspace_safe", "workspace_experiment"]:
+            import logging
+            logging.warning(
+                f"Runtime binding with restrictive policy {self.profile.execution_policy} may cause issues"
+            )
+        return self
+
+    # BACKWARD COMPATIBILITY: Legacy code expects these fields
+    @property
+    def summary(self) -> RoutingDecisionSummary:
+        """Legacy compatibility: Build summary from canonical fields."""
+        return RoutingDecisionSummary(
+            **self.profile.model_dump(),
+            provider=self.binding.provider,
+            model=self.binding.model,
+        )
+
+    @property
+    def resolved_profile(self) -> ResolvedAgentProfile:
+        """Legacy compatibility: Alias for profile."""
+        return self.profile
+
+    @property
+    def provider(self) -> str:
+        """Legacy compatibility: Access binding.provider."""
+        return self.binding.provider
+
+    @property
+    def model(self) -> str:
+        """Legacy compatibility: Access binding.model."""
+        return self.binding.model
+
+    @property
+    def binding_mode(self) -> BindingMode:
+        """Legacy compatibility: Access binding.binding_mode."""
+        return self.binding.binding_mode
+
+    # Legacy schema versions (for read compatibility only)
+    @property
+    def routing_schema_version(self) -> str:
+        return "1.0"  # Legacy compat
+
+    @property
+    def profile_schema_version(self) -> str:
+        return "1.0"  # Legacy compat
 
 
 class ProfileSummary(BaseModel):

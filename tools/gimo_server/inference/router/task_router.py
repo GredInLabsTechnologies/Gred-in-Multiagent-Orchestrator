@@ -56,8 +56,8 @@ _UTIL_HIGH = 85.0
 
 
 @dataclass
-class RoutingDecision:
-    """Result of the routing algorithm."""
+class HardwareRoutingDecision:
+    """Result of the hardware routing algorithm."""
     target_device: HardwareTarget
     selected_model: Optional[ModelSpec]
     shard_strategy: ShardStrategy = ShardStrategy.NONE
@@ -102,14 +102,14 @@ class TaskRouter:
         self,
         request: InferenceRequest,
         model: Optional[ModelSpec] = None,
-    ) -> RoutingDecision:
+    ) -> HardwareRoutingDecision:
         """Return the best routing decision for *request*.
 
         If ``request.target_hardware`` is not AUTO, it takes precedence
         (after checking that the device actually has capacity).
         """
         if not self._devices:
-            return RoutingDecision(
+            return HardwareRoutingDecision(
                 target_device=HardwareTarget.CPU,
                 selected_model=model,
                 rationale="No devices detected; defaulting to CPU",
@@ -129,7 +129,7 @@ class TaskRouter:
         self,
         request: InferenceRequest,
         model: Optional[ModelSpec],
-    ) -> RoutingDecision:
+    ) -> HardwareRoutingDecision:
         target = request.target_hardware
         device = next((d for d in self._devices if d.device_type == target), None)
         if device is None:
@@ -148,7 +148,7 @@ class TaskRouter:
             )
             return self._route_auto(request, model)
 
-        return RoutingDecision(
+        return HardwareRoutingDecision(
             target_device=target,
             selected_model=model,
             rationale=f"Explicit target: {target.value}",
@@ -159,7 +159,7 @@ class TaskRouter:
         self,
         request: InferenceRequest,
         model: Optional[ModelSpec],
-    ) -> RoutingDecision:
+    ) -> HardwareRoutingDecision:
         affinity = TASK_AFFINITY.get(request.task, TASK_AFFINITY[TaskSemantic.GENERAL])
 
         # Build scores for each available device (skip devices at critical temp).
@@ -188,7 +188,7 @@ class TaskRouter:
         candidates.sort(key=lambda c: c.score, reverse=True)
 
         if not candidates:
-            return RoutingDecision(
+            return HardwareRoutingDecision(
                 target_device=HardwareTarget.CPU,
                 selected_model=model,
                 rationale="No candidates; defaulting to CPU",
@@ -204,7 +204,7 @@ class TaskRouter:
 
         logger.info("TaskRouter: %s → %s", request.task.value, best.device.device_type.value)
 
-        return RoutingDecision(
+        return HardwareRoutingDecision(
             target_device=best.device.device_type,
             selected_model=model,
             fallback_device=fallback_device,

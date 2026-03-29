@@ -89,10 +89,24 @@ def llm_response_to_plan_nodes(
         task_fingerprint = TaskFingerprintService.fingerprint_for_descriptor(descriptor)
         role_definition = task.get("role_definition", "")
         prompt_parts = [part for part in [desc, role_definition] if str(part).strip()]
-        routing_summary = routing.summary.model_copy(update={"provider": binding.provider, "model": binding.model})
-        routing_reason = f"{routing.routing_reason}|binding={binding_resolution.reason}"
 
-        task_role = routing.resolved_profile.task_role
+        # Update routing decision with resolved binding (v2.0 contract)
+        from ..models.agent_routing import ModelBinding as CanonicalModelBinding
+        routing = routing.model_copy(update={
+            "binding": CanonicalModelBinding(
+                provider=binding.provider,
+                model=binding.model,
+                binding_mode=binding.binding_mode,
+                binding_reason=binding_resolution.reason,
+            ),
+            "routing_reason": f"{routing.routing_reason}|binding={binding_resolution.reason}",
+        })
+
+        # Legacy compat: build routing_summary for backward compatibility
+        routing_summary = routing.summary
+        routing_reason = routing.routing_reason
+
+        task_role = routing.profile.task_role
         node_type = {
             "orchestrator": "orchestrator",
             "reviewer": "reviewer",
@@ -105,12 +119,11 @@ def llm_response_to_plan_nodes(
         depth = depth_map.get(tid, 0)
         idx_in_layer = layer_index.get(tid, 0)
 
+        # v2.0: Create node with routing_decision as SINGLE SOURCE OF TRUTH
         node = PlanNode(
             id=tid,
             label=title,
             prompt="\n\n".join(prompt_parts),
-            model=binding.model,
-            provider=binding.provider,
             role=node_type,
             node_type=node_type,
             role_definition=role_definition,
@@ -118,26 +131,9 @@ def llm_response_to_plan_nodes(
             depends_on=depends,
             status="pending",
             position=PlanNodePosition(x=250 * depth, y=140 * idx_in_layer),
-            agent_preset=routing.resolved_profile.agent_preset,
-            binding_mode=routing.binding_mode,
-            execution_policy=routing.resolved_profile.execution_policy,
-            workflow_phase=routing.resolved_profile.workflow_phase,
+            routing_decision=routing,  # ← SINGLE SOURCE OF TRUTH
             task_fingerprint=task_fingerprint,
             task_descriptor=descriptor,
-            resolved_profile=routing.resolved_profile,
-            routing_decision_summary=routing_summary,
-            routing_reason=routing_reason,
-            execution_hints=PlanNodeExecutionHints(
-                legacy_mood=task.get("legacy_mood"),
-                requested_model=task.get("requested_model"),
-                requested_provider=task.get("requested_provider"),
-                agent_rationale=task.get("agent_rationale"),
-            ),
-            binding=PlanNodeBinding(
-                provider=binding.provider,
-                model=binding.model,
-                binding_mode=binding.binding_mode,
-            ),
             config={
                 "legacy_mood": task.get("legacy_mood"),
                 "agent_rationale": task.get("agent_rationale"),
@@ -329,7 +325,12 @@ class CustomPlanService:
         plans: List[CustomPlan] = []
         for f in PLANS_DIR.glob("*.json"):
             try:
-                plans.append(CustomPlan.model_validate_json(f.read_text(encoding="utf-8")))
+                plan = CustomPlan.model_validate_json(f.read_text(encoding="utf-8"))
+                # Migrate legacy nodes to v2.0
+                if plan.nodes:
+                    from .plan_migration_service import PlanMigrationService
+                    plan.nodes = PlanMigrationService.migrate_nodes(plan.nodes)
+                plans.append(plan)
             except Exception as exc:
                 logger.warning("Failed to parse plan %s: %s", f.name, exc)
         return sorted(plans, key=lambda p: p.created_at, reverse=True)
@@ -340,7 +341,12 @@ class CustomPlanService:
         p = cls._plan_path(plan_id)
         if not p.exists():
             return None
-        return CustomPlan.model_validate_json(p.read_text(encoding="utf-8"))
+        plan = CustomPlan.model_validate_json(p.read_text(encoding="utf-8"))
+        # Migrate legacy nodes to v2.0
+        if plan and plan.nodes:
+            from .plan_migration_service import PlanMigrationService
+            plan.nodes = PlanMigrationService.migrate_nodes(plan.nodes)
+        return plan
 
     @classmethod
     def create_plan(cls, req: CreatePlanRequest) -> CustomPlan:
@@ -440,6 +446,10 @@ class CustomPlanService:
 
     @classmethod
     def _save(cls, plan: CustomPlan) -> None:
+        # P10: Save guard — ensure all nodes are v2.0 before persisting
+        if plan.nodes:
+            from .plan_migration_service import PlanMigrationService
+            plan.nodes = PlanMigrationService.migrate_nodes(plan.nodes)
         plan_path = cls._plan_path(plan.id)
         tmp_path = plan_path.with_suffix(".tmp")
         with cls._save_lock:
@@ -775,9 +785,12 @@ class CustomPlanService:
         completion_tokens = 0
         total_tokens = 0
         cost_usd = 0.0
+        node_start_ms = time.monotonic_ns() // 1_000_000
         task_type = str(node.node_type or node.role or "worker")
-        model_name = str(node.model or "auto")
-        provider_name = str(node.provider or "auto")
+        # Use v2.0 accessor instead of legacy fields
+        binding = node.get_binding()
+        model_name = str(binding.model or "auto")
+        provider_name = str(binding.provider or "auto")
         storage_service_cls = None
         ops_service_cls = None
 
@@ -789,15 +802,19 @@ class CustomPlanService:
             storage_service_cls = StorageService
             ops_service_cls = OpsService
 
-            # Use routing_decision_summary if available (canonical), fallback to legacy fields
-            routing_summary = node.routing_decision_summary
-            if not routing_summary and node.resolved_profile:
-                # Build summary from resolved_profile for backward compatibility
+            # v2.0: Use routing_decision.summary (SINGLE SOURCE OF TRUTH)
+            routing_summary = None
+            if node.routing_decision:
+                routing_summary = node.routing_decision.summary
+            elif node.get_profile():
+                # Legacy v1.0 fallback: build summary from v2.0 accessors
                 from ..models.agent_routing import RoutingDecisionSummary
+                profile = node.get_profile()
+                b = node.get_binding()
                 routing_summary = RoutingDecisionSummary(
-                    **node.resolved_profile.model_dump(),
-                    provider=node.binding.provider if node.binding else node.provider,
-                    model=node.binding.model if node.binding else node.model,
+                    **profile.model_dump(),
+                    provider=b.provider,
+                    model=b.model,
                 )
 
             if not execution_workspace:
@@ -868,22 +885,24 @@ class CustomPlanService:
 
         quality_score = 85.0 if node.status == "done" else 40.0
         cascade_level = 0  # No cascade in node execution (simplified)
+        duration_ms = (time.monotonic_ns() // 1_000_000) - node_start_ms
         try:
             if storage_service_cls is None or ops_service_cls is None:
                 raise RuntimeError("Plan economy services unavailable")
             storage = storage_service_cls(ops_service_cls._gics)
-            # Extract profile metadata from routing_summary or resolved_profile
+            # Extract profile metadata from routing_decision (v2.0) or routing_summary fallback
             agent_preset = ""
             task_role = ""
             execution_policy_name = ""
-            if routing_summary:
+            profile = node.get_profile()
+            if profile:
+                agent_preset = profile.agent_preset
+                task_role = profile.task_role
+                execution_policy_name = profile.execution_policy
+            elif routing_summary:
                 agent_preset = routing_summary.agent_preset
                 task_role = routing_summary.task_role
                 execution_policy_name = routing_summary.execution_policy
-            elif node.resolved_profile:
-                agent_preset = node.resolved_profile.agent_preset
-                task_role = node.resolved_profile.task_role
-                execution_policy_name = node.resolved_profile.execution_policy
 
             storage.cost.save_cost_event(CostEvent(
                 id=f"ce_{uuid.uuid4().hex[:12]}",
@@ -1038,14 +1057,15 @@ class CustomPlanService:
     @classmethod
     def _build_node_prompt(cls, node: PlanNode, dep_outputs: List[str]) -> str:
         parts = []
-        if node.resolved_profile:
+        profile = node.get_profile()
+        if profile:
             parts.append(
                 "Execution profile:\n"
-                f"- preset: {node.resolved_profile.agent_preset}\n"
-                f"- role: {node.resolved_profile.task_role}\n"
-                f"- mood: {node.resolved_profile.mood}\n"
-                f"- policy: {node.resolved_profile.execution_policy}\n"
-                f"- phase: {node.resolved_profile.workflow_phase}"
+                f"- preset: {profile.agent_preset}\n"
+                f"- role: {profile.task_role}\n"
+                f"- mood: {profile.mood}\n"
+                f"- policy: {profile.execution_policy}\n"
+                f"- phase: {profile.workflow_phase}"
             )
         if node.role_definition.strip():
             parts.append(f"Role definition:\n{node.role_definition.strip()}")

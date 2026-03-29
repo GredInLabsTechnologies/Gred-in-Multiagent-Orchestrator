@@ -32,6 +32,7 @@ if /I "%CMD%"=="stop"      goto :cmd_down
 if /I "%CMD%"=="doctor"    goto :cmd_doctor
 if /I "%CMD%"=="bootstrap" goto :cmd_bootstrap
 if /I "%CMD%"=="mcp"       goto :cmd_mcp
+if /I "%CMD%"=="claude"    goto :cmd_claude
 if /I "%CMD%"=="help"      goto :cmd_help
 if /I "%CMD%"=="-h"        goto :cmd_help
 if /I "%CMD%"=="--help"    goto :cmd_help
@@ -213,6 +214,14 @@ echo =======================================================
 echo   GIMO MCP Server ^(SSE^) — http://localhost:8000/mcp/sse
 echo =======================================================
 "%PYTHON_EXE%" -m uvicorn tools.gimo_server.main:create_app --factory --host 0.0.0.0 --port 8000
+exit /b %ERRORLEVEL%
+
+:: =============================================================
+::  CLAUDE — Launch Claude Code CLI
+:: =============================================================
+:cmd_claude
+TITLE GIMO Claude
+powershell -ExecutionPolicy Bypass -Command "claude !EXTRA_ARGS!"
 exit /b %ERRORLEVEL%
 
 :: =============================================================

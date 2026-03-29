@@ -37,7 +37,7 @@ from terminal_command_executor import (
 
 app = typer.Typer(
     name="gimo",
-    help="GIMO: Generalized Intelligent Multi-agent Orchestrator",
+    help="GIMO: Gred In Multiagent Orchestrator",
     add_completion=True,
     invoke_without_command=True,
 )
@@ -1266,7 +1266,7 @@ def main(
     ctx: typer.Context,
     verbose: bool = typer.Option(False, "--verbose", help="Enable debug/verbose render mode"),
 ) -> None:
-    """GIMO: Generalized Intelligent Multi-agent Orchestrator.
+    """GIMO: Gred In Multiagent Orchestrator.
 
     Run without a subcommand to start an interactive agentic chat session.
     """

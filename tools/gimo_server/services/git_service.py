@@ -39,6 +39,7 @@ class GitService:
             process = subprocess.Popen(
                 ["git", "diff", "--stat", f"{safe_base}..{safe_head}"],
                 cwd=base_dir,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -73,6 +74,7 @@ class GitService:
             process = subprocess.Popen(
                 cmd,
                 cwd=base_dir,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -92,6 +94,7 @@ class GitService:
             process = subprocess.Popen(
                 ["git", "worktree", "add", "-b", safe_branch, str(worktree_path), safe_base],
                 cwd=base_dir,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -110,6 +113,7 @@ class GitService:
             process = subprocess.Popen(
                 ["git", "worktree", "remove", "--force", str(worktree_path)],
                 cwd=base_dir,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -135,6 +139,7 @@ class GitService:
             process = subprocess.Popen(
                 ["git", "worktree", "list", "--porcelain"],
                 cwd=base_dir,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -156,6 +161,7 @@ class GitService:
         process = subprocess.Popen(
             ["git", *args],
             cwd=base_dir,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -273,6 +279,7 @@ class GitService:
         process = subprocess.Popen(
             ["python", "-m", "pytest", "-q"],
             cwd=base_dir,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -286,7 +293,7 @@ class GitService:
         if importlib.util.find_spec("ruff") is not None:
             p_lint = subprocess.Popen(
                 ["python", "-m", "ruff", "check", "."],
-                cwd=base_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                cwd=base_dir, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
             lint_out, lint_err = p_lint.communicate(timeout=max(SUBPROCESS_TIMEOUT, 120))
             outputs.append((lint_out or "") + ("\n" + lint_err if lint_err else ""))
@@ -299,7 +306,7 @@ class GitService:
         if importlib.util.find_spec("mypy") is not None:
             p_type = subprocess.Popen(
                 ["python", "-m", "mypy", "tools/gimo_server"],
-                cwd=base_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                cwd=base_dir, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
             type_out, type_err = p_type.communicate(timeout=max(SUBPROCESS_TIMEOUT, 120))
             outputs.append((type_out or "") + ("\n" + type_err if type_err else ""))
@@ -312,7 +319,7 @@ class GitService:
         if all("not installed" in o for o in outputs):
             p_syntax = subprocess.Popen(
                 ["python", "-m", "compileall", "-q", "tools/gimo_server"],
-                cwd=base_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                cwd=base_dir, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
             syn_out, syn_err = p_syntax.communicate(timeout=max(SUBPROCESS_TIMEOUT, 120))
             outputs.append((syn_out or "") + ("\n" + syn_err if syn_err else ""))

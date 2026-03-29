@@ -43,13 +43,18 @@ def _legacy_to_numeric(tier: Optional[str]) -> Optional[int]:
 
 
 @dataclass
-class RoutingDecision:
+class ModelSelectionDecision:
+    """Result of model selection routing."""
     model: str
     provider_id: str
     reason: str
     tier: int = 3
     alternatives: List[str] = field(default_factory=list)
     hardware_state: str = "safe"
+
+
+# Backward compatibility alias (renamed from RoutingDecision in P6)
+RoutingDecision = ModelSelectionDecision
 
 
 @dataclass
@@ -253,7 +258,7 @@ class ModelRouterService:
         candidates: list[ProviderRoleBinding],
         requested_provider: str | None = None,
         requested_model: str | None = None,
-    ) -> RoutingDecision:
+    ) -> ModelSelectionDecision:
         from .provider_service import ProviderService
         from .provider_topology_service import ProviderTopologyService
 
@@ -263,7 +268,7 @@ class ModelRouterService:
             requested_model=requested_model,
         )
         if not constrained_candidates:
-            return RoutingDecision(
+            return ModelSelectionDecision(
                 model="auto",
                 provider_id="auto",
                 reason="objective=constraints>success>quality>latency>cost|selected=auto/auto|no_candidates",
@@ -385,13 +390,13 @@ class ModelRouterService:
                 if not allow_override:
                     reason_parts.append(f"explicit:{explicit}->hw_critical_blocked")
                 else:
-                    return RoutingDecision(
+                    return ModelSelectionDecision(
                         model=entry.model_id, provider_id=entry.provider_id,
                         reason=f"explicit:{explicit}|hw_override",
                         tier=entry.quality_tier, hardware_state=hw_state,
                     )
             else:
-                return RoutingDecision(
+                return ModelSelectionDecision(
                     model=entry.model_id, provider_id=entry.provider_id,
                     reason=f"explicit:{explicit}",
                     tier=entry.quality_tier, hardware_state=hw_state,
@@ -488,7 +493,7 @@ class ModelRouterService:
                 selected = min(candidates, key=lambda m: m.cost_input + m.cost_output)
                 reason_parts.append(f"eco_select:{selected.model_id}")
                 alts = [m.model_id for m in candidates if m.model_id != selected.model_id][:3]
-                return RoutingDecision(
+                return ModelSelectionDecision(
                     model=selected.model_id, provider_id=selected.provider_id,
                     reason="|".join(reason_parts), tier=selected.quality_tier,
                     alternatives=alts, hardware_state=hw_state,
@@ -503,7 +508,7 @@ class ModelRouterService:
             except Exception:
                 pass  # Fall back to minimal sync inventory
 
-    async def choose_model(self, node: WorkflowNode, _state: Dict[str, Any]) -> RoutingDecision:
+    async def choose_model(self, node: WorkflowNode, _state: Dict[str, Any]) -> ModelSelectionDecision:
         from .ops_service import OpsService
         config = OpsService.get_config()
 
@@ -561,13 +566,13 @@ class ModelRouterService:
         alts = [m.model_id for m in candidates if m.model_id != selected.model_id][:3]
         reason_parts.append(f"selected:{selected.model_id}")
 
-        return RoutingDecision(
+        return ModelSelectionDecision(
             model=selected.model_id, provider_id=selected.provider_id,
             reason="|".join(reason_parts), tier=selected.quality_tier,
             alternatives=alts, hardware_state=hw_state,
         )
 
-    def _fallback_decision(self, reason_parts: list, hw_state: str) -> RoutingDecision:
+    def _fallback_decision(self, reason_parts: list, hw_state: str) -> ModelSelectionDecision:
         """Fallback when no inventory models found — use active provider's model."""
         from .provider_service import ProviderService
         cfg = ProviderService.get_config()
@@ -575,13 +580,13 @@ class ModelRouterService:
             entry = cfg.providers[cfg.active]
             model = entry.model or entry.model_id or "unknown"
             reason_parts.append(f"fallback:{model}")
-            return RoutingDecision(
+            return ModelSelectionDecision(
                 model=model, provider_id=cfg.active,
                 reason="|".join(reason_parts), tier=3,
                 hardware_state=hw_state,
             )
         reason_parts.append("no_provider")
-        return RoutingDecision(
+        return ModelSelectionDecision(
             model="unknown", provider_id="none",
             reason="|".join(reason_parts), tier=1,
             hardware_state=hw_state,

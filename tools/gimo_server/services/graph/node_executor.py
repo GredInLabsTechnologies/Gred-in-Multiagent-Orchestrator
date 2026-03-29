@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from tools.gimo_server.services.tool_registry_service import ToolRegistryService
 from tools.gimo_server.services.hitl_gate_service import HitlGateService
 from tools.gimo_server.services.execution_policy_service import ExecutionPolicyService
+from tools.gimo_server.services.constraint_compiler_service import ConstraintCompilerService
 from tools.gimo_server.services.profile_router_service import ProfileRouterService
 from tools.gimo_server.models.agent_routing import TaskDescriptor
 
@@ -53,35 +54,34 @@ class NodeExecutorMixin:
                 risk_band=node.config.get("risk_level", "low"),
             )
 
-            # Build task context
+            # Build task context for constraint compilation
             task_context = {
                 "cost_ceiling": node.config.get("cost_ceiling"),
                 "binding_mode": "runtime",
                 "budget_mode": node.config.get("budget_mode", "standard"),
             }
 
-            # Route via canonical pipeline
-            workflow_phase = node.config.get("workflow_phase", "executing")
+            # Compile constraints then route via canonical pipeline
+            constraints = ConstraintCompilerService.compile_for_descriptor(descriptor, task_context=task_context)
             routing_decision = ProfileRouterService.route(
-                task_descriptor=descriptor,
-                task_context=task_context,
-                agent_preset=agent_preset,
-                workflow_phase=workflow_phase,
+                descriptor=descriptor,
+                constraints=constraints,
+                requested_preset=agent_preset,
             )
 
-            # Store routing summary in node config for observability
-            node.config["routing_decision_summary"] = routing_decision.summary.model_dump()
+            # Store routing decision in node config for observability (v2.0 canonical)
+            node.config["routing_decision_summary"] = routing_decision.summary.model_dump()  # Backward compat
 
-            # Override selected_model and execution_policy from routing
-            node.config["selected_model"] = routing_decision.summary.model
-            node.config["execution_policy"] = routing_decision.summary.execution_policy
+            # Override selected_model and execution_policy from routing (v2.0 canonical fields)
+            node.config["selected_model"] = routing_decision.binding.model
+            node.config["execution_policy"] = routing_decision.profile.execution_policy
 
             logger.info(
                 "Node %s routed via ProfileRouterService: preset=%s, model=%s, policy=%s",
                 node.id,
                 agent_preset,
-                routing_decision.summary.model,
-                routing_decision.summary.execution_policy,
+                routing_decision.binding.model,
+                routing_decision.profile.execution_policy,
             )
 
         prompt, context = self._prepare_llm_payload(node)

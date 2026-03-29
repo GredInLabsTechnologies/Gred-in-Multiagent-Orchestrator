@@ -31,6 +31,25 @@ class ExecutionPolicyProfile:
     auto_test_on_write: bool = False
     auto_lint_on_write: bool = False
 
+    @property
+    def hitl_required(self) -> bool:
+        """Whether this policy requires Human-In-The-Loop confirmation for some tools."""
+        return len(self.requires_confirmation) > 0
+
+    def assert_tool_allowed(self, tool_name: str) -> None:
+        """Check if a tool is allowed by this policy.
+
+        Raises:
+            PermissionError: If tool is not allowed
+        """
+        # If allowed_tools is empty, allow all tools (no restriction)
+        if not self.allowed_tools:
+            return
+
+        # Check if tool is in allowed list
+        if tool_name not in self.allowed_tools:
+            raise PermissionError(f"Tool '{tool_name}' not allowed by policy '{self.name}'")
+
 
 EXECUTION_POLICIES: Dict[ExecutionPolicyName, ExecutionPolicyProfile] = {
     "read_only": ExecutionPolicyProfile(

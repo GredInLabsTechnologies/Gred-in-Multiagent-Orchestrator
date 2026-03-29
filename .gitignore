@@ -52,6 +52,7 @@ coverage_*.txt
 .pytest_cache/
 .coverage
 htmlcov/
+.hypothesis/
 requirements_utf8.txt
 failing_tests.txt
 last_llm_response.json

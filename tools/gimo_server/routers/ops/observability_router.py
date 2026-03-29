@@ -91,6 +91,20 @@ async def observability_rate_limits(
     return {"entries": entries, "role_limits": ROLE_RATE_LIMITS}
 
 
+@router.get("/observability/migration-status")
+async def observability_migration_status(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    from tools.gimo_server.services.plan_migration_service import PlanMigrationService
+    plans = PlanMigrationService.audit_migration_status()
+    runs = PlanMigrationService.audit_run_routing_coverage()
+    audit_log("OPS", "/ops/observability/migration-status", "read", operation="READ", actor=_actor_label(auth))
+    return {"plans": plans, "runs": runs}
+
+
 @router.get("/realtime/metrics")
 async def realtime_metrics(
     request: Request,

@@ -567,7 +567,7 @@ class ToolExecutor:
         if not query:
             return ToolExecutionResult("error", "Missing 'query' argument")
         if self._contract.network_mode == "blocked":
-            return ToolExecutionResult("error", f"Mood '{self.mood}' blocks network access")
+            return ToolExecutionResult("error", f"Execution policy '{self.execution_policy}' blocks network access")
 
         try:
             from ...models.web_search import WebSearchQuery

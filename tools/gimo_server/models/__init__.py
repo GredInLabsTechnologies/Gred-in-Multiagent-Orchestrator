@@ -46,7 +46,7 @@ from .plan import (
 from .agent_routing import (
     TaskRole, MoodName, ExecutionPolicyName, WorkflowPhase, AgentPresetName,
     BindingMode, TaskFingerprintParts, TaskDescriptor, TaskConstraints,
-    ResolvedAgentProfile, RoutingDecisionSummary, RoutingDecision, ProfileSummary
+    ResolvedAgentProfile, ModelBinding, RoutingDecisionSummary, RoutingDecision, ProfileSummary
 )
 from .eval import (
     EvalGoldenCase, EvalDataset, EvalJudgeConfig, EvalGateConfig,

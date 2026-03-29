@@ -379,12 +379,33 @@ class SkillsService:
             # map ui node format to CustomPlan node format
             node_type = str(n.get("type", "worker"))
             data = n.get("data", {})
+
+            # Build v2.0 routing_decision instead of legacy fields
+            from ..models.agent_routing import RoutingDecision, ModelBinding, ResolvedAgentProfile
+
+            routing_decision = RoutingDecision(
+                profile=ResolvedAgentProfile(
+                    agent_preset=data.get("agent_preset", "executor"),
+                    task_role=data.get("role", "executor"),
+                    mood=skill.mood or "neutral",
+                    execution_policy=data.get("execution_policy", "workspace_safe"),
+                    workflow_phase="executing",
+                ),
+                binding=ModelBinding(
+                    provider=data.get("provider", "auto"),
+                    model=data.get("model", "auto"),
+                    binding_mode="plan_time",
+                    binding_reason="skill_defined",
+                ),
+                routing_reason="loaded_from_skill",
+                candidate_count=1,
+            )
+
             nodes.append(PlanNode(
                 id=n.get("id", ""),
                 label=data.get("label", n.get("id", "")),
                 prompt=data.get("prompt", ""),
-                model=data.get("model", "auto"),
-                provider=data.get("provider", "auto"),
+                routing_decision=routing_decision,  # v2.0 canonical
                 role=data.get("role", node_type),
                 node_type=node_type,
                 role_definition=mood_prefix + data.get("system_prompt", ""),

@@ -111,6 +111,9 @@ class OpsRun(BaseModel):
     spawn_depth: int = 0          # Fractal depth (0 = root orchestrator)
     model_tier: Optional[int] = None  # quality_tier of the model assigned to this run
     validated_task_spec: Optional[Dict[str, Any]] = None # Phase 5B: Required for execution
+    agent_preset: Optional[str] = None  # P10: Routing metadata persisted from draft
+    execution_policy_name: Optional[str] = None  # P10: Execution policy persisted from draft
+    routing_snapshot: Optional[Dict[str, Any]] = None  # P10: Serialized routing decision
 
 class ExecutorReport(BaseModel):
     run_id: str

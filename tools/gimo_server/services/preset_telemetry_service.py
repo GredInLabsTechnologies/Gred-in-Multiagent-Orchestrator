@@ -62,20 +62,24 @@ class PresetTelemetryService:
         alternatives_count: int,
     ) -> None:
         """Registra que un preset fue SELECCIONADO por routing."""
-        from ..services.gics_service import GicsService
+        from ..services.ops_service import OpsService
+
+        gics = getattr(OpsService, '_gics', None)
+        if not gics:
+            return
 
         key = f"ops:preset_telemetry:{task_semantic}:{preset_name}"
 
         # FIX BUG #1: Use lock to prevent race conditions
         with cls._get_lock(key):
-            current = cls._get_or_init(key, task_semantic, preset_name)
+            current = cls._get_or_init(key, task_semantic, preset_name, gics)
 
             # Incrementa selected_count
             current["selected_count"] += 1
             current["updated_at"] = time.time()
 
             # Persist atómicamente
-            GicsService.put(key, current)
+            gics.put(key, current)
 
         logger.debug(
             "Recorded decision: semantic=%s, preset=%s, alternatives=%d",
@@ -99,14 +103,18 @@ class PresetTelemetryService:
         Returns:
             Updated telemetry record
         """
-        from ..services.gics_service import GicsService
+        from ..services.ops_service import OpsService
+
+        gics = getattr(OpsService, '_gics', None)
+        if not gics:
+            return {}
 
         key = f"ops:preset_telemetry:{task_semantic}:{preset_name}"
 
         # FIX BUG #1: Use lock to prevent race conditions
         with cls._get_lock(key):
             # Read-modify-write atómico
-            current = cls._get_or_init(key, task_semantic, preset_name)
+            current = cls._get_or_init(key, task_semantic, preset_name, gics)
 
             # FIX BUG #2 & #3: Guardar old_samples ANTES de incrementar
             old_samples = current["samples"]
@@ -161,7 +169,7 @@ class PresetTelemetryService:
             current["updated_at"] = time.time()
 
             # Persist atómicamente
-            GicsService.put(key, current)
+            gics.put(key, current)
 
             logger.info(
                 "Recorded outcome: semantic=%s, preset=%s, success=%s, quality=%.2f, samples=%d",
@@ -181,10 +189,15 @@ class PresetTelemetryService:
         preset_name: str,
     ) -> Optional[Dict[str, Any]]:
         """Obtiene telemetría de un preset para un semantic."""
-        from ..services.gics_service import GicsService
+        from ..services.ops_service import OpsService
+
+        # GICS is injected via OpsService.set_gics()
+        gics = getattr(OpsService, '_gics', None)
+        if not gics:
+            return None
 
         key = f"ops:preset_telemetry:{task_semantic}:{preset_name}"
-        return GicsService.get(key)
+        return gics.get(key)
 
     @classmethod
     def get_all_for_semantic(
@@ -192,10 +205,14 @@ class PresetTelemetryService:
         task_semantic: str,
     ) -> List[Dict[str, Any]]:
         """Obtiene telemetría de TODOS los presets para un semantic."""
-        from ..services.gics_service import GicsService
+        from ..services.ops_service import OpsService
+
+        gics = getattr(OpsService, '_gics', None)
+        if not gics:
+            return []
 
         prefix = f"ops:preset_telemetry:{task_semantic}:"
-        return GicsService.scan(prefix)
+        return gics.scan(prefix)
 
     @classmethod
     def _get_or_init(
@@ -203,11 +220,10 @@ class PresetTelemetryService:
         key: str,
         task_semantic: str,
         preset_name: str,
+        gics,
     ) -> Dict[str, Any]:
         """Gets existing telemetry or initializes new record."""
-        from ..services.gics_service import GicsService
-
-        current = GicsService.get(key)
+        current = gics.get(key)
         if current:
             return current
 
@@ -261,8 +277,12 @@ class PresetTelemetryService:
         Usado en startup para evitar cold start. Crea entries sintéticas con N=5 samples
         basadas en los priors semánticos de ProfileRouterService.
         """
-        from ..services.gics_service import GicsService
+        from ..services.ops_service import OpsService
         from ..services.profile_router_service import ProfileRouterService
+
+        gics = getattr(OpsService, '_gics', None)
+        if not gics:
+            return
 
         seeded_count = 0
 
@@ -271,7 +291,7 @@ class PresetTelemetryService:
                 key = f"ops:preset_telemetry:{task_semantic}:{preset_name}"
 
                 # Solo seed si no existe
-                if GicsService.get(key):
+                if gics.get(key):
                     continue
 
                 # Crear telemetría sintética con N=5 samples
@@ -281,7 +301,7 @@ class PresetTelemetryService:
                 synthetic_successes = int(5 * synthetic_success_rate)
                 synthetic_failures = 5 - synthetic_successes
 
-                GicsService.put(key, {
+                gics.put(key, {
                     "task_semantic": task_semantic,
                     "preset_name": preset_name,
                     "samples": 5,
