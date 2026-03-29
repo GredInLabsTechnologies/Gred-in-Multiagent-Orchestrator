@@ -10,7 +10,13 @@ from typing import Any
 
 import httpx
 import typer
-import yaml
+try:
+    import yaml
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
+    yaml = None  # type: ignore
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -103,6 +109,9 @@ def _default_config() -> dict[str, Any]:
 
 
 def _save_config(config: dict[str, Any]) -> None:
+    if not YAML_AVAILABLE or not yaml:
+        console.print("[red]PyYAML is required. Install with: pip install PyYAML>=6.0.2[/red]")
+        raise typer.Exit(1)
     _ensure_project_dirs()
     _config_path().write_text(
         yaml.safe_dump(config, sort_keys=False, allow_unicode=False),
@@ -111,6 +120,9 @@ def _save_config(config: dict[str, Any]) -> None:
 
 
 def _load_config() -> dict[str, Any]:
+    if not YAML_AVAILABLE or not yaml:
+        console.print("[red]PyYAML is required. Install with: pip install PyYAML>=6.0.2[/red]")
+        raise typer.Exit(1)
     _ensure_project_dirs()
     if not _config_path().exists():
         console.print("[red]Project not initialized. Run 'gimo init' first.[/red]")
@@ -166,9 +178,8 @@ def _resolve_token(role: str = "operator") -> str | None:
 
     # Try unified credentials file
     unified_creds = _project_root() / "tools" / "gimo_server" / ".gimo_credentials"
-    if unified_creds.exists():
+    if unified_creds.exists() and YAML_AVAILABLE and yaml:
         try:
-            import yaml
             creds = yaml.safe_load(unified_creds.read_text(encoding="utf-8"))
             if isinstance(creds, dict) and role in creds:
                 token = str(creds[role]).strip()
@@ -1934,7 +1945,12 @@ def config(
         return
 
     if show or changed:
-        console.print(Panel(yaml.safe_dump(config_data, sort_keys=False), title="GIMO Config", border_style="cyan"))
+        if YAML_AVAILABLE and yaml:
+            console.print(Panel(yaml.safe_dump(config_data, sort_keys=False), title="GIMO Config", border_style="cyan"))
+        else:
+            # Fallback to JSON if yaml not available
+            import json
+            console.print(Panel(json.dumps(config_data, indent=2), title="GIMO Config", border_style="cyan"))
         return
 
     console.print("[yellow]No changes requested. Use --show to print config.[/yellow]")

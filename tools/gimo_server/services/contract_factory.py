@@ -84,16 +84,18 @@ class ContractFactory:
 
         try:
             workspace_root = Path(workspace_str).resolve()
-            if not workspace_root.exists():
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Workspace does not exist: {workspace_root}",
-                )
-        except Exception as exc:
+        except (ValueError, OSError, TypeError) as exc:
+            # Catch path resolution errors (invalid chars, permissions, type issues)
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid workspace path: {workspace_str} ({exc})",
             ) from exc
+
+        if not workspace_root.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Workspace does not exist: {workspace_root}",
+            )
 
         # 4. SCHEMA CONSTRAINTS — Extract from Pydantic (SINGLE SOURCE OF TRUTH)
         valid_roles = extract_valid_roles()

@@ -7,6 +7,12 @@ from pathlib import Path
 from typing import List, Set
 from dotenv import load_dotenv
 
+try:
+    import yaml
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -122,26 +128,31 @@ def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_T
     base_dir = Path(__file__).parent
     unified_creds = base_dir / ".gimo_credentials"
     if unified_creds.exists():
-        try:
-            import yaml
-            creds_data = yaml.safe_load(unified_creds.read_text(encoding="utf-8"))
-            if isinstance(creds_data, dict):
-                # Map env_key to credential key
-                role_key = None
-                if env_key == "ORCH_TOKEN":
-                    role_key = "admin"
-                elif env_key == "ORCH_ACTIONS_TOKEN":
-                    role_key = "actions"
-                elif env_key == "ORCH_OPERATOR_TOKEN":
-                    role_key = "operator"
+        if not YAML_AVAILABLE:
+            logger.warning(
+                "Found .gimo_credentials but PyYAML is not installed. "
+                "Install with: pip install PyYAML>=6.0.2"
+            )
+        else:
+            try:
+                creds_data = yaml.safe_load(unified_creds.read_text(encoding="utf-8"))
+                if isinstance(creds_data, dict):
+                    # Map env_key to credential key
+                    role_key = None
+                    if env_key == "ORCH_TOKEN":
+                        role_key = "admin"
+                    elif env_key == "ORCH_ACTIONS_TOKEN":
+                        role_key = "actions"
+                    elif env_key == "ORCH_OPERATOR_TOKEN":
+                        role_key = "operator"
 
-                if role_key and role_key in creds_data:
-                    token = str(creds_data[role_key]).strip()
-                    if token:
-                        os.environ[env_key] = token
-                        return token
-        except Exception as exc:
-            logger.warning("Failed to read unified credentials file: %s", exc)
+                    if role_key and role_key in creds_data:
+                        token = str(creds_data[role_key]).strip()
+                        if token:
+                            os.environ[env_key] = token
+                            return token
+            except Exception as exc:
+                logger.warning("Failed to read unified credentials file: %s", exc)
 
     # Fall back to legacy separate token file
     if token_file.exists():
@@ -185,7 +196,14 @@ def _migrate_to_unified_credentials() -> None:
 
     Only runs if .gimo_credentials doesn't exist and legacy files do exist.
     Creates a YAML file with all three tokens clearly labeled.
+
+    Requires PyYAML to be installed. If not available, migration is skipped
+    and legacy files continue to work.
     """
+    if not YAML_AVAILABLE:
+        # Silent skip - PyYAML is in requirements.txt but may not be installed yet
+        return
+
     base_dir = Path(__file__).parent
     unified_creds = base_dir / ".gimo_credentials"
 

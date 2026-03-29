@@ -232,7 +232,9 @@ def register_native_tools(mcp: FastMCP):
 
         # Get active model from provider config
         cfg = ProviderService.get_config()
-        model_id = cfg.providers[cfg.active].model if cfg and cfg.active and cfg.active in cfg.providers else "qwen2.5-coder:3b"
+        model_id = "qwen2.5-coder:3b"  # Default fallback
+        if cfg and cfg.active and cfg.active in cfg.providers:
+            model_id = cfg.providers[cfg.active].model
 
         sys_prompt = (
             "You are a senior systems architect. Generate a JSON execution plan.\n"
