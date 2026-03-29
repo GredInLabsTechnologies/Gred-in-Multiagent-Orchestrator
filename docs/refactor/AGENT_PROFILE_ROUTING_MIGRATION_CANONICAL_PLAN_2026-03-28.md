@@ -10,33 +10,42 @@ continue el trabajo.
 Regla operativa:
 
 - este documento define el plan oficial y el estado fase por fase
-- `docs/refactor/AGENT_PROFILE_ROUTING_MIGRATION_STATUS_2026-03-27.md` es el
-  dashboard de estado y evidencia
+- `docs/refactor/AGENT_PROFILE_ROUTING_MIGRATION_STATUS_2026-03-29.md` es el
+  dashboard de estado y evidencia (**ACTUALIZADO 2026-03-29**)
 - no se salta ninguna fase
-- el siguiente cierre obligatorio es la Fase 4
+- **ACTUALIZACIÓN 2026-03-29:** Auditoría code-by-code revela que P1-P10 están COMPLETAMENTE IMPLEMENTADAS
 
-## Estado Verificado Del Repo
+## ⚠️ ACTUALIZACIÓN CRÍTICA (2026-03-29)
+
+**La documentación estaba desactualizada.** Una auditoría completa del código revela:
+
+- **P1-P10:** ✅ COMPLETAMENTE IMPLEMENTADAS con tests, servicios y ejecución funcional
+- **P11:** ⚠️ PENDING (limpieza de autoridades paralelas legacy)
+
+Ver reporte completo en: `docs/refactor/AGENT_PROFILE_ROUTING_MIGRATION_STATUS_2026-03-29.md`
+
+## Estado Verificado Del Repo (ACTUALIZADO 2026-03-29)
 
 Estado actual contra este plan oficial:
 
-- Fase 0: `DONE`
-- Fase 1: `DONE`
-- Fase 2: `DONE`
-- Fase 3: `DONE`
-- Fase 4: `DONE`
-- Fase 5: `DONE`
-- Fase 6: `PARTIAL`
-- Fase 7: `NOT_STARTED`
-- Fase 8: `NOT_STARTED`
-- Fase 9: `NOT_STARTED`
-- Fase 10: `NOT_STARTED`
-- Fase 11: `NOT_STARTED`
+- Fase 0: ✅ `DONE` (RoutingDecision v2.0, PlanNode con single source of truth)
+- Fase 1: ✅ `DONE` (ExecutionPolicyService, 6 policies, 11 presets)
+- Fase 2: ✅ `DONE` (TaskDescriptorService, TaskFingerprintService)
+- Fase 3: ✅ `DONE` (ConstraintCompilerService, TaskConstraints)
+- Fase 4: ✅ `DONE` (ProfileRouterService con 18 tests, ProfileBindingService)
+- Fase 5: ✅ `DONE` (ConversationService hydration, workflow_phase)
+- Fase 6: ✅ `DONE` (CustomPlanService integrado con routing completo + save guard)
+- Fase 7: ✅ `DONE` (GraphEngine.execute(), NodeExecutorMixin con governance)
+- Fase 8: ✅ `DONE` (AdvisoryEngine F8.2, PresetTelemetryService)
+- Fase 9: ✅ `DONE` (AnomalyDetectionService, auto-downgrade estadístico)
+- Fase 10: ✅ `DONE` (PlanMigrationService, SchemaEvolutionService, ContractValidator, 3 gaps cerrados)
+- Fase 11: ⚠️ `PENDING` (limpieza de role_profiles.py, docs updates)
 
-Phase lock:
+Phase lock (ACTUALIZADO):
 
-1. No reabrir Fase 0, 1, 2 o 3 salvo evidencia nueva de regresion real.
-2. El siguiente cierre obligatorio es Fase 6.
-3. Trabajo parcial en fases posteriores no autoriza saltarse Fase 6.
+1. ✅ Fases 0-10 cerradas con evidencia de código + tests
+2. ⚠️ Fase 11 es el único trabajo restante
+3. NO reabrir fases 0-10 sin evidencia de regresión real
 
 ## Resumen
 
