@@ -1,0 +1,27 @@
+{
+  "id": "calculator_manual",
+  "prompt": "Create a calculator in Python with Tkinter GUI",
+  "context": {},
+  "provider": "claude-account",
+  "status": "draft",
+  "created_at": "2026-03-29T11:32:00Z",
+  "content": {
+    "goal": "Create a functional calculator application with Tkinter GUI",
+    "context": "Python calculator with basic operations",
+    "tasks": [
+      {
+        "id": "task_1",
+        "description": "Create calculator.py with Tkinter GUI implementing basic operations (+, -, *, /) with error handling for division by zero and a clear button",
+        "agent_assignee": {
+          "role": "orchestrator",
+          "model": "claude-haiku-4-5-20251001"
+        },
+        "depends_on": [],
+        "tools": ["write"],
+        "estimated_tokens": 2000
+      }
+    ],
+    "estimated_total_tokens": 2000,
+    "estimated_cost_usd": 0.01
+  }
+}
