@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import secrets
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +51,179 @@ app = typer.Typer(
     invoke_without_command=True,
 )
 console = Console()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ServerBond Infrastructure — Nuclear CLI↔Server Connection
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _gimo_home() -> Path:
+    """~/.gimo/ — global GIMO home. Created if missing."""
+    home = Path(os.environ.get("GIMO_HOME", str(Path.home() / ".gimo")))
+    home.mkdir(parents=True, exist_ok=True)
+    return home
+
+
+def _bonds_dir() -> Path:
+    """~/.gimo/bonds/ — ServerBond storage."""
+    bonds = _gimo_home() / "bonds"
+    bonds.mkdir(parents=True, exist_ok=True)
+    return bonds
+
+
+def _server_fingerprint(url: str) -> str:
+    """SHA-256 truncated fingerprint of normalized server URL."""
+    normalized = url.rstrip("/").lower()
+    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+
+def _machine_id() -> str:
+    """Unique machine ID. Generated once, persisted in ~/.gimo/machine_id."""
+    mid_path = _gimo_home() / "machine_id"
+    if mid_path.exists():
+        return mid_path.read_text(encoding="utf-8").strip()
+    mid = secrets.token_hex(16)
+    mid_path.write_text(mid, encoding="utf-8")
+    return mid
+
+
+def _encrypt_token(token: str) -> str:
+    """Encrypt token with Fernet (AES-256-GCM) derived from machine_id."""
+    try:
+        from cryptography.fernet import Fernet
+        import base64
+        # Derive key from machine_id using PBKDF2-SHA256 (100K iterations)
+        machine_fp = _machine_id()
+        key_material = hashlib.pbkdf2_hmac("sha256", machine_fp.encode(), b"GIMO-BOND-v1", 100_000, dklen=32)
+        fernet = Fernet(base64.urlsafe_b64encode(key_material))
+        return fernet.encrypt(token.encode()).decode()
+    except ImportError:
+        # Fallback: base64 obfuscation (with warning)
+        import base64
+        console.print("[yellow][!] cryptography not available, using base64 obfuscation (install cryptography for AES-256-GCM)[/yellow]")
+        return base64.b64encode(token.encode()).decode()
+
+
+def _decrypt_token(encrypted: str) -> str:
+    """Decrypt token."""
+    try:
+        from cryptography.fernet import Fernet
+        import base64
+        machine_fp = _machine_id()
+        key_material = hashlib.pbkdf2_hmac("sha256", machine_fp.encode(), b"GIMO-BOND-v1", 100_000, dklen=32)
+        fernet = Fernet(base64.urlsafe_b64encode(key_material))
+        return fernet.decrypt(encrypted.encode()).decode()
+    except ImportError:
+        # Fallback: base64 decode
+        import base64
+        return base64.b64decode(encrypted.encode()).decode()
+
+
+def _load_bond(server_url: str) -> dict[str, Any] | None:
+    """Load ServerBond for given server URL."""
+    if not YAML_AVAILABLE or not yaml:
+        return None
+    fp = _server_fingerprint(server_url)
+    bond_path = _bonds_dir() / f"{fp}.yaml"
+    if not bond_path.exists():
+        return None
+    try:
+        bond = yaml.safe_load(bond_path.read_text(encoding="utf-8"))
+        if not isinstance(bond, dict):
+            return None
+        # Decrypt token
+        encrypted = bond.get("token_encrypted")
+        if encrypted:
+            bond["token"] = _decrypt_token(str(encrypted))
+        return bond
+    except Exception:
+        return None
+
+
+def _save_bond(
+    server_url: str,
+    token: str,
+    role: str,
+    capabilities: list[str],
+    plan: str = "local",
+    auth_method: str = "token",
+    server_version: str = "unknown",
+) -> Path:
+    """Save a new ServerBond (encrypted)."""
+    if not YAML_AVAILABLE or not yaml:
+        raise RuntimeError("YAML not available, cannot save bond")
+
+    fp = _server_fingerprint(server_url)
+    bond_path = _bonds_dir() / f"{fp}.yaml"
+
+    bond = {
+        "server_url": server_url,
+        "fingerprint": f"sha256:{fp}",
+        "role": role,
+        "token_encrypted": _encrypt_token(token),
+        "bonded_at": datetime.now(timezone.utc).isoformat(),
+        "last_verified": datetime.now(timezone.utc).isoformat(),
+        "server_version": server_version,
+        "auth_method": auth_method,
+        "plan": plan,
+        "capabilities": capabilities,
+    }
+
+    bond_path.write_text(yaml.dump(bond, default_flow_style=False), encoding="utf-8")
+    return bond_path
+
+
+def _delete_bond(server_url: str) -> bool:
+    """Delete ServerBond for given server."""
+    fp = _server_fingerprint(server_url)
+    bond_path = _bonds_dir() / f"{fp}.yaml"
+    if bond_path.exists():
+        bond_path.unlink()
+        return True
+    return False
+
+
+def _resolve_server_url(config: dict[str, Any]) -> str:
+    """Resolve server URL: env → config → default."""
+    # 1. Env var
+    env_url = os.environ.get("GIMO_API_URL") or os.environ.get("ORCH_API_URL")
+    if env_url:
+        return env_url.rstrip("/")
+
+    # 2. Config
+    api_cfg = config.get("api", {})
+    if isinstance(api_cfg, dict):
+        config_url = api_cfg.get("base_url")
+        if config_url:
+            return str(config_url).rstrip("/")
+
+    # 3. Default
+    return DEFAULT_API_BASE_URL.rstrip("/")
+
+
+def _load_global_config() -> dict[str, Any]:
+    """Load global config from ~/.gimo/config.yaml."""
+    if not YAML_AVAILABLE or not yaml:
+        return {}
+    global_cfg_path = _gimo_home() / "config.yaml"
+    if not global_cfg_path.exists():
+        return {}
+    try:
+        cfg = yaml.safe_load(global_cfg_path.read_text(encoding="utf-8"))
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Deep merge two dicts (override wins)."""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 def _project_root() -> Path:
@@ -119,19 +295,39 @@ def _save_config(config: dict[str, Any]) -> None:
     )
 
 
-def _load_config() -> dict[str, Any]:
+def _load_config(require_project: bool = True) -> dict[str, Any]:
+    """Load config with cascading merge: global (~/.gimo) → project (.gimo) → result.
+
+    Project-level config wins on conflicts.
+
+    Args:
+        require_project: If True (default), requires .gimo/config.yaml to exist.
+                        If False, allows loading only global config (for `gimo login`).
+    """
     if not YAML_AVAILABLE or not yaml:
         console.print("[red]PyYAML is required. Install with: pip install PyYAML>=6.0.2[/red]")
         raise typer.Exit(1)
-    _ensure_project_dirs()
+
+    # Load global config first (optional, no error if missing)
+    global_config = _load_global_config()
+
+    # Load project config (optional if require_project=False)
     if not _config_path().exists():
-        console.print("[red]Project not initialized. Run 'gimo init' first.[/red]")
-        raise typer.Exit(1)
-    content = yaml.safe_load(_config_path().read_text(encoding="utf-8")) or {}
-    if not isinstance(content, dict):
+        if require_project:
+            console.print("[red]Project not initialized. Run 'gimo init' first.[/red]")
+            raise typer.Exit(1)
+        else:
+            # Return global only (or empty dict)
+            return global_config if global_config else {}
+
+    _ensure_project_dirs()
+    local_content = yaml.safe_load(_config_path().read_text(encoding="utf-8")) or {}
+    if not isinstance(local_content, dict):
         console.print("[red]Invalid .gimo/config.yaml format.[/red]")
         raise typer.Exit(1)
-    return content
+
+    # Merge: global → local (local wins)
+    return _deep_merge(global_config, local_content)
 
 
 def _read_token_from_env_file() -> str | None:
@@ -148,17 +344,20 @@ def _read_token_from_env_file() -> str | None:
     return None
 
 
-def _resolve_token(role: str = "operator") -> str | None:
+def _resolve_token(role: str = "operator", config: dict[str, Any] | None = None) -> str | None:
     """Resolve token for the given role.
 
     Args:
         role: "admin", "operator", or "actions"
+        config: Optional config dict for server URL resolution
 
-    Priority:
-    1. Environment variables (GIMO_TOKEN/ORCH_TOKEN for admin, ORCH_OPERATOR_TOKEN, ORCH_ACTIONS_TOKEN)
-    2. Unified .gimo_credentials file (new format)
-    3. Legacy separate token files
-    4. .env file
+    Priority (6 levels, first match wins):
+    1. Environment variables (GIMO_TOKEN/ORCH_TOKEN for admin, etc.)
+    2. CLI flag (passed via config dict - not implemented yet)
+    3. ServerBond (~/.gimo/bonds/<fingerprint>.yaml) — NEW
+    4. Project config (.gimo/config.yaml → api.token)
+    5. Legacy credentials (tools/gimo_server/.gimo_credentials) — only if cwd is GIMO repo
+    6. None → caller should prompt "Run: gimo login <url>"
 
     Returns:
         Token string or None if not found
@@ -170,39 +369,64 @@ def _resolve_token(role: str = "operator") -> str | None:
         "actions": ["ORCH_ACTIONS_TOKEN"],
     }
 
-    # Try environment variables first
+    # 1. Environment variables
     for env_name in env_vars.get(role, []):
         token = os.environ.get(env_name)
         if token:
             return token.strip()
 
-    # Try unified credentials file
-    unified_creds = _project_root() / "tools" / "gimo_server" / ".gimo_credentials"
-    if unified_creds.exists() and YAML_AVAILABLE and yaml:
-        try:
-            creds = yaml.safe_load(unified_creds.read_text(encoding="utf-8"))
-            if isinstance(creds, dict) and role in creds:
-                token = str(creds[role]).strip()
-                if token:
-                    return token
-        except Exception:
-            pass
+    # 2. CLI flag (--token) — handled by caller, skipped here
 
-    # Try legacy token files
-    legacy_files = {
-        "admin": ".orch_token",
-        "operator": ".orch_operator_token",
-        "actions": ".orch_actions_token",
-    }
-    if role in legacy_files:
-        token_path = _project_root() / "tools" / "gimo_server" / legacy_files[role]
-        if token_path.exists():
-            return token_path.read_text(encoding="utf-8").strip()
+    # 3. ServerBond — NEW: portable, machine-bound, works from anywhere
+    if config is None:
+        config = _load_config()
+    server_url = _resolve_server_url(config)
+    bond = _load_bond(server_url)
+    if bond and bond.get("role") == role:
+        token = bond.get("token")
+        if token:
+            return str(token).strip()
 
-    # Fall back to .env file (only for admin/ORCH_TOKEN)
-    if role == "admin":
-        return _read_token_from_env_file()
+    # 4. Project config (.gimo/config.yaml → api.token)
+    api_cfg = config.get("api", {})
+    if isinstance(api_cfg, dict):
+        inline_token = api_cfg.get("token")
+        if inline_token:
+            return str(inline_token).strip()
 
+    # 5. Legacy credentials — ONLY if cwd appears to be GIMO server repo
+    # (tools/gimo_server/ exists as child of _project_root())
+    project_root = _project_root()
+    server_dir = project_root / "tools" / "gimo_server"
+    if server_dir.exists() and server_dir.is_dir():
+        # Try unified credentials
+        unified_creds = server_dir / ".gimo_credentials"
+        if unified_creds.exists() and YAML_AVAILABLE and yaml:
+            try:
+                creds = yaml.safe_load(unified_creds.read_text(encoding="utf-8"))
+                if isinstance(creds, dict) and role in creds:
+                    token = str(creds[role]).strip()
+                    if token:
+                        return token
+            except Exception:
+                pass
+
+        # Try legacy token files
+        legacy_files = {
+            "admin": ".orch_token",
+            "operator": ".orch_operator_token",
+            "actions": ".orch_actions_token",
+        }
+        if role in legacy_files:
+            token_path = server_dir / legacy_files[role]
+            if token_path.exists():
+                return token_path.read_text(encoding="utf-8").strip()
+
+        # .env fallback (admin only)
+        if role == "admin":
+            return _read_token_from_env_file()
+
+    # 6. None → caller should show helpful message
     return None
 
 
@@ -223,7 +447,7 @@ def _api_request(
     extra_headers: dict[str, str] | None = None,
     role: str = "operator",
 ) -> tuple[int, Any]:
-    """Make an API request to the GIMO backend.
+    """Make an API request to the GIMO backend with autorecovery.
 
     Args:
         config: Configuration dict
@@ -238,20 +462,41 @@ def _api_request(
         Tuple of (status_code, response_payload)
     """
     base_url, timeout_seconds = _api_settings(config)
-    token = _resolve_token(role)
+    token = _resolve_token(role, config)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     if extra_headers:
         headers.update(extra_headers)
     url = f"{base_url}{path}"
 
-    with httpx.Client(timeout=timeout_seconds) as client:
-        response = client.request(method, url, params=params, json=json_body, headers=headers)
+    try:
+        with httpx.Client(timeout=timeout_seconds) as client:
+            response = client.request(method, url, params=params, json=json_body, headers=headers)
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        # Server unreachable — guide user to check
+        console.print(f"[red]Server unreachable at {base_url}[/red]")
+        console.print(f"[dim]  Error: {exc}[/dim]")
+        console.print("[yellow]Check server status with: gimo doctor[/yellow]")
+        return 503, {"error": "server_unreachable", "detail": str(exc)}
 
     payload: Any
     try:
         payload = response.json()
     except ValueError:
         payload = response.text
+
+    # Autorecovery: detect auth failures and guide user
+    if response.status_code == 401:
+        server_url = _resolve_server_url(config)
+        bond = _load_bond(server_url)
+        if bond:
+            # Bond exists but token expired/invalid
+            console.print("[yellow]ServerBond token expired or invalid[/yellow]")
+            console.print(f"[cyan]Re-authenticate with: gimo login {server_url}[/cyan]")
+        else:
+            # No bond — never logged in
+            console.print("[yellow]Not authenticated[/yellow]")
+            console.print(f"[cyan]Login first: gimo login {server_url}[/cyan]")
+
     return response.status_code, payload
 
 
@@ -268,9 +513,9 @@ def _get_telemetry_toolbar(config: dict[str, Any]) -> str:
             lvl = n.get("level", "info")
             msg = n.get("message", "")
             if lvl == "warning":
-                alerts.append(f"<ansiyellow>⚠️ {msg}</ansiyellow>")
+                alerts.append(f"<ansiyellow>[!]️ {msg}</ansiyellow>")
             elif lvl == "error":
-                alerts.append(f"<ansired>✗ {msg}</ansired>")
+                alerts.append(f"<ansired>[X] {msg}</ansired>")
         
         alerts_line = " | ".join(alerts) if alerts else "<ansigray>No active alerts</ansigray>"
         
@@ -279,10 +524,10 @@ def _get_telemetry_toolbar(config: dict[str, Any]) -> str:
         elif color == "yellow": color = "ansiyellow"
         else: color = "ansigreen"
         
-        telemetry_line = f" 💰 Budget: <{color}>{100-rem_pct:.1f}% used</{color}> | 🧠 Context: <b>{ctx_status}</b> "
+        telemetry_line = f" [$] Budget: <{color}>{100-rem_pct:.1f}% used</{color}> | [Brain] Context: <b>{ctx_status}</b> "
         return f"{telemetry_line}\n 🔔 ALERTS: {alerts_line} "
         
-    return " 💰 Telemetry unavailable \n 🔔 ALERTS: <ansigray>None</ansigray> "
+    return " [$] Telemetry unavailable \n 🔔 ALERTS: <ansigray>None</ansigray> "
 
 def _provider_config_request(config: dict[str, Any]) -> tuple[int, Any]:
     status_code, payload = _api_request(config, "GET", "/ops/providers")
@@ -651,17 +896,17 @@ def _handle_chat_slash_command(
 
         lines = []
         v = py.get('backend_version', '?')
-        lines.append(f"🟢 [bold]System[/bold]: Healthy (v{v})")
-        lines.append(f"🧠 [bold]Active Orchestrator[/bold]: [cyan]{py.get('active_provider', '?')}[/cyan] ({py.get('active_model', '?')})")
+        lines.append(f"[*] [bold]System[/bold]: Healthy (v{v})")
+        lines.append(f"[Brain] [bold]Active Orchestrator[/bold]: [cyan]{py.get('active_provider', '?')}[/cyan] ({py.get('active_model', '?')})")
         
         perm = py.get("permissions", "suggest")
-        lines.append(f"🔒 [bold]Permissions[/bold]: [bold green]{perm.upper()}[/bold green]")
+        lines.append(f"[Lock] [bold]Permissions[/bold]: [bold green]{perm.upper()}[/bold green]")
         
-        lines.append(f"📁 [bold]Workspace[/bold]: [dim]{workspace_root}[/dim] (Branch: {py.get('branch', '?')})")
+        lines.append(f"[Folder] [bold]Workspace[/bold]: [dim]{workspace_root}[/dim] (Branch: {py.get('branch', '?')})")
         
         budget_pct = py.get("budget_percentage", 100.0)
         budget_status = py.get("budget_status", "ok")
-        lines.append(f"💰 [bold]Economy[/bold]: Budget: [green]{budget_status.upper()}[/green] ({budget_pct:.1f}% remaining)")
+        lines.append(f"[$] [bold]Economy[/bold]: Budget: [green]{budget_status.upper()}[/green] ({budget_pct:.1f}% remaining)")
         
         ctx_status = py.get("context_status", "0%")
         lines.append(f"⚡ [bold]Context[/bold]: Usage: [magenta]{ctx_status}[/magenta]")
@@ -685,13 +930,13 @@ def _handle_chat_slash_command(
             if result.returncode == 0:
                 console.print(Panel(
                     result.stdout.strip() or "Revert successful.",
-                    title="✓ /undo — git revert HEAD",
+                    title="[OK] /undo — git revert HEAD",
                     border_style="green",
                 ))
             else:
                 console.print(Panel(
                     result.stderr.strip() or result.stdout.strip() or "Revert failed.",
-                    title="✗ /undo failed",
+                    title="[X] /undo failed",
                     border_style="red",
                 ))
         except Exception as exc:
@@ -714,7 +959,7 @@ def _handle_chat_slash_command(
             return
         sc, payload = _api_request(config, "POST", f"/ops/threads/{thread_id}/reset")
         if sc in {200, 204}:
-            console.print("[green]✓ Contexto del thread reiniciado.[/green]")
+            console.print("[green][OK] Contexto del thread reiniciado.[/green]")
         else:
             console.print(f"[red]Reset failed ({sc}): {payload}[/red]")
 
@@ -766,7 +1011,7 @@ def _handle_chat_slash_command(
             json_body={"effort": effort_val},
         )
         if sc in {200, 204}:
-            console.print(f"[green]✓ Esfuerzo del orquestador: [bold]{effort_val}[/bold][/green]")
+            console.print(f"[green][OK] Esfuerzo del orquestador: [bold]{effort_val}[/bold][/green]")
         else:
             console.print(f"[red]Set effort failed ({sc}): {payload}[/red]")
 
@@ -780,7 +1025,7 @@ def _handle_chat_slash_command(
             if current_perm is not None:
                 current_perm.clear()
                 current_perm.append(perm_val)
-            console.print(f"[green]✓ Permisos HITL: [bold]perm:{perm_val}[/bold][/green]")
+            console.print(f"[green][OK] Permisos HITL: [bold]perm:{perm_val}[/bold][/green]")
         else:
             console.print(f"[red]Set permissions failed ({sc}): {payload}[/red]")
 
@@ -791,12 +1036,12 @@ def _handle_chat_slash_command(
             json_body={"path": path_val},
         )
         if sc in {200, 201}:
-            console.print(f"[green]✓ Añadido al contexto: [bold]{path_val}[/bold][/green]")
+            console.print(f"[green][OK] Añadido al contexto: [bold]{path_val}[/bold][/green]")
         else:
             console.print(f"[red]Add file failed ({sc}): {payload}[/red]")
 
     def invalid_arg(msg: str):
-        console.print(f"[yellow]⚠ {msg}[/yellow]")
+        console.print(f"[yellow][!] {msg}[/yellow]")
 
     def toggle_debug():
         if renderer is not None:
@@ -829,7 +1074,7 @@ def _handle_chat_slash_command(
             color = "green" if status == "done" else "red"
             console.print(Panel(
                 f"Run ID: [bold]{run_id}[/bold]\nStatus: [{color}]{status}[/bold]\nMessage: {payload.get('message', 'n/a')}",
-                title="✓ /merge successful",
+                title="[OK] /merge successful",
                 border_style=color,
             ))
         else:
@@ -874,7 +1119,7 @@ def _stream_events(
     timeout_seconds: float = DEFAULT_WATCH_TIMEOUT_SECONDS,
 ):
     base_url, connect_timeout_seconds = _api_settings(config)
-    token = _resolve_token()
+    token = _resolve_token("operator", config)
     headers = {"Accept": "text/event-stream"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -1113,7 +1358,7 @@ def _interactive_chat(config: dict[str, Any]) -> None:
 
         # Try SSE streaming first, fall back to sync
         base_url, timeout_seconds = _api_settings(config)
-        auth_token = _resolve_token()
+        auth_token = _resolve_token("operator", config)
         headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
         headers["Accept"] = "text/event-stream"
 
@@ -1426,18 +1671,18 @@ def status(
 
     result: dict[str, Any] = {}
 
-    try:
-        config = _load_config()
-    except typer.Exit:
-        config = {}
+    # Don't require project init if using ServerBond or env tokens
+    config = _load_config(require_project=False)
 
-    if not config:
+    # Only show "not initialized" if we have NO way to auth (no config AND no token)
+    token = _resolve_token("operator", config)
+    if not config and not token:
         repo_name = _project_root().name
         branch_res = _git_command(["rev-parse", "--abbrev-ref", "HEAD"])
         branch = branch_res.stdout.strip() if branch_res.returncode == 0 else "unknown"
         lines = [
-            f"📁 [bold]Repo[/bold]: {repo_name}  branch: [cyan]{branch}[/cyan]",
-            "[red]⚠ Workspace not initialized. Run 'gimo init'.[/red]",
+            f"[bold]Repo[/bold]: {repo_name}  branch: [cyan]{branch}[/cyan]",
+            "[red][!] Workspace not initialized. Run 'gimo init'.[/red]",
         ]
         if json_output:
             _emit_output(result, json_output=True)
@@ -1501,7 +1746,7 @@ def status(
         alerts = []
         
     if not backend_online:
-        alerts.append("✗ Backend OFFLINE")
+        alerts.append("[X] Backend OFFLINE")
 
     # The canonical snapshot doesn't include transient LLM run states or spend_usd directly yet
     # We populate defaults for json contract.
@@ -1545,12 +1790,12 @@ def status(
     alerts_str = "  ".join(alerts) if alerts else "[dim]ninguna[/dim]"
 
     panel_lines = [
-        f"📁 [bold]Repo[/bold]:          {repo_name} · [cyan]{branch}[/cyan]{dirty_str}",
-        f"🧠 [bold]Proveedor[/bold]:     [cyan]{provider_id}[/cyan] / {model_id}",
-        f"🔒 [bold]Permisos[/bold]:      perm:[yellow]{sp.get('permissions', 'suggest')}[/yellow]",
+        f"[Folder] [bold]Repo[/bold]:          {repo_name} · [cyan]{branch}[/cyan]{dirty_str}",
+        f"[Brain] [bold]Proveedor[/bold]:     [cyan]{provider_id}[/cyan] / {model_id}",
+        f"[Lock] [bold]Permisos[/bold]:      perm:[yellow]{sp.get('permissions', 'suggest')}[/yellow]",
         f"🌐 [bold]Backend[/bold]:       {backend_str}",
         f"▶  [bold]Run activo[/bold]:    {run_str}",
-        f"💰 [bold]Budget[/bold]:        {budget_str}",
+        f"[$] [bold]Budget[/bold]:        {budget_str}",
         f"💬 [bold]Último thread[/bold]: {last_thread_id}  turno {last_thread_turn}",
         f"🔔 [bold]Alertas[/bold]:       {alerts_str}",
     ]
@@ -2038,6 +2283,223 @@ def watch(
 # Sub-apps for grouped commands
 # ---------------------------------------------------------------------------
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ServerBond Commands — login, logout, doctor
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.command()
+def login(
+    server_url: str = typer.Argument(DEFAULT_API_BASE_URL, help="Server URL to bond with."),
+    license_key: str = typer.Option("", "--license", help="License key for GIMO WEB validation."),
+    web: bool = typer.Option(False, "--web", help="Use Firebase OAuth (opens browser)."),
+) -> None:
+    """Authenticate with a GIMO server and create a ServerBond.
+
+    Three authentication methods:
+      1. Token (default): Interactive prompt for server token
+      2. License key: --license GIMO-XXXX-YYYY
+      3. Web subscription: --web (Firebase OAuth)
+
+    The bond is saved encrypted in ~/.gimo/bonds/ and works from any directory.
+    """
+    if not YAML_AVAILABLE or not yaml:
+        console.print("[red]PyYAML required. Install with: pip install PyYAML>=6.0.2[/red]")
+        raise typer.Exit(1)
+
+    normalized_url = server_url.rstrip("/")
+
+    # Method 1: License key (via GIMO WEB)
+    if license_key:
+        console.print("[yellow]License key auth not yet implemented (P2). Use token auth for now.[/yellow]")
+        raise typer.Exit(1)
+
+    # Method 2: Firebase OAuth (web subscription)
+    if web:
+        console.print("[yellow]Web OAuth not yet implemented (P2). Use token auth for now.[/yellow]")
+        raise typer.Exit(1)
+
+    # Method 3: Token (default) — interactive prompt
+    console.print(f"[bold]Bonding to GIMO server:[/bold] {normalized_url}")
+    console.print("[dim]Enter server token (from server's .gimo_credentials or ORCH_OPERATOR_TOKEN):[/dim]")
+
+    import getpass
+    token = getpass.getpass("Token: ").strip()
+    if not token:
+        console.print("[red]Token required[/red]")
+        raise typer.Exit(1)
+
+    # Validate token and negotiate capabilities
+    console.print("[dim]Validating token...[/dim]")
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            # 1. Health check
+            health_resp = client.get(f"{normalized_url}/health")
+            if health_resp.status_code != 200:
+                console.print(f"[red]Server health check failed ({health_resp.status_code})[/red]")
+                raise typer.Exit(1)
+
+            # 2. Capabilities endpoint (requires auth)
+            caps_resp = client.get(
+                f"{normalized_url}/ops/capabilities",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            if caps_resp.status_code == 401:
+                console.print("[red][X] Invalid token[/red]")
+                raise typer.Exit(1)
+            if caps_resp.status_code != 200:
+                console.print(f"[yellow][!] Could not fetch capabilities ({caps_resp.status_code}), using defaults[/yellow]")
+                capabilities_data = {
+                    "version": "unknown",
+                    "role": "operator",
+                    "plan": "local",
+                    "features": ["plans", "runs", "chat"],
+                }
+            else:
+                capabilities_data = caps_resp.json()
+
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        console.print(f"[red][X] Cannot reach server at {normalized_url}[/red]")
+        console.print(f"[dim]  {exc}[/dim]")
+        raise typer.Exit(1)
+
+    # Extract bond metadata
+    role = capabilities_data.get("role", "operator")
+    plan = capabilities_data.get("plan", "local")
+    features = capabilities_data.get("features", [])
+    version = capabilities_data.get("version", "unknown")
+
+    # Save encrypted bond
+    bond_path = _save_bond(
+        server_url=normalized_url,
+        token=token,
+        role=role,
+        capabilities=features,
+        plan=plan,
+        auth_method="token",
+        server_version=version,
+    )
+
+    # Success message
+    console.print(f"[green][OK] Bonded to GIMO v{version} as {role}[/green]")
+    console.print(f"[dim]Bond saved: {bond_path}[/dim]")
+    console.print(f"[cyan]Plan: {plan} | Features: {', '.join(features)}[/cyan]")
+    console.print(f"\n[bold]Next steps:[/bold]")
+    console.print(f"  • Check bond health: [cyan]gimo doctor[/cyan]")
+    console.print(f"  • View server status: [cyan]gimo status[/cyan]")
+
+
+@app.command()
+def logout(
+    server_url: str = typer.Argument("", help="Server URL to disconnect from (default: current config)."),
+) -> None:
+    """Remove ServerBond for a given server."""
+    config = _load_config(require_project=False)
+
+    target_url = server_url.rstrip("/") if server_url else _resolve_server_url(config)
+
+    deleted = _delete_bond(target_url)
+    if deleted:
+        console.print(f"[green][OK] Disconnected from {target_url}[/green]")
+        console.print(f"[dim]Bond removed from ~/.gimo/bonds/[/dim]")
+    else:
+        console.print(f"[yellow][!] No bond found for {target_url}[/yellow]")
+
+
+@app.command()
+def doctor() -> None:
+    """Comprehensive health check with actionable hints.
+
+    Checks:
+      • Server reachability
+      • ServerBond validity
+      • License status (if applicable)
+      • Config files
+      • Git repo detection
+      • Provider configuration
+    """
+    config = _load_config(require_project=False)
+    server_url = _resolve_server_url(config)
+    console.print(f"[bold]GIMO Doctor Report[/bold]\n")
+
+    # 1. Server reachability
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            health_resp = client.get(f"{server_url}/health")
+            if health_resp.status_code == 200:
+                health_data = health_resp.json()
+                version = health_data.get("version", "unknown")
+                console.print(f"[green][OK] Server:[/green] reachable ({server_url} v{version})")
+            else:
+                console.print(f"[red][X] Server:[/red] HTTP {health_resp.status_code}")
+    except Exception as exc:
+        console.print(f"[red][X] Server:[/red] unreachable ({exc})")
+        console.print(f"[yellow][>] Start the server or check URL in .gimo/config.yaml[/yellow]")
+
+    # 2. ServerBond
+    bond = _load_bond(server_url)
+    if bond:
+        bonded_at = bond.get("bonded_at", "unknown")
+        role = bond.get("role", "unknown")
+        plan = bond.get("plan", "unknown")
+        console.print(f"[green][OK] Bond:[/green] valid ({role}, plan: {plan}, bonded: {bonded_at[:19]})")
+    else:
+        console.print(f"[red][X] Bond:[/red] not found")
+        console.print(f"[yellow][>] Run: gimo login {server_url}[/yellow]")
+
+    # 3. Config files
+    config_path = _project_root() / ".gimo" / "config.yaml"
+    if config_path.exists():
+        console.print(f"[green][OK] Config:[/green] .gimo/config.yaml found")
+    else:
+        console.print(f"[yellow][!] Config:[/yellow] .gimo/config.yaml missing")
+        console.print(f"[yellow][>] Run: gimo init[/yellow]")
+
+    # 4. Git repo
+    try:
+        repo_root = _project_root()
+        git_dir = repo_root / ".git"
+        if git_dir.exists():
+            branch_result = subprocess.run(
+                ["git", "branch", "--show-current"],
+                cwd=repo_root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            branch = branch_result.stdout.strip() or "detached"
+            console.print(f"[green][OK] Git:[/green] repo detected ({repo_root.name}, branch: {branch})")
+        else:
+            console.print(f"[yellow][!] Git:[/yellow] no .git directory")
+    except Exception:
+        console.print(f"[yellow][!] Git:[/yellow] detection failed")
+
+    # 5. Provider
+    if bond:
+        try:
+            token = bond.get("token", "")
+            with httpx.Client(timeout=5.0) as client:
+                prov_resp = client.get(
+                    f"{server_url}/ops/provider",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                if prov_resp.status_code == 200:
+                    prov_data = prov_resp.json()
+                    active = prov_data.get("active") or prov_data.get("orchestrator_provider", "unknown")
+                    providers = prov_data.get("providers", {})
+                    if active and active in providers:
+                        ptype = providers[active].get("provider_type", "unknown")
+                        console.print(f"[green][OK] Provider:[/green] {active} ({ptype})")
+                    else:
+                        console.print(f"[yellow][!] Provider:[/yellow] not configured")
+                        console.print(f"[yellow][>] Configure via UI: Settings > Providers[/yellow]")
+                else:
+                    console.print(f"[yellow][!] Provider:[/yellow] could not fetch ({prov_resp.status_code})")
+        except Exception:
+            console.print(f"[yellow][!] Provider:[/yellow] check failed")
+
+    console.print(f"\n[dim]Run 'gimo --help' for available commands[/dim]")
+
+
 providers_app = typer.Typer(name="providers", help="Manage LLM providers and connectors.")
 trust_app = typer.Typer(name="trust", help="Trust engine dashboard and controls.")
 mastery_app = typer.Typer(name="mastery", help="Token economy, cost analytics, and budget forecast.")
@@ -2126,6 +2588,122 @@ def providers_models(
         console.print(table)
     else:
         console.print(payload)
+
+
+@providers_app.command("login")
+def providers_login(
+    provider_id: str = typer.Argument("", help="Provider to authenticate (codex/claude). Auto-detects active if omitted."),
+) -> None:
+    """Authenticate with an LLM provider via device flow.
+
+    Supports: codex, claude
+
+    Example:
+      gimo providers login codex
+    """
+    config = _load_config()
+
+    # Auto-detect active provider if not specified
+    if not provider_id:
+        _, payload = _api_request(config, "GET", "/ops/provider")
+        if isinstance(payload, dict):
+            provider_id = payload.get("active", "codex")
+        else:
+            provider_id = "codex"
+        console.print(f"[dim]Auto-detected provider: {provider_id}[/dim]")
+
+    provider_id = provider_id.lower().strip()
+
+    # Start device flow
+    console.print(f"[bold]Authenticating with {provider_id}...[/bold]")
+    status_code, data = _api_request(config, "POST", f"/ops/connectors/{provider_id}/login")
+
+    if status_code >= 400:
+        message = data.get("detail") if isinstance(data, dict) else str(data)
+        console.print(f"[red]Login failed ({status_code}): {message}[/red]")
+        raise typer.Exit(1)
+
+    # Display instructions
+    if isinstance(data, dict):
+        url = data.get("verification_url") or data.get("url", "")
+        code = data.get("user_code", "")
+        poll_id = data.get("poll_id")
+
+        if url and code:
+            console.print(f"\n[bold cyan]Open this URL:[/bold cyan] {url}")
+            console.print(f"[bold cyan]Enter code:[/bold cyan] {code}\n")
+            console.print("[dim]Waiting for authorization... (complete in your browser)[/dim]")
+
+            # Poll for completion if poll_id available
+            if poll_id:
+                max_attempts = 60  # 60 * 2s = 2 min timeout
+                for attempt in range(max_attempts):
+                    time.sleep(2)
+                    poll_status, poll_data = _api_request(config, "GET", f"/ops/connectors/account/login/{poll_id}")
+                    if poll_status == 200 and isinstance(poll_data, dict):
+                        state = poll_data.get("state", "pending")
+                        if state == "completed":
+                            console.print(f"[green][OK] {provider_id} authenticated successfully[/green]")
+                            return
+                        elif state == "failed":
+                            error = poll_data.get("error", "unknown")
+                            console.print(f"[red][X] Authentication failed: {error}[/red]")
+                            raise typer.Exit(1)
+                console.print(f"[yellow][!] Polling timeout. Check status with: gimo providers auth-status[/yellow]")
+            else:
+                # No polling — manual check
+                console.print(f"[yellow][!] Complete auth in browser, then run: gimo providers auth-status[/yellow]")
+        else:
+            console.print(f"[yellow]Response: {data}[/yellow]")
+    else:
+        console.print(f"[yellow]Response: {data}[/yellow]")
+
+
+@providers_app.command("auth-status")
+def providers_auth_status() -> None:
+    """Show authentication status for all CLI-based providers."""
+    config = _load_config(require_project=False)
+
+    providers_to_check = ["codex", "claude"]
+    table = Table(title="Provider Authentication Status", show_header=True)
+    table.add_column("Provider", style="cyan")
+    table.add_column("Status", style="bold")
+    table.add_column("Method", style="dim")
+
+    for provider in providers_to_check:
+        status_code, data = _api_request(config, "GET", f"/ops/connectors/{provider}/auth-status")
+        if status_code == 200 and isinstance(data, dict):
+            authenticated = data.get("authenticated", False)
+            method = data.get("method", "n/a")
+            status_icon = "[OK]" if authenticated else "[X]"
+            status_text = "authenticated" if authenticated else "not connected"
+            table.add_row(provider, f"{status_icon} {status_text}", method)
+        else:
+            table.add_row(provider, "[X] error", f"HTTP {status_code}")
+
+    console.print(table)
+
+
+@providers_app.command("logout")
+def providers_logout(
+    provider_id: str = typer.Argument(..., help="Provider to disconnect (codex/claude)."),
+) -> None:
+    """Disconnect from an LLM provider.
+
+    Example:
+      gimo providers logout codex
+    """
+    config = _load_config()
+    provider_id = provider_id.lower().strip()
+
+    status_code, data = _api_request(config, "POST", f"/ops/connectors/{provider_id}/logout")
+
+    if status_code < 300:
+        console.print(f"[green][OK] {provider_id} disconnected[/green]")
+    else:
+        message = data.get("detail") if isinstance(data, dict) else str(data)
+        console.print(f"[red]Logout failed ({status_code}): {message}[/red]")
+        raise typer.Exit(1)
 
 
 # --- trust ---

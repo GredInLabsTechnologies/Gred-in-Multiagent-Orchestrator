@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 DEFAULT_API_BASE_URL = os.environ.get("GIMO_API_URL") or os.environ.get("ORCH_BASE_URL") or "http://127.0.0.1:9325"
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -6,6 +7,9 @@ DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_WATCH_TIMEOUT_SECONDS = 30.0
 
 DEFAULT_PREFERRED_MODEL = "claude-3-5-sonnet-20241022"
+
+# ServerBond home directory
+GIMO_HOME_DIR = Path(os.environ.get("GIMO_HOME", str(Path.home() / ".gimo")))
 
 DEFAULT_EXCLUDE_DIRS = [
     ".git",

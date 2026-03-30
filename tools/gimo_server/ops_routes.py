@@ -144,6 +144,36 @@ async def get_operator_status(auth: Annotated[AuthContext, Depends(verify_token)
     return OperatorStatusService.get_status_snapshot()
 
 
+@router.get("/capabilities")
+async def get_capabilities(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+):
+    """Returns server capabilities for CLI bond handshake.
+
+    Includes role, plan (from session if Firebase), and feature list.
+    This is the single source of truth for what the CLI can do.
+    """
+    from tools.gimo_server.version import __version__
+    from tools.gimo_server.security.auth import SESSION_COOKIE_NAME, session_store
+
+    plan = "local"  # default for local tokens
+
+    # If Firebase session exists, extract plan
+    cookie = request.cookies.get(SESSION_COOKIE_NAME)
+    if cookie:
+        session = session_store.validate(cookie)
+        if session and session.plan:
+            plan = session.plan
+
+    return {
+        "version": __version__,
+        "role": auth.role,
+        "plan": plan,
+        "features": ["plans", "runs", "chat", "threads", "mastery", "trust", "observe"],
+    }
+
+
 @router.get("/notices")
 async def get_notices(auth: Annotated[AuthContext, Depends(verify_token)]):
     """
