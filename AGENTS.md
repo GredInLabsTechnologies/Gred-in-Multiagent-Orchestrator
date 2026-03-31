@@ -411,6 +411,50 @@ verified, status is not `DONE`.
 
 ---
 
+## Plan Quality Standard
+
+Before an agent submits a plan for approval, it must pass this self-interrogation:
+
+1. **Permanence**: Does this plan deserve to stay in the codebase permanently,
+   or is it a temporary patch that will need replacing?
+
+2. **Completeness**: Does it resolve ALL observed gaps, not just the most
+   obvious one?
+
+3. **Foresight**: Does it address problems that could arise in the future, not
+   just problems that exist now?
+
+4. **Potency**: Is the solution powerful — does it create lasting leverage, not
+   just fix a symptom?
+
+5. **Innovation**: Does it improve on the state of the art? Has the agent
+   researched what competitors do and found a better approach?
+
+6. **Elegance**: Is the design clean — one strong concept, not many weak patches?
+
+7. **Lightness**: Is the implementation minimal — fewest files, fewest lines,
+   fewest new abstractions?
+
+8. **Multiplicity**: Does ONE change solve MULTIPLE problems simultaneously?
+
+9. **Unification**: Does the plan enforce ONE canonical path for all surfaces?
+   If a capability exists, ALL surfaces MUST use the same endpoint/contract.
+   Do not create parallel paths. Do not let surfaces infer what the server
+   already knows. One source of truth, mandatory — not optional.
+
+If any answer is "no", iterate. Do not submit the plan.
+
+Plan anti-patterns to avoid:
+- N independent patches dressed as one plan
+- Client-side hardcoded values that the server already knows
+- New abstractions when an existing endpoint can be enhanced
+- "Innovative" complexity that adds no real leverage over a simpler approach
+- Plans that fix today's bugs but create tomorrow's technical debt
+- "Can use" instead of "must use" — optional contracts become dead contracts
+- Parallel paths to the same truth (one always drifts, one always wins)
+
+---
+
 ## Required Final Response Format
 
 For substantial engineering tasks, final responses should use this structure:

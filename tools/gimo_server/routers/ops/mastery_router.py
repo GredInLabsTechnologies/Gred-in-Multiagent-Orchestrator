@@ -142,17 +142,23 @@ async def get_hardware_status(auth: Annotated[AuthContext, Depends(verify_token)
 @router.get("/status", response_model=MasteryStatus)
 async def get_mastery_status(auth: Annotated[AuthContext, Depends(verify_token)]):
     """Returns general token mastery metrics with real data."""
+    import logging
     from ...services.ops_service import OpsService
     from ...services.storage_service import StorageService
     from ...services.hardware_monitor_service import HardwareMonitorService
 
+    logger = logging.getLogger("orchestrator.mastery")
     config = OpsService.get_config()
-    storage = StorageService()
     hw = HardwareMonitorService.get_instance()
 
     eco_mode_active = config.economy.eco_mode.mode != "off"
-    savings = storage.cost.get_total_savings(days=30)
-    spend = storage.cost.get_total_spend(days=30)
+    savings, spend = 0.0, 0.0
+    try:
+        storage = StorageService()
+        savings = storage.cost.get_total_savings(days=30)
+        spend = storage.cost.get_total_spend(days=30)
+    except Exception:
+        logger.warning("StorageService unavailable for mastery status")
 
     efficiency = 0.0
     if (spend + savings) > 0:
@@ -162,10 +168,14 @@ async def get_mastery_status(auth: Annotated[AuthContext, Depends(verify_token)]
 
     alerts = []
     if config.economy.global_budget_usd:
-        alerts = storage.cost.check_budget_alerts(
-            config.economy.global_budget_usd,
-            config.economy.alert_thresholds
-        )
+        try:
+            storage = StorageService()
+            alerts = storage.cost.check_budget_alerts(
+                config.economy.global_budget_usd,
+                config.economy.alert_thresholds
+            )
+        except Exception:
+            logger.warning("Budget alerts unavailable")
 
     tips = []
     for alert in alerts:
@@ -290,14 +300,20 @@ async def get_mastery_analytics(
 @router.get("/forecast", response_model=List[BudgetForecast])
 async def get_budget_forecast(auth: Annotated[AuthContext, Depends(verify_token)]):
     """Returns budget forecast global + per-provider."""
+    import logging
     from ...services.ops_service import OpsService
     from ...services.storage_service import StorageService
-    
+
+    logger = logging.getLogger("orchestrator.mastery")
     config = OpsService.get_config()
-    storage = StorageService()
-    
-    forecaster = BudgetForecastService(storage)
-    return forecaster.forecast(config.economy)
+
+    try:
+        storage = StorageService()
+        forecaster = BudgetForecastService(storage)
+        return forecaster.forecast(config.economy)
+    except Exception:
+        logger.warning("Forecast unavailable", exc_info=True)
+        return []
 
 
 # F8.3: User Feedback Endpoints

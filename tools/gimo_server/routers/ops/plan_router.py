@@ -242,7 +242,12 @@ async def generate_structured_plan(
         '"status":"pending","description":"...","agent_assignee":{...}}],"constraints":[]}\n'
     )
     try:
-        resp = await ProviderService.static_generate(sys_prompt, context={"task_type": "disruptive_planning"})
+        # Respect X-Preferred-Model header
+        preferred_model = request.headers.get("X-Preferred-Model")
+        context = {"task_type": "disruptive_planning"}
+        if preferred_model:
+            context["model"] = preferred_model
+        resp = await ProviderService.static_generate(sys_prompt, context=context)
         raw = resp.get("content", "").strip()
         raw = re.sub(r"```(?:json)?\s*\n?", "", raw).strip()
         if raw.endswith("```"):

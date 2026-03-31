@@ -151,27 +151,11 @@ async def get_capabilities(
 ):
     """Returns server capabilities for CLI bond handshake.
 
-    Includes role, plan (from session if Firebase), and feature list.
-    This is the single source of truth for what the CLI can do.
+    Enhanced with operation contracts: timeouts, health, active model.
+    This is the mandatory single source of truth for all surfaces.
     """
-    from tools.gimo_server.version import __version__
-    from tools.gimo_server.security.auth import SESSION_COOKIE_NAME, session_store
-
-    plan = "local"  # default for local tokens
-
-    # If Firebase session exists, extract plan
-    cookie = request.cookies.get(SESSION_COOKIE_NAME)
-    if cookie:
-        session = session_store.validate(cookie)
-        if session and session.plan:
-            plan = session.plan
-
-    return {
-        "version": __version__,
-        "role": auth.role,
-        "plan": plan,
-        "features": ["plans", "runs", "chat", "threads", "mastery", "trust", "observe"],
-    }
+    from tools.gimo_server.services.capabilities_service import CapabilitiesService
+    return await CapabilitiesService.get_capabilities(request, auth)
 
 
 @router.get("/notices")

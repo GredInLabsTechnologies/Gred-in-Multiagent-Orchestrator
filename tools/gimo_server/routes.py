@@ -32,6 +32,7 @@ READ_ONLY_ACTIONS_PATHS = {
     "/diff",
     "/status",       # ← ADDED: basic server status (all roles)
     "/health",       # ← ADDED: health check (all roles)
+    "/health/deep",  # ← ADDED: deep health check (all roles)
     "/ui/status",
     "/ui/repos",
     "/ui/repos/active",

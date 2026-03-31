@@ -28,7 +28,6 @@ from cli_constants import (
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_WATCH_TIMEOUT_SECONDS,
-    DEFAULT_PREFERRED_MODEL,
     DEFAULT_EXCLUDE_DIRS,
     ACTIVE_RUN_STATUSES,
     TERMINAL_RUN_STATUSES,
@@ -262,7 +261,7 @@ def _ensure_project_dirs() -> None:
 def _default_config() -> dict[str, Any]:
     return {
         "orchestrator": {
-            "preferred_model": DEFAULT_PREFERRED_MODEL,
+            # No default preferred_model — server decides via GICS inventory
             "budget_limit_usd": 10.0,
             "verbose": False,
             "auto_run_eligible": True,
@@ -430,6 +429,60 @@ def _resolve_token(role: str = "operator", config: dict[str, Any] | None = None)
     return None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Server-Driven Operation Contracts — Capabilities Cache
+# ══════════════════════════════════════════════════════════════════════════════
+
+_caps_cache: dict[str, Any] = {}
+_caps_ts: float = 0.0
+_CAPS_TTL = 300.0  # 5 min
+
+
+def _fetch_capabilities(config: dict[str, Any]) -> dict[str, Any]:
+    """Fetch server capabilities, cached 5min. Never blocks on failure.
+
+    Returns the cached capabilities if available and fresh, otherwise
+    fetches from the server. On network failure, returns empty dict.
+    """
+    global _caps_cache, _caps_ts
+    if _caps_cache and (time.time() - _caps_ts) < _CAPS_TTL:
+        return _caps_cache
+    try:
+        base_url = _resolve_server_url(config)
+        token = _resolve_token("operator", config)
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get(f"{base_url}/ops/capabilities", headers=headers)
+            if resp.status_code == 200:
+                _caps_cache = resp.json()
+                _caps_ts = time.time()
+                return _caps_cache
+    except Exception:
+        pass
+    return {}
+
+
+def _smart_timeout(path: str, config: dict[str, Any]) -> float | None:
+    """Server-driven timeout. Falls back to local profiles if unavailable.
+
+    Returns:
+        Timeout in seconds, or None for streaming endpoints (no timeout).
+    """
+    caps = _fetch_capabilities(config)
+    hints = caps.get("hints", {})
+
+    # Generation endpoints: use server hint
+    if any(p in path for p in ("/generate-plan", "/slice0", "/threads/")):
+        return float(hints.get("generation_timeout_s", 180))
+
+    # Stream endpoints: no timeout
+    if "/stream" in path or "/chat" in path:
+        return None
+
+    # Default: server hint or safe fallback
+    return float(hints.get("default_timeout_s", 15))
+
+
 def _api_settings(config: dict[str, Any]) -> tuple[str, float]:
     api_cfg = dict(config.get("api") or {})
     base_url = str(api_cfg.get("base_url") or DEFAULT_API_BASE_URL).rstrip("/")
@@ -461,9 +514,19 @@ def _api_request(
     Returns:
         Tuple of (status_code, response_payload)
     """
-    base_url, timeout_seconds = _api_settings(config)
+    base_url, config_timeout = _api_settings(config)
     token = _resolve_token(role, config)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    # Smart timeout: server-driven > config override > local fallback
+    timeout_seconds = _smart_timeout(path, config) if config_timeout == DEFAULT_TIMEOUT_SECONDS else config_timeout
+
+    # X-Preferred-Model: allow CLI to influence model selection
+    orch_cfg = config.get("orchestrator") or {}
+    preferred_model = orch_cfg.get("preferred_model")
+    if preferred_model:
+        headers["X-Preferred-Model"] = str(preferred_model)
+
     if extra_headers:
         headers.update(extra_headers)
     url = f"{base_url}{path}"
