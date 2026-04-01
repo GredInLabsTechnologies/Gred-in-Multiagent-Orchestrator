@@ -306,7 +306,7 @@ async def test_run_stream_propagates_session_id():
         with patch.object(AgenticLoopService, "release_thread_execution"):
             with patch.object(AgenticLoopService, "_start_thread_execution_heartbeat", return_value=(asyncio.Event(), MagicMock())):
                 with patch.object(AgenticLoopService, "_stop_heartbeat"):
-                    with patch.object(ConversationService, "get_thread", return_value=MagicMock(mood="neutral", turns=[])):
+                    with patch.object(ConversationService, "get_thread", return_value=MagicMock(mood="neutral", turns=[], workflow_phase="executing")):
                         with patch.object(ConversationService, "add_turn", return_value=MagicMock(id="t1")):
                             with patch.object(ConversationService, "append_item"):
                                 with patch("tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter", return_value=(mock_adapter, "p1", "m1")):

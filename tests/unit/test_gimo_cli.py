@@ -40,13 +40,15 @@ def test_plan_persists_draft_locally(tmp_path, monkeypatch):
     _seed_config(tmp_path, monkeypatch)
     captured: dict[str, object] = {}
 
-    def _fake_api_request(config, method, path, *, params=None):
+    def _fake_api_request(config, method, path, *, params=None, **_kwargs):
         captured["method"] = method
         captured["path"] = path
         captured["params"] = params
         return 201, {"id": "d_123", "status": "draft", "content": '{"tasks":[]}'}
 
-    monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
+    monkeypatch.setattr("gimo_cli.commands.plan.api_request", _fake_api_request)
+    monkeypatch.setattr("gimo_cli.commands.plan.load_bond", lambda _url: {"token": "t", "role": "operator"})
+    monkeypatch.setattr("gimo_cli.commands.plan.provider_config_request", lambda _cfg: (200, {"active": "test-provider"}))
 
     result = runner.invoke(gimo_cli.app, ["plan", "ship p1"], color=False)
 
@@ -71,7 +73,7 @@ def test_run_uses_auto_run_and_saves_backend_payload(tmp_path, monkeypatch):
         ]
     )
 
-    def _fake_api_request(config, method, path, *, params=None):
+    def _fake_api_request(config, method, path, *, params=None, **_kwargs):
         del config
         if path == "/ops/drafts/d_123/approve":
             captured["method"] = method
@@ -85,8 +87,10 @@ def test_run_uses_auto_run_and_saves_backend_payload(tmp_path, monkeypatch):
             return 200, next(run_polls)
         raise AssertionError(f"Unexpected path: {path}")
 
-    monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
-    monkeypatch.setattr(gimo_cli.time, "sleep", lambda _: None)
+    monkeypatch.setattr("gimo_cli.commands.run.api_request", _fake_api_request)
+    monkeypatch.setattr("gimo_cli.stream.api_request", _fake_api_request)
+    import time as _time_mod
+    monkeypatch.setattr(_time_mod, "sleep", lambda _: None)
 
     result = runner.invoke(gimo_cli.app, ["run", "d_123"], color=False)
 
@@ -125,7 +129,7 @@ def test_status_reports_backend_summary(tmp_path, monkeypatch):
             }
         raise AssertionError(f"Unexpected path: {path}")
 
-    monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
+    monkeypatch.setattr("gimo_cli.commands.core.api_request", _fake_api_request)
 
     result = runner.invoke(gimo_cli.app, ["status"], color=False)
 
@@ -146,7 +150,7 @@ def test_diff_calls_backend_and_prints_output(tmp_path, monkeypatch):
         captured["params"] = params
         return 200, " 1 file changed, 3 insertions(+)"
 
-    monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
+    monkeypatch.setattr("gimo_cli.commands.ops.api_request", _fake_api_request)
 
     result = runner.invoke(gimo_cli.app, ["diff", "--base", "main", "--head", "feature/p1"], color=False)
 
@@ -189,7 +193,7 @@ def test_audit_aggregates_backend_checks(tmp_path, monkeypatch):
             return 200, {"lines": ["line-1", "line-2"]}
         raise AssertionError(f"Unexpected path: {path}")
 
-    monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
+    monkeypatch.setattr("gimo_cli.commands.ops.api_request", _fake_api_request)
 
     result = runner.invoke(gimo_cli.app, ["audit"], color=False)
 
@@ -220,7 +224,7 @@ def test_status_json_emits_machine_readable_payload(tmp_path, monkeypatch):
             }
         raise AssertionError(f"Unexpected path: {path}")
 
-    monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
+    monkeypatch.setattr("gimo_cli.commands.core.api_request", _fake_api_request)
 
     result = runner.invoke(gimo_cli.app, ["status", "--json"], color=False)
 
@@ -247,8 +251,7 @@ def test_status_backend_failure_exits_without_local_fallback(tmp_path, monkeypat
         git_calls.append(args)
         raise AssertionError("status must not fall back to local git heuristics")
 
-    monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
-    monkeypatch.setattr(gimo_cli, "_git_command", _fake_git_command)
+    monkeypatch.setattr("gimo_cli.commands.core.api_request", _fake_api_request)
 
     result = runner.invoke(gimo_cli.app, ["status"], color=False)
 
@@ -369,13 +372,15 @@ def test_interactive_chat_done_event_does_not_render_local_notices_or_post_run_r
             return 201, {"id": "th_123"}
         raise AssertionError(f"Unexpected path: {path}")
 
-    monkeypatch.setattr(gimo_cli, "_preflight_check", lambda config: (True, None))
-    monkeypatch.setattr(gimo_cli, "_chat_provider_summary", lambda config: ("openai", "gpt-5"))
-    monkeypatch.setattr(gimo_cli, "_api_request", _fake_api_request)
-    monkeypatch.setattr(gimo_cli.httpx, "Client", FakeClient)
+    monkeypatch.setattr("gimo_cli.chat.preflight_check", lambda config: (True, None))
+    monkeypatch.setattr("gimo_cli.chat.chat_provider_summary", lambda config: ("openai", "gpt-5"))
+    monkeypatch.setattr("gimo_cli.chat.api_request", _fake_api_request)
+    import httpx as _httpx_mod
+    monkeypatch.setattr(_httpx_mod, "Client", FakeClient)
     monkeypatch.setattr("gimo_cli_renderer.ChatRenderer", FakeRenderer)
 
-    gimo_cli._interactive_chat(config)
+    from gimo_cli.chat import interactive_chat
+    interactive_chat(config)
 
     renderer = renderer_box["renderer"]
     assert renderer.responses == ["server response"]
@@ -392,8 +397,9 @@ def test_cli_uses_shared_slash_command_authority(tmp_path, monkeypatch):
             dispatch_calls.append((command, argument))
             return True, None
 
-        m.setattr(gimo_cli, "dispatch_slash_command", _fake_dispatch)
-        handled, outcome = gimo_cli._handle_chat_slash_command(
+        m.setattr("gimo_cli.chat.dispatch_slash_command", _fake_dispatch)
+        from gimo_cli.chat import handle_chat_slash_command
+        handled, outcome = handle_chat_slash_command(
             gimo_cli._load_config(),
             "/status",
             workspace_root=str(tmp_path),
@@ -463,7 +469,7 @@ def test_rollback_uses_safe_git_wrapper(tmp_path, monkeypatch):
             return _cp(args, stdout="deadbeef\n")
         raise AssertionError(f"Unexpected git args: {args}")
 
-    monkeypatch.setattr(gimo_cli, "_git_command", _fake_git_command)
+    monkeypatch.setattr("gimo_cli.commands.ops.git_command", _fake_git_command)
 
     result = runner.invoke(gimo_cli.app, ["rollback", "--yes"], color=False)
 
@@ -480,7 +486,7 @@ def test_watch_json_collects_sse_events(tmp_path, monkeypatch):
         yield {"event": "run_started", "run_id": "r1"}
         yield {"event": "run_finished", "run_id": "r1", "status": "done"}
 
-    monkeypatch.setattr(gimo_cli, "_stream_events", _fake_stream_events)
+    monkeypatch.setattr("gimo_cli.commands.run.stream_events", _fake_stream_events)
 
     result = runner.invoke(gimo_cli.app, ["watch", "--limit", "2", "--json"], color=False)
 

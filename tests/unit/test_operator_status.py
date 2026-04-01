@@ -90,15 +90,16 @@ def test_operator_status_snapshot_ignores_conflicting_legacy_provider_fields(mon
     assert snapshot["active_model"] == "gpt-5.4"
 
 
-def test_operator_status_snapshot_strict_failure(monkeypatch):
+def test_operator_status_snapshot_partial_on_git_failure(monkeypatch):
     from tools.gimo_server.services.git_service import GitService
-    from tools.gimo_server.services.provider_service_impl import ProviderService
-    from tools.gimo_server.services.conversation_service import ConversationService
-    
+
     def mock_fail(*args, **kwargs):
         raise ValueError("Simulated failure")
-        
+
     monkeypatch.setattr(GitService, "get_current_branch", mock_fail)
-    
-    with pytest.raises(ValueError, match="Simulated failure"):
-        OperatorStatusService.get_status_snapshot()
+
+    # Defensive: get_status_snapshot catches exceptions and returns partial snapshot
+    snapshot = OperatorStatusService.get_status_snapshot()
+    assert isinstance(snapshot, dict)
+    # Git fields should be absent or None since they failed
+    assert snapshot.get("branch") is None

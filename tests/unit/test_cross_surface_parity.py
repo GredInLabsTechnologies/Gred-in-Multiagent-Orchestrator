@@ -56,7 +56,7 @@ async def test_cli_and_tui_consume_same_operator_status_contract():
         cli_calls.append((method, path))
         return 200, snapshot
 
-    with patch("gimo._api_request", side_effect=_fake_cli_api_request), patch.object(
+    with patch("gimo_cli.chat.api_request", side_effect=_fake_cli_api_request), patch.object(
         gimo.ConsoleTerminalSurface,
         "render_status_snapshot",
         autospec=True,

@@ -9,8 +9,21 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+import pytest
+
 from tools.gimo_server.security.cold_room import ColdRoomManager
 from tools.gimo_server.security.license_guard import LicenseGuard
+
+# Save the real validate method before session-scoped mocks can replace it.
+_REAL_VALIDATE = LicenseGuard.validate
+
+
+@pytest.fixture(autouse=True)
+def _restore_real_validate():
+    """Undo session-scoped LicenseGuard.validate mock so cold_room tests use real logic."""
+    LicenseGuard.validate = _REAL_VALIDATE
+    yield
+    # No need to restore mock — the session mock will re-apply on next test_client usage.
 
 
 def _b64url(data: bytes) -> str:

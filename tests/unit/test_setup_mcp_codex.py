@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def _load_setup_mcp_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "setup_mcp.py"
+    module_path = Path(__file__).resolve().parents[2] / "scripts" / "setup_mcp.py"
     spec = importlib.util.spec_from_file_location("setup_mcp", module_path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

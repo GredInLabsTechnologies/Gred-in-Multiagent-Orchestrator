@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -198,8 +199,7 @@ def test_normalize_config_auto_injects_codex_and_claude_account_when_clis_exist(
         },
     )
 
-    monkeypatch.setattr(
-        "tools.gimo_server.services.provider_service.shutil.which",
+    monkeypatch.setattr(shutil, "which",
         lambda binary: f"/mock/{binary}" if binary in {"codex", "claude"} else None,
     )
 
@@ -225,7 +225,7 @@ def test_normalize_config_does_not_inject_when_clis_missing(monkeypatch):
         },
     )
 
-    monkeypatch.setattr("tools.gimo_server.services.provider_service.shutil.which", lambda _binary: None)
+    monkeypatch.setattr(shutil, "which", lambda _binary: None)
 
     normalized = ProviderService._normalize_config(cfg)
 
@@ -246,8 +246,7 @@ def test_normalize_config_auto_injection_is_idempotent_and_keeps_roles(monkeypat
         },
     )
 
-    monkeypatch.setattr(
-        "tools.gimo_server.services.provider_service.shutil.which",
+    monkeypatch.setattr(shutil, "which",
         lambda binary: f"/mock/{binary}" if binary in {"codex", "claude"} else None,
     )
 
@@ -276,8 +275,7 @@ def test_normalize_config_does_not_inject_default_id_when_custom_account_provide
         },
     )
 
-    monkeypatch.setattr(
-        "tools.gimo_server.services.provider_service.shutil.which",
+    monkeypatch.setattr(shutil, "which",
         lambda binary: f"/mock/{binary}" if binary in {"codex", "claude"} else None,
     )
 

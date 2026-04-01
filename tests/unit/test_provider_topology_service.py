@@ -145,7 +145,7 @@ def test_provider_config_derives_legacy_topology_fields_from_roles():
 def test_ensure_default_config_without_detected_cli_keeps_roles_unset(monkeypatch, tmp_path):
     config_file = tmp_path / "provider.json"
 
-    monkeypatch.setattr("tools.gimo_server.services.provider_service_impl.OPS_DATA_DIR", tmp_path)
+    monkeypatch.setattr("tools.gimo_server.services.providers.service_impl.OPS_DATA_DIR", tmp_path)
     monkeypatch.setattr(ProviderService, "CONFIG_FILE", config_file)
     monkeypatch.setattr(shutil, "which", lambda _binary: None)
 

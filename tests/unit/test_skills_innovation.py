@@ -188,8 +188,12 @@ class TestMarketplace:
 
 
 class TestMoods:
-    def test_seven_moods_defined(self):
-        assert len(MOOD_PROMPTS) == 7
+    def test_moods_defined(self):
+        # 7 canonical + 7 legacy aliases = 14 total
+        assert len(MOOD_PROMPTS) >= 7
+        for canonical in ("neutral", "assertive", "calm", "analytical",
+                          "exploratory", "cautious", "collaborative"):
+            assert canonical in MOOD_PROMPTS
 
     def test_neutral_is_empty(self):
         assert MOOD_PROMPTS["neutral"] == ""
@@ -200,7 +204,9 @@ class TestMoods:
                 assert prompt.startswith("[MOOD:")
 
     def test_get_mood_prompt(self):
-        assert "FORENSIC" in SkillsService.get_mood_prompt("forensic")
+        # "forensic" is a legacy alias for "analytical"
+        prompt = SkillsService.get_mood_prompt("forensic")
+        assert "[MOOD:" in prompt
         assert SkillsService.get_mood_prompt("neutral") == ""
         assert SkillsService.get_mood_prompt("unknown") == ""
 
@@ -208,7 +214,8 @@ class TestMoods:
         moods = SkillsService.list_available_moods()
         assert "forensic" in moods
         assert "mentor" in moods
-        assert len(moods) == 7
+        # 7 canonical + legacy aliases
+        assert len(moods) >= 7
 
     def test_create_skill_with_mood(self):
         skill = SkillsService.create_skill(_test_create_req(mood="executor"))

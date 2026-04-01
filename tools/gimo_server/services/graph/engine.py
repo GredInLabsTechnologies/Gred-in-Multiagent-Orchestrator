@@ -327,7 +327,7 @@ class GraphEngine(
             # Build task descriptor from node config
             descriptor = TaskDescriptor(
                 task_id=node.id,
-                title=node.name or node.id,
+                title=node.config.get("name") or node.config.get("label") or node.id,
                 description=str(node.config.get("description", "")),
                 task_type=str(node.config.get("task_type", "general")),
                 task_semantic=str(node.config.get("task_semantic", "general")),

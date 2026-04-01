@@ -23,6 +23,7 @@ from gimo_cli.api import (  # noqa: F401
 
 # ── re-exports: config / paths ───────────────────────────────────────
 from gimo_cli.config import (  # noqa: F401
+    DEFAULT_API_BASE_URL,
     load_config as _load_config,
     save_config as _save_config,
     project_root as _project_root,

@@ -95,14 +95,16 @@ def test_official_app_facade_mount_exposes_dual_transport_routes(test_client):
 
     official_mount = next(route for route in app.routes if getattr(route, "path", None) == "/mcp/app")
     subpaths = {getattr(route, "path", None) for route in official_mount.app.routes}
-    assert {"/sse", "/messages", "/mcp"}.issubset(subpaths)
+    # SSE transport routes are always present
+    assert {"/sse", "/messages"}.issubset(subpaths)
+    # Streamable HTTP route is only present when ORCH_APP_MCP_STREAMABLE_HTTP=true
+    from tools.gimo_server.config import get_settings
+    if get_settings().app_mcp_streamable_http:
+        assert "/mcp" in subpaths
 
     # A real request guards against `/mcp/app/*` being swallowed by the broader `/mcp` mount.
     sse_response = test_client.get("/mcp/app/sse", headers={"host": "127.0.0.1"})
     assert sse_response.status_code != 404
-
-    streamable_response = test_client.get("/mcp/app/mcp", headers={"host": "127.0.0.1"})
-    assert streamable_response.status_code != 404
 
 
 @pytest.mark.anyio

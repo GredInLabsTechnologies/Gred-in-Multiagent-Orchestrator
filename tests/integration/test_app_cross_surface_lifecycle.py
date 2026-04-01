@@ -48,7 +48,8 @@ def _configure_ops_dirs(monkeypatch, tmp_path: Path) -> None:
 
 def _configure_surface_settings(monkeypatch, tmp_path: Path):
     from tools.gimo_server import config as config_mod
-    from tools.gimo_server.services import app_session_service, purge_service, review_purge_contract, sandbox_service
+    from tools.gimo_server.services import app_session_service, purge_service, review_purge_contract
+    from tools.gimo_server.services.execution import sandbox_service
 
     base_settings = get_settings()
     test_settings = replace(
@@ -78,7 +79,7 @@ def _configure_surface_settings(monkeypatch, tmp_path: Path):
     return test_settings
 
 
-def test_app_surface_uses_bound_snapshot_and_closes_cross_surface_lifecycle(monkeypatch, tmp_path: Path):
+def test_app_surface_uses_bound_snapshot_and_closes_cross_surface_lifecycle(monkeypatch, tmp_path: Path, test_client):
     _configure_ops_dirs(monkeypatch, tmp_path)
     settings = _configure_surface_settings(monkeypatch, tmp_path)
 
@@ -105,7 +106,8 @@ def test_app_surface_uses_bound_snapshot_and_closes_cross_surface_lifecycle(monk
 
     app.dependency_overrides[verify_token] = _override_auth
 
-    with TestClient(app, raise_server_exceptions=False) as client:
+    client = test_client
+    if True:
         repos_res = client.get("/ops/app/repos")
         assert repos_res.status_code == 200
         repos = repos_res.json()

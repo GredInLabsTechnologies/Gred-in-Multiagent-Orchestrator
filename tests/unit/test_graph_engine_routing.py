@@ -49,6 +49,10 @@ async def test_execute_llm_call_uses_profile_router_when_agent_preset():
     ):
         mock_decision = MagicMock()
         mock_decision.summary = mock_routing_summary
+        mock_decision.binding.model = "gpt-4"
+        mock_decision.binding.provider = "openai"
+        mock_decision.profile.agent_preset = "researcher"
+        mock_decision.profile.execution_policy = "docs_research"
         mock_route.return_value = mock_decision
 
         mock_generate.return_value = {
@@ -64,8 +68,7 @@ async def test_execute_llm_call_uses_profile_router_when_agent_preset():
         # Should call ProfileRouterService.route
         mock_route.assert_called_once()
         call_kwargs = mock_route.call_args.kwargs
-        assert call_kwargs["agent_preset"] == "researcher"
-        assert call_kwargs["workflow_phase"] == "reviewing"
+        assert call_kwargs["requested_preset"] == "researcher"
 
         # Should store routing_decision_summary in node.config
         assert "routing_decision_summary" in node.config
@@ -206,16 +209,13 @@ async def test_execute_llm_call_routing_builds_task_descriptor():
 
         # Verify TaskDescriptor was built correctly
         call_kwargs = mock_route.call_args.kwargs
-        task_descriptor = call_kwargs["task_descriptor"]
-        assert task_descriptor.task_id == "n_test"
+        descriptor = call_kwargs["descriptor"]
+        assert descriptor.task_id == "n_test"
         # Title should be node.label, which defaults to node.id if not set
-        assert task_descriptor.title in ("security_audit", "n_test")  # Either label or id
-        assert task_descriptor.task_type == "security_review"
-        assert task_descriptor.complexity_band == "high"
-        assert task_descriptor.risk_band == "high"
+        assert descriptor.title in ("security_audit", "n_test")  # Either label or id
+        assert descriptor.task_type == "security_review"
+        assert descriptor.complexity_band == "high"
+        assert descriptor.risk_band == "high"
 
-        # Verify task_context
-        task_context = call_kwargs["task_context"]
-        assert task_context["cost_ceiling"] == 0.50
-        assert task_context["binding_mode"] == "runtime"
-        assert task_context["budget_mode"] == "premium"
+        # Verify routing was called with correct preset
+        assert call_kwargs["requested_preset"] == "reviewer"

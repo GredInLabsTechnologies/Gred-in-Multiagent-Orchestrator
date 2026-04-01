@@ -15,14 +15,16 @@ from tools.gimo_server.config import _load_or_create_token
 
 def test_token_creation(tmp_path):
     token_file = tmp_path / ".token"
-    with patch("tools.gimo_server.config.ORCH_TOKEN_FILE", token_file):
-        with patch.dict(os.environ, {"ORCH_TOKEN": ""}):
-            if token_file.exists():
-                token_file.unlink()
-            token = _load_or_create_token()
-            assert len(token) > 20
-            assert token_file.exists()
-            assert token_file.read_text() == token
+    # Patch config.__file__ so unified_creds path points to non-existent location
+    fake_base = tmp_path / "fake_base"
+    fake_base.mkdir()
+    import tools.gimo_server.config as _cfg
+    with patch.object(_cfg, "__file__", str(fake_base / "config.py")), \
+         patch.dict(os.environ, {"ORCH_TOKEN": ""}):
+        token = _load_or_create_token(token_file=token_file)
+        assert len(token) > 20
+        assert token_file.exists()
+        assert token_file.read_text() == token
 
 
 def test_token_from_env():
@@ -34,10 +36,13 @@ def test_token_from_env():
 def test_token_from_file(tmp_path):
     token_file = tmp_path / ".token"
     token_file.write_text("file-token")
-    with patch("tools.gimo_server.config.ORCH_TOKEN_FILE", token_file):
-        with patch.dict(os.environ, {"ORCH_TOKEN": ""}):
-            token = _load_or_create_token()
-            assert token == "file-token"
+    fake_base = tmp_path / "fake_base"
+    fake_base.mkdir()
+    import tools.gimo_server.config as _cfg
+    with patch.object(_cfg, "__file__", str(fake_base / "config.py")), \
+         patch.dict(os.environ, {"ORCH_TOKEN": ""}):
+        token = _load_or_create_token(token_file=token_file)
+        assert token == "file-token"
 
 
 def test_token_file_read_error(tmp_path):

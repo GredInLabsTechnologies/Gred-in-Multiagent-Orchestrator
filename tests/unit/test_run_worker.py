@@ -88,21 +88,21 @@ class TestIsStillActive:
         from tools.gimo_server.services.run_worker import RunWorker
         return RunWorker()
 
-    @patch("tools.gimo_server.services.run_worker.OpsService")
+    @patch("tools.gimo_server.services.execution.run_worker.OpsService")
     def test_active_statuses_return_true(self, mock_ops):
         worker = self._build_worker()
         for status in ("pending", "running", "awaiting_subagents", "awaiting_review"):
             mock_ops.get_run.return_value = _make_run("r1", status=status)
             assert worker._is_still_active("r1") is True
 
-    @patch("tools.gimo_server.services.run_worker.OpsService")
+    @patch("tools.gimo_server.services.execution.run_worker.OpsService")
     def test_terminal_statuses_return_false(self, mock_ops):
         worker = self._build_worker()
         for status in ("done", "error", "cancelled"):
             mock_ops.get_run.return_value = _make_run("r1", status=status)
             assert worker._is_still_active("r1") is False
 
-    @patch("tools.gimo_server.services.run_worker.OpsService")
+    @patch("tools.gimo_server.services.execution.run_worker.OpsService")
     def test_missing_run_returns_false(self, mock_ops):
         worker = self._build_worker()
         mock_ops.get_run.return_value = None
@@ -114,33 +114,13 @@ class TestIsStillActive:
 # ---------------------------------------------------------------------------
 
 class TestExtractTargetPath:
-    """Tests for RunWorker._extract_target_path with various input patterns."""
+    """Tests for RunWorker._extract_target_path (OBSOLETE — always returns None)."""
 
-    def _extract(self, text: str):
+    def test_obsolete_always_returns_none(self):
         from tools.gimo_server.services.run_worker import RunWorker
-        return RunWorker._extract_target_path(text)
-
-    def test_explicit_target_file_directive(self):
-        assert self._extract("Please edit TARGET_FILE: src/main.py now") == "src/main.py"
-
-    def test_windows_absolute_path(self):
-        result = self._extract("modify C:/Users/dev/project/app.py")
-        assert result == "C:/Users/dev/project/app.py"
-
-    def test_relative_path_with_directory(self):
-        result = self._extract("update docs/DISEÑO_CALCULADORA.md content")
-        assert result == "docs/DISEÑO_CALCULADORA.md"
-
-    def test_quoted_filename(self):
-        result = self._extract("create a file called 'report.txt'")
-        assert result == "report.txt"
-
-    def test_bare_filename_after_keyword(self):
-        result = self._extract("create setup.py with the config")
-        assert result == "setup.py"
-
-    def test_no_match_returns_none(self):
-        assert self._extract("just a plain sentence with no files") is None
+        assert RunWorker._extract_target_path("TARGET_FILE: src/main.py") is None
+        assert RunWorker._extract_target_path("modify C:/Users/dev/project/app.py") is None
+        assert RunWorker._extract_target_path("just a plain sentence") is None
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +131,7 @@ class TestTick:
     """Tests for _tick dispatch and concurrency logic."""
 
     @pytest.mark.asyncio
-    @patch("tools.gimo_server.services.run_worker.OpsService")
+    @patch("tools.gimo_server.services.execution.run_worker.OpsService")
     async def test_tick_dispatches_pending_runs(self, mock_ops):
         from tools.gimo_server.services.run_worker import RunWorker
 
@@ -172,7 +152,7 @@ class TestTick:
         assert "r1" in worker._running_ids and "r2" in worker._running_ids
 
     @pytest.mark.asyncio
-    @patch("tools.gimo_server.services.run_worker.OpsService")
+    @patch("tools.gimo_server.services.execution.run_worker.OpsService")
     async def test_tick_respects_max_concurrent(self, mock_ops):
         from tools.gimo_server.services.run_worker import RunWorker
 
@@ -196,45 +176,42 @@ class TestTick:
 # ---------------------------------------------------------------------------
 
 class TestExecuteRun:
-    """Tests for _execute_run delegation and error handling."""
+    """Tests for _execute_run validation and error handling."""
 
     @pytest.mark.asyncio
-    @patch("tools.gimo_server.services.run_worker.OpsService")
-    async def test_execute_run_delegates_to_engine_service(self, mock_ops):
+    async def test_execute_run_rejects_missing_task_spec(self):
         from tools.gimo_server.services.run_worker import RunWorker
-
-        mock_ops.get_run.return_value = _make_run("r1", status="done")
+        from tools.gimo_server.services.ops_service import OpsService
 
         worker = RunWorker()
         worker._running_ids.add("r1")
 
-        with patch("tools.gimo_server.services.engine_service.EngineService.execute_run", new_callable=AsyncMock) as mock_engine:
+        with patch.object(OpsService, "get_run", return_value=_make_run("r1", status="pending")), \
+             patch.object(OpsService, "append_log") as mock_log, \
+             patch.object(OpsService, "update_run_status") as mock_status:
             await worker._execute_run("r1")
-            mock_engine.assert_awaited_once_with("r1")
+            mock_status.assert_called_with("r1", "error", msg="Missing ValidatedTaskSpec")
 
-        # After completion, running_ids should be cleaned up
         assert "r1" not in worker._running_ids
 
     @pytest.mark.asyncio
-    @patch("tools.gimo_server.services.run_worker.OpsService")
-    async def test_execute_run_handles_engine_exception(self, mock_ops):
+    async def test_execute_run_silently_returns_on_missing_run(self):
         from tools.gimo_server.services.run_worker import RunWorker
-
-        mock_ops.get_run.return_value = _make_run("r1", status="error")
+        from tools.gimo_server.services.ops_service import OpsService
 
         worker = RunWorker()
         worker._running_ids.add("r1")
 
-        with patch("tools.gimo_server.services.engine_service.EngineService.execute_run", new_callable=AsyncMock, side_effect=RuntimeError("boom")):
-            # Should not raise
+        with patch.object(OpsService, "get_run", return_value=None), \
+             patch.object(OpsService, "update_run_status") as mock_status:
             await worker._execute_run("r1")
+            mock_status.assert_not_called()
 
-        mock_ops.update_run_status.assert_called_with("r1", "error", msg="Internal engine error")
         assert "r1" not in worker._running_ids
 
 
 @pytest.mark.asyncio
-@patch("tools.gimo_server.services.run_worker.OpsService")
+@patch("tools.gimo_server.services.execution.run_worker.OpsService")
 async def test_critic_gate_skips_mature_high_quality_outputs(mock_ops):
     from tools.gimo_server.services.run_worker import RunWorker
 
@@ -279,7 +256,7 @@ async def test_critic_gate_skips_mature_high_quality_outputs(mock_ops):
 
 
 @pytest.mark.asyncio
-@patch("tools.gimo_server.services.run_worker.OpsService")
+@patch("tools.gimo_server.services.execution.run_worker.OpsService")
 async def test_critic_gate_uses_final_model_used_for_initial_skip_lookup(mock_ops):
     from tools.gimo_server.services.run_worker import RunWorker
 
@@ -325,7 +302,7 @@ async def test_critic_gate_uses_final_model_used_for_initial_skip_lookup(mock_op
 
 
 @pytest.mark.asyncio
-@patch("tools.gimo_server.services.run_worker.OpsService")
+@patch("tools.gimo_server.services.execution.run_worker.OpsService")
 async def test_critic_gate_preserves_legacy_avg_output_tokens_history(mock_ops):
     from tools.gimo_server.services.run_worker import RunWorker
 

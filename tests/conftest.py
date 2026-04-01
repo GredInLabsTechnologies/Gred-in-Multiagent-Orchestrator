@@ -26,7 +26,7 @@ os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("ORCH_LICENSE_ALLOW_DEBUG_BYPASS", "true")
 os.environ.setdefault("ORCH_AUDIT_LOG_MAX_BYTES", str(50 * 1024 * 1024))
 os.environ.setdefault("ORCH_APP_MCP_PROFILE", "safe")
-os.environ.setdefault("ORCH_APP_MCP_STREAMABLE_HTTP", "true")
+os.environ.setdefault("ORCH_APP_MCP_STREAMABLE_HTTP", "false")
 
 from tools.gimo_server.main import app  # noqa: E402
 
@@ -115,7 +115,7 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool | None:
 
 
 @pytest.fixture(scope="session")
-def test_client(_mock_gics_daemon):
+def test_client(_mock_gics_daemon, _mock_license_guard, _mock_lifespan_network):
     """Provide a TestClient with properly initialized lifespan context."""
     client = TestClient(app, raise_server_exceptions=False)
     try:
@@ -138,6 +138,44 @@ def _mock_gics_daemon():
     with patch.object(GicsService, "start_daemon"), \
          patch.object(GicsService, "start_health_check"), \
          patch.object(GicsService, "stop_daemon"):
+        yield
+
+
+@pytest.fixture(scope="session")
+def _mock_license_guard():
+    """Prevent LicenseGuard.validate from making HTTP calls in tests."""
+    from tools.gimo_server.security.license_guard import LicenseGuard, LicenseStatus
+
+    async def _fake_validate(self):
+        return LicenseStatus(valid=True, reason="test_bypass", plan="debug")
+
+    async def _fake_recheck(self):
+        pass
+
+    with patch.object(LicenseGuard, "validate", _fake_validate), \
+         patch.object(LicenseGuard, "periodic_recheck", _fake_recheck):
+        yield
+
+
+@pytest.fixture(scope="session")
+def _mock_lifespan_network():
+    """Prevent network calls during app lifespan startup (Ollama, GICS pipes).
+
+    Instead of replacing high-level methods (which breaks tests that call them
+    directly), we stub the low-level HTTP functions they use.
+    """
+    from tools.gimo_server.services.provider_catalog_service import ProviderCatalogService
+    from tools.gimo_server.services.preset_telemetry_service import PresetTelemetryService
+
+    async def _fake_ollama_health():
+        return False
+
+    async def _fake_ollama_list():
+        return []
+
+    with patch.object(ProviderCatalogService, "_ollama_health", new=_fake_ollama_health), \
+         patch.object(ProviderCatalogService, "_ollama_list_installed", new=_fake_ollama_list), \
+         patch.object(PresetTelemetryService, "seed_initial_priors"):
         yield
 
 
@@ -304,7 +342,7 @@ def init_forensic_state():
 
     # 4. Create real provider config with s1 server
     provider_file = ops_dir / "provider.json"
-    mcp_script = os.path.normpath(os.path.abspath(os.path.join(Path(__file__).parent.resolve(), "test_mcp_server.py")))
+    mcp_script = os.path.normpath(os.path.abspath(os.path.join(Path(__file__).parent.resolve(), "integration", "test_mcp_server.py")))
     prov_cfg = ProviderConfig(
         active="openai",
         providers={"openai": {"type": "openai", "model": "gpt-4o"}},
@@ -312,10 +350,14 @@ def init_forensic_state():
     )
     if provider_file.exists():
         try:
-            # Merge existing servers
+            # Merge: keep existing entries but let test config override for s1
             old_cfg = ProviderConfig.model_validate_json(provider_file.read_text(encoding="utf-8"))
-            prov_cfg.providers.update(old_cfg.providers)
-            prov_cfg.mcp_servers.update(old_cfg.mcp_servers)
+            merged_providers = dict(old_cfg.providers)
+            merged_providers.update(prov_cfg.providers)
+            prov_cfg.providers = merged_providers
+            merged_mcp = dict(old_cfg.mcp_servers)
+            merged_mcp.update(prov_cfg.mcp_servers)  # test config overrides s1
+            prov_cfg.mcp_servers = merged_mcp
         except Exception:
             pass
     provider_file.write_text(prov_cfg.model_dump_json(indent=2), encoding="utf-8")

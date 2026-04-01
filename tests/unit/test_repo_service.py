@@ -28,8 +28,8 @@ def test_list_repos(mock_list):
 
 
 
-@patch("tools.gimo_server.services.repo_service.BASE_DIR")
-@patch("tools.gimo_server.services.repo_service.VITAMINIZE_PACKAGE", {"file.py", "dir"})
+@patch("tools.gimo_server.services.workspace.repo_service.BASE_DIR")
+@patch("tools.gimo_server.services.workspace.repo_service.VITAMINIZE_PACKAGE", {"file.py", "dir"})
 def test_vitaminize_repo(mock_base, tmp_path):
     # Note: VITAMINIZE_PACKAGE patch with value doesn't pass a mock argument
     target = tmp_path / "target"
@@ -43,7 +43,7 @@ def test_vitaminize_repo(mock_base, tmp_path):
 
     mock_base.return_value = source_base
     # Fix: BASE_DIR in the code is used as source = BASE_DIR / rel
-    with patch("tools.gimo_server.services.repo_service.BASE_DIR", source_base):
+    with patch("tools.gimo_server.services.workspace.repo_service.BASE_DIR", source_base):
         created = RepoService.vitaminize_repo(target)
         assert len(created) == 2
         assert (target / "file.py").exists()

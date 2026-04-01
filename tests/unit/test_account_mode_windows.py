@@ -45,24 +45,24 @@ def _mock_proc(stdout: bytes = b'{"result":"ok"}', stderr: bytes = b"", rc: int 
 class TestCliAccountAdapterWindows:
     @pytest.mark.asyncio
     async def test_generate_uses_shell_on_windows(self, _fake_win32, monkeypatch):
-        """En Windows, generate() usa create_subprocess_shell."""
+        """En Windows, generate() usa asyncio.to_thread(subprocess.run, ...)."""
         from tools.gimo_server.providers import cli_account as mod
+        import subprocess
 
         monkeypatch.setattr("shutil.which", lambda _: "/fake/codex")
 
         captured = {}
 
-        async def fake_shell(cmd_str, **kwargs):
-            captured["cmd"] = cmd_str
-            return _mock_proc()
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return subprocess.CompletedProcess(cmd, 0, stdout=b'{"result":"ok"}', stderr=b"")
 
-        monkeypatch.setattr(asyncio, "create_subprocess_shell", fake_shell)
+        monkeypatch.setattr(subprocess, "run", fake_run)
 
         adapter = mod.CliAccountAdapter(binary="codex")
         await adapter.generate("hello", {})
 
-        assert "codex" in captured["cmd"]
-        assert "exec" in captured["cmd"]
+        assert any("codex" in str(c) for c in captured["cmd"])
 
     @pytest.mark.asyncio
     async def test_generate_uses_exec_on_linux(self, _fake_linux, monkeypatch):

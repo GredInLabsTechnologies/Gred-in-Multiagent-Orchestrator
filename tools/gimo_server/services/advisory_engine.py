@@ -53,11 +53,14 @@ class AdvisoryEngine:
 
         telemetry = PresetTelemetryService.get_telemetry(task_semantic, preset_name)
 
-        if not telemetry:
+        if not telemetry or not isinstance(telemetry, dict):
             # Sin datos: usar prior puro
             return 0.0, f"advisory=0.00(no_telemetry,using_prior={prior_score:.2f})"
 
-        samples = telemetry["samples"]
+        try:
+            samples = int(telemetry["samples"])
+        except (KeyError, TypeError, ValueError):
+            return 0.0, f"advisory=0.00(corrupt_telemetry,using_prior={prior_score:.2f})"
 
         if samples < cls.MIN_SAMPLES_EXPLORATION:
             # Muy pocos datos: usar prior puro + bonus exploratorio

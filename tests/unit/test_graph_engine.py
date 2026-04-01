@@ -717,7 +717,9 @@ async def test_graph_engine_model_router_trace_for_llm_call():
     assert state.data["model_router_last"]["node_id"] == "L1"
     assert state.data["model_router_last"]["selected_model"] == state.data["model_seen"]
     assert len(state.data["model_router_trace"]) >= 1
-    assert "hardware_state" in state.data["model_router_last"]
+    # Verify routing decision fields are present
+    assert "provider_id" in state.data["model_router_last"]
+    assert "agent_preset" in state.data["model_router_last"]
 
 # ── Confidence Analysis ───────────────────────────────────
 

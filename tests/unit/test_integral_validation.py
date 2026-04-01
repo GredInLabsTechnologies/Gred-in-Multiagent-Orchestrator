@@ -212,6 +212,11 @@ def test_phase10_merge_conflict_main_intact(tmp_path, monkeypatch):
     run = OpsService.create_run(approved.id)
     from tools.gimo_server.services import merge_gate_service as mgs
 
+    # Provide workspace/authoritative paths to satisfy resolve_* functions
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(mgs, "resolve_workspace_path", lambda *a, **kw: workspace)
+    monkeypatch.setattr(mgs, "resolve_authoritative_repo_path", lambda *a, **kw: workspace)
     monkeypatch.setattr(mgs.GitService, "is_worktree_clean", lambda _base: True)
     monkeypatch.setattr(mgs.GitService, "run_tests", lambda _base: (True, "ok"))
     monkeypatch.setattr(mgs.GitService, "run_lint_typecheck", lambda _base: (True, "ok"))
