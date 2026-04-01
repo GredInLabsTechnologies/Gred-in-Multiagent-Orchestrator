@@ -1927,20 +1927,40 @@ def plan(
         )
         return
 
+    # Check for error status BEFORE showing success panel
+    plan_status = payload.get("status", "draft")
+    is_error = plan_status == "error"
+
     console.print(
         Panel(
             "\n".join(
                 [
-                    "[bold green]Plan generated successfully.[/bold green]",
+                    "[bold green]Plan generated successfully.[/bold green]" if not is_error else "[bold red]Plan generation failed.[/bold red]",
                     f"Draft ID: [bold]{draft_id}[/bold]",
-                    f"Status: {payload.get('status', 'draft')}",
+                    f"Status: {plan_status}",
                     f"Saved: {draft_path if should_save else 'not persisted locally'}",
                 ]
             ),
             title="GIMO Plan",
-            border_style="green",
+            border_style="green" if not is_error else "red",
         )
     )
+
+    # Show error details if status=error
+    if is_error:
+        error_detail = payload.get("error") or payload.get("error_detail") or "Unknown error"
+        console.print(f"\n[red]✗ Error:[/red] {error_detail}", style="bold")
+
+        # Show actionable hints based on error type
+        error_lower = str(error_detail).lower()
+        if "bond" in error_lower or "auth" in error_lower or "token" in error_lower:
+            console.print("[yellow]→[/yellow] Check authentication: [cyan]gimo doctor[/cyan]")
+            console.print("[yellow]→[/yellow] Re-authenticate: [cyan]gimo login http://127.0.0.1:9325[/cyan]")
+        elif "provider" in error_lower:
+            console.print("[yellow]→[/yellow] Check providers: [cyan]gimo providers list[/cyan]")
+            console.print("[yellow]→[/yellow] Configure provider in .gimo/config.yaml")
+
+        raise typer.Exit(1)  # EXIT WITH ERROR CODE
 
     content = payload.get("content")
     if isinstance(content, str) and content.strip():
@@ -2381,15 +2401,21 @@ def login(
         console.print("[yellow]Web OAuth not yet implemented (P2). Use token auth for now.[/yellow]")
         raise typer.Exit(1)
 
-    # Method 3: Token (default) — interactive prompt
+    # Method 3: Token (default) — try environment variable first, then interactive prompt
     console.print(f"[bold]Bonding to GIMO server:[/bold] {normalized_url}")
-    console.print("[dim]Enter server token (from server's .gimo_credentials or ORCH_OPERATOR_TOKEN):[/dim]")
 
-    import getpass
-    token = getpass.getpass("Token: ").strip()
-    if not token:
-        console.print("[red]Token required[/red]")
-        raise typer.Exit(1)
+    # Try ORCH_OPERATOR_TOKEN from environment
+    token = os.getenv("ORCH_OPERATOR_TOKEN", "").strip()
+    if token:
+        console.print("[dim]Using token from ORCH_OPERATOR_TOKEN environment variable[/dim]")
+    else:
+        # Fall back to interactive prompt
+        console.print("[dim]Enter server token (from server's .gimo_credentials or ORCH_OPERATOR_TOKEN):[/dim]")
+        import getpass
+        token = getpass.getpass("Token: ").strip()
+        if not token:
+            console.print("[red]Token required[/red]")
+            raise typer.Exit(1)
 
     # Validate token and negotiate capabilities
     console.print("[dim]Validating token...[/dim]")
