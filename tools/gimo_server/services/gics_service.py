@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..config import GICS_DAEMON_SCRIPT, GICS_SOCKET_PATH, GICS_TOKEN_PATH, OPS_DATA_DIR
-from .gics_client import GICSClient, GICSDaemonSupervisor
+from vendor.gics.clients.python.gics_client import GICSClient, GICSDaemonSupervisor
 
 logger = logging.getLogger("orchestrator.services.gics")
 

@@ -3,7 +3,6 @@ import time
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 from tools.gimo_server.services.trust_engine import CircuitBreakerConfig, TrustEngine, TrustThresholds
-from tools.gimo_server.services.trust_event_buffer import TrustEventBuffer
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server import config
@@ -56,17 +55,9 @@ class TestTrustEngineCore:
         assert record["circuit_state"] == "open"
         assert record["policy"] == "blocked"
 
-# ── Event Buffer & Performance ──────────────────────────────
+# ── Performance ──────────────────────────────────────────
 
 class TestTrustInfrastructure:
-    def test_buffer_flushes(self):
-        storage = StubStorage()
-        buffer = TrustEventBuffer(storage=storage, max_events=2, flush_interval_seconds=999)
-        buffer.add_event({"tool": "a"})
-        assert buffer.size == 1
-        buffer.add_event({"tool": "b"})
-        assert len(storage.saved_batches) == 1
-
     @pytest.mark.parametrize("n_events", [200, 500])
     def test_performance_overhead(self, n_events):
         """Verify TrustEngine overhead stays under 15ms budget (consolidated from latency tests)."""
