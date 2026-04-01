@@ -26,7 +26,7 @@ def test_panic_catcher_middleware(test_client, valid_token):
         "tools.gimo_server.security.load_security_db", return_value={"panic_mode": False}
     ):
         with patch(
-            "tools.gimo_server.routes.get_active_repo_dir",
+            "tools.gimo_server.routers.legacy_ui_router.get_active_repo_dir",
             side_effect=RuntimeError("critical fail"),
         ):
             response = test_client.get(

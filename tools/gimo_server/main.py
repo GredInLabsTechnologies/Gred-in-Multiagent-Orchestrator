@@ -11,7 +11,9 @@ import json as _json
 
 from tools.gimo_server.config import ACTIONS_MAX_PAYLOAD_BYTES, BASE_DIR, DEBUG, LOG_LEVEL, get_settings
 from tools.gimo_server.middlewares import register_middlewares
-from tools.gimo_server.routes import register_routes
+from tools.gimo_server.routers.core_router import router as core_router
+from tools.gimo_server.routers.legacy_ui_router import router as legacy_ui_router
+from tools.gimo_server.routers.redirects import router as redirects_router
 from tools.gimo_server.version import __version__
 from tools.gimo_server.services.snapshot_service import SnapshotService
 from tools.gimo_server.services.gics_service import GicsService
@@ -615,7 +617,9 @@ def create_app() -> FastAPI:
         logger.error(f"Failed to mount FastMCP Server: {e}")
 
     # Register all API routes
-    register_routes(app)
+    app.include_router(core_router)
+    app.include_router(legacy_ui_router)
+    app.include_router(redirects_router)
     app.include_router(auth_router)
     app.include_router(ops_router)
 

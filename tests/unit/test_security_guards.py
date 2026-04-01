@@ -115,7 +115,7 @@ class TestContentSecurity:
     def test_audit_log_sanitization(self, test_client):
         """Verify audit logs don't leak tokens."""
         # Simulate a log with a token
-        with patch("tools.gimo_server.routes.FileService.tail_audit_lines") as m:
+        with patch("tools.gimo_server.routers.legacy_ui_router.FileService.tail_audit_lines") as m:
             m.return_value = ["User accessed file with token ghp_12345"]
             response = test_client.get("/ui/audit", headers={"Authorization": f"Bearer {'a'*32}"})
             assert response.status_code == 200

@@ -78,10 +78,10 @@ def test_ui_plan_create_writes_canonical_plan_content(client):
         return {"content": json.dumps(raw_plan)}
 
     with patch(
-        "tools.gimo_server.routes.ProviderService.static_generate",
+        "tools.gimo_server.routers.legacy_ui_router.ProviderService.static_generate",
         new=_fake_generate,
     ), patch(
-        "tools.gimo_server.routes.OpsService.create_draft",
+        "tools.gimo_server.routers.legacy_ui_router.OpsService.create_draft",
         side_effect=_capture_create_draft,
     ):
         response = client.post("/ui/plan/create", json={"prompt": "ship p2"})
@@ -93,8 +93,8 @@ def test_ui_plan_create_writes_canonical_plan_content(client):
 
 
 def test_get_health_deep(client, tmp_path):
-    with patch("tools.gimo_server.routes.ProviderService.health_check", return_value=True):
-        with patch("tools.gimo_server.routes.OpsService.OPS_DIR", tmp_path):
+    with patch("tools.gimo_server.routers.legacy_ui_router.ProviderService.health_check", return_value=True):
+        with patch("tools.gimo_server.routers.legacy_ui_router.OpsService.OPS_DIR", tmp_path):
             response = client.get("/health/deep")
             assert response.status_code == 200
             payload = response.json()
@@ -153,7 +153,7 @@ def test_cold_room_access_disabled(client):
 
 def test_get_ui_status(client):
     with patch(
-        "tools.gimo_server.routes.FileService.tail_audit_lines", return_value=["audit line"]
+        "tools.gimo_server.routers.legacy_ui_router.FileService.tail_audit_lines", return_value=["audit line"]
     ):
         with patch("tools.gimo_server.routers.ops.file_router.get_active_repo_dir", return_value=Path(".")):
             response = client.get("/ui/status")
@@ -189,7 +189,7 @@ def test_get_me_uses_cookie_session(client):
         firebase_user=True,
         role="admin",
     )
-    with patch("tools.gimo_server.routes.session_store.validate", return_value=fake_session):
+    with patch("tools.gimo_server.routers.core_router.session_store.validate", return_value=fake_session):
         response = client.get("/me", cookies={"gimo_session": "session-token"})
         assert response.status_code == 200
         payload = response.json()
@@ -200,7 +200,7 @@ def test_get_me_uses_cookie_session(client):
 
 def test_get_ui_audit(client):
     with patch(
-        "tools.gimo_server.routes.FileService.tail_audit_lines", return_value=["l1", "l2"]
+        "tools.gimo_server.routers.legacy_ui_router.FileService.tail_audit_lines", return_value=["l1", "l2"]
     ):
         response = client.get("/ui/audit?limit=10")
         assert response.status_code == 200
@@ -212,10 +212,10 @@ def test_get_ui_allowlist(client, tmp_path):
     base.mkdir()
     f = base / "file.py"
     f.write_text("ok")
-    with patch("tools.gimo_server.routes.get_active_repo_dir", return_value=base):
-        with patch("tools.gimo_server.routes.get_allowed_paths", return_value={f}):
+    with patch("tools.gimo_server.routers.legacy_ui_router.get_active_repo_dir", return_value=base):
+        with patch("tools.gimo_server.routers.legacy_ui_router.get_allowed_paths", return_value={f}):
             with patch(
-                "tools.gimo_server.routes.serialize_allowlist",
+                "tools.gimo_server.routers.legacy_ui_router.serialize_allowlist",
                 return_value=[
                     {"path": str(f), "type": "file"},
                     {"path": "/outside", "type": "file"},
