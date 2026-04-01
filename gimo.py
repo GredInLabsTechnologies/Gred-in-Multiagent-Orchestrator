@@ -1890,6 +1890,23 @@ def plan(
         if not typer.confirm("Proceed?", default=True):
             raise typer.Exit(0)
 
+    # VERIFY PREREQUISITES: Check provider is configured BEFORE calling server
+    bond = _load_bond(_resolve_server_url(config))
+    if not bond:
+        console.print("[red][X] ServerBond not found[/red]")
+        console.print("[yellow]-> Run:[/yellow] [cyan]gimo login http://127.0.0.1:9325[/cyan]")
+        raise typer.Exit(1)
+
+    # Quick provider check (non-blocking, just validates config exists)
+    _, provider_cfg = _provider_config_request(config)
+    if isinstance(provider_cfg, dict):
+        active_provider = provider_cfg.get("active")
+        if not active_provider or active_provider == "none":
+            console.print("[red][X] No active provider configured[/red]")
+            console.print("[yellow]-> Check providers:[/yellow] [cyan]gimo providers list[/cyan]")
+            console.print("[yellow]-> Set provider:[/yellow] [cyan]gimo providers set <name>[/cyan]")
+            raise typer.Exit(1)
+
     with console.status("[bold green]Generating plan..."):
         status_code, payload = _api_request(
             config,
@@ -2562,11 +2579,12 @@ def doctor() -> None:
     except Exception:
         console.print(f"[yellow][!] Git:[/yellow] detection failed")
 
-    # 5. Provider
+    # 5. Provider configuration and connectivity
     if bond:
         try:
             token = bond.get("token", "")
             with httpx.Client(timeout=5.0) as client:
+                # 5a. Provider config
                 prov_resp = client.get(
                     f"{server_url}/ops/provider",
                     headers={"Authorization": f"Bearer {token}"}
@@ -2575,16 +2593,44 @@ def doctor() -> None:
                     prov_data = prov_resp.json()
                     active = prov_data.get("active") or prov_data.get("orchestrator_provider", "unknown")
                     providers = prov_data.get("providers", {})
-                    if active and active in providers:
+
+                    if not active or active == "none":
+                        console.print(f"[red][X] Provider:[/red] not configured")
+                        console.print(f"[yellow][>] Set provider: [cyan]gimo providers set <name>[/cyan][/yellow]")
+                    elif active and active in providers:
                         ptype = providers[active].get("provider_type", "unknown")
-                        console.print(f"[green][OK] Provider:[/green] {active} ({ptype})")
+                        model_id = prov_data.get("model_id", "default")
+                        console.print(f"[green][OK] Provider:[/green] {active} ({ptype}, model: {model_id})")
+
+                        # 5b. Provider health check (connectivity test)
+                        try:
+                            health_resp = client.get(
+                                f"{server_url}/ops/connectors/{active}/health",
+                                headers={"Authorization": f"Bearer {token}"},
+                                timeout=8.0,
+                            )
+                            if health_resp.status_code == 200:
+                                health_result = health_resp.json()
+                                status = health_result.get("status", "unknown")
+                                if status == "ok":
+                                    console.print(f"[green][OK] Provider connectivity:[/green] healthy")
+                                elif status == "degraded":
+                                    console.print(f"[yellow][!] Provider connectivity:[/yellow] degraded")
+                                else:
+                                    console.print(f"[yellow][!] Provider connectivity:[/yellow] {status}")
+                            else:
+                                console.print(f"[yellow][!] Provider connectivity:[/yellow] test failed ({health_resp.status_code})")
+                        except httpx.TimeoutException:
+                            console.print(f"[yellow][!] Provider connectivity:[/yellow] timeout (slow network or provider down)")
+                        except Exception as health_exc:
+                            console.print(f"[yellow][!] Provider connectivity:[/yellow] {str(health_exc)[:60]}")
                     else:
-                        console.print(f"[yellow][!] Provider:[/yellow] not configured")
-                        console.print(f"[yellow][>] Configure via UI: Settings > Providers[/yellow]")
+                        console.print(f"[yellow][!] Provider:[/yellow] active '{active}' not in providers list")
+                        console.print(f"[yellow][>] Check: [cyan]gimo providers list[/cyan][/yellow]")
                 else:
                     console.print(f"[yellow][!] Provider:[/yellow] could not fetch ({prov_resp.status_code})")
-        except Exception:
-            console.print(f"[yellow][!] Provider:[/yellow] check failed")
+        except Exception as exc:
+            console.print(f"[yellow][!] Provider:[/yellow] check failed: {str(exc)[:60]}")
 
     console.print(f"\n[dim]Run 'gimo --help' for available commands[/dim]")
 
@@ -2622,20 +2668,115 @@ def providers_list(
     if json_output:
         _emit_output(payload, json_output=True)
         return
-    if isinstance(payload, dict):
-        table = Table(title="Providers", show_header=True)
-        table.add_column("Key", style="cyan")
-        table.add_column("Value", style="white")
-        for k, v in payload.items():
-            if k == "providers" and isinstance(v, dict):
-                for pid, pdata in v.items():
-                    ptype = pdata.get("type", "?") if isinstance(pdata, dict) else str(pdata)
-                    table.add_row(f"  {pid}", ptype)
-            else:
-                table.add_row(k, str(v)[:120])
-        console.print(table)
-    else:
+
+    if not isinstance(payload, dict):
         console.print(payload)
+        return
+
+    # Extract key info
+    active = payload.get("active", "none")
+    model_id = payload.get("model_id", "default")
+    provider_type = payload.get("provider_type", "unknown")
+    providers = payload.get("providers", {})
+
+    # Header: Active provider
+    console.print("[bold]Active Provider:[/bold]", style="cyan")
+    if active and active != "none":
+        console.print(f"  {active} ({provider_type})", style="green")
+        console.print(f"  Model: {model_id}", style="dim")
+    else:
+        console.print("  [red]None configured[/red]")
+        console.print("  [yellow]-> Set provider:[/yellow] [cyan]gimo providers set <name>[/cyan]")
+
+    # Available providers
+    if providers:
+        console.print("\n[bold]Available Providers:[/bold]", style="cyan")
+        for pid, pdata in providers.items():
+            if isinstance(pdata, dict):
+                ptype = pdata.get("provider_type") or pdata.get("type", "unknown")
+                is_active = pid == active
+                marker = "[green]*[/green]" if is_active else " "
+                console.print(f"  {marker} {pid} ({ptype})")
+            else:
+                console.print(f"    {pid}: {pdata}")
+
+    # Orchestrator/Worker roles (if present)
+    roles = payload.get("roles", {})
+    if roles:
+        console.print("\n[bold]Roles:[/bold]", style="cyan")
+        orch_prov = roles.get("orchestrator", {}).get("provider_id", "none")
+        orch_model = roles.get("orchestrator", {}).get("model", "default")
+        console.print(f"  Orchestrator: {orch_prov} / {orch_model}")
+        workers = roles.get("workers", [])
+        if workers:
+            for w in workers:
+                wprov = w.get("provider_id", "?")
+                wmodel = w.get("model", "?")
+                console.print(f"  Worker: {wprov} / {wmodel}")
+
+    # Footer: helpful commands
+    console.print("\n[dim]Commands:[/dim]")
+    console.print("  [cyan]gimo providers set <name>[/cyan]     - Set active provider")
+    console.print("  [cyan]gimo providers test <name>[/cyan]    - Test connectivity")
+    console.print("  [cyan]gimo doctor[/cyan]                   - Health check")
+
+
+@providers_app.command("set")
+def providers_set(
+    provider_id: str = typer.Argument(..., help="Provider ID to activate (e.g., openai, claude-account, ollama_local)."),
+    model: str = typer.Option(None, "--model", "-m", help="Optional model to use with this provider."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Set active provider for orchestrator.
+
+    Examples:
+        gimo providers set openai
+        gimo providers set claude-account --model claude-sonnet-4-5
+        gimo providers set ollama_local --model llama3
+    """
+    config = _load_config()
+
+    # Call /ops/provider/select endpoint
+    payload_data = {"provider_id": provider_id}
+    if model:
+        payload_data["model"] = model
+
+    with console.status(f"[bold green]Setting provider to {provider_id}..."):
+        status_code, payload = _api_request(
+            config,
+            "POST",
+            "/ops/provider/select",
+            json_data=payload_data,
+            role="admin",
+        )
+
+    if status_code != 200:
+        error_msg = payload if isinstance(payload, str) else payload.get("detail", str(payload))
+        console.print(f"[red][X] Failed to set provider ({status_code}): {error_msg}[/red]")
+        console.print("[yellow]-> Check available providers: [cyan]gimo providers list[/cyan][/yellow]")
+        raise typer.Exit(1)
+
+    if json_output:
+        _emit_output(payload, json_output=True)
+        return
+
+    # Success message
+    active = payload.get("active", provider_id) if isinstance(payload, dict) else provider_id
+    model_id = payload.get("model_id", model) if isinstance(payload, dict) else model
+    console.print(f"[green][OK] Active provider set to: {active}[/green]")
+    if model_id:
+        console.print(f"[cyan]Model: {model_id}[/cyan]")
+    console.print("\n[dim]Verify with:[/dim] [cyan]gimo providers list[/cyan]")
+
+
+@providers_app.command("activate")
+def providers_activate(
+    provider_id: str = typer.Argument(..., help="Provider ID to activate."),
+    model: str = typer.Option(None, "--model", "-m", help="Optional model to use."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Alias for 'gimo providers set' (user-friendly)."""
+    providers_set(provider_id, model, json_output)
 
 
 @providers_app.command("test")

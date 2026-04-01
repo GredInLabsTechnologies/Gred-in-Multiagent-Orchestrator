@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+import json as _json
 
 from tools.gimo_server.config import ACTIONS_MAX_PAYLOAD_BYTES, BASE_DIR, DEBUG, LOG_LEVEL, get_settings
 from tools.gimo_server.middlewares import register_middlewares
@@ -25,6 +26,19 @@ logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger("orchestrator")
 if DEBUG:
     logger.info("DEBUG mode enabled (LOG_LEVEL=%s)", LOG_LEVEL)
+
+
+# Custom JSONResponse with ensure_ascii=False for proper Unicode support
+class UnicodeJSONResponse(JSONResponse):
+    """JSONResponse that properly encodes Unicode characters (e.g., é, ñ, 中)."""
+    def render(self, content) -> bytes:
+        return _json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+        ).encode("utf-8")
 
 
 
@@ -558,7 +572,12 @@ def _refresh_app_mcp_facade(app: FastAPI, settings) -> None:
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="GIMO Orchestrator", version=__version__, lifespan=lifespan)
+    app = FastAPI(
+        title="GIMO Orchestrator",
+        version=__version__,
+        lifespan=lifespan,
+        default_response_class=UnicodeJSONResponse,  # Fix P2-7: proper Unicode encoding
+    )
     actions_safe_targets = {(method.upper(), path) for method, path in _ACTIONS_SAFE_PUBLIC_ENDPOINTS}
     
     _register_core_exception_handlers(app, actions_safe_targets)
