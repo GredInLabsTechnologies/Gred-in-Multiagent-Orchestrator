@@ -101,13 +101,13 @@ def test_sandbox_service_uses_ephemeral_workspace_instead_of_source_worktree(mon
     def _destroy_workspace(self, workspace_path):
         destroyed.append(Path(workspace_path))
 
-    monkeypatch.setattr("tools.gimo_server.services.sandbox_service.get_settings", lambda: settings)
+    monkeypatch.setattr("tools.gimo_server.services.execution.sandbox_service.get_settings", lambda: settings)
     monkeypatch.setattr(
-        "tools.gimo_server.services.sandbox_service.EphemeralRepoService.create_ephemeral_workspace",
+        "tools.gimo_server.services.execution.sandbox_service.EphemeralRepoService.create_ephemeral_workspace",
         _create_workspace,
     )
     monkeypatch.setattr(
-        "tools.gimo_server.services.sandbox_service.EphemeralRepoService.destroy_workspace",
+        "tools.gimo_server.services.execution.sandbox_service.EphemeralRepoService.destroy_workspace",
         _destroy_workspace,
     )
 
@@ -142,9 +142,9 @@ def test_sandbox_service_refuses_legacy_cleanup_path(monkeypatch, tmp_path):
     def _destroy_workspace(self, workspace_path):
         destroyed.append(Path(workspace_path))
 
-    monkeypatch.setattr("tools.gimo_server.services.sandbox_service.get_settings", lambda: settings)
+    monkeypatch.setattr("tools.gimo_server.services.execution.sandbox_service.get_settings", lambda: settings)
     monkeypatch.setattr(
-        "tools.gimo_server.services.sandbox_service.EphemeralRepoService.destroy_workspace",
+        "tools.gimo_server.services.execution.sandbox_service.EphemeralRepoService.destroy_workspace",
         _destroy_workspace,
     )
 
@@ -277,7 +277,7 @@ def test_create_run_provisions_workspace_and_copies_validated_task_spec(monkeypa
         lambda handle: str(tmp_path / "repo"),
     )
     monkeypatch.setattr(
-        "tools.gimo_server.services.sandbox_service.SandboxService.create_worktree_handle",
+        "tools.gimo_server.services.execution.sandbox_service.SandboxService.create_worktree_handle",
         lambda run_id, repo_path, base_ref="main": SimpleNamespace(worktree_path=workspace),
     )
 
@@ -332,7 +332,7 @@ def test_create_run_can_target_source_repo_for_sovereign_surface(monkeypatch, tm
         lambda handle: str(repo_root),
     )
     monkeypatch.setattr(
-        "tools.gimo_server.services.sandbox_service.SandboxService.create_worktree_handle",
+        "tools.gimo_server.services.execution.sandbox_service.SandboxService.create_worktree_handle",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("sandbox must not be created")),
     )
 
@@ -401,7 +401,7 @@ def test_create_run_uses_app_bound_snapshot_for_chatgpt_surface(monkeypatch, tmp
         return SimpleNamespace(worktree_path=workspace)
 
     monkeypatch.setattr(
-        "tools.gimo_server.services.sandbox_service.SandboxService.create_worktree_handle",
+        "tools.gimo_server.services.execution.sandbox_service.SandboxService.create_worktree_handle",
         _create_handle,
     )
 

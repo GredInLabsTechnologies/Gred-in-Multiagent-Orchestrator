@@ -226,8 +226,8 @@ def test_log_rotation_rotates_and_deletes(tmp_path, monkeypatch):
     large_file = scan_dir / "large.log"
     large_file.write_bytes(b"a" * (50 * 1024 * 1024 + 32))
 
-    monkeypatch.setattr("tools.gimo_server.services.log_rotation_service.SCAN_DIRS", [scan_dir])
-    monkeypatch.setattr("tools.gimo_server.services.log_rotation_service.OPS_DATA_DIR", tmp_path)
+    monkeypatch.setattr("tools.gimo_server.services.observability_pkg.log_rotation_service.SCAN_DIRS", [scan_dir])
+    monkeypatch.setattr("tools.gimo_server.services.observability_pkg.log_rotation_service.OPS_DATA_DIR", tmp_path)
 
     stats = LogRotationService.run_rotation()
     assert stats["deleted"] >= 1
