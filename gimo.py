@@ -1949,16 +1949,16 @@ def plan(
     # Show error details if status=error
     if is_error:
         error_detail = payload.get("error") or payload.get("error_detail") or "Unknown error"
-        console.print(f"\n[red]✗ Error:[/red] {error_detail}", style="bold")
+        console.print(f"\n[red][X] Error:[/red] {error_detail}", style="bold")
 
         # Show actionable hints based on error type
         error_lower = str(error_detail).lower()
         if "bond" in error_lower or "auth" in error_lower or "token" in error_lower:
-            console.print("[yellow]→[/yellow] Check authentication: [cyan]gimo doctor[/cyan]")
-            console.print("[yellow]→[/yellow] Re-authenticate: [cyan]gimo login http://127.0.0.1:9325[/cyan]")
+            console.print("[yellow]->[/yellow] Check authentication: [cyan]gimo doctor[/cyan]")
+            console.print("[yellow]->[/yellow] Re-authenticate: [cyan]gimo login http://127.0.0.1:9325[/cyan]")
         elif "provider" in error_lower:
-            console.print("[yellow]→[/yellow] Check providers: [cyan]gimo providers list[/cyan]")
-            console.print("[yellow]→[/yellow] Configure provider in .gimo/config.yaml")
+            console.print("[yellow]->[/yellow] Check providers: [cyan]gimo providers list[/cyan]")
+            console.print("[yellow]->[/yellow] Configure provider in .gimo/config.yaml")
 
         raise typer.Exit(1)  # EXIT WITH ERROR CODE
 
