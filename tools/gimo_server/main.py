@@ -10,7 +10,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import json as _json
 
 from tools.gimo_server.config import ACTIONS_MAX_PAYLOAD_BYTES, BASE_DIR, DEBUG, LOG_LEVEL, get_settings
-from tools.gimo_server.middlewares import register_middlewares
+# Note: middlewares.py (module) vs middlewares/ (package) - import from the .py module
+import importlib.util as _importlib_util
+import os as _os
+_middlewares_py_path = _os.path.join(_os.path.dirname(__file__), "middlewares.py")
+_middlewares_spec = _importlib_util.spec_from_file_location("_middlewares_module", _middlewares_py_path)
+_middlewares_module = _importlib_util.module_from_spec(_middlewares_spec)
+_middlewares_spec.loader.exec_module(_middlewares_module)
+register_middlewares = _middlewares_module.register_middlewares
 from tools.gimo_server.routers.core_router import router as core_router
 from tools.gimo_server.routers.legacy_ui_router import router as legacy_ui_router
 from tools.gimo_server.routers.redirects import router as redirects_router
@@ -630,12 +637,14 @@ def create_app() -> FastAPI:
     from tools.gimo_server.routers.ops.ui_security_router import router as sec_router
     from tools.gimo_server.routers.ops.service_router import router as svc_router
     from tools.gimo_server.routers.ops.ide_context_router import router as ide_context_router
+    from tools.gimo_server.routers.ops.checkpoint_router import router as checkpoint_router
     app.include_router(file_router)
     app.include_router(repo_router)
     app.include_router(graph_router)
     app.include_router(sec_router)
     app.include_router(svc_router)
     app.include_router(ide_context_router)
+    app.include_router(checkpoint_router)
 
     mount_static(app)
 

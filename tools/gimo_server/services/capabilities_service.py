@@ -84,14 +84,38 @@ class CapabilitiesService:
         # Context/IDE features are always ok (no hard dependencies)
         context_health = "ok"
 
-        # Timeout hints based on system load
-        # Higher load → more generous timeouts to avoid false failures
-        if load_level == "critical":
-            gen_timeout = 300  # 5 min under critical load
-        elif load_level == "caution":
-            gen_timeout = 240  # 4 min under caution
-        else:  # "safe" or unknown
-            gen_timeout = 120  # 2 min under safe/normal load
+        # GAEP Phase 2: Adaptive timeout prediction based on historical data
+        try:
+            from .timeout.adaptive_timeout_service import AdaptiveTimeoutService
+
+            # Inject GICS for historical data access
+            gics = getattr(request.app.state, "gics", None)
+            if gics:
+                AdaptiveTimeoutService.set_gics(gics)
+
+            # Predict timeout for plan generation with context
+            gen_timeout = AdaptiveTimeoutService.predict_timeout(
+                operation="plan",
+                context={
+                    "model": active_model,
+                    "system_load": load_level,
+                }
+            )
+
+            logger.debug(
+                "Adaptive timeout for plan generation: %.1fs (model=%s, load=%s)",
+                gen_timeout, active_model, load_level
+            )
+
+        except Exception as exc:
+            # Fallback to static timeouts if predictor fails
+            logger.warning("Adaptive timeout prediction failed, using static fallback: %s", exc)
+            if load_level == "critical":
+                gen_timeout = 300  # 5 min under critical load
+            elif load_level == "caution":
+                gen_timeout = 240  # 4 min under caution
+            else:  # "safe" or unknown
+                gen_timeout = 120  # 2 min under safe/normal load
 
         return {
             "version": __version__,
@@ -105,6 +129,7 @@ class CapabilitiesService:
                 "mastery",
                 "trust",
                 "observe",
+                "plan_streaming",  # SEA Phase 3: SSE progress streaming
             ],
             "active_model": active_model,
             "active_provider": active_provider,

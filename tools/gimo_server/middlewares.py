@@ -210,6 +210,10 @@ def register_middlewares(app):
     The order here is significant because Starlette middlewares are processed as a stack.
     Requests pass through them in reverse order of registration.
     """
+    # SEA Phase 4: Deadline propagation (early in chain)
+    from tools.gimo_server.middlewares import DeadlineMiddleware
+    app.add_middleware(DeadlineMiddleware)
+
     app.middleware("http")(threat_level_middleware)
     app.middleware("http")(allow_options_preflight_middleware)
     app.middleware("http")(correlation_id_middleware)

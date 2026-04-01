@@ -236,11 +236,22 @@ class EngineService:
     @classmethod
     async def execute_run(cls, run_id: str, composition: Optional[str] = None):
         """Unified execution for any run."""
+        import time
         from ..ops_service import OpsService
+        from ..timeout.duration_telemetry_service import DurationTelemetryService
+
+        # GAEP Phase 1: Start timing
+        start_time = time.time()
 
         run = OpsService.get_run(run_id)
         if not run:
             return []
+
+        # Inject GICS into telemetry service
+        try:
+            DurationTelemetryService.set_gics(getattr(OpsService, "_gics", None))
+        except Exception:
+            pass
 
         # Ensure the run is in 'running' state before executing.
         # When the worker picks up a 'pending' run directly (e.g. child runs
@@ -369,4 +380,28 @@ class EngineService:
                 return results
 
         OpsService.update_run_status(run_id, final_status, msg=final_msg)
+
+        # GAEP Phase 1: Record duration telemetry
+        duration = time.time() - start_time
+        try:
+            # Extract context for telemetry
+            model_used = context.get("model") or "unknown"
+            file_count = len(context.get("target_files", [])) if context.get("target_files") else 0
+            is_child = bool(getattr(run, "parent_run_id", None))
+
+            DurationTelemetryService.record_operation_duration(
+                operation="run",
+                duration=duration,
+                context={
+                    "model": model_used,
+                    "composition": composition,
+                    "file_count": file_count,
+                    "is_child": is_child,
+                    "multi_agent": bool(context.get("multi_agent")),
+                },
+                success=(final_status == "done")
+            )
+        except Exception as telemetry_exc:
+            logger.warning("Failed to record run duration telemetry: %s", telemetry_exc)
+
         return results

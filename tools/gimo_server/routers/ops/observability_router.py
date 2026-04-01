@@ -115,3 +115,42 @@ async def realtime_metrics(
     data = NotificationService.get_metrics()
     audit_log("OPS", "/ops/realtime/metrics", "read", operation="READ", actor=_actor_label(auth))
     return data
+
+
+@router.get("/observability/duration-stats")
+async def observability_duration_stats(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+    operation: Annotated[str | None, Query()] = None,
+):
+    """
+    Get duration statistics for operations (GAEP Phase 1).
+
+    Query params:
+        operation: Filter by operation type (e.g., "plan", "run", "merge")
+
+    Returns aggregated statistics: total_samples, success_rate, avg_duration, p50, p95, max.
+    """
+    _require_role(auth, "operator")
+    from tools.gimo_server.services.timeout.duration_telemetry_service import DurationTelemetryService
+    from tools.gimo_server.services.ops_service import OpsService
+
+    # Inject GICS
+    DurationTelemetryService.set_gics(getattr(request.app.state, "gics", None))
+
+    if operation:
+        stats = DurationTelemetryService.get_stats_for_operation(operation)
+        audit_log("OPS", f"/ops/observability/duration-stats?operation={operation}",
+                 "read", operation="READ", actor=_actor_label(auth))
+        return stats
+    else:
+        # Return stats for all known operations
+        operations = ["plan", "run", "merge"]
+        all_stats = {
+            op: DurationTelemetryService.get_stats_for_operation(op)
+            for op in operations
+        }
+        audit_log("OPS", "/ops/observability/duration-stats",
+                 "read", operation="READ", actor=_actor_label(auth))
+        return {"operations": all_stats}
