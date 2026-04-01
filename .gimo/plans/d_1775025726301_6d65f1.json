@@ -1,0 +1,10 @@
+{
+  "id": "d_1775025726301_6d65f1",
+  "prompt": "Crea una calculadora simple en Python con interfaz gráfica Tkinter. La calculadora debe tener botones para números del 0-9, operaciones básicas (+, -, *, /), botón igual (=) y limpiar (C). También incluye un archivo lanzador.bat para Windows que ejecute el programa. Usa arquitectura limpia y modular.",
+  "context": {},
+  "provider": null,
+  "content": null,
+  "status": "error",
+  "error": "Plan generation failed: Client error '401 Unauthorized' for url 'https://api.openai.com/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401",
+  "created_at": "2026-04-01T06:42:06.301679Z"
+}
