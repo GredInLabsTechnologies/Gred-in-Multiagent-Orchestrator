@@ -7,7 +7,7 @@ import os
 # Add parent dir to path for gimo.py import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gimo import _smart_timeout, _fetch_capabilities
+from gimo_cli.api import smart_timeout as _smart_timeout, fetch_capabilities as _fetch_capabilities
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def mock_config():
     }
 
 
-@patch("gimo._fetch_capabilities")
+@patch("gimo_cli.api.fetch_capabilities")
 def test_smart_timeout_generation_endpoints_use_server_hint(mock_fetch, mock_config):
     """Generation endpoints use server-provided timeout hint."""
     mock_fetch.return_value = {
@@ -42,7 +42,7 @@ def test_smart_timeout_generation_endpoints_use_server_hint(mock_fetch, mock_con
     assert timeout == 180.0
 
 
-@patch("gimo._fetch_capabilities")
+@patch("gimo_cli.api.fetch_capabilities")
 def test_smart_timeout_stream_endpoints_have_no_timeout(mock_fetch, mock_config):
     """Stream endpoints return None (no timeout)."""
     mock_fetch.return_value = {"hints": {}}
@@ -54,7 +54,7 @@ def test_smart_timeout_stream_endpoints_have_no_timeout(mock_fetch, mock_config)
     assert timeout is None
 
 
-@patch("gimo._fetch_capabilities")
+@patch("gimo_cli.api.fetch_capabilities")
 def test_smart_timeout_default_endpoints_use_15s(mock_fetch, mock_config):
     """Default endpoints use 15s from server hint."""
     mock_fetch.return_value = {
@@ -71,7 +71,7 @@ def test_smart_timeout_default_endpoints_use_15s(mock_fetch, mock_config):
     assert timeout == 15.0
 
 
-@patch("gimo._fetch_capabilities")
+@patch("gimo_cli.api.fetch_capabilities")
 def test_smart_timeout_fallback_when_server_unreachable(mock_fetch, mock_config):
     """When server unreachable, falls back to local defaults."""
     mock_fetch.return_value = {}  # Empty dict = fetch failed
@@ -89,7 +89,7 @@ def test_smart_timeout_fallback_when_server_unreachable(mock_fetch, mock_config)
     assert timeout is None
 
 
-@patch("gimo._fetch_capabilities")
+@patch("gimo_cli.api.fetch_capabilities")
 def test_smart_timeout_adapts_to_system_load(mock_fetch, mock_config):
     """Timeout increases when server reports high load."""
     # Critical load → 300s
@@ -109,7 +109,7 @@ def test_smart_timeout_adapts_to_system_load(mock_fetch, mock_config):
     assert timeout == 120.0
 
 
-@patch("gimo._fetch_capabilities")
+@patch("gimo_cli.api.fetch_capabilities")
 def test_smart_timeout_missing_hints_uses_safe_defaults(mock_fetch, mock_config):
     """Missing hints field uses safe hardcoded defaults."""
     mock_fetch.return_value = {}  # No hints at all

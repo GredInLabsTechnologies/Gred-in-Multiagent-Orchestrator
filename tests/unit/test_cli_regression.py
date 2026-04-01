@@ -135,43 +135,44 @@ def test_project_root_no_git(monkeypatch):
     root = _project_root()
     assert root == Path.cwd()
 
-@patch('gimo._write_json')
-@patch('gimo._runs_dir', return_value=Path('/fake/runs'))
+@patch('gimo_cli.commands.run.write_json')
+@patch('gimo_cli.commands.run.runs_dir', return_value=Path('/fake/runs'))
 def test_run_artifact_persistence(mock_runs_dir, mock_write_json):
     from gimo import app
     from typer.testing import CliRunner
     runner = CliRunner()
-    
-    with patch('gimo._load_config', return_value={}): 
-        with patch('gimo._api_request', return_value=(200, {'run': {'id': 'run-999'}}, )):
+
+    with patch('gimo_cli.commands.run.load_config', return_value={}):
+        with patch('gimo_cli.commands.run.api_request', return_value=(200, {'run': {'id': 'run-999'}}, )):
             result = runner.invoke(app, ['run', 'plan-123', '--no-confirm', '--no-wait'])
-            
+
             # Should have written to run-999.json
             args, kwargs = mock_write_json.call_args
             assert 'run-999.json' in str(args[0])
-            
-        with patch('gimo._api_request', return_value=(200, {'run': None}, )):
+
+        with patch('gimo_cli.commands.run.api_request', return_value=(200, {'run': None}, )):
             result = runner.invoke(app, ['run', 'plan-123', '--no-confirm', '--no-wait'])
-            
+
             # Should have written to plan-123_RANDOM.json
             args, kwargs = mock_write_json.call_args
             assert 'plan-123_' in str(args[0])
             assert 'run-999.json' not in str(args[0])
 
 def test_handle_chat_slash_command_permissions(monkeypatch):
-    import gimo
+    import gimo_cli.chat as chat_mod
     config = {}
-    
+
     captured = {}
-    def _fake_api_request(cfg, method, path, *, params=None, json_body=None):
+    def _fake_api_request(cfg, method, path, *, params=None, json_body=None, extra_headers=None, role="operator"):
         captured["method"] = method
         captured["path"] = path
         captured["json_body"] = json_body
         return 200, {"ok": True}
-        
-    monkeypatch.setattr(gimo, "_api_request", _fake_api_request)
-    
-    handled, res = gimo._handle_chat_slash_command(
+
+    monkeypatch.setattr(chat_mod, "api_request", _fake_api_request)
+
+    from gimo import _handle_chat_slash_command
+    handled, res = _handle_chat_slash_command(
         config, "/permissions auto-edit", workspace_root="/fake/root", thread_id="t123"
     )
     assert handled is True
