@@ -2746,7 +2746,7 @@ def providers_set(
             config,
             "POST",
             "/ops/provider/select",
-            json_data=payload_data,
+            json_body=payload_data,
             role="admin",
         )
 
