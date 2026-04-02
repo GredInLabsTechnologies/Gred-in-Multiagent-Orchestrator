@@ -11,7 +11,7 @@ from rich.panel import Panel
 
 from gimo_cli import app, console
 from gimo_cli.api import api_request, provider_config_request, resolve_server_url
-from gimo_cli.bond import load_bond
+from gimo_cli.bond import load_bond, load_cli_bond
 from gimo_cli.config import load_config, plans_dir, project_root
 from gimo_cli.stream import emit_output, write_json
 
@@ -35,10 +35,11 @@ def plan(
         if not typer.confirm("Proceed?", default=True):
             raise typer.Exit(0)
 
-    bond = load_bond(resolve_server_url(config))
+    bond = load_cli_bond() or load_bond(resolve_server_url(config))
     if not bond:
-        console.print("[red][X] ServerBond not found[/red]")
-        console.print("[yellow]-> Run:[/yellow] [cyan]gimo login http://127.0.0.1:9325[/cyan]")
+        console.print("[red][X] No authentication found (CLI Bond or ServerBond)[/red]")
+        console.print("[yellow]-> Run:[/yellow] [cyan]gimo login --web[/cyan] (recommended)")
+        console.print("[yellow]-> Or:[/yellow]  [cyan]gimo login http://127.0.0.1:9325[/cyan]")
         raise typer.Exit(1)
 
     _, provider_cfg = provider_config_request(config)

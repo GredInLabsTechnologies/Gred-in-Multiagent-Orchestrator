@@ -177,16 +177,75 @@ def _resolve_role(token: str) -> str:
 # ---------------------------------------------------------------------------
 # Unified verify: Bearer header OR session cookie
 # ---------------------------------------------------------------------------
+def _verify_cli_bond_jwt(token: str, request: Request) -> AuthContext | None:
+    """Verify a CLI Bond JWT (Ed25519-signed, scope:cli).
+
+    Returns AuthContext if valid, None otherwise.
+    """
+    # Quick check: JWTs have 3 dot-separated parts
+    if token.count(".") != 2:
+        return None
+
+    try:
+        from tools.gimo_server.security.license_guard import (
+            _verify_jwt_ed25519,
+            _get_public_key_pem,
+        )
+
+        public_key_pem = _get_public_key_pem()
+        payload = _verify_jwt_ed25519(token, public_key_pem)
+        if not payload:
+            return None
+
+        # Must be a CLI-scoped bond
+        if payload.get("scope") != "cli":
+            return None
+
+        # Verify machine_id matches request header (if provided)
+        bond_machine_id = payload.get("machine_id", "")
+        request_machine_id = request.headers.get("X-Machine-Id", "")
+        if request_machine_id and bond_machine_id:
+            if request_machine_id != bond_machine_id:
+                logger.warning(
+                    "CLI Bond JWT machine_id mismatch: jwt=%s... req=%s...",
+                    bond_machine_id[:8],
+                    request_machine_id[:8],
+                )
+                return None
+
+        # Map JWT plan to role
+        jwt_plan = payload.get("plan", "standard")
+        role = "operator"  # CLI bonds are always operator-level
+        if jwt_plan in ("admin", "enterprise"):
+            role = "admin"
+
+        return AuthContext(token="cli_bond", role=role)
+
+    except Exception as e:
+        logger.debug("CLI Bond JWT verification failed: %s", e)
+        return None
+
+
 def verify_token(
     request: Request, credentials: HTTPAuthorizationCredentials | None = Security(security)
 ) -> AuthContext:
     # 1. Try Bearer header first (API/CLI callers)
     if credentials and credentials.credentials:
         token = credentials.credentials.strip()
+
+        # 1a. Static token match
         if token and len(token) >= 16 and token in TOKENS:
             ctx = AuthContext(token=token, role=_resolve_role(token))
             request.state.auth_role = ctx.role
             return ctx
+
+        # 1b. CLI Bond JWT (Ed25519-signed)
+        if token:
+            bond_ctx = _verify_cli_bond_jwt(token, request)
+            if bond_ctx:
+                request.state.auth_role = bond_ctx.role
+                return bond_ctx
+
         if token:
             _report_auth_failure(request, token)
             raise HTTPException(status_code=401, detail=INVALID_TOKEN_ERROR)

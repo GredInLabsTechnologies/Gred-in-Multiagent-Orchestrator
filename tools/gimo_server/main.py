@@ -489,7 +489,48 @@ def _register_core_routes(app: FastAPI, settings):
     @app.get("/health")
     async def health_route():
         """Liveness probe for k8s / load balancers."""
-        return JSONResponse({"status": "ok"})
+        import os
+        return JSONResponse({
+            "status": "ok",
+            "version": __version__,
+            "pid": os.getpid(),
+            "server": "gimo",
+        })
+
+    @app.post("/ops/shutdown")
+    async def shutdown_route(request: Request):
+        """Graceful shutdown — only from localhost.
+
+        Triggers uvicorn's graceful shutdown sequence:
+        1. Stops accepting new connections
+        2. Waits for in-flight requests to complete
+        3. Runs FastAPI lifespan cleanup (stops services, cancels tasks)
+        4. Properly closes listening sockets (prevents Windows zombie sockets)
+
+        On Windows: sends CTRL_BREAK_EVENT (uvicorn handles SIGBREAK since PR #1909)
+        On Unix: sends SIGINT to self
+
+        NEVER use os._exit() — it skips socket cleanup and creates zombie
+        TCP LISTEN entries on Windows that persist indefinitely.
+        """
+        import os, signal, asyncio, sys
+        client = request.client
+        if not client or client.host not in ("127.0.0.1", "::1", "localhost"):
+            return JSONResponse({"error": "shutdown only from localhost"}, status_code=403)
+        pid = os.getpid()
+        logger.info("Graceful shutdown requested (PID %d)", pid)
+
+        async def _trigger_graceful_shutdown():
+            await asyncio.sleep(0.3)  # Let the HTTP response flush
+            if sys.platform == "win32":
+                # CTRL_BREAK_EVENT targets only this process group (not parent)
+                # Uvicorn catches SIGBREAK on Windows for graceful shutdown
+                os.kill(pid, signal.SIGBREAK)
+            else:
+                os.kill(pid, signal.SIGINT)
+
+        asyncio.get_event_loop().create_task(_trigger_graceful_shutdown())
+        return JSONResponse({"status": "shutting_down", "pid": pid})
 
     @app.get("/")
     async def root_route():

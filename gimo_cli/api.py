@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from gimo_cli import console
-from gimo_cli.bond import load_bond
+from gimo_cli.bond import load_bond, resolve_bond_token
 from gimo_cli.config import (
     DEFAULT_API_BASE_URL,
     DEFAULT_TIMEOUT_SECONDS,
@@ -40,6 +40,15 @@ def resolve_server_url(config: dict[str, Any]) -> str:
 
 
 def resolve_token(role: str = "operator", config: dict[str, Any] | None = None) -> str | None:
+    # 1. CLI Bond (Identity-First Auth) — highest priority for operator role
+    if role == "operator":
+        bond_jwt, bond_hint = resolve_bond_token()
+        if bond_jwt:
+            return bond_jwt
+        if bond_hint:
+            console.print(f"[yellow]{bond_hint}[/yellow]")
+
+    # 2. Environment variables
     env_vars = {
         "admin": ["GIMO_TOKEN", "ORCH_TOKEN"],
         "operator": ["ORCH_OPERATOR_TOKEN"],
@@ -51,6 +60,7 @@ def resolve_token(role: str = "operator", config: dict[str, Any] | None = None) 
         if token:
             return token.strip()
 
+    # 3. Legacy ServerBond (YAML-based)
     if config is None:
         config = load_config()
     server_url = resolve_server_url(config)
@@ -60,12 +70,14 @@ def resolve_token(role: str = "operator", config: dict[str, Any] | None = None) 
         if token:
             return str(token).strip()
 
+    # 4. Inline config token
     api_cfg = config.get("api", {})
     if isinstance(api_cfg, dict):
         inline_token = api_cfg.get("token")
         if inline_token:
             return str(inline_token).strip()
 
+    # 5. Server credential files (local dev)
     pr = project_root()
     server_dir = pr / "tools" / "gimo_server"
     if server_dir.exists() and server_dir.is_dir():
@@ -132,6 +144,47 @@ def api_settings(config: dict[str, Any]) -> tuple[str, float]:
     return base_url, timeout_seconds
 
 
+def _try_auto_start(base_url: str) -> bool:
+    """Offer to auto-start the server when unreachable. Returns True if started."""
+    # Don't auto-start if GIMO_NO_AUTOSTART is set (CI, scripts, etc.)
+    if os.environ.get("GIMO_NO_AUTOSTART", "").lower() in ("1", "true", "yes"):
+        return False
+
+    # Don't auto-start for remote servers
+    from urllib.parse import urlparse
+    parsed = urlparse(base_url)
+    if parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+        return False
+
+    # Extract port from URL
+    port = parsed.port or 9325
+
+    try:
+        import sys
+        if not sys.stdin.isatty():
+            return False
+    except Exception:
+        return False
+
+    console.print(f"[yellow]Server not reachable at {base_url}[/yellow]")
+    try:
+        answer = input("Start server? [Y/n] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+    if answer in ("", "y", "yes", "si", "sí"):
+        console.print("[dim]Starting GIMO server...[/dim]")
+        from gimo_cli.commands.server import start_server
+        if start_server(host=parsed.hostname or "127.0.0.1", port=port):
+            console.print("[green][OK] Server auto-started[/green]")
+            return True
+        else:
+            console.print("[red][X] Auto-start failed[/red]")
+            return False
+
+    return False
+
+
 def api_request(
     config: dict[str, Any],
     method: str,
@@ -161,10 +214,21 @@ def api_request(
         with httpx.Client(timeout=timeout_seconds) as client:
             response = client.request(method, url, params=params, json=json_body, headers=headers)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
-        console.print(f"[red]Server unreachable at {base_url}[/red]")
-        console.print(f"[dim]  Error: {exc}[/dim]")
-        console.print("[yellow]Check server status with: gimo doctor[/yellow]")
-        return 503, {"error": "server_unreachable", "detail": str(exc)}
+        # Auto-start: offer to launch the server interactively
+        if _try_auto_start(base_url):
+            # Retry the request after successful auto-start
+            try:
+                with httpx.Client(timeout=timeout_seconds) as client:
+                    response = client.request(method, url, params=params, json=json_body, headers=headers)
+            except (httpx.ConnectError, httpx.TimeoutException) as retry_exc:
+                console.print(f"[red]Server still unreachable after auto-start[/red]")
+                console.print(f"[dim]  Error: {retry_exc}[/dim]")
+                return 503, {"error": "server_unreachable", "detail": str(retry_exc)}
+        else:
+            console.print(f"[red]Server unreachable at {base_url}[/red]")
+            console.print(f"[dim]  Error: {exc}[/dim]")
+            console.print("[yellow]Start manually with: gimo up[/yellow]")
+            return 503, {"error": "server_unreachable", "detail": str(exc)}
 
     payload: Any
     try:

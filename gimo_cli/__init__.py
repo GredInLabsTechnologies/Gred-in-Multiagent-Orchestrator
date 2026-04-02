@@ -27,5 +27,6 @@ from gimo_cli.commands import skills  # noqa: E402,F401
 from gimo_cli.commands import repos  # noqa: E402,F401
 from gimo_cli.commands import threads  # noqa: E402,F401
 from gimo_cli.commands import observe  # noqa: E402,F401
+from gimo_cli.commands import server  # noqa: E402,F401
 
 __all__ = ["app", "console"]
