@@ -21,9 +21,9 @@ from gimo_cli import console
 # ── Constants (from cli_constants.py) ─────────────────────────────────────────
 
 DEFAULT_API_BASE_URL = os.environ.get("GIMO_API_URL") or os.environ.get("ORCH_BASE_URL") or "http://127.0.0.1:9325"
-DEFAULT_TIMEOUT_SECONDS = 15.0
+DEFAULT_TIMEOUT_SECONDS = 180.0  # Increased from 15s to 180s - plan generation can take 30-60s
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
-DEFAULT_WATCH_TIMEOUT_SECONDS = 30.0
+DEFAULT_WATCH_TIMEOUT_SECONDS = 180.0  # Increased from 30s to 180s for consistency
 GIMO_HOME_DIR = Path(os.environ.get("GIMO_HOME", str(Path.home() / ".gimo")))
 
 DEFAULT_EXCLUDE_DIRS = [

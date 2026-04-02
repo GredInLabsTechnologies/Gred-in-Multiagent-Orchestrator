@@ -7,8 +7,15 @@ from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server import config
 
-# Add test token to config.TOKENS to bypass real verify_token 401s
-config.TOKENS.add("a"*32)
+
+@pytest.fixture(autouse=True)
+def _register_test_token():
+    """Register and clean up test token to avoid global state leakage."""
+    token = "a" * 32
+    config.TOKENS.add(token)
+    yield
+    config.TOKENS.discard(token)
+
 
 # ── Stubs & Helper ────────────────────────────────────────
 

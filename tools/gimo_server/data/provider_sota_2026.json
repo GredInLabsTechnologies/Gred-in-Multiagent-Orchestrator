@@ -1,0 +1,302 @@
+{
+  "schema_version": "2026-04-01",
+  "last_updated": "2026-04-01T00:00:00Z",
+  "description": "State-of-the-art data for LLM providers. This is empirical data, not hardcoded rules. The orchestrator uses this to make intelligent decisions.",
+  "providers": {
+    "gpt-5.4": {
+      "display_name": "OpenAI GPT-5.4",
+      "family": "gpt",
+      "released": "2026-03-05",
+      "intelligence_index": 57,
+      "context_window": 1000000,
+      "pricing": {
+        "input_per_m_tokens": 2.50,
+        "output_per_m_tokens": 15.00,
+        "currency": "USD"
+      },
+      "strengths": [
+        "Computer use workflows (native capability)",
+        "Complex API orchestration with multiple tools",
+        "Mathematical precision and numerical calculations",
+        "Marketing copy with strict rule adherence",
+        "100% schema adherence guaranteed (structured outputs)",
+        "Negative constraints ('Do NOT...' very effective)",
+        "Best for logical structures and edge-case handling"
+      ],
+      "weaknesses": [
+        "Not optimal for complex technical diagrams (Claude better)",
+        "More expensive than Gemini for output tokens"
+      ],
+      "benchmarks": {
+        "coding_swe_bench": 57.7,
+        "computer_use": "native",
+        "gdp_val": 83.0
+      },
+      "structured_output": {
+        "method": "json_schema",
+        "reliability": 100,
+        "features": [
+          "Strict mode with mathematical guarantees",
+          "Context-free grammars (CFGs) support",
+          "additionalProperties: false enforcement",
+          "All properties must be in required array"
+        ],
+        "best_for": "Critical schemas requiring 100% adherence"
+      },
+      "prompting_strategy": {
+        "key_principle": "Evaluability - Can I measure if the model followed?",
+        "techniques": [
+          "Use strict output formats (JSON schemas)",
+          "Negative constraints ('Do NOT...')",
+          "XML scaffolding for agents",
+          "Verbosity control + output contract",
+          "Examples within schema"
+        ]
+      },
+      "optimal_for": [
+        "Plans requiring 100% schema adherence",
+        "Complex tool orchestration",
+        "Computer-use workflows",
+        "Tasks with strict numerical constraints"
+      ]
+    },
+    "claude-opus-4-6": {
+      "display_name": "Anthropic Claude Opus 4.6",
+      "family": "claude",
+      "released": "2026-02-05",
+      "intelligence_index": 53,
+      "context_window": 1000000,
+      "pricing": {
+        "input_per_m_tokens": 5.00,
+        "output_per_m_tokens": 25.00,
+        "currency": "USD"
+      },
+      "strengths": [
+        "Coding agents and self-correction (#1 in SWE-bench: 80.8%)",
+        "Technical diagrams and structured visualizations (SVG, flowcharts)",
+        "Creative writing and prose quality",
+        "Long-context synthesis (1M tokens effective)",
+        "Conversational and seeks clarification when ambiguous",
+        "Best for expert-level work and production bug-fixing",
+        "Adaptive reasoning mode available"
+      ],
+      "weaknesses": [
+        "Most expensive option ($5/$25 per M tokens)",
+        "Not optimal for pure mathematical reasoning (Gemini better)"
+      ],
+      "benchmarks": {
+        "coding_swe_bench_verified": 80.8,
+        "mmmu_pro": 85.1,
+        "humaneval": 94.2
+      },
+      "structured_output": {
+        "method": "tool_use",
+        "reliability": 99.5,
+        "features": [
+          "Grammar compilation (server-side)",
+          "Fine-grained streaming (GA)",
+          "Tool parameters validation",
+          "Dynamic filtering with web tools"
+        ],
+        "best_for": "Complex tools and ambiguous queries"
+      },
+      "prompting_strategy": {
+        "key_principle": "Conversational - seeks to understand intention",
+        "techniques": [
+          "Examples alongside schema (improves 30%)",
+          "Encourage clarification on ambiguity",
+          "Structured thinking (adaptive reasoning)",
+          "Iterative refinement (multi-turn)",
+          "2-3 concrete examples"
+        ]
+      },
+      "optimal_for": [
+        "Coding agents with self-correction",
+        "Large codebase refactors",
+        "Technical diagrams and architectures",
+        "High-stakes analysis",
+        "Creative and structured writing"
+      ]
+    },
+    "claude-sonnet-4-6": {
+      "display_name": "Anthropic Claude Sonnet 4.6",
+      "family": "claude",
+      "released": "2026-02-17",
+      "intelligence_index": 52,
+      "context_window": 1000000,
+      "pricing": {
+        "input_per_m_tokens": 2.00,
+        "output_per_m_tokens": 10.00,
+        "currency": "USD"
+      },
+      "strengths": [
+        "Best balance of performance and cost",
+        "#1 globally on office productivity benchmarks",
+        "Better than Opus for structured data processing",
+        "Tool integration excellence",
+        "Faster responses than Opus",
+        "Practical default for most workloads"
+      ],
+      "weaknesses": [
+        "Slightly lower reasoning than Opus for very complex tasks"
+      ],
+      "benchmarks": {
+        "coding_swe_bench_verified": 77.0,
+        "office_productivity": "rank_1_global"
+      },
+      "structured_output": {
+        "method": "tool_use",
+        "reliability": 98.0,
+        "features": [
+          "Grammar compilation (server-side)",
+          "Fine-grained streaming (GA)",
+          "Same reliability as Opus with better speed"
+        ],
+        "best_for": "Everyday development and structured writing"
+      },
+      "prompting_strategy": {
+        "key_principle": "Same as Opus but optimized for speed",
+        "techniques": [
+          "Examples alongside schema",
+          "Clear, concise prompts",
+          "Tool use for structured output"
+        ]
+      },
+      "optimal_for": [
+        "Daily development tasks",
+        "Moderate complexity coding",
+        "Structured writing and automation",
+        "Cost-sensitive projects with good quality needs",
+        "Real-time applications needing faster responses"
+      ]
+    },
+    "gemini-3-1-pro": {
+      "display_name": "Google Gemini 3.1 Pro",
+      "family": "gemini",
+      "released": "2026-02-19",
+      "intelligence_index": 57,
+      "context_window": 2000000,
+      "pricing": {
+        "input_per_m_tokens": 2.00,
+        "output_per_m_tokens": 12.00,
+        "currency": "USD"
+      },
+      "strengths": [
+        "Pure reasoning and logic (#1 ARC-AGI-2: 77.1%)",
+        "Largest context window (2M tokens - unique)",
+        "Most cost-efficient (60% cheaper output than Claude)",
+        "Web-connected agents (Google Search grounding)",
+        "Multimodal reasoning (text + images + video + audio)",
+        "Native JSON Schema support (Pydantic/Zod out-of-box)",
+        "Code execution built-in (can validate own output)"
+      ],
+      "weaknesses": [
+        "More sensitive to ambiguous prompts",
+        "May commit to wrong interpretation confidently",
+        "Not optimal for production coding (Claude/GPT lead SWE-bench)"
+      ],
+      "benchmarks": {
+        "arc_agi_2": 77.1,
+        "reasoning_verified": "double_vs_gemini_3_pro"
+      },
+      "structured_output": {
+        "method": "response_schema",
+        "reliability": 97.0,
+        "features": [
+          "Native JSON Schema support",
+          "Property ordering preserved",
+          "Advanced keywords (anyOf, $ref)",
+          "Pydantic/Zod direct integration",
+          "Combine with built-in tools (Search, Code Execution)"
+        ],
+        "best_for": "Complex schemas with clear prompts"
+      },
+      "prompting_strategy": {
+        "key_principle": "Clarity - needs very explicit prompts",
+        "techniques": [
+          "Rich descriptions in schema (every field)",
+          "Explicit constraints upfront",
+          "Use enums for limited values",
+          "Combine with Code Execution for validation",
+          "Clear, unambiguous language"
+        ]
+      },
+      "optimal_for": [
+        "Full codebase analysis (2M context)",
+        "Pure logic and reasoning tasks",
+        "Web research + structured output",
+        "Cost-sensitive high-volume operations",
+        "Multimodal tasks (document understanding)"
+      ]
+    }
+  },
+  "decision_framework": {
+    "description": "Guidelines for the orchestrator to choose providers. These are NOT rules, but empirical insights to inform decisions.",
+    "factors_to_consider": [
+      {
+        "factor": "task_complexity",
+        "insight": "Very complex tasks (coding refactors, architectural decisions) benefit from Claude Opus 4.6's reasoning. Simple tasks work well with Sonnet or Gemini."
+      },
+      {
+        "factor": "budget_sensitivity",
+        "insight": "Gemini 3.1 Pro is 60% cheaper on output. For high-volume operations, consider Gemini if prompts can be made very clear."
+      },
+      {
+        "factor": "context_size",
+        "insight": "If analyzing full codebase (>1M tokens), only Gemini 3.1 Pro supports 2M context."
+      },
+      {
+        "factor": "schema_adherence_criticality",
+        "insight": "If 100% schema adherence is mandatory (e.g., financial data), GPT-5.4 provides mathematical guarantees."
+      },
+      {
+        "factor": "prompt_ambiguity",
+        "insight": "If objective is ambiguous, Claude (Opus/Sonnet) asks clarifying questions. Gemini may misinterpret and proceed confidently."
+      },
+      {
+        "factor": "coding_focus",
+        "insight": "For coding agents and SWE tasks, Claude Opus 4.6 leads benchmarks (80.8% SWE-bench)."
+      }
+    ]
+  },
+  "structured_output_comparison": {
+    "description": "Reliability comparison for structured output generation",
+    "test_case": "Generate plan with constraint 'exactly 1 orchestrator'",
+    "results": {
+      "gpt-5.4": {
+        "adherence": 100.0,
+        "interpretation_errors": "low",
+        "rating": 5
+      },
+      "claude-opus-4-6": {
+        "adherence": 99.5,
+        "interpretation_errors": "very_low",
+        "rating": 5
+      },
+      "claude-sonnet-4-6": {
+        "adherence": 98.0,
+        "interpretation_errors": "low",
+        "rating": 4
+      },
+      "gemini-3-1-pro": {
+        "adherence": 97.0,
+        "interpretation_errors": "medium_high_if_ambiguous",
+        "rating": 4
+      }
+    }
+  },
+  "cost_analysis": {
+    "description": "Cost per typical GIMO plan generation (5K input + 2K output tokens)",
+    "typical_plan_cost_usd": {
+      "gpt-5.4": 0.045,
+      "claude-opus-4-6": 0.09,
+      "claude-sonnet-4-6": 0.036,
+      "gemini-3-1-pro": 0.038
+    },
+    "volume_recommendations": {
+      "under_1000_plans_month": "Use Claude Opus (best quality)",
+      "1000_to_10000_plans_month": "Use Claude Sonnet (optimal balance)",
+      "over_10000_plans_month": "Consider Gemini with refined prompts"
+    }
+  }
+}

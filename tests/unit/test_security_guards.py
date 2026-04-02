@@ -12,8 +12,15 @@ from tools.gimo_server.security.audit import redact_sensitive_data
 from tools.gimo_server.services.cognitive.security_guard import RuleBasedSecurityGuard
 from tools.gimo_server import config
 
-# Add test token to config.TOKENS to bypass real verify_token 401s
-config.TOKENS.add("a"*32)
+
+@pytest.fixture(autouse=True)
+def _register_test_token():
+    """Register and clean up test token to avoid global state leakage."""
+    token = "a" * 32
+    config.TOKENS.add(token)
+    yield
+    config.TOKENS.discard(token)
+
 
 # ── Path Validation & Normalization ───────────────────────
 
