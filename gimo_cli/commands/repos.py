@@ -49,7 +49,7 @@ def repos_list(
         else:
             console.print_json(data=payload)
     else:
-        console.print(payload)
+        console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(f"[dim]{payload}[/dim]")
 
 
 @repos_app.command("select")

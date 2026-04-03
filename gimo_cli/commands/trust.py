@@ -47,8 +47,10 @@ def trust_status(
         summary = payload.get("summary") or payload.get("aggregate")
         if summary:
             console.print(f"[dim]Aggregate: {summary}[/dim]")
+    elif isinstance(payload, (dict, list)):
+        console.print_json(data=payload)
     else:
-        console.print(payload)
+        console.print(f"[dim]{payload}[/dim]")
 
 
 @trust_app.command("reset")

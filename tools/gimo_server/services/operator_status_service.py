@@ -21,7 +21,11 @@ class OperatorStatusService:
     _TERMINAL_RUN_STATUSES = {"done", "error", "cancelled"}
 
     @classmethod
-    def _repo_root(cls) -> Path:
+    def _repo_root(cls, workspace_override: str | None = None) -> Path:
+        if workspace_override:
+            p = Path(workspace_override)
+            if p.is_dir():
+                return p
         settings = get_settings()
         return Path(settings.repo_root_dir)
 
@@ -98,11 +102,12 @@ class OperatorStatusService:
         return remaining_pct, ("ok" if remaining_pct > 20.0 else "low"), budget_spend, budget_limit
 
     @classmethod
-    def get_status_snapshot(cls) -> dict[str, Any]:
+    def get_status_snapshot(cls, workspace_override: str | None = None) -> dict[str, Any]:
         """Return the canonical backend-authored operator status snapshot.
 
-        Defensive: each subsnapshot is wrapped in try/except to prevent 500 errors
-        if any single component fails. Returns partial snapshot on failure.
+        Args:
+            workspace_override: If set (from X-Gimo-Workspace header), use this
+                path instead of the server's own repo_root_dir for git operations.
         """
         # Base snapshot (always present)
         snapshot: dict[str, Any] = {
@@ -112,7 +117,7 @@ class OperatorStatusService:
 
         # Git snapshot (optional, fail-safe)
         try:
-            repo_root = cls._repo_root()
+            repo_root = cls._repo_root(workspace_override)
             branch = GitService.get_current_branch(repo_root)
             dirty_files = GitService.get_changed_files(repo_root)
             snapshot["repo"] = repo_root.name if repo_root.exists() else None

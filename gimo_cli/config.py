@@ -111,8 +111,14 @@ def runs_dir() -> Path:
 
 
 def ensure_project_dirs() -> None:
-    for path in (gimo_dir(), plans_dir(), history_dir(), runs_dir()):
-        path.mkdir(parents=True, exist_ok=True)
+    """Ensure .gimo/ workspace structure exists. Delegates to WorkspaceContract."""
+    try:
+        from tools.gimo_server.services.workspace.workspace_contract import WorkspaceContract
+        WorkspaceContract.ensure(project_root())
+    except ImportError:
+        # Fallback if server package not available (e.g. standalone CLI)
+        for path in (gimo_dir(), plans_dir(), history_dir(), runs_dir()):
+            path.mkdir(parents=True, exist_ok=True)
 
 
 def default_config() -> dict[str, Any]:

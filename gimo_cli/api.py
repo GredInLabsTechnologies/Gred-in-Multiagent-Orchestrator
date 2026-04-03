@@ -25,6 +25,7 @@ from gimo_cli.config import (
 _caps_cache: dict[str, Any] = {}
 _caps_ts: float = 0.0
 _CAPS_TTL = 300.0
+_bond_warning_emitted: bool = False
 
 
 def resolve_server_url(config: dict[str, Any]) -> str:
@@ -46,7 +47,10 @@ def resolve_token(role: str = "operator", config: dict[str, Any] | None = None) 
         if bond_jwt:
             return bond_jwt
         if bond_hint:
-            console.print(f"[yellow]{bond_hint}[/yellow]")
+            global _bond_warning_emitted
+            if not _bond_warning_emitted:
+                console.print(f"[yellow]{bond_hint}[/yellow]")
+                _bond_warning_emitted = True
 
     # 2. Environment variables
     env_vars = {
@@ -208,6 +212,11 @@ def api_request(
 
     if extra_headers:
         headers.update(extra_headers)
+
+    # Inject workspace context so the server knows CLI's working directory.
+    if "X-Gimo-Workspace" not in headers:
+        headers["X-Gimo-Workspace"] = str(project_root())
+
     url = f"{base_url}{path}"
 
     try:

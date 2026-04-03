@@ -40,8 +40,10 @@ def skills_list(
                     str(skill.get("description", ""))[:60],
                 )
         console.print(table)
+    elif isinstance(payload, (dict, list)):
+        console.print_json(data=payload)
     else:
-        console.print(payload)
+        console.print("[dim]No skills available.[/dim]")
 
 
 @skills_app.command("run")

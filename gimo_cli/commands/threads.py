@@ -44,8 +44,10 @@ def threads_list(
                     str(t.get("created_at", ""))[:19],
                 )
         console.print(table)
+    elif isinstance(payload, (dict, list)):
+        console.print_json(data=payload)
     else:
-        console.print(payload)
+        console.print("[dim]No threads found.[/dim]")
 
 
 @threads_app.command("show")
@@ -86,5 +88,7 @@ def threads_show(
                 elif itype == "tool_call":
                     meta = item.get("metadata", {})
                     console.print(f"  [dim]\u25b8 {meta.get('tool_name', '?')}[/dim]")
+    elif isinstance(payload, (dict, list)):
+        console.print_json(data=payload)
     else:
-        console.print(payload)
+        console.print(f"[dim]{payload}[/dim]")

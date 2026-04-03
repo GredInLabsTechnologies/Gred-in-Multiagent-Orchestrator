@@ -1,8 +1,9 @@
 import json
 from datetime import datetime, timezone
 from typing import List, Optional, Annotated
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from ...ops_models import GimoThread, GimoTurn, GimoItem, GimoItemType
 from ...services.conversation_service import ConversationService
 from ...services.agentic_loop_service import AgenticLoopService, ThreadExecutionBusyError
@@ -13,6 +14,11 @@ from .common import _require_role
 from ...services.thread_session_service import ThreadSessionService
 
 router = APIRouter(prefix="/threads", tags=["conversation"])
+
+
+class ChatMessageBody(BaseModel):
+    """Body for POST endpoints that accept user content."""
+    content: str
 
 
 def _merge_plan_context(thread: GimoThread, plan_data: dict) -> dict:
@@ -141,7 +147,7 @@ async def fork_thread(
 @router.post("/{thread_id}/messages", responses={404: {"description": "Thread not found"}})
 async def post_message(
     thread_id: str,
-    content: str,
+    body: ChatMessageBody,
     auth: Annotated[AuthContext, Depends(verify_token)]
 ):
     """Post a new message to a thread (as the user)."""
@@ -150,7 +156,7 @@ async def post_message(
     if not turn:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    item = GimoItem(type="text", content=content, status="completed")
+    item = GimoItem(type="text", content=body.content, status="completed")
     ConversationService.append_item(thread_id, turn.id, item)
 
     return {"status": "ok", "turn_id": turn.id}
@@ -158,7 +164,7 @@ async def post_message(
 @router.post("/{thread_id}/chat", responses={404: {"description": "Thread not found"}})
 async def chat_message(
     thread_id: str,
-    content: str,
+    body: ChatMessageBody,
     auth: Annotated[AuthContext, Depends(verify_token)]
 ):
     """
@@ -177,7 +183,7 @@ async def chat_message(
     try:
         result = await AgenticLoopService.run(
             thread_id=thread_id,
-            user_message=content,
+            user_message=body.content,
             workspace_root=thread.workspace_root,
             token=token,
         )
@@ -196,7 +202,7 @@ async def chat_message(
 @router.post("/{thread_id}/chat/stream", responses={404: {"description": "Thread not found"}})
 async def chat_message_stream(
     thread_id: str,
-    content: str,
+    body: ChatMessageBody,
     auth: Annotated[AuthContext, Depends(verify_token)]
 ):
     """
@@ -224,7 +230,7 @@ async def chat_message_stream(
         try:
             async for event in AgenticLoopService._run_stream_reserved(
                 thread_id=thread_id,
-                user_message=content,
+                user_message=body.content,
                 workspace_root=thread.workspace_root,
                 token=token,
             ):

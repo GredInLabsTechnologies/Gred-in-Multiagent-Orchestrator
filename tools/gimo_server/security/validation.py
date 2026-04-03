@@ -23,6 +23,20 @@ def save_repo_registry(data: dict):
     REPO_REGISTRY_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def get_workspace_from_request(request) -> Path:
+    """Resolve workspace: X-Gimo-Workspace header > get_active_repo_dir() fallback.
+
+    CLI sends the header on every request so the server uses the CLI's cwd.
+    UI/web requests omit the header, so the server falls back to its own state.
+    """
+    ws = getattr(request, "headers", {}).get("X-Gimo-Workspace") if request else None
+    if ws:
+        p = Path(ws).resolve()
+        if p.is_dir():
+            return p
+    return get_active_repo_dir()
+
+
 def get_active_repo_dir() -> Path:
     override = RepoOverrideService.get_active_override()
     if override:

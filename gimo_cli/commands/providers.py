@@ -31,7 +31,7 @@ def providers_list(
         return
 
     if not isinstance(payload, dict):
-        console.print(payload)
+        console.print(f"[dim]{payload}[/dim]")
         return
 
     active = payload.get("active", "none")
@@ -168,7 +168,7 @@ def providers_models(
             table.add_row(name)
         console.print(table)
     else:
-        console.print(payload)
+        console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(f"[dim]{payload}[/dim]")
 
 
 @providers_app.command("login")

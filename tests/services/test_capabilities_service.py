@@ -10,7 +10,7 @@ def mock_request():
     """Mock FastAPI request."""
     req = MagicMock()
     req.cookies.get.return_value = None
-    req.app.state.gics = True
+    req.app.state.gics = MagicMock()
     req.app.state.run_worker = True
     return req
 
@@ -52,9 +52,10 @@ async def test_capabilities_returns_all_required_fields(mock_request, mock_auth)
 
 
 @pytest.mark.asyncio
+@patch("tools.gimo_server.services.timeout.adaptive_timeout_service.AdaptiveTimeoutService.predict_timeout", side_effect=Exception("force static fallback"))
 @patch("tools.gimo_server.services.hardware_monitor_service.HardwareMonitorService")
-async def test_capabilities_adapts_timeout_to_system_load(mock_hw, mock_request, mock_auth):
-    """Generation timeout increases under high system load."""
+async def test_capabilities_adapts_timeout_to_system_load(mock_hw, _mock_ats, mock_request, mock_auth):
+    """Generation timeout increases under high system load (static fallback path)."""
     # Safe load
     mock_hw.get_instance.return_value.get_load_level.return_value = "safe"
     caps = await CapabilitiesService.get_capabilities(mock_request, mock_auth)
@@ -77,7 +78,7 @@ async def test_capabilities_service_health_reflects_gics_state(mock_auth):
     # GICS attached
     req = MagicMock()
     req.cookies.get.return_value = None
-    req.app.state.gics = True
+    req.app.state.gics = MagicMock()
     req.app.state.run_worker = True
 
     caps = await CapabilitiesService.get_capabilities(req, mock_auth)
@@ -125,7 +126,7 @@ async def test_capabilities_extracts_plan_from_firebase_session(mock_session_sto
     """Plan extracted from Firebase session when available."""
     req = MagicMock()
     req.cookies.get.return_value = "test-session-cookie"
-    req.app.state.gics = True
+    req.app.state.gics = MagicMock()
     req.app.state.run_worker = True
 
     mock_session = MagicMock()
@@ -151,5 +152,5 @@ async def test_capabilities_handles_hardware_monitor_failure(mock_hw, mock_reque
 
     caps = await CapabilitiesService.get_capabilities(mock_request, mock_auth)
     assert caps["system_load"] == "safe"
-    # Defaults to safe → 120s timeout
-    assert caps["hints"]["generation_timeout_s"] == 120
+    # Adaptive timeout uses default for "plan" (180s) when no historical data
+    assert caps["hints"]["generation_timeout_s"] == 180.0

@@ -27,6 +27,7 @@ from .provider_auth_service import ProviderAuthService
 from .provider_service_adapter_registry import build_provider_adapter
 from .provider_service_impl import ProviderService
 from .task_descriptor_service import TaskDescriptorService
+from .workspace.workspace_contract import WorkspaceContract
 
 logger = logging.getLogger("orchestrator.agentic_loop")
 
@@ -646,13 +647,24 @@ class AgenticLoopService:
         workflow_phase: WorkflowPhase | str = "planning",
     ) -> str:
         tree = _generate_workspace_tree(workspace_root)
-        return SYSTEM_PROMPT_TEMPLATE.format(
+        # Inject workspace governance if available
+        governance_block = ""
+        try:
+            if WorkspaceContract.is_initialized(workspace_root):
+                contract = WorkspaceContract.verify(workspace_root)
+                governance_block = contract.governance.prompt_constraints()
+        except Exception as exc:
+            logger.debug("Could not load workspace governance: %s", exc)
+        base = SYSTEM_PROMPT_TEMPLATE.format(
             workspace_root=workspace_root,
             task_role=task_role,
             workflow_phase=workflow_phase,
             tree=tree,
             mood_prefix=mood_profile.prompt_prefix or "",
         )
+        if governance_block:
+            return f"{base}\n\n{governance_block}"
+        return base
 
     @classmethod
     async def _run_loop(
@@ -684,12 +696,19 @@ class AgenticLoopService:
         else:
             resolved_execution_policy = ExecutionPolicyService.policy_name_from_legacy_mood(mood)
         policy_profile = ExecutionPolicyService.get_policy(resolved_execution_policy)
+        # Bootstrap workspace contract for governance + audit
+        ws_contract = None
+        try:
+            ws_contract = WorkspaceContract.ensure(workspace_root)
+        except Exception as exc:
+            logger.debug("Workspace contract not available: %s", exc)
         executor = ToolExecutor(
             workspace_root=workspace_root,
             token=token,
             mood=mood,
             execution_policy=resolved_execution_policy,
             session_id=session_id,
+            workspace_contract=ws_contract,
         )
         total_usage: Dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         all_tool_logs: List[Dict[str, Any]] = []
@@ -700,6 +719,7 @@ class AgenticLoopService:
         total_budget = float(policy_profile.max_cost_per_turn_usd or 0.0) * max(1, max_turns)
         proof_chain = cls._load_execution_proof_chain(thread_id, recover=True) if thread_id else None
         last_content = ""
+        last_tool_call_format = "none"
 
         await emit_event(
             "session_start",
@@ -754,6 +774,7 @@ class AgenticLoopService:
             tool_calls = list(llm_result.get("tool_calls", []) or [])
             finish_reason = llm_result.get("finish_reason", "stop")
             last_content = content or last_content
+            last_tool_call_format = llm_result.get("tool_call_format", "none")
 
             if content:
                 await emit_event("text_delta", {"content": content})
@@ -1114,6 +1135,22 @@ class AgenticLoopService:
             final_response = last_content or "(Reached maximum iterations. Stopping.)"
 
         total_usage["cost_usd"] = total_cost
+
+        # U4: Single telemetry sink — writes to metrics, audit log, and thread metadata.
+        try:
+            from .observability import ObservabilityService
+            ObservabilityService.record_llm_usage(
+                thread_id=thread_id,
+                model=model or "unknown",
+                prompt_tokens=total_usage.get("prompt_tokens", 0),
+                completion_tokens=total_usage.get("completion_tokens", 0),
+                cost_usd=total_cost,
+                tools_executed=len(all_tool_logs),
+                tool_call_format=last_tool_call_format or "none",
+            )
+        except Exception:
+            logger.debug("record_llm_usage failed", exc_info=True)
+
         if persist_conversation and thread_id and final_response:
             final_turn = ConversationService.add_turn(thread_id, agent_id="orchestrator")
             if final_turn:

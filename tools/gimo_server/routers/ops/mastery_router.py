@@ -184,7 +184,11 @@ async def get_mastery_status(auth: Annotated[AuthContext, Depends(verify_token)]
     if spend > 50:
          tips.append("Tu gasto global este mes es elevado (> $50). Revisa tus limites de provider.")
 
-    hw_state = hw.get_load_level()
+    try:
+        hw_state = hw.get_load_level()
+    except Exception:
+        logger.warning("HardwareMonitorService unavailable, assuming safe load")
+        hw_state = "safe"
     if hw_state == "critical":
         tips.insert(0, "CARGA CRITICA: El sistema esta bajo mucha carga. Solo se usaran modelos remotos.")
     elif hw_state == "caution":

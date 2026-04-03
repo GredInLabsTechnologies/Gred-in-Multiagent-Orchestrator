@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from ...services.file_service import FileService
 from ...services.execution_policy_service import ExecutionPolicyProfile, ExecutionPolicyService
 from ...services.task_descriptor_service import TaskDescriptorService
+from ...services.workspace.workspace_contract import WorkspaceContract
 from ..moods import get_mood_profile
 
 logger = logging.getLogger(__name__)
@@ -39,8 +40,10 @@ class ToolExecutor:
         mood: str = "neutral",
         execution_policy: Optional[str] = None,
         session_id: Optional[str] = None,
+        workspace_contract: Optional[WorkspaceContract] = None,
     ):
         self.workspace_root = os.path.abspath(workspace_root)
+        self._workspace_contract = workspace_contract
         self.policy = policy or {}
         self.token = token
         self.mood = mood
@@ -220,6 +223,34 @@ class ToolExecutor:
         )
 
     async def execute_tool_call(self, name: str, arguments: Dict[str, Any]) -> ToolExecutionResult:
+        # Gate: mutating tools require initialized workspace — auto-bootstrap
+        if name in _MUTATING_TOOLS and not self._workspace_contract:
+            try:
+                self._workspace_contract = WorkspaceContract.ensure(self.workspace_root)
+            except Exception as exc:
+                logger.warning("Workspace bootstrap failed: %s", exc)
+                return ToolExecutionResult(
+                    "error",
+                    f"Workspace not initialized and auto-bootstrap failed: {exc}. "
+                    f"Run 'gimo init' or check workspace permissions.",
+                )
+
+        # Gate: protected paths
+        if name in _MUTATING_TOOLS and self._workspace_contract:
+            target_path = arguments.get("path", "")
+            if target_path:
+                try:
+                    rel = os.path.relpath(
+                        self._to_abs_path(target_path), self.workspace_root
+                    ).replace("\\", "/")
+                except ValueError:
+                    rel = target_path
+                if self._workspace_contract.is_path_protected(rel):
+                    return ToolExecutionResult(
+                        "error",
+                        f"Path '{target_path}' is protected by workspace governance rules.",
+                    )
+
         if name in _MUTATING_TOOLS and self._contract.fs_mode == "read_only":
             return ToolExecutionResult("error", f"Execution policy '{self.execution_policy}' is read-only and cannot execute '{name}'")
         if name in _NETWORK_TOOLS and self._contract.network_mode == "blocked":
@@ -240,11 +271,25 @@ class ToolExecutor:
         if not handler:
             return ToolExecutionResult("error", f"Unknown tool: {name}")
 
+        start_time = __import__("time").monotonic()
         try:
-            return await handler(arguments)
+            result = await handler(arguments)
         except Exception as exc:
             logger.exception("Error executing tool %s", name)
-            return ToolExecutionResult("error", f"Internal error in {name}: {exc}")
+            result = ToolExecutionResult("error", f"Internal error in {name}: {exc}")
+
+        # Audit trail for mutating tools
+        if name in _MUTATING_TOOLS and self._workspace_contract:
+            elapsed = __import__("time").monotonic() - start_time
+            self._workspace_contract.append_audit({
+                "session_id": self.session_id or "",
+                "tool": name,
+                "path": arguments.get("path", ""),
+                "result": result.get("status", "unknown"),
+                "duration_s": round(elapsed, 3),
+            })
+
+        return result
 
     async def handle_write_file(self, args: Dict[str, Any]) -> ToolExecutionResult:
         path = args.get("path")

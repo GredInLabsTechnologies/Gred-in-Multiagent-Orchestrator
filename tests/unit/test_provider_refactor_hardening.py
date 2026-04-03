@@ -86,8 +86,9 @@ def test_get_cli_dependency_install_job_not_found_returns_error_payload() -> Non
 
 
 def test_connector_health_unknown_connector_raises() -> None:
-    with pytest.raises(ValueError, match="Unknown connector"):
-        asyncio.run(ProviderConnectorService.connector_health(SimpleNamespace(), "unknown"))
+    stub = SimpleNamespace(get_config=lambda: None)
+    with pytest.raises(ValueError, match="Unknown provider or connector"):
+        asyncio.run(ProviderConnectorService.connector_health(stub, "unknown"))
 
 
 def test_connector_health_openai_compat_uses_provider_health_when_provider_id_present() -> None:

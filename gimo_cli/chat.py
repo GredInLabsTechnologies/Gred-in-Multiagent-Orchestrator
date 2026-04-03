@@ -329,7 +329,7 @@ def interactive_chat(config: dict[str, Any]) -> None:
                     with client.stream(
                         "POST",
                         f"{base_url}/ops/threads/{thread_id}/chat/stream",
-                        params={"content": user_input},
+                        json={"content": user_input},
                         headers=headers,
                     ) as response:
                         if response.status_code != 200:
@@ -468,7 +468,7 @@ def interactive_chat(config: dict[str, Any]) -> None:
                     with renderer.render_thinking():
                         response = client.post(
                             f"{base_url}/ops/threads/{thread_id}/chat",
-                            params={"content": user_input},
+                            json={"content": user_input},
                             headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
                         )
 

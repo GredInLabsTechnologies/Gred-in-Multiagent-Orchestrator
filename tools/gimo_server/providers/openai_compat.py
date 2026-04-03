@@ -115,7 +115,7 @@ class OpenAICompatAdapter(ProviderAdapter):
             "usage": usage
         }
 
-    async def chat_with_tools(
+    async def _raw_chat_with_tools(
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,

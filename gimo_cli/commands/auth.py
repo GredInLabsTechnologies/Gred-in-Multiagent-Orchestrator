@@ -182,6 +182,11 @@ def login(
     if token:
         console.print("[dim]Using token from ORCH_OPERATOR_TOKEN environment variable[/dim]")
     else:
+        import sys
+        if not sys.stdin.isatty():
+            console.print("[red]Cannot prompt for token in non-interactive mode.[/red]")
+            console.print("[cyan]Set ORCH_OPERATOR_TOKEN env var or run from a terminal.[/cyan]")
+            raise typer.Exit(1)
         console.print("[dim]Enter server token (from server's .gimo_credentials or ORCH_OPERATOR_TOKEN):[/dim]")
         import getpass
         token = getpass.getpass("Token: ").strip()

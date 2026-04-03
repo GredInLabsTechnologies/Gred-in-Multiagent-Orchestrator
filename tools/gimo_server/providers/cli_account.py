@@ -3,13 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import shutil
 import sys
 from asyncio.subprocess import PIPE
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from .base import ProviderAdapter
+from .tool_call_parser import parse_tool_calls_from_text as _parse_tool_calls_from_text
 
 logger = logging.getLogger("orchestrator.providers.cli_account")
 
@@ -66,74 +66,6 @@ def _format_tools_for_prompt(tools: List[Dict[str, Any]]) -> str:
             lines.extend(param_strs)
 
     return "\n".join(lines)
-
-
-def _parse_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
-    """Extract tool_calls JSON blocks from LLM text output.
-
-    Returns (remaining_text, tool_calls_list).
-    Supports multiple formats:
-    - ```json\n{"tool_calls": [...]}```
-    - {"tool_calls": [...]} (bare JSON)
-    - Mixed text + JSON
-    """
-    tool_calls: List[Dict[str, Any]] = []
-    remaining = text
-
-    # Pattern 1: JSON code blocks with tool_calls
-    json_block_pattern = r'```(?:json)?\s*\n?(\{[^`]*?"tool_calls"[^`]*?\})\s*```'
-    matches = list(re.finditer(json_block_pattern, text, re.DOTALL | re.IGNORECASE))
-
-    for match in matches:
-        json_str = match.group(1).strip()
-        try:
-            data = json.loads(json_str)
-            if isinstance(data, dict) and "tool_calls" in data:
-                calls = data["tool_calls"]
-                if isinstance(calls, list):
-                    # Normalize to OpenAI format
-                    for call in calls:
-                        if isinstance(call, dict) and "name" in call:
-                            tool_calls.append({
-                                "id": f"call_{len(tool_calls)}",
-                                "type": "function",
-                                "function": {
-                                    "name": call.get("name", ""),
-                                    "arguments": json.dumps(call.get("arguments", {})),
-                                },
-                            })
-                # Remove the JSON block from remaining text
-                remaining = remaining.replace(match.group(0), "", 1)
-        except json.JSONDecodeError:
-            continue
-
-    # Pattern 2: Bare JSON objects with tool_calls (no code fence)
-    if not tool_calls:
-        bare_json_pattern = r'(\{[^{}]*?"tool_calls"[^{}]*?\})'
-        bare_matches = list(re.finditer(bare_json_pattern, text, re.DOTALL))
-        for match in bare_matches:
-            json_str = match.group(1).strip()
-            try:
-                data = json.loads(json_str)
-                if isinstance(data, dict) and "tool_calls" in data:
-                    calls = data["tool_calls"]
-                    if isinstance(calls, list):
-                        for call in calls:
-                            if isinstance(call, dict) and "name" in call:
-                                tool_calls.append({
-                                    "id": f"call_{len(tool_calls)}",
-                                    "type": "function",
-                                    "function": {
-                                        "name": call.get("name", ""),
-                                        "arguments": json.dumps(call.get("arguments", {})),
-                                    },
-                                })
-                    remaining = remaining.replace(match.group(0), "", 1)
-                    break
-            except json.JSONDecodeError:
-                continue
-
-    return remaining.strip(), tool_calls
 
 
 def _parse_codex_jsonl(raw: str) -> str:
@@ -263,7 +195,7 @@ class CliAccountAdapter(ProviderAdapter):
             },
         }
 
-    async def chat_with_tools(
+    async def _raw_chat_with_tools(
         self,
         messages: List[Dict[str, Any]],
         tools: list | None = None,
@@ -273,9 +205,9 @@ class CliAccountAdapter(ProviderAdapter):
     ) -> Dict[str, Any]:
         """Implement tool-calling via CLI binary using prompt engineering.
 
-        P2 Innovation: Injects tool schemas into system prompt, prompts the CLI
-        to emit tool_calls as JSON, then parses the response. Includes retry
-        logic for malformed responses.
+        Injects tool schemas into system prompt, prompts the CLI to emit
+        tool_calls as JSON, then parses the response. Includes retry logic
+        for malformed responses.
         """
         # Build flat prompt with tool-calling instructions injected
         parts: list[str] = []
@@ -346,6 +278,7 @@ class CliAccountAdapter(ProviderAdapter):
             "tool_calls": tool_calls,
             "usage": result.get("usage", {}),
             "finish_reason": "stop" if not tool_calls else "tool_calls",
+            "tool_call_format": "parsed_json_in_text" if tool_calls else "none",
         }
 
     async def health_check(self) -> bool:

@@ -235,6 +235,7 @@ async def lifespan(app: FastAPI):
             logger.warning("  Reason: %s", _license_status.reason)
             logger.warning("  Only /auth/cold-room/* endpoints are available")
             logger.warning("=" * 60)
+            app.state.ready = True
             yield
             logger.info("Shutting down GIMO Orchestrator (limited mode)...")
             return
@@ -412,6 +413,8 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Preset telemetry seed warning: %s", exc)
 
+        app.state.ready = True
+        logger.info("GIMO Orchestrator ready (lifespan complete)")
         yield
 
         # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
@@ -492,6 +495,20 @@ def _register_core_routes(app: FastAPI, settings):
         import os
         return JSONResponse({
             "status": "ok",
+            "version": __version__,
+            "pid": os.getpid(),
+            "server": "gimo",
+        })
+
+    @app.get("/ready")
+    async def readiness_route():
+        """Readiness probe — only returns 200 after lifespan completes."""
+        import os
+        ready = getattr(app.state, "ready", False)
+        if not ready:
+            return JSONResponse({"status": "starting"}, status_code=503)
+        return JSONResponse({
+            "status": "ready",
             "version": __version__,
             "pid": os.getpid(),
             "server": "gimo",

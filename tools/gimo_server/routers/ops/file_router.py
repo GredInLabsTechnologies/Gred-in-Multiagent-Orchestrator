@@ -4,11 +4,12 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from ...config import ALLOWLIST_REQUIRE, MAX_LINES
 from ...security import check_rate_limit, get_active_repo_dir, get_allowed_paths, validate_path
+from ...security.validation import get_workspace_from_request
 from ...security.auth import AuthContext
 from ...services.file_service import FileService
 from ...services.repo_service import RepoService
@@ -19,12 +20,13 @@ router = APIRouter(prefix="/ops/files", tags=["files"])
 
 @router.get("/tree")
 async def get_tree(
+    request: Request,
     path: str = ".",
     max_depth: int = Query(3, le=6),
     auth: AuthContext = Depends(require_read),
     _rl: None = Depends(check_rate_limit),
 ):
-    base_dir = get_active_repo_dir()
+    base_dir = get_workspace_from_request(request)
     target = validate_path(path, base_dir)
     if not target.is_dir():
         raise HTTPException(status_code=400, detail="Path is not a directory.")
@@ -47,13 +49,14 @@ async def get_tree(
 
 @router.get("/content", response_class=PlainTextResponse)
 def get_file_content(
+    request: Request,
     path: str,
     start_line: int = Query(1, ge=1),
     end_line: int = Query(MAX_LINES, ge=1),
     auth: AuthContext = Depends(require_read),
     _rl: None = Depends(check_rate_limit),
 ):
-    base_dir = get_active_repo_dir()
+    base_dir = get_workspace_from_request(request)
     target = validate_path(path, base_dir)
     if not target.is_file():
         raise HTTPException(status_code=400, detail="Path is not a file.")
@@ -69,12 +72,13 @@ def get_file_content(
 
 @router.get("/search")
 async def search_files(
+    request: Request,
     q: str = Query(..., min_length=3, max_length=128),
     ext: Optional[str] = None,
     auth: AuthContext = Depends(require_read),
     _rl: None = Depends(check_rate_limit),
 ):
-    base_dir = get_active_repo_dir()
+    base_dir = get_workspace_from_request(request)
     loop = asyncio.get_running_loop()
     hits = await loop.run_in_executor(None, RepoService.perform_search, base_dir, q, ext)
     return {"results": hits, "truncated": len(hits) >= 50}
@@ -82,6 +86,7 @@ async def search_files(
 
 @router.get("/diff", response_class=PlainTextResponse)
 def get_diff(
+    request: Request,
     base: str = "main",
     head: str = "HEAD",
     auth: AuthContext = Depends(require_read),
@@ -91,7 +96,7 @@ def get_diff(
     from ...security import redact_sensitive_data
     from ...services.git_service import GitService
 
-    base_dir = get_active_repo_dir()
+    base_dir = get_workspace_from_request(request)
     try:
         stdout = GitService.get_diff(base_dir, base, head)
         content = redact_sensitive_data(stdout)

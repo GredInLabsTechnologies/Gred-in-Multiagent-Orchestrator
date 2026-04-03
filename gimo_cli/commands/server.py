@@ -276,37 +276,53 @@ def start_server(host: str = "127.0.0.1", port: int = 9325) -> bool:
         "--timeout-graceful-shutdown", "10",
     ]
 
-    if sys.platform == "win32":
-        # CREATE_NEW_PROCESS_GROUP: required for SIGBREAK graceful shutdown
-        # CREATE_NO_WINDOW: no console window flashing
-        creation_flags = (
-            subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
-            | subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
-        )
-        proc = subprocess.Popen(
-            uvicorn_cmd,
-            cwd=str(proj_root),
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=creation_flags,
-        )
-    else:
-        proc = subprocess.Popen(
-            uvicorn_cmd,
-            cwd=str(proj_root),
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+    # Capture logs to ~/.gimo/server.log instead of discarding them
+    log_path = gimo_home() / "server.log"
+    log_file = open(log_path, "w", encoding="utf-8")
+
+    try:
+        if sys.platform == "win32":
+            # CREATE_NEW_PROCESS_GROUP: required for SIGBREAK graceful shutdown
+            # CREATE_NO_WINDOW: no console window flashing
+            creation_flags = (
+                subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+                | subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+            )
+            proc = subprocess.Popen(
+                uvicorn_cmd,
+                cwd=str(proj_root),
+                env=env,
+                stdout=log_file,
+                stderr=log_file,
+                creationflags=creation_flags,
+            )
+        else:
+            proc = subprocess.Popen(
+                uvicorn_cmd,
+                cwd=str(proj_root),
+                env=env,
+                stdout=log_file,
+                stderr=log_file,
+                start_new_session=True,
+            )
+    except Exception:
+        log_file.close()
+        raise
 
     _pid_file().write_text(str(proc.pid), encoding="utf-8")
 
-    # Health check with retries (server lifespan can take 60-90s on cold start)
+    # Readiness probe: wait for /ready (lifespan complete), not /health (immediate)
+    def _is_ready() -> bool:
+        try:
+            resp = httpx.get(f"{url}/ready", timeout=3.0)
+            return resp.status_code == 200
+        except Exception:
+            return False
+
     for _ in range(90):
         time.sleep(1)
-        if _is_gimo_server(url):
+        if _is_ready():
+            log_file.close()
             return True
         # Check if process died early
         try:
@@ -315,6 +331,7 @@ def start_server(host: str = "127.0.0.1", port: int = 9325) -> bool:
         except Exception:
             break  # Process crashed
 
+    log_file.close()
     _pid_file().unlink(missing_ok=True)
     return False
 

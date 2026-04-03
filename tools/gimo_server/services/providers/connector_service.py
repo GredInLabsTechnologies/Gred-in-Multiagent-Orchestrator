@@ -346,6 +346,48 @@ class ProviderConnectorService:
 
         return {"items": items, "count": len(items)}
 
+    # Known connector types (these are NOT provider_ids).
+    _KNOWN_CONNECTORS = {"claude_code", "codex_cli", "gemini_cli", "openai_compat"}
+
+    @classmethod
+    def _resolve_connector(
+        cls,
+        provider_service_cls,
+        connector_id: str,
+        provider_id: Optional[str] = None,
+    ) -> tuple[str, Optional[str]]:
+        """Resolve a caller-supplied ID to (connector_type, provider_id).
+
+        If the caller sent a known connector_type, pass through.
+        If not, treat it as a provider_id and resolve via ProviderConfig.
+        This eliminates the abstraction leak where the CLI must know about
+        connector types — it only needs to know provider names.
+        """
+        cid = str(connector_id).strip().lower()
+        if cid in cls._KNOWN_CONNECTORS:
+            return cid, provider_id
+
+        # Treat as provider_id — resolve to openai_compat connector
+        cfg = provider_service_cls.get_config()
+        if cfg and cid in cfg.providers:
+            return "openai_compat", cid
+
+        # Check CLI account providers (e.g. "claude-account", "codex-account")
+        cli_map = {
+            "claude-account": "claude_code",
+            "codex-account": "codex_cli",
+            "gemini-account": "gemini_cli",
+        }
+        if cid in cli_map:
+            return cli_map[cid], None
+
+        # Last resort: if it looks like a provider type from metadata, assume openai_compat
+        from .metadata import OPENAI_COMPAT_ADAPTER_TYPES
+        if cid in OPENAI_COMPAT_ADAPTER_TYPES:
+            return "openai_compat", provider_id
+
+        raise ValueError(f"Unknown provider or connector: {connector_id}")
+
     @classmethod
     async def connector_health(
         cls,
@@ -353,7 +395,9 @@ class ProviderConnectorService:
         connector_id: str,
         provider_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        connector_id = str(connector_id).strip().lower()
+        connector_id, provider_id = cls._resolve_connector(
+            provider_service_cls, connector_id, provider_id,
+        )
 
         if connector_id in {"claude_code", "codex_cli", "gemini_cli"}:
             binary = {

@@ -136,12 +136,13 @@ async def ops_event_stream(request: Request):
 
 
 @router.get("/operator/status")
-async def get_operator_status(auth: Annotated[AuthContext, Depends(verify_token)]):
+async def get_operator_status(request: Request, auth: Annotated[AuthContext, Depends(verify_token)]):
     """
     P2: Returns a single backend-authored snapshot for operator status.
     """
     _require_role(auth, "operator")
-    return OperatorStatusService.get_status_snapshot()
+    workspace = request.headers.get("X-Gimo-Workspace")
+    return OperatorStatusService.get_status_snapshot(workspace_override=workspace)
 
 
 @router.get("/capabilities")
@@ -159,14 +160,14 @@ async def get_capabilities(
 
 
 @router.get("/notices")
-async def get_notices(auth: Annotated[AuthContext, Depends(verify_token)]):
+async def get_notices(request: Request, auth: Annotated[AuthContext, Depends(verify_token)]):
     """
     F2: returns a canonical backend-authored notice feed for all surfaces.
     """
     _require_role(auth, "operator")
     from tools.gimo_server.services.notice_policy_service import NoticePolicyService
-    # Evaluation is backend-authored based on the authoritative status snapshot.
-    status = OperatorStatusService.get_status_snapshot()
+    workspace = request.headers.get("X-Gimo-Workspace")
+    status = OperatorStatusService.get_status_snapshot(workspace_override=workspace)
     return NoticePolicyService.evaluate_all(status)
 
 

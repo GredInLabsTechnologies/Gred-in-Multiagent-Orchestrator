@@ -16,6 +16,24 @@ from gimo_cli.config import YAML_AVAILABLE, yaml, load_config, project_root, sav
 from gimo_cli.stream import emit_output, git_command
 
 
+def _detect_default_branch() -> str:
+    """Detect the repository's default branch (main/master/etc).
+
+    Strategy: git symbolic-ref → main fallback → master fallback.
+    """
+    result = git_command(["symbolic-ref", "refs/remotes/origin/HEAD"])
+    if result.returncode == 0:
+        ref = result.stdout.strip()
+        # refs/remotes/origin/main → main
+        return ref.rsplit("/", 1)[-1] if "/" in ref else ref
+    # Fallback: check if main or master exists locally
+    for branch in ("main", "master"):
+        check = git_command(["rev-parse", "--verify", branch])
+        if check.returncode == 0:
+            return branch
+    return "main"
+
+
 def _require_git_repo() -> None:
     probe = git_command(["rev-parse", "--is-inside-work-tree"])
     if probe.returncode != 0 or probe.stdout.strip().lower() != "true":
@@ -35,11 +53,13 @@ def _ensure_clean_worktree() -> None:
 
 @app.command()
 def diff(
-    base: str = typer.Option("main", help="Base git ref."),
+    base: str = typer.Option("", help="Base git ref (auto-detects default branch if omitted)."),
     head: str = typer.Option("HEAD", help="Head git ref."),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
 ) -> None:
     """Show backend diff summary for the active repository."""
+    if not base:
+        base = _detect_default_branch()
     cfg = load_config()
     status_code, payload = api_request(cfg, "GET", "/ops/files/diff", params={"base": base, "head": head})
     if status_code != 200:
@@ -48,7 +68,12 @@ def diff(
     if json_output:
         emit_output({"base": base, "head": head, "diff": payload}, json_output=True)
         return
-    console.print(payload)
+    if isinstance(payload, (dict, list)):
+        console.print_json(data=payload)
+    elif payload:
+        console.print(str(payload))
+    else:
+        console.print("[dim]No diff output.[/dim]")
 
 
 @app.command()

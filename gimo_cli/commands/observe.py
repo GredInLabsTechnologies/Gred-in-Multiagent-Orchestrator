@@ -36,7 +36,7 @@ def observe_metrics(
                 table.add_row(k, str(v))
         console.print(table)
     else:
-        console.print(payload)
+        console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(f"[dim]{payload}[/dim]")
 
 
 @observe_app.command("alerts")
@@ -68,7 +68,7 @@ def observe_alerts(
                 table.add_row("?", str(alert)[:80])
         console.print(table)
     else:
-        console.print(payload)
+        console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(f"[dim]{payload}[/dim]")
 
 
 @observe_app.command("traces")
@@ -99,4 +99,4 @@ def observe_traces(
                 )
         console.print(table)
     else:
-        console.print(payload)
+        console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(f"[dim]{payload}[/dim]")
