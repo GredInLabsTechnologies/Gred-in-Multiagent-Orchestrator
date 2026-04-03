@@ -242,11 +242,16 @@ def login(
         server_version=version,
     )
 
+    # Also create CLI Bond (AES-256-GCM) so `gimo doctor` shows both bonds OK
+    try:
+        save_cli_bond(token)
+    except Exception:
+        pass  # Non-fatal: legacy bond is sufficient for operation
+
     console.print(f"[green][OK] Bonded to GIMO v{version} as {role}[/green]")
     console.print(f"[dim]Bond saved: {bond_path}[/dim]")
     console.print(f"[cyan]Plan: {plan_type} | Features: {', '.join(features)}[/cyan]")
     console.print(f"\n[bold]Next steps:[/bold]")
-    console.print(f"  \u2022 Upgrade to Identity-First Auth: [cyan]gimo login --web[/cyan]")
     console.print(f"  \u2022 Check bond health: [cyan]gimo doctor[/cyan]")
 
 

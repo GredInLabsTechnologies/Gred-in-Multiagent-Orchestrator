@@ -90,6 +90,24 @@ def run(
                 border_style="blue",
             )
         )
+    else:
+        console.print(
+            Panel(
+                "\n".join([
+                    "[bold yellow]Draft approved but run was NOT started.[/bold yellow]",
+                    f"Draft ID: [bold]{plan_id}[/bold]",
+                    f"Approved ID: {approved.get('id', 'unknown')}",
+                    "",
+                    "[dim]Possible causes:[/dim]",
+                    "  - Plan was not eligible for auto-run (missing execution_decision)",
+                    "  - Intent was excluded from auto-run by policy",
+                    "  - Use --json flag to see full response details",
+                ]),
+                title="GIMO Run — No Execution",
+                border_style="yellow",
+            )
+        )
+        raise typer.Exit(1)
 
 
 @app.command()

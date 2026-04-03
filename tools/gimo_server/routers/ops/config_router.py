@@ -62,6 +62,7 @@ async def select_provider(
             provider_id=payload.provider_id,
             model=payload.model,
             prefer_family=payload.prefer_family,
+            api_key=payload.api_key,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

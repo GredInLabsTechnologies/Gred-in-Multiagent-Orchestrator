@@ -102,6 +102,7 @@ class TestGitService:
     def test_list_repos(self, tmp_path):
         from tools.gimo_server.services.git_service import GitService
         (tmp_path / "repo1").mkdir()
+        (tmp_path / "repo1" / ".git").mkdir()
         repos = GitService.list_repos(tmp_path)
         assert len(repos) >= 1
 

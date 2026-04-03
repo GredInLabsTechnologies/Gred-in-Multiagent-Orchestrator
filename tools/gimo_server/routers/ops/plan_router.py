@@ -250,6 +250,10 @@ async def generate_structured_plan(
         "2. **ROLE CONSTRAINTS**: agent_assignee.role MUST be exactly one of: " + roles_str + "\n"
         "   - 'orchestrator': Coordinates and delegates to workers (EXACTLY 1 per plan)\n"
         "   - 'worker': Executes specific tasks (can be multiple)\n\n"
+        "**SCOPE CONSTRAINT**: Generate AT MOST 5 workers for simple tasks (single file, small utility, calculator, etc). "
+        "NEVER include tasks for: deployment, production monitoring, user manuals, packaging as executable, "
+        "or code review with other developers — unless the user EXPLICITLY requested them. "
+        "Keep plans minimal and proportionate to the task complexity.\n\n"
         f"3. **MODEL SPECIFICATION**: agent_assignee.model MUST be: \"{contract.model_id}\"\n\n"
         "4. **TASK STRUCTURE**: Each task needs:\n"
         "   - id: Unique identifier (e.g., 't_orch', 't_worker_1')\n"
@@ -305,12 +309,21 @@ async def generate_structured_plan(
             canonical_plan, name=plan.title, description=plan.objective,
         )
 
+        # Validate plan scope: reject absurdly large plans
+        task_count = len(canonical_plan.get("tasks", plan_data.get("tasks", [])))
+        if task_count > 10:
+            logger.warning("Plan has %d tasks — pruning to first 10", task_count)
+            tasks_key = "tasks" if "tasks" in canonical_plan else None
+            if tasks_key:
+                canonical_plan[tasks_key] = canonical_plan[tasks_key][:10]
+
         draft = OpsService.create_draft(
             prompt,
             content=TaskDescriptorService.canonicalize_plan_content(canonical_plan),
             context={
                 "structured": True,
                 "custom_plan_id": custom_plan.id,
+                "execution_decision": "AUTO_RUN_ELIGIBLE",
             },
             provider=resp.get("provider", "local_ollama"),
             status="draft",

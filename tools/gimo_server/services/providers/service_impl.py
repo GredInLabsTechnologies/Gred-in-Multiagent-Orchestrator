@@ -381,6 +381,7 @@ class ProviderService:
         provider_id: str,
         model: str | None = None,
         prefer_family: str | None = None,
+        api_key: str | None = None,
     ) -> ProviderConfig:
         cfg = cls.get_config()
         if not cfg:
@@ -393,7 +394,15 @@ class ProviderService:
             requested_model=model,
             prefer_family=prefer_family,
         )
-        entry = cfg.providers[provider_id].model_copy(update={"model": resolved_model, "model_id": resolved_model})
+        updates: dict = {"model": resolved_model, "model_id": resolved_model}
+        if api_key:
+            updates["api_key"] = api_key
+        entry = cfg.providers[provider_id].model_copy(update=updates)
+
+        if api_key:
+            from .auth_service import ProviderAuthService
+            entry = ProviderAuthService.sanitize_entry_for_storage(provider_id, entry)
+
         cfg.providers[provider_id] = entry
         cfg.active = provider_id
         cfg.provider_type = cls.normalize_provider_type(entry.provider_type or entry.type)

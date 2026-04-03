@@ -153,6 +153,7 @@ class ProviderSelectionRequest(BaseModel):
     provider_id: str
     model: Optional[str] = None
     prefer_family: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 class ProviderModelInstallRequest(BaseModel):

@@ -120,6 +120,14 @@ def providers_set(
     console.print(f"[green][OK] Active provider set to: {active}[/green]")
     if model_id:
         console.print(f"[cyan]Model: {model_id}[/cyan]")
+
+    # Warn if provider has no credentials
+    if not api_key:
+        auth_code, auth_data = api_request(config, "GET", f"/ops/connectors/{provider_id}/auth-status")
+        if auth_code == 200 and isinstance(auth_data, dict) and not auth_data.get("authenticated"):
+            console.print(f"[yellow][!] Warning: {provider_id} is not authenticated. API calls will fail.[/yellow]")
+            console.print(f"[yellow]    Run: [cyan]gimo providers login {provider_id} --api-key YOUR_KEY[/cyan][/yellow]")
+
     console.print("\n[dim]Verify with:[/dim] [cyan]gimo providers list[/cyan]")
 
 
@@ -145,7 +153,18 @@ def providers_test(
         emit_output({"status_code": status_code, "result": payload}, json_output=True)
         return
     if status_code == 200:
-        console.print(f"[green]Provider '{provider_id}' is healthy.[/green]")
+        console.print(f"[green]Provider '{provider_id}' endpoint is reachable.[/green]")
+        # Also check auth status for known providers
+        auth_code, auth_data = api_request(config, "GET", f"/ops/connectors/{provider_id}/auth-status")
+        if auth_code == 200 and isinstance(auth_data, dict):
+            authed = auth_data.get("authenticated", False)
+            method = auth_data.get("method", "n/a")
+            if authed:
+                console.print(f"[green]Auth: authenticated ({method})[/green]")
+            else:
+                console.print(f"[yellow]Auth: not authenticated — run [cyan]gimo providers login {provider_id}[/cyan][/yellow]")
+        else:
+            console.print(f"[dim]Auth status: unknown[/dim]")
     else:
         console.print(f"[red]Provider '{provider_id}' test failed ({status_code}): {payload}[/red]")
 
@@ -168,14 +187,24 @@ def providers_models(
 @providers_app.command("login")
 def providers_login(
     provider_id: str = typer.Argument("", help="Provider to authenticate (codex/claude). Auto-detects active if omitted."),
+    api_key: str = typer.Option(None, "--api-key", "-k", help="Authenticate with an API key instead of device flow."),
 ) -> None:
-    """Authenticate with an LLM provider via device flow.
+    """Authenticate with an LLM provider.
 
-    Supports: codex, claude
+    Supports two modes:
+      1. Device flow (browser): gimo providers login claude
+      2. API key:               gimo providers login claude --api-key sk-ant-...
+
+    Also reads from environment variables if --api-key is not provided:
+      ANTHROPIC_API_KEY (for claude/anthropic providers)
+      OPENAI_API_KEY   (for codex/openai providers)
 
     Example:
-      gimo providers login codex
+      gimo providers login codex --api-key sk-...
+      gimo providers login claude -k sk-ant-...
     """
+    import os
+
     config = load_config()
 
     if not provider_id:
@@ -188,12 +217,60 @@ def providers_login(
 
     provider_id = provider_id.lower().strip()
 
-    console.print(f"[bold]Authenticating with {provider_id}...[/bold]")
+    # --- API key mode: resolve from flag, env var, or prompt ---
+    resolved_key = api_key
+    if not resolved_key:
+        env_map = {
+            "claude": "ANTHROPIC_API_KEY",
+            "claude-account": "ANTHROPIC_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "codex": "OPENAI_API_KEY",
+            "codex-account": "OPENAI_API_KEY",
+            "openai": "OPENAI_API_KEY",
+        }
+        env_var = env_map.get(provider_id)
+        if env_var:
+            resolved_key = os.environ.get(env_var)
+            if resolved_key:
+                console.print(f"[dim]Using API key from ${env_var}[/dim]")
+
+    if resolved_key:
+        # Resolve provider alias to actual config ID (e.g. claude → claude-account)
+        alias_map = {
+            "claude": "claude-account",
+            "codex": "codex-account",
+            "anthropic": "claude-account",
+            "openai": "openai",
+        }
+        resolved_id = alias_map.get(provider_id, provider_id)
+
+        # Use providers set --api-key flow (stores encrypted on server)
+        console.print(f"[bold]Authenticating {resolved_id} with API key...[/bold]")
+        payload_data = {"provider_id": resolved_id, "api_key": resolved_key}
+        status_code, data = api_request(
+            config, "POST", "/ops/provider/select",
+            json_body=payload_data, role="operator",
+        )
+        if status_code == 200:
+            model_id = data.get("model_id", "") if isinstance(data, dict) else ""
+            console.print(f"[green][OK] {provider_id} authenticated and set as active provider[/green]")
+            if model_id:
+                console.print(f"[cyan]Model: {model_id}[/cyan]")
+            console.print("[dim]Verify with:[/dim] [cyan]gimo providers auth-status[/cyan]")
+        else:
+            error_msg = data.get("detail", str(data)) if isinstance(data, dict) else str(data)
+            console.print(f"[red][X] Failed to authenticate ({status_code}): {error_msg}[/red]")
+            raise typer.Exit(1)
+        return
+
+    # --- Device flow mode (original behavior) ---
+    console.print(f"[bold]Authenticating with {provider_id} via device flow...[/bold]")
     status_code, data = api_request(config, "POST", f"/ops/connectors/{provider_id}/login")
 
     if status_code >= 400:
         message = data.get("detail") if isinstance(data, dict) else str(data)
         console.print(f"[red]Login failed ({status_code}): {message}[/red]")
+        console.print(f"[yellow]Tip: use [cyan]gimo providers login {provider_id} --api-key YOUR_KEY[/cyan] for API key auth[/yellow]")
         raise typer.Exit(1)
 
     if isinstance(data, dict):

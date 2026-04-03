@@ -57,7 +57,7 @@ class GitService:
             return []
         entries = []
         for item in root_dir.iterdir():
-            if item.is_dir() and not item.name.startswith("."):
+            if item.is_dir() and not item.name.startswith(".") and (item / ".git").exists():
                 entries.append({"name": item.name, "path": str(item.resolve())})
         return sorted(entries, key=lambda x: x["name"].lower())
 

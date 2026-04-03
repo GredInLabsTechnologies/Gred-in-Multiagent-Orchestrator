@@ -12,6 +12,30 @@ from .common import _require_role, _actor_label
 router = APIRouter()
 
 
+def _enrich_with_vault_key(provider: str, data: dict) -> dict:
+    """Check if an API key is stored in the encrypted vault for this provider."""
+    from tools.gimo_server.services.providers.secret_store import get_secret
+
+    raw = str(provider or "").strip().lower()
+    # Try multiple naming conventions (guiones, guiones bajos, con/sin -account)
+    variants = {raw, raw.replace("-", "_"), f"{raw}-account", f"{raw}_account"}
+    candidates = []
+    for v in variants:
+        candidates.append(f"ORCH_PROVIDER_{v.upper()}_API_KEY")
+    # Deduplicate preserving order
+    seen = set()
+    candidates = [c for c in candidates if not (c in seen or seen.add(c))]
+    for env_name in candidates:
+        stored = get_secret(env_name)
+        if stored:
+            data = dict(data)
+            data["authenticated"] = True
+            data["method"] = "api_key"
+            data["detail"] = f"API key stored (vault: {env_name})"
+            return data
+    return data
+
+
 def _resolve_cli_auth_provider(provider: str):
     normalized = str(provider or "").strip().lower()
     if normalized == "codex":
@@ -72,6 +96,8 @@ async def codex_auth_status(
 ):
     _require_role(auth, "operator")
     data = await CodexAuthService.get_auth_status()
+    if not data.get("authenticated"):
+        data = _enrich_with_vault_key("codex", data)
     return data
 
 
@@ -95,6 +121,8 @@ async def claude_auth_status(
 ):
     _require_role(auth, "operator")
     data = await ClaudeAuthService.get_auth_status()
+    if not data.get("authenticated"):
+        data = _enrich_with_vault_key("claude", data)
     return data
 
 
@@ -107,7 +135,11 @@ async def provider_auth_status(
 ):
     _require_role(auth, "operator")
     service = _resolve_cli_auth_provider(provider)
-    return await service.get_auth_status()
+    data = await service.get_auth_status()
+    # Enrich: check if an API key is stored in the vault for this provider
+    if not data.get("authenticated"):
+        data = _enrich_with_vault_key(provider, data)
+    return data
 
 
 @router.post("/connectors/claude/logout")

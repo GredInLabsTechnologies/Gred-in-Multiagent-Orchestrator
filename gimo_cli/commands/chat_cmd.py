@@ -40,8 +40,14 @@ def tui(
 @app.command()
 def chat(
     verbose: bool = typer.Option(False, "--verbose", help="Enable debug/verbose render mode"),
+    message: str = typer.Option(None, "--message", "-m", help="Send a single message and exit (non-interactive mode)."),
 ) -> None:
-    """Interactive agentic chat session with GIMO orchestrator."""
+    """Interactive agentic chat session with GIMO orchestrator.
+
+    Use --message / -m for non-interactive single-turn mode:
+      gimo chat -m "What files are in this project?"
+      echo "hello" | gimo chat
+    """
     try:
         config = load_config()
     except typer.Exit:
@@ -53,5 +59,25 @@ def chat(
     if "orchestrator" not in config:
         config["orchestrator"] = {}
     config["orchestrator"]["verbose"] = verbose or config["orchestrator"].get("verbose", False)
+
+    if message:
+        # Single-turn mode: send message via API and print response
+        from gimo_cli.api import api_request
+        import json
+
+        # Create or use default thread
+        _, thread_data = api_request(config, "POST", "/ops/threads", params={"workspace_root": "."})
+        thread_id = thread_data.get("id", "") if isinstance(thread_data, dict) else ""
+        if not thread_id:
+            console.print("[red]Failed to create thread for single-turn chat[/red]")
+            raise typer.Exit(1)
+
+        _, resp = api_request(config, "POST", f"/ops/threads/{thread_id}/chat", json_body={"content": message})
+        if isinstance(resp, dict):
+            content = resp.get("response") or resp.get("content") or ""
+            console.print(content)
+        else:
+            console.print(str(resp))
+        return
 
     interactive_chat(config)

@@ -50,15 +50,24 @@ async def list_threads(
     """Lists all conversation threads."""
     return ConversationService.list_threads(workspace_root=workspace_root)
 
+class CreateThreadRequest(BaseModel):
+    title: str = "New Conversation"
+
 @router.post("", response_model=GimoThread, status_code=201)
 async def create_thread(
     workspace_root: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
-    title: str = "New Conversation",
+    body: CreateThreadRequest = Body(default_factory=CreateThreadRequest),
+    title: str = Query(default=None, description="Thread title (deprecated, use request body)"),
 ):
-    """Creates a new conversation thread."""
+    """Creates a new conversation thread.
+
+    Title can be provided via request body {"title": "..."} or query param ?title=...
+    Body takes precedence over query param.
+    """
     _require_role(auth, "operator")
-    return ConversationService.create_thread(workspace_root=workspace_root, title=title)
+    resolved_title = body.title if body.title != "New Conversation" else (title or body.title)
+    return ConversationService.create_thread(workspace_root=workspace_root, title=resolved_title)
 
 @router.get("/{thread_id}", response_model=GimoThread, responses={404: {"description": "Thread not found"}})
 async def get_thread(

@@ -276,6 +276,17 @@ class ChatRenderer:
                                     display_meta=desc
                                 )
 
+            # Non-TTY guard: fall back to readline when stdin is not a terminal
+            import sys
+            if not sys.stdin.isatty():
+                try:
+                    line = sys.stdin.readline()
+                    if not line:
+                        return "/exit"
+                    return line.strip()
+                except (EOFError, KeyboardInterrupt):
+                    return "/exit"
+
             if not hasattr(self, "_prompt_session") or not self._prompt_session:
                 custom_style = Style.from_dict({
                     'completion-menu': 'bg:#0f1e24 #a0b2b8',
@@ -299,7 +310,7 @@ class ChatRenderer:
                     if self.telemetry_html:
                         return HTML(self.telemetry_html)
                     return None
-                
+
                 result = self._prompt_session.prompt(
                     HTML("<b><ansicyan>&gt; </ansicyan></b>"),
                     bottom_toolbar=get_toolbar

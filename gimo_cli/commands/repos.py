@@ -43,9 +43,20 @@ def repos_list(
         repos = payload.get("repos") or payload.get("repositories") or []
         active = payload.get("active") or payload.get("selected")
         if repos:
+            table = Table(title="Repositories", show_header=True)
+            table.add_column("Name", style="cyan")
+            table.add_column("Path", style="dim")
+            table.add_column("Active", style="green")
             for r in repos:
-                marker = " [green]*[/green]" if str(r) == str(active) else ""
-                console.print(f"  {r}{marker}")
+                if isinstance(r, dict):
+                    name = str(r.get("name", r.get("path", "?")))
+                    path = str(r.get("path", ""))
+                    is_active = "[green]*[/green]" if str(r) == str(active) or name == str(active) else ""
+                    table.add_row(name, path, is_active)
+                else:
+                    marker = "[green]*[/green]" if str(r) == str(active) else ""
+                    table.add_row(str(r), "", marker)
+            console.print(table)
         else:
             console.print_json(data=payload)
     else:

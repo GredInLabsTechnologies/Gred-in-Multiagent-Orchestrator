@@ -132,6 +132,8 @@ class TestGitService:
 
     def test_list_repos_git(self, tmp_path):
         (tmp_path / "r1").mkdir()
+        (tmp_path / "r1" / ".git").mkdir()
+        (tmp_path / "not_a_repo").mkdir()  # no .git → excluded
         from tools.gimo_server.services.git_service import GitService
         repos = GitService.list_repos(tmp_path)
         assert len(repos) == 1

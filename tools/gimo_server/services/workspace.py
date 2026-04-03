@@ -153,7 +153,7 @@ class WorkspaceService:
             return []
         repos = []
         for item in REPO_ROOT_DIR.iterdir():
-            if item.is_dir() and not item.name.startswith("."):
+            if item.is_dir() and not item.name.startswith(".") and (item / ".git").exists():
                 repos.append(RepoEntry(name=item.name, path=str(item.resolve())))
         return sorted(repos, key=lambda x: x.name.lower())
 

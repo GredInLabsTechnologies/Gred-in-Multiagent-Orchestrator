@@ -6,7 +6,10 @@ from ...ops_models import ProviderEntry
 from ...providers.base import ProviderAdapter
 from ...providers.cli_account import CliAccountAdapter
 from ...providers.openai_compat import OpenAICompatAdapter
+from ...providers.anthropic_adapter import AnthropicAdapter
 from .metadata import DEFAULT_BASE_URLS, OPENAI_COMPAT_ADAPTER_TYPES
+
+_ANTHROPIC_TYPES = {"anthropic", "claude"}
 
 
 def build_provider_adapter(
@@ -15,9 +18,20 @@ def build_provider_adapter(
     canonical_type: str,
     resolve_secret: Callable[[ProviderEntry], str | None],
 ) -> ProviderAdapter:
-    if canonical_type in {"codex", "claude"} and str(entry.auth_mode or "").strip().lower() == "account":
+    auth_mode = str(entry.auth_mode or "").strip().lower()
+
+    if canonical_type in {"codex", "claude"} and auth_mode == "account":
         binary = "codex" if canonical_type == "codex" else "claude"
         return CliAccountAdapter(binary=binary)
+
+    # Anthropic/Claude with API key → dedicated adapter (x-api-key + /v1/messages)
+    if canonical_type in _ANTHROPIC_TYPES and auth_mode != "account":
+        base_url = entry.base_url or DEFAULT_BASE_URLS.get(canonical_type, "https://api.anthropic.com")
+        return AnthropicAdapter(
+            base_url=base_url,
+            model=entry.model,
+            api_key=resolve_secret(entry),
+        )
 
     if canonical_type in OPENAI_COMPAT_ADAPTER_TYPES:
         if not entry.base_url:

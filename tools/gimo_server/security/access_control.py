@@ -34,6 +34,7 @@ OPERATOR_EMERGENCY_PATHS = {
     "/ui/security/events",
     "/ui/security/resolve",
     "/ui/repos/revoke",
+    "/ui/audit",
 }
 
 
