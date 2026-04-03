@@ -77,26 +77,11 @@ def observe_traces(
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """Show recent traces."""
+    from gimo_cli.render import render_response, TRACES
+
     config = load_config()
     status_code, payload = api_request(config, "GET", "/ops/observability/traces", params={"limit": limit})
     if status_code != 200:
         console.print(f"[red]Failed ({status_code}): {payload}[/red]")
         raise typer.Exit(1)
-    if json_output:
-        emit_output(payload, json_output=True)
-        return
-    if isinstance(payload, list):
-        table = Table(title="Traces", show_header=True)
-        table.add_column("ID", style="cyan")
-        table.add_column("Status", style="magenta")
-        table.add_column("Duration", style="dim")
-        for t in payload:
-            if isinstance(t, dict):
-                table.add_row(
-                    str(t.get("trace_id", t.get("id", "?")))[:12],
-                    str(t.get("status", "?")),
-                    str(t.get("duration_ms", t.get("duration", "?")))[:10],
-                )
-        console.print(table)
-    else:
-        console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(f"[dim]{payload}[/dim]")
+    render_response(payload, TRACES, json_output=json_output)

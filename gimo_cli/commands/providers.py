@@ -81,12 +81,13 @@ def providers_list(
 def providers_set(
     provider_id: str = typer.Argument(..., help="Provider ID to activate (e.g., openai, claude-account, ollama_local)."),
     model: str = typer.Option(None, "--model", "-m", help="Optional model to use with this provider."),
+    api_key: str = typer.Option(None, "--api-key", help="API key for the provider (stored encrypted on server)."),
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """Set active provider for orchestrator.
 
     Examples:
-        gimo providers set openai
+        gimo providers set openai --api-key sk-...
         gimo providers set claude-account --model claude-sonnet-4-5
         gimo providers set ollama_local --model llama3
     """
@@ -95,11 +96,13 @@ def providers_set(
     payload_data = {"provider_id": provider_id}
     if model:
         payload_data["model"] = model
+    if api_key:
+        payload_data["api_key"] = api_key
 
     with console.status(f"[bold green]Setting provider to {provider_id}..."):
         status_code, payload = api_request(
             config, "POST", "/ops/provider/select",
-            json_body=payload_data, role="admin",
+            json_body=payload_data, role="operator",
         )
 
     if status_code != 200:
@@ -127,7 +130,7 @@ def providers_activate(
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """Alias for 'gimo providers set' (user-friendly)."""
-    providers_set(provider_id, model, json_output)
+    providers_set(provider_id, model, api_key=None, json_output=json_output)
 
 
 @providers_app.command("test")
@@ -152,23 +155,14 @@ def providers_models(
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """List models available from the active provider."""
+    from gimo_cli.render import render_response, PROVIDER_MODELS
+
     config = load_config()
     status_code, payload = api_request(config, "GET", "/ops/provider/models")
     if status_code != 200:
         console.print(f"[red]Failed ({status_code}): {payload}[/red]")
         raise typer.Exit(1)
-    if json_output:
-        emit_output(payload, json_output=True)
-        return
-    if isinstance(payload, list):
-        table = Table(title="Available Models", show_header=True)
-        table.add_column("Model", style="cyan")
-        for m in payload:
-            name = m.get("id", str(m)) if isinstance(m, dict) else str(m)
-            table.add_row(name)
-        console.print(table)
-    else:
-        console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(f"[dim]{payload}[/dim]")
+    render_response(payload, PROVIDER_MODELS, json_output=json_output)
 
 
 @providers_app.command("login")

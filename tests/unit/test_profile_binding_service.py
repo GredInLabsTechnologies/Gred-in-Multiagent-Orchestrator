@@ -296,6 +296,19 @@ def test_provider_service_impl_preserves_explicit_selected_model(monkeypatch):
         classmethod(_should_not_route),
     )
 
+    # Model gate validates against inventory; provide a matching entry so explicit model passes through
+    _entry = ModelEntry(model_id="explicit-model", provider_id="orch-main", provider_type="openai", is_local=False, quality_tier=3)
+    monkeypatch.setattr(
+        ModelInventoryService,
+        "get_available_models",
+        classmethod(lambda cls: [_entry]),
+    )
+    monkeypatch.setattr(
+        ModelInventoryService,
+        "find_model",
+        classmethod(lambda cls, mid: _entry),
+    )
+
     provider, model = ProviderService._resolve_effective_provider_and_model(
         _provider_config(),
         context={"selected_model": "explicit-model"},

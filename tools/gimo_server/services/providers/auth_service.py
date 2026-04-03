@@ -40,6 +40,11 @@ class ProviderAuthService:
     def resolve_secret(cls, entry: ProviderEntry) -> Optional[str]:
         env_name = cls.parse_env_ref(entry.auth_ref)
         if env_name:
+            # Check encrypted vault first (survives restarts)
+            from .secret_store import get_secret
+            stored = get_secret(env_name)
+            if stored:
+                return stored
             return os.environ.get(env_name)
         # Legacy fallback for migration compatibility
         return cls.resolve_env_expression(entry.api_key)
@@ -58,6 +63,8 @@ class ProviderAuthService:
             else:
                 env_name = f"ORCH_PROVIDER_{provider_id.upper()}_API_KEY"
                 os.environ[env_name] = inline_key
+                from .secret_store import set_secret
+                set_secret(env_name, inline_key)
             auth_ref = cls.env_ref_from_name(env_name)
             auth_mode = auth_mode or "api_key"
 
@@ -69,6 +76,8 @@ class ProviderAuthService:
         if auth_mode == "account" and inline_account_ref and not inline_account_ref.lower().startswith("env:"):
             env_name = f"ORCH_PROVIDER_{provider_id.upper()}_ACCOUNT_TOKEN"
             os.environ[env_name] = inline_account_ref
+            from .secret_store import set_secret
+            set_secret(env_name, inline_account_ref)
             auth_ref = cls.env_ref_from_name(env_name)
 
         return entry.model_copy(

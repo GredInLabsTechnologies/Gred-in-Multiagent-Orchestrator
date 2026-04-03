@@ -280,6 +280,7 @@ def resolve_bond_token() -> tuple[str | None, str | None]:
 
     payload = verify_bond_jwt(jwt_token)
     if payload is None:
+        delete_cli_bond()
         return None, "Bond expired or invalid. Run: gimo login"
 
     return jwt_token, None

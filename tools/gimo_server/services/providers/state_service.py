@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict
 
 from ...ops_models import ProviderConfig
+
+logger = logging.getLogger("orchestrator.provider_state")
 
 
 class ProviderStateService:
@@ -56,9 +60,31 @@ class ProviderStateService:
             cfg.auth_mode = active_entry.auth_mode
             cfg.auth_ref = active_entry.auth_ref
             cfg.capabilities_snapshot = dict(active_entry.capabilities or {})
+        # Restore secrets from encrypted vault on boot
+        cls._restore_secrets_from_vault(cfg)
+
         if not cfg.last_validated_at:
             cfg.last_validated_at = cls.utc_now_iso()
         base_snapshot = cls.build_effective_state_snapshot(cfg, normalize_provider_type)
         # Preserve non-sensitive runtime status fields (health, actionable errors, warnings, etc.)
         cfg.effective_state = {**existing_effective_state, **base_snapshot}
         return cfg
+
+    @classmethod
+    def _restore_secrets_from_vault(cls, cfg: ProviderConfig) -> None:
+        """On boot: restore secrets from encrypted vault to os.environ."""
+        from .auth_service import ProviderAuthService
+        from .secret_store import get_secret
+
+        for pid, entry in cfg.providers.items():
+            env_name = ProviderAuthService.parse_env_ref(entry.auth_ref)
+            if env_name and not os.environ.get(env_name):
+                stored = get_secret(env_name)
+                if stored:
+                    os.environ[env_name] = stored
+                    logger.info("Restored credential for '%s' from vault", pid)
+                else:
+                    logger.warning(
+                        "Provider '%s' needs re-auth: gimo providers set %s --api-key <key>",
+                        pid, pid,
+                    )

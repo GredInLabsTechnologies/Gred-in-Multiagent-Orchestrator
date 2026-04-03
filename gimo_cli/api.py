@@ -25,7 +25,6 @@ from gimo_cli.config import (
 _caps_cache: dict[str, Any] = {}
 _caps_ts: float = 0.0
 _CAPS_TTL = 300.0
-_bond_warning_emitted: bool = False
 
 
 def resolve_server_url(config: dict[str, Any]) -> str:
@@ -47,10 +46,7 @@ def resolve_token(role: str = "operator", config: dict[str, Any] | None = None) 
         if bond_jwt:
             return bond_jwt
         if bond_hint:
-            global _bond_warning_emitted
-            if not _bond_warning_emitted:
-                console.print(f"[yellow]{bond_hint}[/yellow]")
-                _bond_warning_emitted = True
+            console.print(f"[yellow]{bond_hint}[/yellow]")
 
     # 2. Environment variables
     env_vars = {

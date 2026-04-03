@@ -21,36 +21,14 @@ def trust_status(
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """Show trust engine dashboard."""
+    from gimo_cli.render import render_response, TRUST_STATUS
+
     config = load_config()
     status_code, payload = api_request(config, "GET", "/ops/trust/dashboard")
     if status_code != 200:
         console.print(f"[red]Failed ({status_code}): {payload}[/red]")
         raise typer.Exit(1)
-    if json_output:
-        emit_output(payload, json_output=True)
-        return
-    if isinstance(payload, dict):
-        table = Table(title="Trust Dashboard", show_header=True)
-        table.add_column("Dimension", style="cyan")
-        table.add_column("Score", style="magenta")
-        table.add_column("State", style="white")
-        entries = payload.get("entries") or payload.get("dimensions") or []
-        if isinstance(entries, list):
-            for entry in entries:
-                if isinstance(entry, dict):
-                    table.add_row(
-                        str(entry.get("dimension", entry.get("key", "?"))),
-                        str(entry.get("score", "?")),
-                        str(entry.get("state", entry.get("circuit_state", "?"))),
-                    )
-        console.print(table)
-        summary = payload.get("summary") or payload.get("aggregate")
-        if summary:
-            console.print(f"[dim]Aggregate: {summary}[/dim]")
-    elif isinstance(payload, (dict, list)):
-        console.print_json(data=payload)
-    else:
-        console.print(f"[dim]{payload}[/dim]")
+    render_response(payload, TRUST_STATUS, json_output=json_output)
 
 
 @trust_app.command("reset")

@@ -56,7 +56,7 @@ async def select_provider(
     auth: Annotated[AuthContext, Depends(verify_token)],
     _rl: Annotated[None, Depends(check_rate_limit)],
 ):
-    _require_role(auth, "admin")
+    _require_role(auth, "operator")
     try:
         cfg = await ProviderService.select_provider(
             provider_id=payload.provider_id,

@@ -116,3 +116,37 @@ def test_update_plan_autonomy_updates_selected_nodes(monkeypatch):
     assert cfg.economy.autonomy_level == "autonomous"
     assert plan.nodes[1].config.get("autonomy_level") == "autonomous"
     assert saved["called"] is True
+
+
+# ── Change 5: OpsConfig.economy default ──────────────────────────────────
+
+
+def test_opsconfig_economy_never_none():
+    """OpsConfig should always have a valid economy (never None)."""
+    from tools.gimo_server.models.core import OpsConfig
+
+    config = OpsConfig()
+    assert config.economy is not None
+    assert config.economy.autonomy_level == "manual"
+
+
+def test_mastery_status_has_hardware_state():
+    """MasteryStatus should include hardware_state field."""
+    from tools.gimo_server.models.economy import MasteryStatus
+
+    status = MasteryStatus(
+        eco_mode_enabled=False,
+        total_savings_usd=0.0,
+        efficiency_score=0.0,
+        tips=[],
+    )
+    assert status.hardware_state == "unknown"
+
+    status_with_hw = MasteryStatus(
+        eco_mode_enabled=True,
+        total_savings_usd=1.5,
+        efficiency_score=0.8,
+        tips=["tip1"],
+        hardware_state="optimal",
+    )
+    assert status_with_hw.hardware_state == "optimal"

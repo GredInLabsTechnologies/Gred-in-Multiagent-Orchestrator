@@ -240,7 +240,7 @@ class TestGetThreadEndpoint:
 
         resp = test_client.post(
             f"/ops/threads/{thread_id}/chat",
-            params={"content": "hello"},
+            json={"content": "hello"},
             headers={"Authorization": f"Bearer {valid_token}"},
         )
 
@@ -262,7 +262,7 @@ class TestGetThreadEndpoint:
 
         resp = test_client.post(
             f"/ops/threads/{thread_id}/chat/stream",
-            params={"content": "hello"},
+            json={"content": "hello"},
             headers={"Authorization": f"Bearer {valid_token}"},
         )
 

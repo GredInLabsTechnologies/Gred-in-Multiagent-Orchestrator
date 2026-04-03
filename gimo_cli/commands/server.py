@@ -319,17 +319,18 @@ def start_server(host: str = "127.0.0.1", port: int = 9325) -> bool:
         except Exception:
             return False
 
-    for _ in range(90):
-        time.sleep(1)
-        if _is_ready():
-            log_file.close()
-            return True
-        # Check if process died early
-        try:
-            import psutil
-            psutil.Process(proc.pid)
-        except Exception:
-            break  # Process crashed
+    with console.status("[bold green]Starting GIMO server...[/bold green]", spinner="dots"):
+        for _ in range(90):
+            time.sleep(1)
+            if _is_ready():
+                log_file.close()
+                return True
+            # Check if process died early
+            try:
+                import psutil
+                psutil.Process(proc.pid)
+            except Exception:
+                break  # Process crashed
 
     log_file.close()
     _pid_file().unlink(missing_ok=True)

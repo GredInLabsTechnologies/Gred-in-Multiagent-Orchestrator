@@ -160,10 +160,34 @@ class TestThreatResponse:
         """Verify resolution endpoint clears threat level."""
         from tools.gimo_server.security import threat_engine
         threat_engine.level = ThreatLevel.LOCKDOWN
-        
+
         response = test_client.post(
             "/ops/security/resolve?action=clear_all",
             headers=_admin_headers()
         )
         assert response.status_code == 200
         assert threat_engine.level == ThreatLevel.NOMINAL
+
+
+# ── Change 6: Provider select role demotion ──────────────────────────────
+
+
+class TestProviderSelectRoleDemotion:
+    """POST /ops/provider/select should work with operator role (not require admin)."""
+
+    def test_provider_select_operator_allowed(self, test_client):
+        response = test_client.post(
+            "/ops/provider/select",
+            json={"provider_id": "local_ollama"},
+            headers={"Authorization": f"Bearer {ORCH_OPERATOR_TOKEN}"},
+        )
+        # Should not be 401/403 — operator is now allowed
+        assert response.status_code != 401
+
+    def test_provider_select_actions_denied(self, test_client):
+        response = test_client.post(
+            "/ops/provider/select",
+            json={"provider_id": "local_ollama"},
+            headers={"Authorization": f"Bearer {ORCH_ACTIONS_TOKEN}"},
+        )
+        assert response.status_code in (401, 403)

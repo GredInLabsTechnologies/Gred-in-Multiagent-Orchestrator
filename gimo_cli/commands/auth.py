@@ -139,6 +139,7 @@ def login(
         plan = payload.get("plan", "standard")
         uid = payload.get("uid", "unknown")
 
+        delete_cli_bond()  # Clean any expired/stale bond before saving new one
         bond_path = save_cli_bond(jwt_token, metadata={
             "server_url": normalized_url,
             "uid": uid,
@@ -187,7 +188,7 @@ def login(
             console.print("[red]Cannot prompt for token in non-interactive mode.[/red]")
             console.print("[cyan]Set ORCH_OPERATOR_TOKEN env var or run from a terminal.[/cyan]")
             raise typer.Exit(1)
-        console.print("[dim]Enter server token (from server's .gimo_credentials or ORCH_OPERATOR_TOKEN):[/dim]")
+        console.print("[dim]Enter server token (from .orch_token or ORCH_OPERATOR_TOKEN):[/dim]")
         import getpass
         token = getpass.getpass("Token: ").strip()
         if not token:
@@ -230,6 +231,7 @@ def login(
     features = capabilities_data.get("features", [])
     version = capabilities_data.get("version", "unknown")
 
+    delete_cli_bond()  # Clean any expired/stale CLI bond before saving legacy bond
     bond_path = save_bond(
         server_url=normalized_url,
         token=token,

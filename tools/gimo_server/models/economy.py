@@ -200,3 +200,4 @@ class MasteryStatus(BaseModel):
     total_savings_usd: float
     efficiency_score: float
     tips: List[str]
+    hardware_state: str = "unknown"

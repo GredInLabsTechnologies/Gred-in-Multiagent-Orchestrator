@@ -8,6 +8,7 @@ from rich.table import Table
 from gimo_cli import app, console
 from gimo_cli.api import api_request
 from gimo_cli.config import load_config
+from gimo_cli.render import render_response, FORECAST, ANALYTICS
 from gimo_cli.stream import emit_output
 
 mastery_app = typer.Typer(name="mastery", help="Token economy, cost analytics, and budget forecast.")
@@ -36,7 +37,7 @@ def mastery_status(
                 table.add_row(k, str(v))
         console.print(table)
     else:
-        console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(f"[dim]{payload}[/dim]")
+        console.print(f"[dim]{payload}[/dim]")
 
 
 @mastery_app.command("forecast")
@@ -49,19 +50,7 @@ def mastery_forecast(
     if status_code != 200:
         console.print(f"[red]Failed ({status_code}): {payload}[/red]")
         raise typer.Exit(1)
-    if json_output:
-        emit_output(payload, json_output=True)
-        return
-    if isinstance(payload, dict):
-        table = Table(title="Budget Forecast", show_header=False)
-        table.add_column("Property", style="cyan")
-        table.add_column("Value", style="magenta")
-        for k, v in payload.items():
-            if not isinstance(v, (dict, list)):
-                table.add_row(k, str(v))
-        console.print(table)
-    else:
-        console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(f"[dim]{payload}[/dim]")
+    render_response(payload, FORECAST, json_output=json_output)
 
 
 @mastery_app.command("analytics")
@@ -75,7 +64,4 @@ def mastery_analytics(
     if status_code != 200:
         console.print(f"[red]Failed ({status_code}): {payload}[/red]")
         raise typer.Exit(1)
-    if json_output:
-        emit_output(payload, json_output=True)
-        return
-    console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(payload)
+    render_response(payload, ANALYTICS, json_output=json_output)

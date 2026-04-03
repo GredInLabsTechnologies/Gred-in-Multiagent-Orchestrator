@@ -148,7 +148,7 @@ class OpsConfig(BaseModel):
     draft_cleanup_ttl_days: int = 7
     max_concurrent_runs: int = 3
     operator_can_generate: bool = False
-    economy: Optional[UserEconomyConfig] = None
+    economy: UserEconomyConfig = Field(default_factory=UserEconomyConfig)
     refactor: RefactorConfig = Field(default_factory=RefactorConfig)
     ui_show_ids_events: bool = True
     ui_enable_chat_investigation: bool = True

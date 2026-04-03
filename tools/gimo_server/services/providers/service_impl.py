@@ -598,6 +598,24 @@ class ProviderService:
         requested_provider = context.get("provider") or context.get("selected_provider")
         effective_provider = str(requested_provider or cfg.active or "").strip() or cfg.active
 
+        # Validate requested model against active provider's inventory
+        if requested_model:
+            from ..model_inventory_service import ModelInventoryService
+            inventory = ModelInventoryService.get_available_models()
+            if inventory:  # Fail-open on cold start (empty inventory)
+                entry = ModelInventoryService.find_model(requested_model)
+                if entry is None or entry.provider_id != effective_provider:
+                    logger.warning(
+                        "X-Preferred-Model '%s' not in provider '%s' inventory; using provider default",
+                        requested_model, effective_provider,
+                    )
+                    requested_model = None
+                elif entry.quality_tier < 2 and task_type in ("disruptive_planning", "agentic_chat"):
+                    logger.warning(
+                        "Model '%s' (tier %d) may not support tool calling for %s",
+                        requested_model, entry.quality_tier, task_type,
+                    )
+
         if not requested_model:
             default_entry = cfg.providers.get(effective_provider)
             default_model = str((default_entry.model if default_entry else "") or "").strip()
