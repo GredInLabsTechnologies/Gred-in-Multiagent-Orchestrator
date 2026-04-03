@@ -31,7 +31,7 @@ def stream_events(
 ):
     base_url, connect_timeout_seconds = api_settings(config)
     token = resolve_token("operator", config)
-    headers = {"Accept": "text/event-stream"}
+    headers = {"Accept": "text/event-stream", "X-GIMO-Surface": "cli"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     url = f"{base_url}{path}"

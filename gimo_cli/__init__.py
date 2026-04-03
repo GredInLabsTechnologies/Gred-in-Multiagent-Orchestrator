@@ -2,8 +2,35 @@
 
 from __future__ import annotations
 
+import sys
+
 import typer
 from rich.console import Console
+
+
+def _setup_windows_console():
+    """Enable UTF-8 output and VT processing on Windows."""
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream and hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetConsoleOutputCP(65001)
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        mode = ctypes.c_ulong()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    except Exception:
+        pass
+
+
+_setup_windows_console()
 
 app = typer.Typer(
     name="gimo",

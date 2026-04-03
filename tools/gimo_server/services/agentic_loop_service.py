@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List
 
 from ..engine.moods import MoodProfile, get_mood_profile
-from ..engine.tools.chat_tools_schema import CHAT_TOOLS, get_tool_risk_level
+from ..engine.tools.chat_tools_schema import CHAT_TOOLS, filter_tools_by_policy, get_tool_risk_level
 from ..engine.tools.executor import ToolExecutor
 from ..models.agent_routing import RoutingDecisionSummary, WorkflowPhase
 from ..ops_models import GimoItem, GimoTurn
@@ -26,6 +26,7 @@ from .notification_service import NotificationService
 from .provider_auth_service import ProviderAuthService
 from .provider_service_adapter_registry import build_provider_adapter
 from .provider_service_impl import ProviderService
+from .constraint_compiler_service import ConstraintCompilerService
 from .task_descriptor_service import TaskDescriptorService
 from .workspace.workspace_contract import WorkspaceContract
 
@@ -173,7 +174,8 @@ def _build_messages_from_thread(thread_turns: List[GimoTurn], system_prompt: str
     return messages
 
 
-def _resolve_orchestrator_adapter() -> tuple[ProviderAdapter, str, str]:
+def _resolve_orchestrator_adapter() -> tuple[ProviderAdapter, str, str, str]:
+    """Returns (adapter, provider_id, model, canonical_provider_type)."""
     cfg = ProviderService.get_config()
     if not cfg:
         raise RuntimeError("Provider config not found. Run gimo init or configure providers.")
@@ -196,14 +198,15 @@ def _resolve_orchestrator_adapter() -> tuple[ProviderAdapter, str, str]:
         canonical_type=canonical_type,
         resolve_secret=ProviderAuthService.resolve_secret,
     )
-    return adapter, provider_id, model
+    return adapter, provider_id, model, canonical_type
 
 
 def _resolve_bound_adapter(
     provider_id: str,
     model: str,
     allow_orchestrator_fallback: bool = True,
-) -> tuple[ProviderAdapter, str, str]:
+) -> tuple[ProviderAdapter, str, str, str]:
+    """Returns (adapter, provider_id, model, canonical_provider_type)."""
     cfg = ProviderService.get_config()
     if not cfg:
         raise RuntimeError("Provider config not found. Run gimo init or configure providers.")
@@ -226,7 +229,7 @@ def _resolve_bound_adapter(
         resolve_secret=ProviderAuthService.resolve_secret,
     )
     resolved_model = model if model and model != "auto" else str(entry.model_id or entry.model or "")
-    return adapter, provider_id, resolved_model
+    return adapter, provider_id, resolved_model, canonical_type
 
 
 class AgenticLoopService:
@@ -688,6 +691,7 @@ class AgenticLoopService:
         emit: EventEmitter | None = None,
         persist_conversation: bool = False,
         allow_hitl: bool = False,
+        force_hitl: bool = False,
         session_id: str | None = None,
     ) -> AgenticResult:
         emit_event = emit or cls._noop_emit
@@ -829,7 +833,7 @@ class AgenticLoopService:
                     },
                 )
 
-                if allow_hitl and thread_id and risk == "HIGH":
+                if allow_hitl and thread_id and (risk == "HIGH" or force_hitl):
                     await emit_event(
                         "tool_approval_required",
                         {
@@ -1029,8 +1033,12 @@ class AgenticLoopService:
                     except Exception:
                         pass
                     await emit_event("plan_proposed", canonical_plan)
-                    final_response = "Plan proposed. Please review and approve to continue."
-                    finish_reason = "plan_proposed"
+                    if canonical_plan:
+                        final_response = "Plan proposed. Please review and approve to continue."
+                        finish_reason = "plan_proposed"
+                    else:
+                        final_response = "Plan proposal failed: no plan data was generated."
+                        finish_reason = "error"
                     stop_loop = True
                     break
 
@@ -1188,12 +1196,20 @@ class AgenticLoopService:
         token: str = "system",
         session_id: str | None = None,
     ) -> AgenticResult:
-        adapter, provider_id, model = _resolve_orchestrator_adapter()
+        adapter, provider_id, model, canonical_type = _resolve_orchestrator_adapter()
         thread = ConversationService.get_thread(thread_id)
         if not thread:
             raise RuntimeError(f"Thread {thread_id} not found")
 
         mood, mood_profile, task_role, workflow_phase, execution_policy = cls._resolve_thread_runtime_context(thread)
+
+        # Wire 2: Dynamic trust-gated authority — GICS + TrustEngine constrain policy
+        execution_policy, _trust_hitl = ConstraintCompilerService.apply_trust_authority(
+            execution_policy,
+            model_id=model,
+            provider_type=canonical_type,
+            workspace_root=workspace_root,
+        )
 
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
         if not user_turn:
@@ -1215,6 +1231,15 @@ class AgenticLoopService:
             workflow_phase=workflow_phase,
         )
         messages = _build_messages_from_thread(thread.turns, system_prompt)
+
+        # Wire 4: Schema-time tool filtering — LLM only sees tools the policy allows
+        try:
+            policy_obj = ExecutionPolicyService.get_policy(execution_policy) if execution_policy else None
+        except KeyError:
+            logger.warning("Unknown execution policy '%s', defaulting to no tool filtering", execution_policy)
+            policy_obj = None
+        effective_tools = filter_tools_by_policy(CHAT_TOOLS, policy_obj.allowed_tools if policy_obj else None)
+
         return await AgenticLoopService._run_loop(
             adapter=adapter,
             provider_id=provider_id,
@@ -1227,12 +1252,13 @@ class AgenticLoopService:
             messages=messages,
             max_turns=mood_profile.max_turns,
             temperature=mood_profile.temperature,
-            tools=CHAT_TOOLS,
+            tools=effective_tools,
             task_key="agentic_chat",
             thread_id=thread_id,
             thread=thread,
             persist_conversation=True,
             allow_hitl=True,
+            force_hitl=_trust_hitl,
             session_id=session_id,
         )
 
@@ -1269,13 +1295,21 @@ class AgenticLoopService:
         token: str = "system",
         session_id: str | None = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        adapter, provider_id, model = _resolve_orchestrator_adapter()
+        adapter, provider_id, model, canonical_type = _resolve_orchestrator_adapter()
         thread = ConversationService.get_thread(thread_id)
         if not thread:
             yield {"event": "error", "data": {"message": f"Thread {thread_id} not found"}}
             return
 
         mood, mood_profile, task_role, workflow_phase, execution_policy = cls._resolve_thread_runtime_context(thread)
+
+        # Wire 2: Dynamic trust-gated authority — GICS + TrustEngine constrain policy
+        execution_policy, _trust_hitl = ConstraintCompilerService.apply_trust_authority(
+            execution_policy,
+            model_id=model,
+            provider_type=canonical_type,
+            workspace_root=workspace_root,
+        )
 
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
         if not user_turn:
@@ -1300,6 +1334,14 @@ class AgenticLoopService:
         )
         messages = _build_messages_from_thread(thread.turns, system_prompt)
 
+        # Wire 4: Schema-time tool filtering
+        try:
+            policy_obj = ExecutionPolicyService.get_policy(execution_policy) if execution_policy else None
+        except KeyError:
+            logger.warning("Unknown execution policy '%s', defaulting to no tool filtering", execution_policy)
+            policy_obj = None
+        effective_tools = filter_tools_by_policy(CHAT_TOOLS, policy_obj.allowed_tools if policy_obj else None)
+
         queue: asyncio.Queue[Dict[str, Any] | None] = asyncio.Queue()
 
         async def emit(event: str, data: Dict[str, Any]) -> None:
@@ -1319,13 +1361,14 @@ class AgenticLoopService:
                     messages=messages,
                     max_turns=mood_profile.max_turns,
                     temperature=mood_profile.temperature,
-                    tools=CHAT_TOOLS,
+                    tools=effective_tools,
                     task_key="agentic_stream",
                     thread_id=thread_id,
                     thread=thread,
                     emit=emit,
                     persist_conversation=True,
                     allow_hitl=True,
+                    force_hitl=_trust_hitl,
                     session_id=session_id,
                 )
             except Exception as exc:
@@ -1430,6 +1473,17 @@ class AgenticLoopService:
             if not thread:
                 return AgenticResult(response=f"Thread {thread_id} not found after recovery write.", finish_reason="error")
             mood, mood_profile, task_role, workflow_phase, execution_policy = runtime_context
+
+            adapter, provider_id, model, canonical_type = _resolve_orchestrator_adapter()
+
+            # Wire 2: Dynamic trust-gated authority
+            execution_policy, _trust_hitl = ConstraintCompilerService.apply_trust_authority(
+                execution_policy,
+                model_id=model,
+                provider_type=canonical_type,
+                workspace_root=workspace_root,
+            )
+
             system_prompt = cls._build_system_prompt(
                 workspace_root,
                 mood_profile,
@@ -1438,7 +1492,10 @@ class AgenticLoopService:
             )
             messages = _build_messages_from_thread(thread.turns, system_prompt)
 
-            adapter, provider_id, model = _resolve_orchestrator_adapter()
+            # Wire 4: Schema-time tool filtering
+            policy_obj = ExecutionPolicyService.get_policy(execution_policy) if execution_policy else None
+            effective_tools = filter_tools_by_policy(CHAT_TOOLS, policy_obj.allowed_tools if policy_obj else None)
+
             return await cls._run_loop(
                 adapter=adapter,
                 provider_id=provider_id,
@@ -1451,12 +1508,14 @@ class AgenticLoopService:
                 messages=messages,
                 max_turns=10,
                 temperature=mood_profile.temperature,
-                tools=CHAT_TOOLS,
+                tools=effective_tools,
                 task_key="resume",
                 thread_id=thread_id,
                 thread=thread,
                 emit=emit,
                 persist_conversation=True,
+                allow_hitl=True,
+                force_hitl=_trust_hitl,
                 session_id=session_id,
             )
         finally:
@@ -1491,7 +1550,7 @@ class AgenticLoopService:
         else:
             allow_fallback = True
 
-        adapter, provider_id, resolved_model = _resolve_bound_adapter(provider, model, allow_fallback)
+        adapter, provider_id, resolved_model, _canonical_type = _resolve_bound_adapter(provider, model, allow_fallback)
         try:
             mood_profile = get_mood_profile(mood)
         except KeyError:

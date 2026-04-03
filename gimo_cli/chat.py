@@ -313,6 +313,7 @@ def interactive_chat(config: dict[str, Any]) -> None:
         auth_token = resolve_token("operator", config)
         headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
         headers["Accept"] = "text/event-stream"
+        headers["X-GIMO-Surface"] = "cli"
 
         chat_response = ""
         usage = {}
@@ -466,10 +467,13 @@ def interactive_chat(config: dict[str, Any]) -> None:
             try:
                 with httpx.Client(timeout=max(timeout_seconds, 300.0)) as client:
                     with renderer.render_thinking():
+                        fallback_headers = {"X-GIMO-Surface": "cli"}
+                        if auth_token:
+                            fallback_headers["Authorization"] = f"Bearer {auth_token}"
                         response = client.post(
                             f"{base_url}/ops/threads/{thread_id}/chat",
                             json={"content": user_input},
-                            headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                            headers=fallback_headers,
                         )
 
                 if response.status_code != 200:

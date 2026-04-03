@@ -208,7 +208,7 @@ async def test_agentic_loop_resumes_after_resolution(tmp_path):
                 return {"role": "assistant", "content": "Got it, thanks!", "usage": {"total_tokens": 50}}
             mock_adapter.chat_with_tools = MagicMock(side_effect=mock_chat)
             
-            with patch("tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter", return_value=(mock_adapter, "p1", "m1")):
+            with patch("tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter", return_value=(mock_adapter, "p1", "m1", "openai")):
                 res = await AgenticLoopService.resume_session(sid, workspace_root=str(tmp_path))
                 
                 assert "Got it" in res.response
@@ -309,7 +309,7 @@ async def test_run_stream_propagates_session_id():
                     with patch.object(ConversationService, "get_thread", return_value=MagicMock(mood="neutral", turns=[], workflow_phase="executing")):
                         with patch.object(ConversationService, "add_turn", return_value=MagicMock(id="t1")):
                             with patch.object(ConversationService, "append_item"):
-                                with patch("tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter", return_value=(mock_adapter, "p1", "m1")):
+                                with patch("tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter", return_value=(mock_adapter, "p1", "m1", "openai")):
                                     with patch.object(AgenticLoopService, "_run_loop") as mock_run_loop:
                                         mock_run_loop.return_value = asyncio.Future()
                                         mock_run_loop.return_value.set_result(AgenticResult(response="ok"))

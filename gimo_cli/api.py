@@ -213,6 +213,10 @@ def api_request(
     if "X-Gimo-Workspace" not in headers:
         headers["X-Gimo-Workspace"] = str(project_root())
 
+    # Identify this surface as CLI for unified authority chain.
+    if "X-GIMO-Surface" not in headers:
+        headers["X-GIMO-Surface"] = "cli"
+
     url = f"{base_url}{path}"
 
     try:

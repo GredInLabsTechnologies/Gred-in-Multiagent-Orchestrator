@@ -233,7 +233,7 @@ async def test_run_reserved_passes_explicit_policy_from_thread_context(tmp_path:
 
     monkeypatch.setattr(
         "tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter",
-        lambda: (object(), "provider", "model"),
+        lambda: (object(), "provider", "model", "openai"),
     )
     monkeypatch.setattr(AgenticLoopService, "_run_loop", _fake_run_loop)
 

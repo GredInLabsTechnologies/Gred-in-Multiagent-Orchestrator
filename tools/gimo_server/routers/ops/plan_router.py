@@ -528,6 +528,7 @@ async def generate_plan_stream(
                 context={
                     "structured": True,
                     "custom_plan_id": custom_plan.id,
+                    "execution_decision": "AUTO_RUN_ELIGIBLE",
                 },
                 provider=resp.get("provider", "local_ollama"),
                 status="draft",

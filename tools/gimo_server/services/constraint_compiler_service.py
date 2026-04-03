@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
 
 from ..models.agent_routing import TaskConstraints, TaskDescriptor
@@ -8,6 +9,8 @@ from .provider_service import ProviderService
 from .provider_topology_service import ProviderTopologyService
 from .runtime_policy_service import RuntimePolicyService
 from .workspace_policy_service import WorkspacePolicyService
+
+logger = logging.getLogger("orchestrator.services.constraint_compiler")
 
 
 class ConstraintCompilerService:
@@ -132,6 +135,74 @@ class ConstraintCompilerService:
             return ["plan_time", "runtime"]
 
         return ["plan_time"]
+
+    @classmethod
+    def _is_gics_daemon_available(cls) -> bool:
+        """Fast non-blocking check: is the GICS daemon socket/pipe reachable?"""
+        import os, sys
+        if sys.platform == "win32":
+            return os.path.exists(r"\\.\pipe\gics-daemon")
+        # Unix: check socket file
+        gics_home = os.path.join(os.path.expanduser("~"), ".gics")
+        return os.path.exists(os.path.join(gics_home, "gics.sock"))
+
+    @classmethod
+    def apply_trust_authority(
+        cls,
+        execution_policy: str,
+        *,
+        model_id: str | None = None,
+        provider_type: str | None = None,
+        workspace_root: str | None = None,
+    ) -> tuple[str, bool]:
+        """Dynamically constrain execution policy based on trust and reliability signals.
+
+        Returns (effective_policy, requires_human_approval).
+        Fail-open: if signals unavailable, returns policy unchanged.
+        """
+        requires_approval = False
+
+        # Check GICS model reliability — anomalous model loses write authority
+        if model_id and provider_type and cls._is_gics_daemon_available():
+            try:
+                from .gics_service import GicsService
+                gics = GicsService()
+                reliability = gics.get_model_reliability(
+                    provider_type=provider_type, model_id=model_id,
+                )
+                if reliability and reliability.get("anomaly"):
+                    logger.info(
+                        "Trust authority: model %s/%s anomaly detected, clamping to propose_only",
+                        provider_type, model_id,
+                    )
+                    return "propose_only", False
+            except Exception:
+                pass  # Fail-open
+
+        # Check TrustEngine workspace dimension
+        if workspace_root and cls._is_gics_daemon_available():
+            try:
+                from .storage_service import StorageService
+                from .trust_engine import TrustEngine
+                storage = StorageService()
+                engine = TrustEngine(storage.trust)
+                trust_record = engine.query_dimension(f"workspace:{workspace_root}")
+                trust_policy = trust_record.get("policy")
+                # No policy key = no trust data yet → fail-open (auto_approve)
+                if trust_policy is None:
+                    pass  # New workspace, no data — full authority
+                elif trust_policy == "blocked":
+                    logger.info(
+                        "Trust authority: workspace %s blocked, clamping to propose_only",
+                        workspace_root,
+                    )
+                    return "propose_only", False
+                elif trust_policy == "require_review":
+                    requires_approval = True
+            except Exception:
+                pass  # Fail-open
+
+        return execution_policy, requires_approval
 
     @classmethod
     def compile_for_descriptor(

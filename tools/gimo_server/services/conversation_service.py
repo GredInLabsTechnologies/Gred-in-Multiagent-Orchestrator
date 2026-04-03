@@ -235,14 +235,14 @@ class ConversationService:
         return cls._load_thread_unlocked(thread_id)
 
     @classmethod
-    def create_thread(cls, workspace_root: str, title: str = "New Conversation") -> GimoThread:
+    def create_thread(
+        cls, workspace_root: str, title: str = "New Conversation", surface: str = "operator",
+    ) -> GimoThread:
         cls._ensure_dir()
         thread = GimoThread(
             workspace_root=workspace_root,
             title=title,
-            metadata=WorkspacePolicyService.default_metadata_for_surface(
-                WorkspacePolicyService.SURFACE_OPERATOR
-            ),
+            metadata=WorkspacePolicyService.default_metadata_for_surface(surface),
         )
         cls.save_thread(thread)
         return thread

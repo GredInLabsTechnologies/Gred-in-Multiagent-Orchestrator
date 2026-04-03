@@ -396,6 +396,16 @@ class ProviderService:
         )
         updates: dict = {"model": resolved_model, "model_id": resolved_model}
         if api_key:
+            from .auth_service import ProviderAuthService
+            existing_entry = cfg.providers[provider_id]
+            ok, warning = ProviderAuthService.validate_api_key_format(
+                existing_entry.provider_type or existing_entry.type or "", api_key,
+            )
+            if not ok:
+                raise ValueError(f"Invalid API key: {warning}")
+            if warning:
+                import logging
+                logging.getLogger("orchestrator.providers").warning(warning)
             updates["api_key"] = api_key
         entry = cfg.providers[provider_id].model_copy(update=updates)
 

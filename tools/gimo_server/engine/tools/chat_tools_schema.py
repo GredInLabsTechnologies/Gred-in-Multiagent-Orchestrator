@@ -27,6 +27,21 @@ def get_tool_risk_level(tool_name: str) -> str:
     return TOOL_RISK_LEVELS.get(tool_name, "HIGH")
 
 
+def filter_tools_by_policy(tools: List[Dict[str, Any]], allowed_tools: frozenset[str] | None) -> List[Dict[str, Any]]:
+    """Return only tool schemas the execution policy allows.
+
+    Schema-time filtering: the LLM never sees tools it cannot use,
+    reducing wasted tool calls and improving inference quality.
+
+    Convention (matching ExecutionPolicyProfile.assert_tool_allowed):
+    - ``None`` or empty frozenset → no restriction, all tools visible
+    - Non-empty frozenset → only those tools visible
+    """
+    if not allowed_tools:
+        return tools  # None or empty frozenset = no restriction
+    return [t for t in tools if t.get("function", {}).get("name") in allowed_tools]
+
+
 CHAT_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",

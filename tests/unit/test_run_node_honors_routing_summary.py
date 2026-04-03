@@ -24,7 +24,7 @@ async def test_run_node_with_routing_summary_uses_summary_provider():
         patch("tools.gimo_server.services.agentic_loop_service._resolve_bound_adapter") as mock_resolve,
         patch.object(AgenticLoopService, "_run_loop", new_callable=AsyncMock) as mock_loop,
     ):
-        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4")
+        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4", "openai")
         mock_loop.return_value = MagicMock(response="done", usage={}, finish_reason="stop")
 
         await AgenticLoopService.run_node(
@@ -55,7 +55,7 @@ async def test_run_node_with_routing_summary_uses_summary_policy():
         patch("tools.gimo_server.services.agentic_loop_service._resolve_bound_adapter") as mock_resolve,
         patch.object(AgenticLoopService, "_run_loop", new_callable=AsyncMock) as mock_loop,
     ):
-        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4")
+        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4", "openai")
         mock_loop.return_value = MagicMock(response="done", usage={}, finish_reason="stop")
 
         await AgenticLoopService.run_node(
@@ -77,7 +77,7 @@ async def test_run_node_without_routing_summary_backward_compatible():
         patch("tools.gimo_server.services.agentic_loop_service._resolve_bound_adapter") as mock_resolve,
         patch.object(AgenticLoopService, "_run_loop", new_callable=AsyncMock) as mock_loop,
     ):
-        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4")
+        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4", "openai")
         mock_loop.return_value = MagicMock(response="done", usage={}, finish_reason="stop")
 
         await AgenticLoopService.run_node(

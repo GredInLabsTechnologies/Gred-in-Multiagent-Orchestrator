@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 from typing import List, Optional, Annotated
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from ...ops_models import GimoThread, GimoTurn, GimoItem, GimoItemType
@@ -51,7 +51,7 @@ async def list_threads(
     return ConversationService.list_threads(workspace_root=workspace_root)
 
 class CreateThreadRequest(BaseModel):
-    title: str = "New Conversation"
+    title: Optional[str] = None
 
 @router.post("", response_model=GimoThread, status_code=201)
 async def create_thread(
@@ -59,15 +59,20 @@ async def create_thread(
     auth: Annotated[AuthContext, Depends(verify_token)],
     body: CreateThreadRequest = Body(default_factory=CreateThreadRequest),
     title: str = Query(default=None, description="Thread title (deprecated, use request body)"),
+    x_gimo_surface: Optional[str] = Header(default=None, alias="X-GIMO-Surface"),
 ):
     """Creates a new conversation thread.
 
     Title can be provided via request body {"title": "..."} or query param ?title=...
     Body takes precedence over query param.
+    Surface is identified via X-GIMO-Surface header (cli, web, mcp, chatgpt_app).
     """
     _require_role(auth, "operator")
-    resolved_title = body.title if body.title != "New Conversation" else (title or body.title)
-    return ConversationService.create_thread(workspace_root=workspace_root, title=resolved_title)
+    resolved_title = body.title or title or "New Conversation"
+    surface = (x_gimo_surface or "").strip().lower() or "operator"
+    return ConversationService.create_thread(
+        workspace_root=workspace_root, title=resolved_title, surface=surface,
+    )
 
 @router.get("/{thread_id}", response_model=GimoThread, responses={404: {"description": "Thread not found"}})
 async def get_thread(

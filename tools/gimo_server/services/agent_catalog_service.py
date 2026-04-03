@@ -85,7 +85,7 @@ MOOD_CATALOG: Dict[MoodName, CatalogMoodProfile] = {
 }
 
 PRESET_CATALOG: Dict[AgentPresetName, AgentPresetProfile] = {
-    "plan_orchestrator": AgentPresetProfile("plan_orchestrator", "orchestrator", "collaborative", "propose_only", "planning"),
+    "plan_orchestrator": AgentPresetProfile("plan_orchestrator", "orchestrator", "collaborative", "workspace_safe", "planning"),
     "researcher": AgentPresetProfile("researcher", "researcher", "analytical", "docs_research", "planning"),
     "executor": AgentPresetProfile("executor", "executor", "assertive", "workspace_safe", "executing"),
     "reviewer": AgentPresetProfile("reviewer", "reviewer", "didactic", "read_only", "reviewing"),

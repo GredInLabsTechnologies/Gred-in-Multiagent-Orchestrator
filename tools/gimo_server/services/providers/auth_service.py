@@ -10,8 +10,28 @@ from ...ops_models import ProviderEntry
 _ENV_PATTERN = re.compile(r"^\$\{([A-Z0-9_]+)\}$")
 
 
+_KEY_PREFIX_HINTS: dict[str, list[str]] = {
+    "anthropic": ["sk-ant-"],
+    "openai": ["sk-"],
+    "google": ["AIza"],
+}
+
+
 class ProviderAuthService:
     """Administra credenciales y autenticacion de proveedores LLM."""
+
+    @staticmethod
+    def validate_api_key_format(provider_type: str, key: str) -> tuple[bool, str]:
+        """Advisory validation of API key format. Returns (ok, warning_message)."""
+        key = (key or "").strip()
+        if not key or len(key) < 10:
+            return False, f"API key too short ({len(key)} chars). Expected 20+ characters."
+        normalized = provider_type.lower().replace("_compat", "").replace("local_", "")
+        prefixes = _KEY_PREFIX_HINTS.get(normalized)
+        if prefixes and not any(key.startswith(p) for p in prefixes):
+            return True, f"Warning: key does not start with expected prefix ({', '.join(prefixes)}) for {normalized}. Key format may have changed."
+        return True, ""
+
     @staticmethod
     def parse_env_ref(auth_ref: Optional[str]) -> Optional[str]:
         if not auth_ref:

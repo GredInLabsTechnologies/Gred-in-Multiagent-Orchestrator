@@ -33,7 +33,7 @@ async def test_agentic_loop_enforces_execution_policy():
         patch("tools.gimo_server.services.agentic_loop_service._resolve_bound_adapter") as mock_resolve,
         patch("tools.gimo_server.services.agentic_loop_service.ToolExecutor") as mock_executor_cls,
     ):
-        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4")
+        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4", "openai")
 
         # Configure mock adapter chat_with_tools
         mock_adapter.chat_with_tools = AsyncMock(side_effect=[
@@ -97,7 +97,7 @@ async def test_agentic_loop_allows_permitted_tool():
         patch("tools.gimo_server.services.agentic_loop_service._resolve_bound_adapter") as mock_resolve,
         patch("tools.gimo_server.services.agentic_loop_service.ToolExecutor") as mock_executor_cls,
     ):
-        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4")
+        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4", "openai")
 
         # Configure mock adapter chat_with_tools
         mock_adapter.chat_with_tools = AsyncMock(side_effect=[
@@ -146,7 +146,7 @@ async def test_agentic_loop_without_execution_policy_backward_compat():
         patch("tools.gimo_server.services.agentic_loop_service._resolve_bound_adapter") as mock_resolve,
         patch("tools.gimo_server.services.agentic_loop_service.ToolExecutor") as mock_executor_cls,
     ):
-        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4")
+        mock_resolve.return_value = (mock_adapter, "openai", "gpt-4", "openai")
 
         # Configure mock adapter chat_with_tools
         mock_adapter.chat_with_tools = AsyncMock(side_effect=[

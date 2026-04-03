@@ -49,7 +49,7 @@ class TestRunNode:
     @patch("tools.gimo_server.services.agentic_loop_service.CostService.calculate_cost", return_value=0.001)
     def test_basic_run_returns_agentic_result(self, _mock_cost, mock_resolve):
         adapter = _mock_adapter([_final_response("Hello from node")])
-        mock_resolve.return_value = (adapter, "test-provider", "test-model")
+        mock_resolve.return_value = (adapter, "test-provider", "test-model", "openai")
 
         result = asyncio.run(AgenticLoopService.run_node(
             workspace_root="/tmp",
@@ -67,7 +67,7 @@ class TestRunNode:
     @patch("tools.gimo_server.services.agentic_loop_service.CostService.calculate_cost", return_value=0.0)
     def test_does_not_use_conversation_service(self, _mock_cost, mock_resolve):
         adapter = _mock_adapter([_final_response("OK")])
-        mock_resolve.return_value = (adapter, "test", "model")
+        mock_resolve.return_value = (adapter, "test", "model", "openai")
 
         with patch("tools.gimo_server.services.agentic_loop_service.ConversationService") as mock_cs:
             result = asyncio.run(AgenticLoopService.run_node(
@@ -88,7 +88,7 @@ class TestRunNode:
             _tool_call_response("ask_user", {"question": "Which file?"}),
             _final_response("Completed without asking"),
         ])
-        mock_resolve.return_value = (adapter, "test", "model")
+        mock_resolve.return_value = (adapter, "test", "model", "openai")
 
         result = asyncio.run(AgenticLoopService.run_node(
             workspace_root="/tmp",
@@ -111,7 +111,7 @@ class TestRunNode:
             _tool_call_response("list_files", {"path": "."}, usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}),
             _final_response("Done", usage={"prompt_tokens": 200, "completion_tokens": 100, "total_tokens": 300}),
         ])
-        mock_resolve.return_value = (adapter, "test", "model")
+        mock_resolve.return_value = (adapter, "test", "model", "openai")
 
         result = asyncio.run(AgenticLoopService.run_node(
             workspace_root="/tmp",
@@ -127,7 +127,7 @@ class TestRunNode:
     @patch("tools.gimo_server.services.agentic_loop_service.CostService.calculate_cost", return_value=0.0)
     def test_invalid_mood_defaults_to_executor(self, _mock_cost, mock_resolve):
         adapter = _mock_adapter([_final_response("OK")])
-        mock_resolve.return_value = (adapter, "test", "model")
+        mock_resolve.return_value = (adapter, "test", "model", "openai")
 
         result = asyncio.run(AgenticLoopService.run_node(
             workspace_root="/tmp",
