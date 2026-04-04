@@ -69,11 +69,20 @@ class Pipeline:
             if output.status == "fail" and self.config.stop_on_failure:
                 # Trigger rollback for all completed stages in reverse order
                 logger.warning(f"Pipeline failed at stage {stage.name}. Triggering rollback.")
+                rollback_errors: list[tuple[str, Exception]] = []
                 for completed_stage, completed_input in reversed(execution_history):
                     try:
                         await completed_stage.rollback(completed_input)
                     except Exception as rb_err:
                         logger.error(f"Error during rollback of {completed_stage.name}: {rb_err}")
+                        rollback_errors.append((completed_stage.name, rb_err))
+                if rollback_errors:
+                    output.artifacts["rollback_status"] = "partial"
+                    output.artifacts["rollback_errors"] = [
+                        f"{name}: {err}" for name, err in rollback_errors
+                    ]
+                else:
+                    output.artifacts["rollback_status"] = "clean"
                 break
             if output.status == "halt":
                 break
@@ -82,76 +91,44 @@ class Pipeline:
 
 
     async def _execute_stage_with_retries(self, stage: ExecutionStage, input: StageInput, *, healing_enabled: bool = False) -> StageOutput:
-        selected_stages: List[ExecutionStage] = [stage]
-        if healing_enabled:
-            selected_stages.extend(list(getattr(stage, "alternatives", []) or []))
         last_error: Optional[Exception] = None
 
-        for stage_candidate in selected_stages:
-            for attempt in range(self.config.max_retries + 1):
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                started_at = datetime.now(timezone.utc)
+                output = await stage.execute(input)
+                finished_at = datetime.now(timezone.utc)
 
-                try:
-                    started_at = datetime.now(timezone.utc)
-                    output = await stage_candidate.execute(input)
-                    finished_at = datetime.now(timezone.utc)
+                if not output.journal_entry:
+                    output.journal_entry = self._create_journal_entry(
+                        stage, input, output, started_at, finished_at,
+                        "completed" if output.status != "fail" else "failed",
+                    )
 
-                    # Check for journal entry if not provided by stage
-                    if not output.journal_entry:
-                        output.journal_entry = self._create_journal_entry(
-                            stage_candidate,
-                            input,
-                            output,
-                            started_at,
-                            finished_at,
-                            "completed" if output.status != "fail" else "failed",
-                        )
+                if output.status == "retry" and attempt == self.config.max_retries:
+                    output = StageOutput(
+                        status="fail",
+                        artifacts={
+                            **dict(output.artifacts or {}),
+                            "error": f"Stage requested retry but max retries exhausted: {stage.name}",
+                        },
+                        journal_entry=output.journal_entry,
+                    )
+                if output.status != "retry" or attempt == self.config.max_retries:
+                    return output
 
-                    if output.status == "retry" and attempt == self.config.max_retries:
-                        output = StageOutput(
-                            status="fail",
-                            artifacts={
-                                **dict(output.artifacts or {}),
-                                "error": f"Stage requested retry but max retries exhausted: {stage_candidate.name}",
-                            },
-                            journal_entry=output.journal_entry,
-                        )
-                    if (
-                        output.status == "fail"
-                        and healing_enabled
-                        and stage_candidate is not selected_stages[-1]
-                    ):
-                        logger.warning(
-                            "Stage failed, trying self-healing alternative stage=%s",
-                            stage_candidate.name,
-                        )
-                        break
-                    if output.status != "retry" or attempt == self.config.max_retries:
-                        return output
+            except Exception as e:
+                last_error = e
+                if attempt == self.config.max_retries:
+                    break
 
-                except Exception as e:
-                    last_error = e
-                    if attempt == self.config.max_retries:
-                        break
+            await asyncio.sleep(self.config.retry_delay_seconds * (2 ** attempt))
 
-                await asyncio.sleep(self.config.retry_delay_seconds * (2 ** attempt))
-
-            if last_error is not None and stage_candidate is not stage:
-                logger.warning(
-                    "Self-healing alternative stage failed stage=%s error=%s",
-                    stage_candidate.name,
-                    str(last_error),
-                )
-            
         finished_at = datetime.now(timezone.utc)
-        err_text = str(last_error) if 'last_error' in locals() and last_error else "Max retries exceeded"
+        err_text = str(last_error) if last_error else "Max retries exceeded"
         failed_output = StageOutput(status="fail", artifacts={"error": err_text})
         failed_output.journal_entry = self._create_journal_entry(
-            stage,
-            input,
-            failed_output,
-            finished_at,
-            finished_at,
-            "failed",
+            stage, input, failed_output, finished_at, finished_at, "failed",
         )
         return failed_output
 

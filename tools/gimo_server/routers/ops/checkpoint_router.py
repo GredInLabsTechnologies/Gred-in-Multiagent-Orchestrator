@@ -232,17 +232,10 @@ async def _resume_plan_generation(
         stage, len(completed_tasks)
     )
 
-    # TODO: Implement actual resume logic
-    # For now, return a placeholder indicating resume capability
-    return {
-        "resumed": True,
-        "checkpoint_id": checkpoint_id,
-        "operation": "plan",
-        "operation_id": operation_id,
-        "resumed_from_stage": stage,
-        "message": "Plan generation resumed (placeholder implementation)",
-        "note": "Full resume implementation pending",
-    }
+    raise HTTPException(
+        status_code=501,
+        detail="Plan resume is not yet implemented. Checkpoint was saved but cannot be resumed automatically.",
+    )
 
 
 async def _resume_run_execution(
@@ -257,16 +250,10 @@ async def _resume_run_execution(
 
     logger.info("Resuming run execution: stage=%s", stage)
 
-    # TODO: Implement actual resume logic
-    return {
-        "resumed": True,
-        "checkpoint_id": checkpoint_id,
-        "operation": "run",
-        "operation_id": operation_id,
-        "resumed_from_stage": stage,
-        "message": "Run execution resumed (placeholder implementation)",
-        "note": "Full resume implementation pending",
-    }
+    raise HTTPException(
+        status_code=501,
+        detail="Run resume is not yet implemented. Checkpoint was saved but cannot be resumed automatically.",
+    )
 
 
 @router.delete("/checkpoints/{checkpoint_id}")

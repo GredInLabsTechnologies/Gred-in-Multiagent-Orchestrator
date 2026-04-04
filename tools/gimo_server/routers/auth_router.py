@@ -103,6 +103,8 @@ async def login(body: LoginRequest, response: Response, request: Request):
 @router.post("/firebase-login")
 async def firebase_login(body: FirebaseLoginRequest, response: Response, request: Request):
     """Authenticate using Firebase ID token via GIMO WEB verify endpoint."""
+    _auth_throttle.check(request)
+
     id_token = body.idToken.strip()
     if not id_token:
         raise HTTPException(status_code=400, detail="idToken required")
@@ -148,8 +150,11 @@ async def firebase_login(body: FirebaseLoginRequest, response: Response, request
         detail = f"[{upstream_code or 'UPSTREAM_' + str(verify_response.status_code)}] {upstream_error}"
         if upstream_detail:
             detail = f"{detail} — {upstream_detail[:300]}"
+        if status == 401:
+            _auth_throttle.record_failure(request)
         raise HTTPException(status_code=status, detail=detail)
 
+    _auth_throttle.reset(request)
     payload = verify_response.json()
     firebase_role = payload.get("role") if payload.get("role") in ("admin", "user") else "user"
     role = _map_firebase_role_to_session_role(firebase_role)
