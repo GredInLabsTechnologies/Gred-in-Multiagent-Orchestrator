@@ -315,8 +315,9 @@ class AgenticLoopService:
     @classmethod
     def _start_thread_execution_heartbeat(
         cls, thread_id: str, owner_id: str
-    ) -> tuple[asyncio.Event, asyncio.Task[None]]:
+    ) -> tuple[asyncio.Event, asyncio.Task[None], asyncio.Event]:
         stop_event = asyncio.Event()
+        lock_lost = asyncio.Event()
 
         async def _heartbeat() -> None:
             while not stop_event.is_set():
@@ -326,10 +327,11 @@ class AgenticLoopService:
                 try:
                     cls.heartbeat_thread_execution(thread_id, owner_id)
                 except Exception:
-                    logger.warning("Thread execution heartbeat failed for %s", thread_id, exc_info=True)
+                    logger.warning("Heartbeat failed for %s — signaling lock_lost", thread_id, exc_info=True)
+                    lock_lost.set()
                     break
 
-        return stop_event, asyncio.create_task(_heartbeat())
+        return stop_event, asyncio.create_task(_heartbeat()), lock_lost
 
     @staticmethod
     async def _stop_heartbeat(stop_event: asyncio.Event, task: asyncio.Task[None]) -> None:
@@ -464,6 +466,8 @@ class AgenticLoopService:
             parsed = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
             return parsed if isinstance(parsed, dict) else {}
         except json.JSONDecodeError:
+            logger.warning("Malformed tool_call arguments (JSONDecodeError): %.200s",
+                           raw_args if isinstance(raw_args, str) else type(raw_args).__name__)
             return {}
 
     @staticmethod
@@ -1254,8 +1258,8 @@ class AgenticLoopService:
         try:
             policy_obj = ExecutionPolicyService.get_policy(execution_policy) if execution_policy else None
         except KeyError:
-            logger.warning("Unknown execution policy '%s', defaulting to no tool filtering", execution_policy)
-            policy_obj = None
+            logger.error("FAIL-CLOSED: Unknown execution policy %r — aborting tool binding", execution_policy)
+            raise RuntimeError(f"Unknown execution policy: {execution_policy!r}")
         effective_tools = filter_tools_by_policy(CHAT_TOOLS, policy_obj.allowed_tools if policy_obj else None)
 
         return await AgenticLoopService._run_loop(
@@ -1291,7 +1295,7 @@ class AgenticLoopService:
     ) -> AgenticResult:
         reservation = cls.reserve_thread_execution(thread_id)
         owner_id = str(reservation.get("owner_id") or "")
-        stop_event, heartbeat_task = cls._start_thread_execution_heartbeat(thread_id, owner_id)
+        stop_event, heartbeat_task, _lock_lost = cls._start_thread_execution_heartbeat(thread_id, owner_id)
         try:
             return await cls._run_reserved(
                 thread_id=thread_id,
@@ -1312,6 +1316,7 @@ class AgenticLoopService:
         workspace_root: str,
         token: str = "system",
         session_id: str | None = None,
+        lock_lost: asyncio.Event | None = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         adapter, provider_id, model, canonical_type = _resolve_orchestrator_adapter()
         thread = ConversationService.get_thread(thread_id)
@@ -1356,8 +1361,8 @@ class AgenticLoopService:
         try:
             policy_obj = ExecutionPolicyService.get_policy(execution_policy) if execution_policy else None
         except KeyError:
-            logger.warning("Unknown execution policy '%s', defaulting to no tool filtering", execution_policy)
-            policy_obj = None
+            logger.error("FAIL-CLOSED: Unknown execution policy %r — aborting tool binding", execution_policy)
+            raise RuntimeError(f"Unknown execution policy: {execution_policy!r}")
         effective_tools = filter_tools_by_policy(CHAT_TOOLS, policy_obj.allowed_tools if policy_obj else None)
 
         queue: asyncio.Queue[Dict[str, Any] | None] = asyncio.Queue()
@@ -1398,6 +1403,10 @@ class AgenticLoopService:
         task = asyncio.create_task(runner())
         try:
             while True:
+                if lock_lost is not None and lock_lost.is_set():
+                    yield {"event": "error", "data": {"message": "Execution lock lost — aborting stream"}}
+                    task.cancel()
+                    break
                 event = await queue.get()
                 if event is None:
                     break
@@ -1416,7 +1425,7 @@ class AgenticLoopService:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         reservation = cls.reserve_thread_execution(thread_id)
         owner_id = str(reservation.get("owner_id") or "")
-        stop_event, heartbeat_task = cls._start_thread_execution_heartbeat(thread_id, owner_id)
+        stop_event, heartbeat_task, lock_lost = cls._start_thread_execution_heartbeat(thread_id, owner_id)
         try:
             async for event in cls._run_stream_reserved(
                 thread_id=thread_id,
@@ -1424,6 +1433,7 @@ class AgenticLoopService:
                 workspace_root=workspace_root,
                 token=token,
                 session_id=session_id,
+                lock_lost=lock_lost,
             ):
                 yield event
         finally:
@@ -1460,7 +1470,7 @@ class AgenticLoopService:
         except ThreadExecutionBusyError:
             return AgenticResult(response="Session is already being resumed elsewhere.", finish_reason="error")
 
-        stop_event, heartbeat_task = cls._start_thread_execution_heartbeat(thread_id, owner_id)
+        stop_event, heartbeat_task, _lock_lost = cls._start_thread_execution_heartbeat(thread_id, owner_id)
 
         try:
             # Inject resolved contexts as TOOL RESULTS

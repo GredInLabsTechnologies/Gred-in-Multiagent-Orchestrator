@@ -10,12 +10,18 @@ def _git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
+def _init_test_repo(cwd: Path, *extra_args: str) -> None:
+    """Init a git repo with signing disabled (sandbox/CI safe)."""
+    _git(cwd, "init", *extra_args)
+    _git(cwd, "config", "commit.gpgSign", "false")
+
+
 def _git_result(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
 
 
 def test_get_changed_files_includes_untracked_files(tmp_path: Path):
-    _git(tmp_path, "init")
+    _init_test_repo(tmp_path)
     _git(tmp_path, "config", "user.name", "Tester")
     _git(tmp_path, "config", "user.email", "tester@example.com")
     (tmp_path / "tracked.txt").write_text("base", encoding="utf-8")
@@ -29,7 +35,7 @@ def test_get_changed_files_includes_untracked_files(tmp_path: Path):
 
 
 def test_get_changed_files_preserves_first_modified_filename(tmp_path: Path):
-    _git(tmp_path, "init")
+    _init_test_repo(tmp_path)
     _git(tmp_path, "config", "user.name", "Tester")
     _git(tmp_path, "config", "user.email", "tester@example.com")
     (tmp_path / "tracked.txt").write_text("base\n", encoding="utf-8")
@@ -44,7 +50,7 @@ def test_get_changed_files_preserves_first_modified_filename(tmp_path: Path):
 
 
 def test_perform_merge_aborts_on_conflict_and_leaves_repo_clean(tmp_path: Path):
-    _git(tmp_path, "init", "-b", "main")
+    _init_test_repo(tmp_path, "-b", "main")
     _git(tmp_path, "config", "user.name", "Tester")
     _git(tmp_path, "config", "user.email", "tester@example.com")
     (tmp_path / "tracked.txt").write_text("base\n", encoding="utf-8")

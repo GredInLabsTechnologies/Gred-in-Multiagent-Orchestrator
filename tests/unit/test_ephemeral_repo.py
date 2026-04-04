@@ -1,7 +1,18 @@
+import os
+
 import pytest
 from pathlib import Path
 from tools.gimo_server.services.git_service import GitService
 from tools.gimo_server.services.ephemeral_repo_service import EphemeralRepoService
+
+
+@pytest.fixture(autouse=True)
+def _disable_commit_signing(monkeypatch):
+    """Disable commit signing globally for all git operations in test subprocesses."""
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "commit.gpgSign")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
+
 
 def test_fetch_mirror_roundtrip(tmp_path):
     # Setup origin

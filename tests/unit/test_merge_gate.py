@@ -304,7 +304,7 @@ async def test_run_stream_propagates_session_id():
     
     with patch.object(AgenticLoopService, "reserve_thread_execution", return_value={"owner_id": "o1"}):
         with patch.object(AgenticLoopService, "release_thread_execution"):
-            with patch.object(AgenticLoopService, "_start_thread_execution_heartbeat", return_value=(asyncio.Event(), MagicMock())):
+            with patch.object(AgenticLoopService, "_start_thread_execution_heartbeat", return_value=(asyncio.Event(), MagicMock(), asyncio.Event())):
                 with patch.object(AgenticLoopService, "_stop_heartbeat"):
                     with patch.object(ConversationService, "get_thread", return_value=MagicMock(mood="neutral", turns=[], workflow_phase="executing")):
                         with patch.object(ConversationService, "add_turn", return_value=MagicMock(id="t1")):

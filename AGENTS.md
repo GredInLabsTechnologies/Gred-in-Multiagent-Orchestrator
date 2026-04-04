@@ -234,6 +234,24 @@ explicitly safe.
 - do not widen externally callable surface area casually
 - changes to control-plane routes require extra caution, validation, and tests
 
+### Execution Boundary Security (OWASP Agentic AI 2026)
+
+GIMO implements three pillars of the OWASP Top 10 for Agentic Applications (2026):
+
+- **ASI02 (Tool Misuse)**: Fail-closed policy enforcement. Unknown execution
+  policies raise RuntimeError — absence of permission means denial. Six
+  canonical policies with deterministic pre-execution evaluation.
+- **ASI03 (Privilege Isolation)**: Each agent preset binds to exactly one
+  execution policy. Tool filtering happens at schema-time (LLM never sees
+  disallowed tools) and execution-time (double enforcement).
+- **ASI08 (Cascading Failures)**: Streaming execution uses three-layer defense:
+  generator finally (primary), BackgroundTask (safety net), TTL expiry
+  (backstop). Heartbeat failure signals lock_lost to abort execution
+  (circuit breaker pattern).
+
+Invariant: no execution path may degrade to "all tools allowed" on error.
+This is enforced by fail-closed policy resolution and verified by tests.
+
 ### Worktree and repo mutation caution
 
 Anything that mutates repositories, branches, merges, or execution workspaces
