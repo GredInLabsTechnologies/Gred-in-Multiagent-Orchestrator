@@ -7,11 +7,11 @@
 
 ## Executive Summary
 
-After a thorough exploration of the entire codebase (353 Python backend files, 156 frontend TS/TSX files, Next.js web app), the system is architecturally sound and most components are production-ready. However, there are **12 gaps** that could surface during E2E testing, categorized by severity.
+After a thorough exploration of the entire codebase (353 Python backend files, 156 frontend TS/TSX files, Next.js web app), the system is architecturally sound and most components are production-ready. However, there are **19 gaps** that could surface during E2E testing, categorized by severity.
 
 ---
 
-## CRITICAL (3) - Will likely break E2E flows
+## CRITICAL (6) - Will likely break E2E flows
 
 ### 1. Checkpoint Resume is a Placeholder
 - **Location**: `tools/gimo_server/routers/ops/checkpoint_router.py:235,260`
@@ -42,67 +42,109 @@ After a thorough exploration of the entire codebase (353 Python backend files, 1
 - **Impact**: Any E2E flow that involves inter-agent communication via the UI will show no messages.
 - **Fix**: Wire to backend `/ops/{agent_id}/messages` endpoint or clearly disable the feature in the UI.
 
+### 4. WebSocket `/ws` Endpoint Has No Authentication
+- **Location**: `tools/gimo_server/main.py:562-578`
+- **Issue**: The `@app.websocket("/ws")` handler does NOT use `Depends(verify_token)` and has no authentication check inside the handler body. Any client on the network can connect and receive all run execution events.
+- **Impact**: Unauthenticated users can subscribe to real-time notifications, potentially leaking sensitive execution data (file paths, agent decisions, error details).
+- **Fix**: Add `Depends(verify_token)` or implement token validation in the WebSocket handshake.
+
+### 5. Fire-and-Forget Execution - Runs Can Get Stuck Forever
+- **Location**: `tools/gimo_server/routers/ops/run_router.py:235-246`
+- **Issue**: `asyncio.create_task(EngineService.execute_run(run.id))` launches execution without tracking the task. If the task raises an unhandled exception immediately after creation, the run stays in "running" status permanently. No timeout mechanism exists.
+- **Impact**: E2E tests that trigger edge-case failures will see runs stuck in "running" with no way to detect failure. Requires manual status reset.
+- **Fix**: Track the task reference, add an exception callback via `task.add_done_callback()`, and implement a maximum execution timeout.
+
+### 6. Background Task Exceptions Are Lost
+- **Location**: `tools/gimo_server/services/execution/engine_service.py:363-407`
+- **Issue**: `run_composition()` re-raises exceptions, but since the caller is `asyncio.create_task()`, there is no awaiter to catch them. The exception is logged to the run but never surfaced to the orchestrator's error tracking.
+- **Impact**: Pipeline failures appear as silent hangs. The run status may update to "error" in GICS but the orchestrator has no way to trigger recovery or notifications.
+- **Fix**: Wrap the `create_task` target in a try/except that updates run status to "error" and publishes a notification event.
+
 ---
 
-## HIGH (4) - Will cause incorrect data or confusing failures
+## HIGH (7) - Will cause incorrect data or confusing failures
 
-### 4. Cost Event Timestamps Silently Dropped
+### 7. Cost Event Timestamps Silently Dropped
 - **Location**: `tools/gimo_server/services/storage/cost_storage.py:36-71`
 - **Issue**: Events with malformed timestamps are silently dropped via `except ValueError: pass`. No logging, no counter.
 - **Impact**: `get_daily_costs()`, `get_roi_leaderboard()`, `get_cascade_stats()` will have missing data with no indication why.
 - **Fix**: Log dropped events at WARNING level and add a counter metric.
 
-### 5. Trust Records Query Scans Entire Database
+### 8. Trust Records Query Scans Entire Database
 - **Location**: `tools/gimo_server/services/storage/trust_storage.py:110-129`
 - **Issue**: `list_trust_records()` uses `prefix=""` (scans everything) and relies on a fragile heuristic (`"approvals" in fields and "dimension_key" in fields`).
 - **Impact**: Records missing either field are silently excluded. In production with many GICS entries, this will be slow and incomplete.
 - **Fix**: Use explicit prefix (e.g., `"tr:"`) and validate record structure.
 
-### 6. eval_run_id vs run_id Field Mismatch
+### 9. eval_run_id vs run_id Field Mismatch
 - **Location**: `tools/gimo_server/models/eval.py:44` vs `tools/gimo_server/services/storage/eval_storage.py:29`
 - **Issue**: Model defines `eval_run_id`, but storage writes `run_id`. On read-back, `eval_run_id` is always `None`.
 - **Impact**: Code expecting `report.eval_run_id` to match stored data will get `None`.
 - **Fix**: Unify naming to use `eval_run_id` everywhere or alias properly.
 
-### 7. Threat Level Middleware Can Cascade-Block Tests
+### 10. Threat Level Middleware Can Cascade-Block Tests
 - **Location**: `tools/gimo_server/middlewares.py:32-84`
 - **Issue**: Adversarial/chaos tests that trigger errors can escalate threat level to LOCKDOWN, which then blocks ALL subsequent unauthenticated requests with 503.
 - **Impact**: Test ordering matters. Early adversarial tests can break later tests.
 - **Fix**: Reset threat level between test suites, or provide a test-mode override.
 
+### 11. No Rate Limiting on Auth Endpoints
+- **Location**: `tools/gimo_server/routers/auth_router.py`
+- **Issue**: `/auth/login` and `/auth/firebase-login` are NOT protected by `check_rate_limit`. No maximum failed attempt tracking or exponential backoff.
+- **Impact**: Brute force attacks on token validation are possible. In E2E, rapid auth retries won't be throttled, masking real-world behavior.
+- **Fix**: Add rate limiting middleware to auth endpoints, with lockout after N failures.
+
+### 12. Pipeline Rollback Failure Handling is Incomplete
+- **Location**: `tools/gimo_server/engine/pipeline.py:74-76`
+- **Issue**: If a rollback fails on stage N, the error is logged but rollback continues. There is no atomic transaction guarantee - if rollback fails on stage 2, stage 1 changes are already committed.
+- **Impact**: Partial rollbacks leave the system in an inconsistent state. E2E tests with intentional failures may find file changes half-applied.
+- **Fix**: Implement compensation logic or at minimum flag the run as "rollback_partial" for operator review.
+
+### 13. Self-Healing Pipeline Stages Are Non-Functional
+- **Location**: `tools/gimo_server/engine/pipeline.py:86-143`
+- **Issue**: When `healing_enabled=True`, the pipeline tries `getattr(stage, "alternatives", [])` to find fallback stages. But no stage implementation ever defines an `alternatives` attribute, so the list is always empty.
+- **Impact**: The self-healing feature documented in the architecture is effectively dead code. Stages that fail will never try alternatives.
+- **Fix**: Either implement `alternatives` on stages that support it, or remove the feature to avoid false confidence.
+
 ---
 
-## MEDIUM (3) - Potential issues under specific conditions
+## MEDIUM (4) - Potential issues under specific conditions
 
-### 8. CostPredictor Creates StorageService Without GICS
+### 14. CostPredictor Creates StorageService Without GICS
 - **Location**: `tools/gimo_server/services/economy/cost_predictor.py`
 - **Issue**: `CostPredictor(storage=None)` creates `StorageService()` with `gics=None`, silently losing all cost predictions.
 - **Impact**: Cost predictions work but are never persisted. Dashboards show stale or missing data.
 - **Fix**: Require explicit GICS injection or fail fast.
 
-### 9. CheckpointService Requires Manual `set_gics()` Call
+### 15. CheckpointService Requires Manual `set_gics()` Call
 - **Location**: `tools/gimo_server/services/checkpoint_service.py:15-34`
 - **Issue**: Uses class variable singleton pattern. Every handler must call `CheckpointService.set_gics()` before use or get `RuntimeError`.
 - **Impact**: If any new router forgets to call `set_gics()`, it crashes mid-request.
 - **Fix**: Use proper dependency injection (FastAPI `Depends()`) instead of manual singleton.
 
-### 10. GIMO WEB URL Defaults to External Vercel URL
+### 16. GIMO WEB URL Defaults to External Vercel URL
 - **Location**: `tools/gimo_server/config.py`
 - **Issue**: `GIMO_WEB_URL` defaults to `https://gimo-web.vercel.app`. In air-gapped/Cold Room mode or local E2E tests without internet, Firebase login fails.
 - **Impact**: E2E tests with Firebase auth flow will fail in offline environments.
 - **Fix**: Detect Cold Room mode and skip Firebase verification, or require explicit `GIMO_WEB_URL` in tests.
 
+### 17. Session Revocation Lost on Server Restart
+- **Location**: `tools/gimo_server/security/auth.py:58`
+- **Issue**: `self._revoked: set[str] = set()` stores revoked sessions in memory only. On server restart, all revocations are cleared.
+- **Impact**: A user who logged out can reuse their old session cookie after a deployment/restart. Creates a session hijacking window.
+- **Fix**: Persist revocation set to GICS or use short-lived tokens that don't need explicit revocation.
+
 ---
 
 ## LOW (2) - Minor or by-design issues
 
-### 11. All Storage Operations Swallow Exceptions
+### 18. All Storage Operations Swallow Exceptions
 - **Location**: All classes in `tools/gimo_server/services/storage/`
 - **Issue**: Pattern `try: self.gics.put(...) except Exception: logger.error(...)` with no re-raise. Calling code never knows persistence failed.
 - **Impact**: Data loss is invisible. E2E tests won't detect storage failures.
 - **Fix**: At minimum, add a metric counter for failed operations. Consider re-raising for critical paths.
 
-### 12. PlanNode Legacy Fields Leak During Serialization
+### 19. PlanNode Legacy Fields Leak During Serialization
 - **Location**: `tools/gimo_server/models/plan.py:43-93`
 - **Issue**: Legacy fields (`model`, `provider`, `agent_preset`, etc.) marked `exclude=True` are still in the Pydantic schema. Strict deserializers may reject them.
 - **Impact**: API consumers parsing PlanNode JSON with strict validation may encounter unexpected fields.
@@ -118,6 +160,8 @@ After a thorough exploration of the entire codebase (353 Python backend files, 1
 | `apps/web` (Next.js) | **Zero tests** | HIGH - License/auth flows untested |
 | Checkpoint resume flow | **Stubbed** | CRITICAL - Always returns fake success |
 | Inter-agent messaging | **Mocked** | HIGH - `useAgentComms` is a no-op |
+| WebSocket auth | **Missing** | CRITICAL - No auth on `/ws` |
+| Fire-and-forget task tracking | **Missing** | CRITICAL - No stuck-run detection |
 | Cold Room auth flow | **No E2E test** | MEDIUM - Air-gapped mode untested |
 | Integration tests in CI | **Excluded from main CI** | MEDIUM - Only adversarial tests run |
 
@@ -134,6 +178,9 @@ Before running E2E, ensure:
 - [ ] Threat level is reset between test suites
 - [ ] Checkpoint resume endpoints are either implemented or marked 501
 - [ ] `useAgentComms` feature is hidden/disabled in the UI if not wired
+- [ ] WebSocket `/ws` endpoint has auth added before exposing to network
+- [ ] Background execution tasks have exception callbacks registered
+- [ ] Auth endpoints have rate limiting enabled
 
 ---
 
@@ -147,6 +194,5 @@ These areas passed the audit with no significant gaps:
 - **Auth Flow**: Token, Firebase, and Cold Room mechanisms properly implemented
 - **SSE/Streaming**: EventSource with keep-alive, proper disconnect handling
 - **CORS**: Correctly configured with debug flexibility
-- **Pipeline Engine**: Multi-stage execution with rollback, retries, and self-healing
 - **Provider Adapters**: Anthropic and OpenAI-compat adapters complete
 - **Frontend-Backend Integration**: API_BASE resolution, proxy config, and cookie auth all matching
