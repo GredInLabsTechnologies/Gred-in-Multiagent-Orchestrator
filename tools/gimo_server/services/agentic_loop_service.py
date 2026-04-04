@@ -1159,6 +1159,24 @@ class AgenticLoopService:
         except Exception:
             logger.debug("record_llm_usage failed", exc_info=True)
 
+        # Wire 3: Response Honesty Gate — detect semantic mismatch between
+        # tool results and the LLM's text response.  If every tool call failed
+        # and the response doesn't mention the failure, override with an honest
+        # summary so the user is never misled.
+        if all_tool_logs and finish_reason not in ("error", "tool_error", "user_question"):
+            _failed = [t for t in all_tool_logs if t.get("status") in ("error", "policy_denied", "denied")]
+            _succeeded = [t for t in all_tool_logs if t.get("status") == "success"]
+            if _failed and not _succeeded:
+                _failure_words = {"fail", "error", "denied", "could not", "unable", "cannot"}
+                _response_lower = (final_response or "").lower()
+                if not any(w in _response_lower for w in _failure_words):
+                    tool_errors = "; ".join(
+                        f"{t['name']}: {t.get('message', t.get('status', 'failed'))}"
+                        for t in _failed[:5]
+                    )
+                    final_response = f"All tool calls failed: {tool_errors}"
+                    finish_reason = "tool_error"
+
         if persist_conversation and thread_id and final_response:
             final_turn = ConversationService.add_turn(thread_id, agent_id="orchestrator")
             if final_turn:

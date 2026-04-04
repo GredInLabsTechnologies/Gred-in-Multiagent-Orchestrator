@@ -41,12 +41,19 @@ def tui(
 def chat(
     verbose: bool = typer.Option(False, "--verbose", help="Enable debug/verbose render mode"),
     message: str = typer.Option(None, "--message", "-m", help="Send a single message and exit (non-interactive mode)."),
+    thread: str = typer.Option(None, "--thread", "-t", help="Continue an existing thread by ID."),
+    execute: bool = typer.Option(False, "--execute", "-x", help="Enable file mutation tools (workspace_safe policy)."),
 ) -> None:
     """Interactive agentic chat session with GIMO orchestrator.
 
     Use --message / -m for non-interactive single-turn mode:
       gimo chat -m "What files are in this project?"
-      echo "hello" | gimo chat
+
+    Use --execute / -x to allow file writes:
+      gimo chat -m "Create calculator.py" -x
+
+    Use --thread / -t to continue an existing thread:
+      gimo chat -m "Add tests" -t thread_abc12345
     """
     try:
         config = load_config()
@@ -63,19 +70,38 @@ def chat(
     if message:
         # Single-turn mode: send message via API and print response
         from gimo_cli.api import api_request
-        import json
 
-        # Create or use default thread
-        _, thread_data = api_request(config, "POST", "/ops/threads", params={"workspace_root": "."})
-        thread_id = thread_data.get("id", "") if isinstance(thread_data, dict) else ""
-        if not thread_id:
-            console.print("[red]Failed to create thread for single-turn chat[/red]")
-            raise typer.Exit(1)
+        if thread:
+            thread_id = thread
+        else:
+            # Create a new thread
+            _, thread_data = api_request(config, "POST", "/ops/threads", params={"workspace_root": "."})
+            thread_id = thread_data.get("id", "") if isinstance(thread_data, dict) else ""
+            if not thread_id:
+                console.print("[red]Failed to create thread for single-turn chat[/red]")
+                raise typer.Exit(1)
+
+        # If --execute, set policy to workspace_safe via config endpoint
+        if execute:
+            api_request(
+                config, "POST", f"/ops/threads/{thread_id}/config",
+                json_body={"execution_policy": "workspace_safe"},
+            )
 
         _, resp = api_request(config, "POST", f"/ops/threads/{thread_id}/chat", json_body={"content": message})
         if isinstance(resp, dict):
             content = resp.get("response") or resp.get("content") or ""
+            if verbose:
+                tool_logs = resp.get("tool_calls_log") or []
+                for tl in tool_logs:
+                    status = tl.get("status", "?")
+                    name = tl.get("name", "?")
+                    msg = tl.get("message", "")[:80]
+                    style = "green" if status == "success" else "red"
+                    console.print(f"  [{style}][{status}] {name}[/{style}] {msg}")
             console.print(content)
+            if verbose and thread_id:
+                console.print(f"[dim]thread: {thread_id}[/dim]")
         else:
             console.print(str(resp))
         return

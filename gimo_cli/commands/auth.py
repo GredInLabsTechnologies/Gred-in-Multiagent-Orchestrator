@@ -242,11 +242,14 @@ def login(
         server_version=version,
     )
 
-    # Also create CLI Bond (AES-256-GCM) so `gimo doctor` shows both bonds OK
-    try:
-        save_cli_bond(token)
-    except Exception:
-        pass  # Non-fatal: legacy bond is sufficient for operation
+    # Also create CLI Bond (AES-256-GCM) so `gimo doctor` shows both bonds OK.
+    # Only attempt for JWT tokens (3 dot-separated parts) — raw API tokens
+    # are not valid JWTs and will fail verify_bond_jwt() later.
+    if token.count(".") >= 2:
+        try:
+            save_cli_bond(token)
+        except Exception:
+            pass  # Non-fatal: legacy bond is sufficient for operation
 
     console.print(f"[green][OK] Bonded to GIMO v{version} as {role}[/green]")
     console.print(f"[dim]Bond saved: {bond_path}[/dim]")

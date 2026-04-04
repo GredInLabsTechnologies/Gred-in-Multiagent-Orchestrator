@@ -38,7 +38,7 @@ def threads_list(
             if isinstance(t, dict):
                 turns = t.get("turns", [])
                 table.add_row(
-                    str(t.get("id", "?"))[:12],
+                    str(t.get("id", "?")),
                     str(t.get("title", "Untitled"))[:40],
                     str(len(turns) if isinstance(turns, list) else "?"),
                     str(t.get("created_at", ""))[:19],
@@ -69,7 +69,7 @@ def threads_show(
             f"Title: {payload.get('title', 'Untitled')}\n"
             f"Workspace: {payload.get('workspace_root', '?')}\n"
             f"Turns: {len(payload.get('turns', []))}",
-            title=f"Thread {thread_id[:12]}",
+            title=f"Thread {thread_id}",
             border_style="cyan",
         ))
         for turn in payload.get("turns", []):

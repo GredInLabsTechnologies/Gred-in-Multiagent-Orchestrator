@@ -38,6 +38,12 @@ class ThreadSessionService:
                     requested_mode=str(config_data["workspace_mode"]),
                     surface=surface,
                 )
+            if "execution_policy" in config_data:
+                from .execution_policy_service import ExecutionPolicyService
+                raw_policy = str(config_data["execution_policy"]).strip()
+                # Validate that the policy name exists before accepting it
+                canonical = ExecutionPolicyService.canonical_policy_name(raw_policy)
+                thread.metadata["execution_policy"] = canonical
             return True
         return bool(ConversationService.mutate_thread(thread_id, _mutate))
 

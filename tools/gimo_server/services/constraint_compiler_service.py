@@ -22,6 +22,8 @@ class ConstraintCompilerService:
         "approval": ["propose_only"],
         "implementation": ["workspace_safe", "workspace_experiment"],
     }
+    _FIRST_PARTY_SURFACES = frozenset({"operator", "cli", "tui", "web", "mcp"})
+    _TRUST_UPGRADEABLE_SEMANTICS = frozenset({"planning", "approval"})
     _RUNTIME_ROLE_ALLOWLIST = frozenset({"worker", "executor", "reviewer", "researcher", "human_gate"})
     _RUNTIME_TOPOLOGY_HINTS = frozenset({"dynamic", "runtime", "adaptive"})
     _RISK_SCORE_BY_BAND = {
@@ -38,6 +40,48 @@ class ConstraintCompilerService:
                 cls._BASE_POLICIES_BY_SEMANTIC["implementation"],
             )
         )
+
+    @classmethod
+    def _trust_gate_policies(
+        cls,
+        *,
+        allowed_policies: list[str],
+        descriptor: TaskDescriptor,
+        surface: str,
+        task_context: Dict[str, Any],
+    ) -> list[str]:
+        """Upgrade base policies for trusted first-party surfaces via GICS signals.
+
+        First-party surfaces with a reliable model get workspace_safe added to
+        their allowed policies for planning/approval semantics.  Third-party
+        surfaces and anomalous models keep the static constraints unchanged.
+        Fail-open: if GICS is unavailable, the upgrade proceeds.
+        """
+        if descriptor.task_semantic not in cls._TRUST_UPGRADEABLE_SEMANTICS:
+            return allowed_policies
+        if surface not in cls._FIRST_PARTY_SURFACES:
+            return allowed_policies
+
+        # Check GICS for anomaly — block upgrade if model is unreliable
+        if cls._is_gics_daemon_available():
+            model_id = task_context.get("requested_model") or task_context.get("model_id")
+            provider_type = task_context.get("requested_provider") or task_context.get("provider_type")
+            if model_id and provider_type:
+                try:
+                    from .gics_service import GicsService
+                    gics = GicsService()
+                    reliability = gics.get_model_reliability(
+                        provider_type=provider_type, model_id=model_id,
+                    )
+                    if reliability and (reliability.get("anomaly") or reliability.get("score", 0.5) < 0.5):
+                        return allowed_policies  # Unreliable model — keep static constraints
+                except Exception:
+                    pass  # GICS error — fail-open to upgrade
+
+        # Trust-gated upgrade: prepend workspace_safe so the router can select it
+        if "workspace_safe" not in allowed_policies:
+            return ["workspace_safe"] + allowed_policies
+        return allowed_policies
 
     @classmethod
     def _safe_int(cls, value: Any) -> int | None:
@@ -215,6 +259,18 @@ class ConstraintCompilerService:
         allowed_policies = cls._base_policies(descriptor)
         surface, workspace_mode, surface_notes = cls._resolve_surface_context(context)
         compiler_notes.extend(surface_notes)
+
+        # Wire 1: Trust-gated policy upgrade for first-party surfaces
+        pre_upgrade = list(allowed_policies)
+        allowed_policies = cls._trust_gate_policies(
+            allowed_policies=allowed_policies,
+            descriptor=descriptor,
+            surface=surface,
+            task_context=context,
+        )
+        if allowed_policies != pre_upgrade:
+            compiler_notes.append("trust_gate_upgraded_to_workspace_safe")
+
         if "workspace_mode_rejected_for_surface" in compiler_notes:
             return TaskConstraints(
                 allowed_policies=[],

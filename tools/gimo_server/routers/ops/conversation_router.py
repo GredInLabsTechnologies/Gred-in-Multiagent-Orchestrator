@@ -432,7 +432,7 @@ async def config_thread(
     _require_role(auth, "operator")
     try:
         success = ThreadSessionService.update_config(thread_id, config_data)
-    except ValueError as exc:
+    except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not success:
         raise HTTPException(status_code=404, detail="Thread not found")
