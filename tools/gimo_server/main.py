@@ -595,8 +595,14 @@ def _register_core_routes(app: FastAPI, settings):
         # --- First-message auth handshake ---
         try:
             auth_msg = await asyncio.wait_for(ws.receive_text(), timeout=5.0)
-        except (asyncio.TimeoutError, Exception):
-            await ws.close(code=4401, reason="Auth timeout")
+        except asyncio.TimeoutError:
+            try:
+                await ws.close(code=4401, reason="Auth timeout")
+            except Exception:
+                pass
+            return
+        except Exception:
+            # Client disconnected before sending auth — no close needed
             return
 
         authenticated = False

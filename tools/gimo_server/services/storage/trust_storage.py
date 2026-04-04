@@ -85,14 +85,18 @@ class TrustStorage:
     def get_trust_record(self, dimension_key: str) -> Optional[Dict[str, Any]]:
         if not self.gics:
             return None
-            
+
         try:
+            # Try canonical tr: prefix first, fall back to bare key for old data
+            result = self.gics.get(f"{self._RECORD_PREFIX}{dimension_key}")
+            if result and "fields" in result:
+                return result["fields"]
             result = self.gics.get(dimension_key)
             if result and "fields" in result:
                 return result["fields"]
         except Exception as e:
             logger.error("Failed to query get_trust_record from GICS for %s: %s", dimension_key, e)
-            
+
         return None
 
     # Canonical GICS prefix for trust dimension records.
@@ -105,7 +109,7 @@ class TrustStorage:
         try:
             dimension_key = record.get("dimension_key")
             if dimension_key:
-                record["updated_at"] = _normalize_timestamp(datetime.now())
+                record["updated_at"] = _normalize_timestamp(datetime.now(timezone.utc))
                 # Store under tr: prefix AND under bare key for backward compat
                 self.gics.put(f"{self._RECORD_PREFIX}{dimension_key}", record)
                 self.gics.put(dimension_key, record)
@@ -131,10 +135,7 @@ class TrustStorage:
                     if (
                         "dimension_key" in fields
                         and "approvals" in fields
-                        and not key.startswith("te:")
-                        and not key.startswith("ce:")
-                        and not key.startswith("er:")
-                        and not key.startswith("ed:")
+                        and not key.startswith(("te:", "ce:", "er:", "ed:", "wf:", "cp:", "cb:", "tk:", "ckpt:", "revoked:"))
                     ):
                         records.append(fields)
 

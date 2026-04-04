@@ -22,7 +22,9 @@ export function useAgentComms(agentId: string | null) {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch(`${API_BASE}/ops/threads?agent_id=${encodeURIComponent(agentId)}`, {
+            // Backend /ops/threads does not support agent_id filter — fetch all
+            // threads and filter client-side by matching turn agent_id.
+            const res = await fetch(`${API_BASE}/ops/threads`, {
                 credentials: 'include',
                 signal: ctrl.signal,
             });
@@ -31,10 +33,14 @@ export function useAgentComms(agentId: string | null) {
                 return;
             }
             const threads = await res.json();
-            // Flatten turns from all threads into AgentMessage[]
+            // Flatten turns from threads that involve this agent
             const mapped: AgentMessage[] = [];
             for (const thread of Array.isArray(threads) ? threads : []) {
-                for (const turn of thread.turns ?? []) {
+                const turns = thread.turns ?? [];
+                // Only include threads that have at least one turn from this agent
+                const hasAgent = turns.some((t: Record<string, unknown>) => t.agent_id === agentId);
+                if (!hasAgent) continue;
+                for (const turn of turns) {
                     for (const item of turn.items ?? []) {
                         mapped.push({
                             id: item.id ?? `${turn.turn_id ?? ''}-${mapped.length}`,

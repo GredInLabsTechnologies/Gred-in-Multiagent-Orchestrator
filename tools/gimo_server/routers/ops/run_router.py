@@ -39,7 +39,13 @@ def _spawn_run(request: Request, run_id: str, composition: str | None = None) ->
             timeout=3600,
         )
     else:
-        asyncio.create_task(EngineService.execute_run(run_id, composition=composition))
+        # Fallback: no supervisor (e.g. tests) — still handle failures
+        async def _fallback() -> None:
+            try:
+                await EngineService.execute_run(run_id, composition=composition)
+            except Exception as exc:
+                await _on_failure(exc)
+        asyncio.create_task(_fallback())
 from tools.gimo_server.engine.replay import ReplayEngine
 from tools.gimo_server.engine.pipeline import Pipeline
 from .common import _require_role, _actor_label, _WORKFLOW_ENGINES

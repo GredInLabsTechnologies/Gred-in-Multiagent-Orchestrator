@@ -15,7 +15,7 @@ Three primitives, zero external dependencies:
 
 Design notes (aligned with AGENTS.md doctrine):
 - Zero new dependencies.
-- Each primitive is < 40 lines.
+- Each primitive is < 50 lines.
 - Composable: they work independently or together.
 - Fail-closed: no silent degradation.
 """
@@ -67,7 +67,15 @@ class SupervisedTask:
         timeout: Optional[float] = None,
     ) -> asyncio.Task[Any]:
         """Create a supervised task.  Exceptions invoke *on_failure* instead
-        of being silently lost."""
+        of being silently lost.
+
+        If *name* collides with an existing task, the old task is cancelled
+        before the new one starts.
+        """
+        # Cancel existing task with same name to avoid callback conflicts
+        existing = self._tasks.pop(name, None)
+        if existing and not existing.done():
+            existing.cancel()
 
         async def _supervised() -> Any:
             try:
@@ -96,12 +104,12 @@ class SupervisedTask:
 
     async def shutdown(self, timeout: float = 10.0) -> None:
         """Cancel all running tasks and wait for graceful exit."""
-        for task in self._tasks.values():
+        # Snapshot to avoid dict-mutation-during-iteration
+        tasks = list(self._tasks.values())
+        for task in tasks:
             task.cancel()
-        if self._tasks:
-            await asyncio.wait(
-                list(self._tasks.values()), timeout=timeout,
-            )
+        if tasks:
+            await asyncio.wait(tasks, timeout=timeout)
         self._tasks.clear()
 
 
@@ -128,14 +136,29 @@ class AuthThrottle:
         self.max_attempts = max_attempts
         self.window = window_seconds
         self._hits: Dict[str, list[float]] = defaultdict(list)
-        self._failures: Dict[str, int] = defaultdict(int)
+        self._failures: Dict[str, tuple[int, float]] = {}  # ip -> (count, last_failure_time)
 
     def _client_ip(self, request: Any) -> str:
-        return request.client.host if getattr(request, "client", None) else "unknown"
+        client = getattr(request, "client", None)
+        if client and getattr(client, "host", None):
+            return client.host
+        # Fall back to X-Forwarded-For if behind proxy
+        forwarded = getattr(request, "headers", {})
+        if hasattr(forwarded, "get"):
+            xff = forwarded.get("x-forwarded-for")
+            if xff:
+                return xff.split(",")[0].strip()
+        return "unknown"
 
     def _prune(self, ip: str) -> None:
         cutoff = time.monotonic() - self.window
-        self._hits[ip] = [t for t in self._hits[ip] if t > cutoff]
+        hits = self._hits.get(ip)
+        if hits is not None:
+            pruned = [t for t in hits if t > cutoff]
+            if pruned:
+                self._hits[ip] = pruned
+            else:
+                del self._hits[ip]
 
     def check(self, request: Any) -> None:
         """Raise HTTPException(429) if the IP exceeds the rate limit."""
@@ -144,18 +167,30 @@ class AuthThrottle:
         ip = self._client_ip(request)
         self._prune(ip)
 
+        # Expire old failure records (after 2x window with no activity)
+        failure_record = self._failures.get(ip)
+        failure_count = 0
+        if failure_record:
+            count, last_time = failure_record
+            if time.monotonic() - last_time > self.window * 2:
+                del self._failures[ip]
+            else:
+                failure_count = count
+
         # Exponential penalty: halve the limit for every 3 consecutive failures
         effective_limit = max(
-            2, self.max_attempts >> (self._failures[ip] // 3)
+            1, self.max_attempts >> (failure_count // 3)
         )
-        if len(self._hits[ip]) >= effective_limit:
-            logger.warning("Auth throttle: IP %s blocked (%d hits, %d failures)", ip, len(self._hits[ip]), self._failures[ip])
+        if len(self._hits.get(ip, [])) >= effective_limit:
+            logger.warning("Auth throttle: IP %s blocked (%d hits, %d failures)", ip, len(self._hits.get(ip, [])), failure_count)
             raise HTTPException(status_code=429, detail="Too many authentication attempts")
-        self._hits[ip].append(time.monotonic())
+        self._hits.setdefault(ip, []).append(time.monotonic())
 
     def record_failure(self, request: Any) -> None:
         ip = self._client_ip(request)
-        self._failures[ip] = self._failures.get(ip, 0) + 1
+        existing = self._failures.get(ip)
+        count = (existing[0] if existing else 0) + 1
+        self._failures[ip] = (count, time.monotonic())
 
     def reset(self, request: Any) -> None:
         """Reset failure counter on successful login."""
@@ -171,7 +206,8 @@ class GicsUnavailableError(RuntimeError):
 
 
 def require_gics(gics: Any, operation: str = "storage") -> Any:
-    """Return *gics* if truthy, otherwise raise ``GicsUnavailableError``.
+    """Return *gics* if it is not ``None``, otherwise raise
+    ``GicsUnavailableError``.
 
     Replaces every ``if not self.gics: return`` guard with a single
     auditable contract.  Calling code becomes::
@@ -183,7 +219,7 @@ def require_gics(gics: Any, operation: str = "storage") -> Any:
     keep the existing guard — this helper is for paths where silent data
     loss is unacceptable.
     """
-    if gics:
+    if gics is not None:
         return gics
     raise GicsUnavailableError(
         f"GICS is not initialized — cannot perform {operation}. "

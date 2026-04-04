@@ -25,16 +25,6 @@ class Pipeline:
         self.journal: List[JournalEntry] = []
         self._journal_store: Optional[RunJournal] = None
 
-    def _self_healing_enabled(self, context: Dict[str, Any]) -> bool:
-        if bool(context.get("self_healing_enabled", False)):
-            return True
-        try:
-            from ..services.ops_service import OpsService
-            cfg = OpsService.get_config()
-            return bool(getattr(getattr(cfg, "refactor", None), "self_healing_enabled", False))
-        except Exception:
-            return False
-
     def _ensure_journal_store(self, context: Dict[str, Any]) -> None:
         journal_path = context.get("journal_path")
         if not journal_path:
@@ -46,16 +36,15 @@ class Pipeline:
         current_context = initial_context.copy()
         self._ensure_journal_store(current_context)
         execution_history: List[tuple[ExecutionStage, StageInput]] = []
-        healing_enabled = self._self_healing_enabled(current_context)
-        
+
         for stage in self.stages:
             stage_input = StageInput(
                 run_id=self.run_id,
                 context=current_context,
                 artifacts=self.artifacts
             )
-            
-            output = await self._execute_stage_with_retries(stage, stage_input, healing_enabled=healing_enabled)
+
+            output = await self._execute_stage_with_retries(stage, stage_input)
             self.results[stage.name] = output
             execution_history.append((stage, stage_input))
             
@@ -90,7 +79,7 @@ class Pipeline:
         return list(self.results.values())
 
 
-    async def _execute_stage_with_retries(self, stage: ExecutionStage, input: StageInput, *, healing_enabled: bool = False) -> StageOutput:
+    async def _execute_stage_with_retries(self, stage: ExecutionStage, input: StageInput) -> StageOutput:
         last_error: Optional[Exception] = None
 
         for attempt in range(self.config.max_retries + 1):
