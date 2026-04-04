@@ -55,8 +55,26 @@ class SessionStore:
         self._signing_key = hashlib.sha256(
             "|".join(sorted(TOKENS)).encode()
         ).digest()
-        self._revoked: set[str] = set()  # revoked session_ids (cleared on restart)
+        self._revoked: set[str] = set()
         self._lock = Lock()
+        self._gics = None  # optional: persist revocations across restarts
+
+    def set_gics(self, gics) -> None:
+        """Enable GICS-backed revocation persistence."""
+        self._gics = gics
+        # Load previously revoked session IDs from GICS
+        if gics:
+            try:
+                items = gics.scan(prefix="revoked:", include_fields=True)
+                with self._lock:
+                    for item in items:
+                        sid = (item.get("fields") or {}).get("sid")
+                        if sid:
+                            self._revoked.add(sid)
+                if self._revoked:
+                    logger.info("Loaded %d revoked sessions from GICS", len(self._revoked))
+            except Exception as exc:
+                logger.warning("Failed to load revoked sessions from GICS: %s", exc)
 
     def _sign(self, payload_b64: str) -> str:
         return hmac.new(self._signing_key, payload_b64.encode(), hashlib.sha256).hexdigest()
@@ -148,6 +166,12 @@ class SessionStore:
             _, session_id = result
             with self._lock:
                 self._revoked.add(session_id)
+            # Persist to GICS so revocation survives restarts
+            if self._gics:
+                try:
+                    self._gics.put(f"revoked:{session_id}", {"sid": session_id})
+                except Exception as exc:
+                    logger.warning("Failed to persist session revocation to GICS: %s", exc)
 
     def cleanup_expired(self) -> int:
         # Stateless — nothing to clean up server-side

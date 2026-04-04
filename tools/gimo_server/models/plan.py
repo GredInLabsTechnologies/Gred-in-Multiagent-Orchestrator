@@ -76,20 +76,21 @@ class PlanNode(BaseModel):
     schema_version: str = Field(default="2.0", frozen=True)
 
     # LEGACY FIELDS (v1.0 backward compatibility)
-    # These are kept as Optional for reading old data, but ignored if routing_decision exists
-    model: Optional[str] = Field(default=None, exclude=True)  # Use routing_decision.binding.model
-    provider: Optional[str] = Field(default=None, exclude=True)  # Use routing_decision.binding.provider
-    agent_preset: Optional[str] = Field(default=None, exclude=True)  # Use routing_decision.profile.agent_preset
-    binding_mode: Optional[BindingMode] = Field(default=None, exclude=True)  # Use routing_decision.binding.binding_mode
-    execution_policy: Optional[ExecutionPolicyName] = Field(default=None, exclude=True)  # Use routing_decision.profile.execution_policy
-    workflow_phase: Optional[WorkflowPhase] = Field(default=None, exclude=True)  # Use routing_decision.profile.workflow_phase
-    resolved_profile: Optional[ResolvedAgentProfile] = Field(default=None, exclude=True)  # Use routing_decision.profile
-    routing_decision_summary: Optional[RoutingDecisionSummary] = Field(default=None, exclude=True)  # Use routing_decision.summary
-    routing_reason: str = Field(default="", exclude=True)  # Use routing_decision.routing_reason
-    execution_hints: PlanNodeExecutionHints = Field(default_factory=PlanNodeExecutionHints, exclude=True)
-    binding: PlanNodeBinding = Field(default_factory=PlanNodeBinding, exclude=True)  # Use routing_decision.binding
-    routing_schema_version: str = Field(default="1.0", exclude=True)
-    profile_schema_version: str = Field(default="1.0", exclude=True)
+    # Kept for deserializing old persisted data.  Excluded from both
+    # serialization (exclude=True) and JSON schema (json_schema_extra).
+    model: Optional[str] = Field(default=None, exclude=True, json_schema_extra={"deprecated": True})
+    provider: Optional[str] = Field(default=None, exclude=True, json_schema_extra={"deprecated": True})
+    agent_preset: Optional[str] = Field(default=None, exclude=True, json_schema_extra={"deprecated": True})
+    binding_mode: Optional[BindingMode] = Field(default=None, exclude=True, json_schema_extra={"deprecated": True})
+    execution_policy: Optional[ExecutionPolicyName] = Field(default=None, exclude=True, json_schema_extra={"deprecated": True})
+    workflow_phase: Optional[WorkflowPhase] = Field(default=None, exclude=True, json_schema_extra={"deprecated": True})
+    resolved_profile: Optional[ResolvedAgentProfile] = Field(default=None, exclude=True, json_schema_extra={"deprecated": True})
+    routing_decision_summary: Optional[RoutingDecisionSummary] = Field(default=None, exclude=True, json_schema_extra={"deprecated": True})
+    routing_reason: str = Field(default="", exclude=True, json_schema_extra={"deprecated": True})
+    execution_hints: PlanNodeExecutionHints = Field(default_factory=PlanNodeExecutionHints, exclude=True, json_schema_extra={"deprecated": True})
+    binding: PlanNodeBinding = Field(default_factory=PlanNodeBinding, exclude=True, json_schema_extra={"deprecated": True})
+    routing_schema_version: str = Field(default="1.0", exclude=True, json_schema_extra={"deprecated": True})
+    profile_schema_version: str = Field(default="1.0", exclude=True, json_schema_extra={"deprecated": True})
 
     # ACCESSORS: Clean API for accessing routing info
     def get_binding(self) -> "PlanNodeBinding":

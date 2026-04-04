@@ -105,6 +105,13 @@ async def firebase_login(body: FirebaseLoginRequest, response: Response, request
     """Authenticate using Firebase ID token via GIMO WEB verify endpoint."""
     _auth_throttle.check(request)
 
+    # Cold Room mode: Firebase login is unavailable (no external connectivity).
+    if _cold_room_enabled():
+        raise HTTPException(
+            status_code=409,
+            detail="Firebase login is unavailable in Cold Room mode. Use /auth/cold-room/access instead.",
+        )
+
     id_token = body.idToken.strip()
     if not id_token:
         raise HTTPException(status_code=400, detail="idToken required")

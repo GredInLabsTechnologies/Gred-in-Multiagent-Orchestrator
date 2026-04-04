@@ -15,7 +15,7 @@ logger = logging.getLogger("orchestrator.services.checkpoint")
 class CheckpointService:
     """Gestiona checkpoints para operaciones resumibles."""
 
-    # Singleton GICS instance (injected)
+    # Singleton GICS instance — prefers shared GICS from StorageService.
     _gics = None
 
     # TTL for checkpoints (24 hours)
@@ -28,10 +28,19 @@ class CheckpointService:
 
     @classmethod
     def _get_gics(cls):
-        """Get GICS instance, raising if not initialized."""
-        if cls._gics is None:
-            raise RuntimeError("CheckpointService: GICS not initialized. Call set_gics() first.")
-        return cls._gics
+        """Get GICS instance.  Falls back to StorageService shared GICS if
+        set_gics() was never called explicitly."""
+        if cls._gics is not None:
+            return cls._gics
+        # Auto-resolve from StorageService shared instance
+        try:
+            from .storage_service import StorageService
+            if StorageService._shared_gics is not None:
+                cls._gics = StorageService._shared_gics
+                return cls._gics
+        except Exception:
+            pass
+        raise RuntimeError("CheckpointService: GICS not initialized. Call set_gics() or StorageService.set_shared_gics() first.")
 
     @classmethod
     def save_checkpoint(

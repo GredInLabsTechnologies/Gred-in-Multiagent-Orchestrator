@@ -282,6 +282,10 @@ async def lifespan(app: FastAPI):
         from tools.gimo_server.services.storage_service import StorageService as _SS
         _SS.set_shared_gics(gics_service)
 
+        # Enable GICS-backed session revocation persistence
+        from tools.gimo_server.security.auth import session_store as _session_store
+        _session_store.set_gics(gics_service)
+
         from tools.gimo_server.services.ops_service import OpsService
 
         OpsService.set_gics(gics_service)
