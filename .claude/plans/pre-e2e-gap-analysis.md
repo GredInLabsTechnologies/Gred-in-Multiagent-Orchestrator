@@ -2,12 +2,33 @@
 
 > Audit date: 2026-04-04
 > Scope: Full codebase exploration across backend, frontend, storage, types, middleware, and integration points.
+> **Update 2026-04-04**: 13 of 19 gaps fixed via resilience kernel (`resilience.py`) + targeted edits across 10 files.
 
 ---
 
 ## Executive Summary
 
-After a thorough exploration of the entire codebase (353 Python backend files, 156 frontend TS/TSX files, Next.js web app), the system is architecturally sound and most components are production-ready. However, there are **19 gaps** that could surface during E2E testing, categorized by severity.
+After a thorough exploration of the entire codebase (353 Python backend files, 156 frontend TS/TSX files, Next.js web app), the system is architecturally sound and most components are production-ready. 19 gaps were identified; **13 have been fixed** in this branch. The root cause was a systemic "fail-open by default" pattern — when a dependency was unavailable (GICS, auth, tracking), code continued silently instead of failing or alerting. The fix inverts this default to fail-closed via one new module (`resilience.py`) with 3 composable primitives, plus targeted edits.
+
+### Fix summary
+
+| New module | Purpose | Gaps resolved |
+|---|---|---|
+| `resilience.py` — `SupervisedTask` | Lifecycle-aware async task wrapper with failure callbacks + timeout | #5, #6 |
+| `resilience.py` — `AuthThrottle` | Pre-auth sliding-window rate limiter with exponential penalty | #11 |
+| `resilience.py` — `GicsUnavailableError` | Fail-closed dependency enforcement for GICS | #2 |
+
+| Modified file | Change | Gaps |
+|---|---|---|
+| `main.py` | Supervisor init at startup + WebSocket first-message auth | #4, #5, #6 |
+| `run_router.py` | `_spawn_run()` replaces 3 fire-and-forget `create_task` calls | #5, #6 |
+| `storage_service.py` | `set_shared_gics()` so all `StorageService()` callers get GICS | #2, #14 |
+| `auth_router.py` | `AuthThrottle` on `/auth/login` + `/auth/firebase-login` | #11 |
+| `cost_storage.py` | Log dropped timestamps instead of silent `pass` | #7 |
+| `trust_storage.py` | `tr:` prefix scan with legacy fallback | #8 |
+| `eval_storage.py` | Write `eval_run_id` alongside `run_id` | #9 |
+| `pipeline.py` | Track rollback status (clean/partial) + remove dead self-healing | #12, #13 |
+| `checkpoint_router.py` | Return 501 instead of fake success | #1 |
 
 ---
 
@@ -158,10 +179,10 @@ After a thorough exploration of the entire codebase (353 Python backend files, 1
 |------|--------|------|
 | Frontend E2E (Playwright/Cypress) | **Zero tests** | HIGH - No automated UI flow testing |
 | `apps/web` (Next.js) | **Zero tests** | HIGH - License/auth flows untested |
-| Checkpoint resume flow | **Stubbed** | CRITICAL - Always returns fake success |
+| Checkpoint resume flow | **501 (fixed)** | ~~CRITICAL~~ - Now returns honest 501 |
 | Inter-agent messaging | **Mocked** | HIGH - `useAgentComms` is a no-op |
-| WebSocket auth | **Missing** | CRITICAL - No auth on `/ws` |
-| Fire-and-forget task tracking | **Missing** | CRITICAL - No stuck-run detection |
+| WebSocket auth | **Fixed** | ~~CRITICAL~~ - First-message auth added |
+| Fire-and-forget task tracking | **Fixed** | ~~CRITICAL~~ - SupervisedTask with callbacks |
 | Cold Room auth flow | **No E2E test** | MEDIUM - Air-gapped mode untested |
 | Integration tests in CI | **Excluded from main CI** | MEDIUM - Only adversarial tests run |
 
@@ -171,16 +192,16 @@ After a thorough exploration of the entire codebase (353 Python backend files, 1
 
 Before running E2E, ensure:
 
-- [ ] GICS is initialized and `StorageService.gics` is not `None`
+- [x] GICS is initialized and `StorageService.gics` is not `None` — **fixed**: `set_shared_gics()` at startup
 - [ ] `ORCH_TOKEN`, `ORCH_ACTIONS_TOKEN`, `ORCH_OPERATOR_TOKEN` are set (avoid auto-gen in containers)
 - [ ] `GIMO_INTERNAL_KEY` matches between backend and web app (for Firebase flow)
 - [ ] `DEBUG=false` to test production CORS behavior
 - [ ] Threat level is reset between test suites
-- [ ] Checkpoint resume endpoints are either implemented or marked 501
+- [x] Checkpoint resume endpoints are either implemented or marked 501 — **fixed**: returns 501
 - [ ] `useAgentComms` feature is hidden/disabled in the UI if not wired
-- [ ] WebSocket `/ws` endpoint has auth added before exposing to network
-- [ ] Background execution tasks have exception callbacks registered
-- [ ] Auth endpoints have rate limiting enabled
+- [x] WebSocket `/ws` endpoint has auth added before exposing to network — **fixed**: first-message auth
+- [x] Background execution tasks have exception callbacks registered — **fixed**: SupervisedTask
+- [x] Auth endpoints have rate limiting enabled — **fixed**: AuthThrottle on login + firebase-login
 
 ---
 
@@ -196,3 +217,16 @@ These areas passed the audit with no significant gaps:
 - **CORS**: Correctly configured with debug flexibility
 - **Provider Adapters**: Anthropic and OpenAI-compat adapters complete
 - **Frontend-Backend Integration**: API_BASE resolution, proxy config, and cookie auth all matching
+
+---
+
+## Remaining Gaps (6 of 19)
+
+| # | Gap | Why not fixed | Severity |
+|---|---|---|---|
+| 3 | `useAgentComms` fully mocked | Requires backend endpoint that doesn't exist yet — frontend-only stub | HIGH |
+| 10 | Threat level cascade blocks tests | Test isolation concern — needs pytest fixture, not production code | MEDIUM |
+| 15 | CheckpointService manual `set_gics()` | Lower priority; same pattern as OpsService, works today | MEDIUM |
+| 16 | GIMO WEB URL defaults to Vercel | Config/deployment concern, not a code bug | MEDIUM |
+| 17 | Session revocation lost on restart | Documented as acceptable for dev (`auth.py` comment) | MEDIUM |
+| 19 | PlanNode legacy fields leak | Documented tech debt in SYSTEM.md, doesn't block E2E | LOW |
