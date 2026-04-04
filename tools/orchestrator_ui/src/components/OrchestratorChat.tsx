@@ -979,11 +979,11 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
 
                     case 'plan_proposed':
                         // Agent proposed a plan
-                        setProposedPlan(data as ProposedPlan);
+                        setProposedPlan(data as unknown as ProposedPlan);
                         appendMessage({
                             id: `m-plan-${Date.now()}`,
                             role: 'assistant',
-                            text: `📋 Plan propuesto: ${(data as ProposedPlan).title}`,
+                            text: `📋 Plan propuesto: ${(data as unknown as ProposedPlan).title}`,
                             ts: new Date().toISOString(),
                         });
                         break;
