@@ -3,10 +3,12 @@ Unit tests for AgenticLoopService helper functions.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from tools.gimo_server.services.agentic_loop_service import (
     AgenticResult,
@@ -574,3 +576,105 @@ async def test_run_loop_plan_proposed_preserves_conversation_turns(tmp_path: Pat
         assert any(item.content == "Plan proposed. Please review and approve to continue." for turn in stored.turns for item in turn.items)
     finally:
         ConversationService.THREADS_DIR = original_threads_dir
+
+
+# --- Execution Boundary Hardening tests (R5) ---
+
+
+class TestFailClosedPolicyEnforcement:
+    """Verify that unknown execution policies raise RuntimeError (fail-closed).
+
+    The fail-closed check is a second defense layer in _run_stream_reserved.
+    The first layer (_resolve_thread_runtime_context) catches and corrects
+    bad policies. To test the second layer, we mock the first to pass
+    the bad policy through.
+    """
+
+    @pytest.mark.asyncio
+    async def test_run_stream_reserved_raises_on_unknown_policy(self, tmp_path: Path):
+        """_run_stream_reserved must raise RuntimeError for unknown policy names."""
+        from tools.gimo_server.services.constraint_compiler_service import ConstraintCompilerService
+
+        thread = GimoThread(
+            workspace_root=str(tmp_path),
+            title="fail-closed test",
+            mood="neutral",
+            agent_preset="plan_orchestrator",
+            workflow_phase="executing",
+        )
+        # Return a bad policy directly from runtime context (bypassing first defense layer)
+        fake_context = ("neutral", get_mood_profile("neutral"), "orchestrator", "executing", "NONEXISTENT_POLICY")
+
+        with (
+            patch(
+                "tools.gimo_server.services.agentic_loop_service._resolve_orchestrator_adapter",
+                return_value=(MagicMock(), "p1", "m1", "openai"),
+            ),
+            patch.object(ConversationService, "get_thread", return_value=thread),
+            patch.object(ConversationService, "add_turn", return_value=MagicMock(id="t1")),
+            patch.object(ConversationService, "append_item"),
+            patch.object(AgenticLoopService, "_resolve_thread_runtime_context", return_value=fake_context),
+            patch.object(ConstraintCompilerService, "apply_trust_authority", return_value=("NONEXISTENT_POLICY", False)),
+        ):
+            with pytest.raises(RuntimeError, match="Unknown execution policy"):
+                async for _ in AgenticLoopService._run_stream_reserved(
+                    thread_id=thread.id,
+                    user_message="test",
+                    workspace_root=str(tmp_path),
+                ):
+                    pass
+
+
+class TestHeartbeatLockLost:
+    """Verify heartbeat failure signals lock_lost Event."""
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_failure_sets_lock_lost(self):
+        """When heartbeat_thread_execution raises, lock_lost must be set."""
+        with patch.object(
+            AgenticLoopService,
+            "heartbeat_thread_execution",
+            side_effect=Exception("Redis down"),
+        ):
+            AgenticLoopService.THREAD_LOCK_HEARTBEAT_SECONDS = 0.01
+            try:
+                stop_event, heartbeat_task, lock_lost = (
+                    AgenticLoopService._start_thread_execution_heartbeat("t1", "o1")
+                )
+                # Wait for the heartbeat to fire and fail
+                await asyncio.sleep(0.1)
+                assert lock_lost.is_set(), "lock_lost should be set after heartbeat failure"
+            finally:
+                stop_event.set()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
+                AgenticLoopService.THREAD_LOCK_HEARTBEAT_SECONDS = 30
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_returns_three_tuple(self):
+        """_start_thread_execution_heartbeat must return (Event, Task, Event)."""
+        with patch.object(AgenticLoopService, "heartbeat_thread_execution"):
+            result = AgenticLoopService._start_thread_execution_heartbeat("t1", "o1")
+            assert len(result) == 3
+            stop_event, task, lock_lost = result
+            assert isinstance(stop_event, asyncio.Event)
+            assert isinstance(lock_lost, asyncio.Event)
+            stop_event.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+class TestToolParseErrorLogging:
+    """Verify malformed tool arguments are logged, not silently swallowed."""
+
+    def test_malformed_json_logs_warning(self, caplog):
+        """JSONDecodeError in _parse_tool_arguments must produce a warning log."""
+        with caplog.at_level(logging.WARNING):
+            result = AgenticLoopService._parse_tool_arguments("{invalid json")
+        assert result == {}
+        assert any("Malformed tool_call arguments" in msg for msg in caplog.messages)
+
+    def test_valid_json_no_warning(self, caplog):
+        """Valid JSON must not produce any warning."""
+        with caplog.at_level(logging.WARNING):
+            result = AgenticLoopService._parse_tool_arguments('{"key": "value"}')
+        assert result == {"key": "value"}
+        assert not any("Malformed" in msg for msg in caplog.messages)

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Annotated
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel
 from ...ops_models import GimoThread, GimoTurn, GimoItem, GimoItemType
 from ...services.conversation_service import ConversationService
@@ -238,7 +239,7 @@ async def chat_message_stream(
     except ThreadExecutionBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     owner_id = str(reservation.get("owner_id") or "")
-    stop_event, heartbeat_task = AgenticLoopService._start_thread_execution_heartbeat(thread_id, owner_id)
+    stop_event, heartbeat_task, lock_lost = AgenticLoopService._start_thread_execution_heartbeat(thread_id, owner_id)
 
     async def event_generator():
         try:
@@ -247,6 +248,7 @@ async def chat_message_stream(
                 user_message=body.content,
                 workspace_root=thread.workspace_root,
                 token=token,
+                lock_lost=lock_lost,
             ):
                 event_type = event.get("event", "message")
                 data = json.dumps(event.get("data", {}), ensure_ascii=False)
@@ -254,6 +256,13 @@ async def chat_message_stream(
         finally:
             await AgenticLoopService._stop_heartbeat(stop_event, heartbeat_task)
             AgenticLoopService.release_thread_execution(thread_id, owner_id)
+
+    # Safety net: BackgroundTask runs AFTER the response completes or client
+    # disconnects — catches the edge case where the generator is never iterated.
+    # Double release is safe because release_thread_execution uses .pop(key, None).
+    async def _release_lock_safety_net():
+        await AgenticLoopService._stop_heartbeat(stop_event, heartbeat_task)
+        AgenticLoopService.release_thread_execution(thread_id, owner_id)
 
     return StreamingResponse(
         event_generator(),
@@ -263,6 +272,7 @@ async def chat_message_stream(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+        background=BackgroundTask(_release_lock_safety_net),
     )
 
 
