@@ -13,10 +13,15 @@ from ..security.auth import (
     session_store,
 )
 from ..security.cold_room import ColdRoomManager
+from ..resilience import AuthThrottle
 
 logger = logging.getLogger("orchestrator.auth_router")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Pre-auth rate limiter — runs BEFORE token validation.
+# Halves effective limit for every 3 consecutive failures per IP.
+_auth_throttle = AuthThrottle(max_attempts=10, window_seconds=60)
 
 
 class LoginRequest(BaseModel):
@@ -69,13 +74,17 @@ def _cold_room_enabled() -> bool:
 @router.post("/login", response_model=LoginResponse)
 async def login(body: LoginRequest, response: Response, request: Request):
     """Validate a token and set a session cookie. The token is never stored in the browser."""
+    _auth_throttle.check(request)
+
     token = body.token.strip()
     if not token or len(token) < 16 or token not in TOKENS:
+        _auth_throttle.record_failure(request)
         from ..security.auth import _report_auth_failure
         if token:
             _report_auth_failure(request, token)
         raise HTTPException(status_code=401, detail="Invalid token")
 
+    _auth_throttle.reset(request)
     role = _resolve_role(token)
     cookie_value = session_store.create(role)
 

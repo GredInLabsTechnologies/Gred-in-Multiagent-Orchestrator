@@ -18,6 +18,28 @@ from tools.gimo_server.services.confidence_service import ConfidenceService
 from tools.gimo_server.services.trust_engine import TrustEngine
 from tools.gimo_server.services.engine_service import EngineService
 from tools.gimo_server.engine.journal import RunJournal
+from tools.gimo_server.resilience import SupervisedTask
+
+
+def _spawn_run(request: Request, run_id: str, composition: str | None = None) -> None:
+    """Launch a run via the supervisor (if available) or fall back to worker."""
+    supervisor: SupervisedTask | None = getattr(request.app.state, "supervisor", None)
+
+    async def _on_failure(exc: Exception) -> None:
+        try:
+            OpsService.update_run_status(run_id, "error", msg=f"Execution failed: {str(exc)[:200]}")
+        except Exception:
+            pass
+
+    if supervisor:
+        supervisor.spawn(
+            EngineService.execute_run(run_id, composition=composition),
+            name=f"run:{run_id}",
+            on_failure=_on_failure,
+            timeout=3600,
+        )
+    else:
+        asyncio.create_task(EngineService.execute_run(run_id, composition=composition))
 from tools.gimo_server.engine.replay import ReplayEngine
 from tools.gimo_server.engine.pipeline import Pipeline
 from .common import _require_role, _actor_label, _WORKFLOW_ENGINES
@@ -145,7 +167,7 @@ async def approve_draft(
             if run.status == "pending":
                 try:
                     run = OpsService.update_run_status(run.id, "running", msg="Execution started via draft approval auto-run")
-                    asyncio.create_task(EngineService.execute_run(run.id, composition=composition))
+                    _spawn_run(request, run.id, composition=composition)
                 except Exception:
                     try:
                         worker = getattr(request.app.state, "run_worker", None)
@@ -154,7 +176,7 @@ async def approve_draft(
                     except Exception:
                         pass
             else:
-                asyncio.create_task(EngineService.execute_run(run.id, composition=composition))
+                _spawn_run(request, run.id, composition=composition)
             
             if composition:
                 audit_log("OPS", f"/ops/{composition}s/{context.get('custom_plan_id')}/execute", run.id, operation="WRITE_AUTO", actor=actor)
@@ -235,7 +257,7 @@ async def create_run(
     if run.status == "pending":
         try:
             run = OpsService.update_run_status(run.id, "running", msg="Execution started via /ops/runs")
-            asyncio.create_task(EngineService.execute_run(run.id))
+            _spawn_run(request, run.id)
         except Exception:
             # Fallback to worker wake-up if direct launch fails for any reason.
             try:
@@ -340,7 +362,7 @@ async def rerun(
     if run.status == "pending":
         try:
             run = OpsService.update_run_status(run.id, "running", msg="Execution started via /ops/runs/{run_id}/rerun")
-            asyncio.create_task(EngineService.execute_run(run.id))
+            _spawn_run(request, run.id)
         except Exception:
             try:
                 worker = getattr(request.app.state, "run_worker", None)

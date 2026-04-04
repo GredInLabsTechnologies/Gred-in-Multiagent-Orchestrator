@@ -64,7 +64,7 @@ class CostStorage:
                         if ts >= cutoff:
                             events.append(fields)
                     except ValueError:
-                        pass
+                        logger.warning("Dropped cost event with unparseable timestamp: %s", ts_val)
             return events
         except Exception as e:
             logger.error(f"Failed to fetch cost events: {e}")

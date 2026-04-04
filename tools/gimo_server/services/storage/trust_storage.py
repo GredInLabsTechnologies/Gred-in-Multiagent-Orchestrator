@@ -95,14 +95,19 @@ class TrustStorage:
             
         return None
 
+    # Canonical GICS prefix for trust dimension records.
+    _RECORD_PREFIX = "tr:"
+
     def upsert_trust_record(self, record: Dict[str, Any]) -> None:
         if not self.gics:
             return
-            
+
         try:
             dimension_key = record.get("dimension_key")
             if dimension_key:
                 record["updated_at"] = _normalize_timestamp(datetime.now())
+                # Store under tr: prefix AND under bare key for backward compat
+                self.gics.put(f"{self._RECORD_PREFIX}{dimension_key}", record)
                 self.gics.put(dimension_key, record)
         except Exception as e:
             logger.error("Failed to push trust record %s to GICS: %s", record.get("dimension_key"), e)
@@ -110,18 +115,29 @@ class TrustStorage:
     def list_trust_records(self, limit: int = 100) -> List[Dict[str, Any]]:
         if not self.gics:
             return []
-            
+
         try:
-            # We don't have an explicit prefix for trust records, but let's assume dim: keys or query them.
-            # Assuming records might be prefixed by 'tr:' if added, but right now they just use dimension_key
-            # We will use scan without prefix, filter those containing 'approvals' indicating a record.
-            items = self.gics.scan(prefix="", include_fields=True)
-            records = []
-            for item in items:
-                fields = item.get("fields", {})
-                if "dimension_key" in fields and "approvals" in fields and not item.get("key", "").startswith("te:"):
-                    records.append(fields)
-                    
+            # Primary: scan canonical tr: prefix (populated by upsert_trust_record)
+            items = self.gics.scan(prefix=self._RECORD_PREFIX, include_fields=True)
+            records = [item.get("fields", {}) for item in items if "dimension_key" in item.get("fields", {})]
+
+            # Fallback: if no tr:-prefixed records yet (pre-migration data),
+            # scan broadly but with tighter heuristics.
+            if not records:
+                items = self.gics.scan(prefix="", include_fields=True)
+                for item in items:
+                    key = item.get("key", "")
+                    fields = item.get("fields", {})
+                    if (
+                        "dimension_key" in fields
+                        and "approvals" in fields
+                        and not key.startswith("te:")
+                        and not key.startswith("ce:")
+                        and not key.startswith("er:")
+                        and not key.startswith("ed:")
+                    ):
+                        records.append(fields)
+
             records.sort(key=lambda x: x.get("updated_at") or x.get("last_updated") or "", reverse=True)
             return records[:limit]
         except Exception as e:

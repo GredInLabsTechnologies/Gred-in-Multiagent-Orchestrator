@@ -28,6 +28,7 @@ class EvalStorage:
         workflow_id = data.get("workflow_id", "unknown")
         run_id = int(time.time() * 1000)
         data["run_id"] = run_id
+        data["eval_run_id"] = run_id  # keep both names for model compat
         
         try:
             self.gics.put(f"er:{workflow_id}:{run_id}", data)

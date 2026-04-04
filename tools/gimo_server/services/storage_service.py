@@ -18,12 +18,23 @@ class StorageService:
     Powered entirely by GICS.
     """
 
+    # Class-level GICS reference — set once at startup by main.py lifespan.
+    # All StorageService() calls without explicit gics= will use this.
+    _shared_gics: Optional[GicsService] = None
+
+    @classmethod
+    def set_shared_gics(cls, gics: Optional[GicsService]) -> None:
+        """Set the shared GICS instance for all StorageService instances."""
+        cls._shared_gics = gics
+
     def __init__(self, gics: Optional[GicsService] = None, conn: Optional[Any] = None):
-        if not gics:
-            # Enforce having GICS
-            logger.warning("StorageService running without GICS instance. Most storage operations will no-op.")
-            
-        self.gics = gics
+        resolved = gics or self.__class__._shared_gics
+        if not resolved:
+            logger.critical(
+                "StorageService created without GICS — all persistence will silently no-op. "
+                "Ensure GICS is running and StorageService.set_shared_gics() was called at startup."
+            )
+        self.gics = resolved
         
         # Initialize sub-storages sharing the GICS instance
         self.workflows = WorkflowStorage(gics=self.gics)

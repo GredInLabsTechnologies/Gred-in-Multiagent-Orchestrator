@@ -276,6 +276,12 @@ async def lifespan(app: FastAPI):
         gics_service.start_daemon()
         gics_service.start_health_check()
         app.state.gics = gics_service
+
+        # Share GICS with StorageService so all callers (even those using
+        # StorageService() without explicit gics=) get persistence.
+        from tools.gimo_server.services.storage_service import StorageService as _SS
+        _SS.set_shared_gics(gics_service)
+
         from tools.gimo_server.services.ops_service import OpsService
 
         OpsService.set_gics(gics_service)
@@ -413,9 +419,18 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Preset telemetry seed warning: %s", exc)
 
+        # Resilience kernel: supervised task manager for run execution
+        from tools.gimo_server.resilience import SupervisedTask
+
+        supervisor = SupervisedTask()
+        app.state.supervisor = supervisor
+
         app.state.ready = True
         logger.info("GIMO Orchestrator ready (lifespan complete)")
         yield
+
+        # Shutdown supervised tasks before services
+        await supervisor.shutdown(timeout=15.0)
 
         # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
         logger.info("Shutting down GIMO Orchestrator...")
@@ -560,10 +575,40 @@ def _register_core_routes(app: FastAPI, settings):
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket):
-        """Real-time event stream via WebSocket (mirrors /ops/stream SSE)."""
+        """Real-time event stream via WebSocket (mirrors /ops/stream SSE).
+
+        Authentication: client must send a valid Bearer token or session
+        cookie as the first text message within 5 seconds.  Unauthenticated
+        connections are closed with 4401.
+        """
         from tools.gimo_server.services.notification_service import NotificationService
+        from tools.gimo_server.security.auth import session_store, SESSION_COOKIE_NAME
+        from tools.gimo_server.config import TOKENS
         import asyncio
+
         await ws.accept()
+
+        # --- First-message auth handshake ---
+        try:
+            auth_msg = await asyncio.wait_for(ws.receive_text(), timeout=5.0)
+        except (asyncio.TimeoutError, Exception):
+            await ws.close(code=4401, reason="Auth timeout")
+            return
+
+        authenticated = False
+        token = auth_msg.strip()
+        if token and len(token) >= 16 and token in TOKENS:
+            authenticated = True
+        elif token:
+            session = session_store.validate(token)
+            if session:
+                authenticated = True
+
+        if not authenticated:
+            await ws.close(code=4401, reason="Invalid credentials")
+            return
+
+        # --- Authenticated stream ---
         queue = await NotificationService.subscribe()
         try:
             while True:
@@ -573,7 +618,7 @@ def _register_core_routes(app: FastAPI, settings):
                 except asyncio.TimeoutError:
                     await ws.send_text('{"type":"ping"}')
         except Exception:
-            pass
+            logger.debug("WebSocket disconnected")
         finally:
             NotificationService.unsubscribe(queue)
 
