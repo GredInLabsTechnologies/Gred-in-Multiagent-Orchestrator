@@ -130,9 +130,15 @@ def fetch_capabilities(config: dict[str, Any]) -> dict[str, Any]:
 def smart_timeout(path: str, config: dict[str, Any]) -> float | None:
     caps = fetch_capabilities(config)
     hints = caps.get("hints", {})
+    # Server-driven operation timeouts (authoritative)
+    op_timeouts = hints.get("operation_timeouts", {})
+    for pattern, timeout_val in op_timeouts.items():
+        if pattern in path:
+            return None if timeout_val == 0 else float(timeout_val)
+    # Fallback for paths not covered by operation_timeouts
     if any(p in path for p in ("/generate-plan", "/slice0", "/threads/")):
         return float(hints.get("generation_timeout_s", 180))
-    if "/stream" in path or "/chat" in path:
+    if "/stream" in path or "/chat" in path or "/events" in path:
         return None
     return float(hints.get("default_timeout_s", 15))
 

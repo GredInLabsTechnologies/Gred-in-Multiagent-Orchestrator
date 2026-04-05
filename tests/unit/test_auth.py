@@ -91,7 +91,6 @@ class TestRBAC:
     @pytest.mark.parametrize("endpoint,method,json_body", [
         ("/ops/provider", "put", {"active": "openai", "providers": {}}),
         ("/ops/config", "put", {"default_auto_run": True, "draft_cleanup_ttl_days": 7}),
-        ("/ops/trust/reset", "post", None),
         ("/ops/plan", "put", {
             "id": "p1", "title": "test", "workspace": ".", "created": "2024-01-01",
             "objective": "test", "tasks": []

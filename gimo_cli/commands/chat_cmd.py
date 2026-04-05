@@ -43,6 +43,7 @@ def chat(
     message: str = typer.Option(None, "--message", "-m", help="Send a single message and exit (non-interactive mode)."),
     thread: str = typer.Option(None, "--thread", "-t", help="Continue an existing thread by ID."),
     execute: bool = typer.Option(False, "--execute", "-x", help="Enable file mutation tools (workspace_safe policy)."),
+    workspace: str = typer.Option(None, "--workspace", "-w", help="Target workspace directory for file operations."),
 ) -> None:
     """Interactive agentic chat session with GIMO orchestrator.
 
@@ -74,8 +75,14 @@ def chat(
         if thread:
             thread_id = thread
         else:
-            # Create a new thread
-            _, thread_data = api_request(config, "POST", "/ops/threads", params={"workspace_root": "."})
+            # Create a new thread with title from first message and workspace
+            ws_root = workspace or "."
+            thread_title = (message or "")[:60] or None
+            _, thread_data = api_request(
+                config, "POST", "/ops/threads",
+                params={"workspace_root": ws_root},
+                json_body={"title": thread_title},
+            )
             thread_id = thread_data.get("id", "") if isinstance(thread_data, dict) else ""
             if not thread_id:
                 console.print("[red]Failed to create thread for single-turn chat[/red]")

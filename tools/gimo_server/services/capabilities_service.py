@@ -138,6 +138,15 @@ class CapabilitiesService:
                 "generation_timeout_s": gen_timeout,
                 "default_timeout_s": 15,
                 "stream_timeout_s": 0,  # no timeout for SSE streams
+                "operation_timeouts": {
+                    "/approve": gen_timeout,
+                    "/execute": gen_timeout,
+                    "/chat": 0,
+                    "/stream": 0,
+                    "/events": 0,
+                    "/generate": gen_timeout,
+                    "/merge": 60,
+                },
             },
             "service_health": {
                 "mastery": mastery_health,

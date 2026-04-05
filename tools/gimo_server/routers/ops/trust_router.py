@@ -98,8 +98,8 @@ async def trust_reset(
     auth: Annotated[AuthContext, Depends(verify_token)],
     _rl: Annotated[None, Depends(check_rate_limit)],
 ):
-    """Alias for resolving security threats (admin level)."""
-    _require_role(auth, "admin")
+    """Reset threat state (operator level — consistent with other trust endpoints)."""
+    _require_role(auth, "operator")
     from ...security import save_security_db, threat_engine
     threat_engine.clear_all()
     save_security_db()

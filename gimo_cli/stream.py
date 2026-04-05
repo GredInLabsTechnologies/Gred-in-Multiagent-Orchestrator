@@ -23,6 +23,9 @@ from gimo_cli.config import (
 )
 
 
+SSE_IDLE_TIMEOUT_SECONDS = 120
+
+
 def stream_events(
     config: dict[str, Any],
     *,
@@ -37,28 +40,31 @@ def stream_events(
     url = f"{base_url}{path}"
     timeout = httpx.Timeout(
         connect=connect_timeout_seconds,
-        read=timeout_seconds if timeout_seconds > 0 else None,
+        read=SSE_IDLE_TIMEOUT_SECONDS if timeout_seconds > 0 else None,
         write=connect_timeout_seconds,
         pool=connect_timeout_seconds,
     )
 
-    with httpx.Client(timeout=timeout) as client:
-        with client.stream("GET", url, headers=headers) as response:
-            response.raise_for_status()
-            for line in response.iter_lines():
-                if not line:
-                    continue
-                if line.startswith(":"):
-                    continue
-                if not line.startswith("data:"):
-                    continue
-                raw = line[5:].strip()
-                if not raw:
-                    continue
-                try:
-                    yield json.loads(raw)
-                except json.JSONDecodeError:
-                    yield raw
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            with client.stream("GET", url, headers=headers) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    if line.startswith(":"):
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if not raw:
+                        continue
+                    try:
+                        yield json.loads(raw)
+                    except json.JSONDecodeError:
+                        yield raw
+    except httpx.ReadTimeout:
+        console.print(f"[yellow]No events received for {SSE_IDLE_TIMEOUT_SECONDS}s — stream idle.[/yellow]")
 
 
 def emit_output(payload: Any, *, json_output: bool) -> None:

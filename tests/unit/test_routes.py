@@ -227,25 +227,18 @@ def test_get_ui_allowlist(client, tmp_path):
                 assert len(response.json()["paths"]) == 1
 
 
-def test_list_repos(client):
+def test_list_repos(client, tmp_path):
+    repo_dir = tmp_path / "my_repo"
+    repo_dir.mkdir()
     with patch(
-        "tools.gimo_server.routers.ops.repo_router.RepoService.list_repos",
-        return_value=[
-            RepoEntry(name="r1", path="C:\\Users\\someuser\\repo"),
-            RepoEntry(name="empty", path=""),
-        ],
+        "tools.gimo_server.routers.ops.repo_router.load_repo_registry",
+        return_value={"active_repo": str(repo_dir), "repos": [str(repo_dir)]},
     ):
-        with patch(
-            "tools.gimo_server.routers.ops.repo_router.load_repo_registry",
-            return_value={"active_repo": "C:\\Users\\someuser\\repo", "repos": []},
-        ):
-            with patch("tools.gimo_server.routers.ops.repo_router.save_repo_registry"):
-                # Use a generic user path to avoid hardcoding a real workstation username.
-                with patch("tools.gimo_server.routers.ops.repo_router.REPO_ROOT_DIR", Path("C:\\Users\\someuser")):
-                    response = client.get("/ops/repos")
-                    assert response.status_code == 200
-                    assert "[USER]" in response.json()["active_repo"]
-                    assert response.json()["repos"][1]["path"] == ""
+        with patch("tools.gimo_server.routers.ops.repo_router.REPO_ROOT_DIR", tmp_path):
+            response = client.get("/ops/repos")
+            assert response.status_code == 200
+            assert len(response.json()["repos"]) == 1
+            assert response.json()["repos"][0]["name"] == "my_repo"
 
 
 def test_get_active_repo(client):

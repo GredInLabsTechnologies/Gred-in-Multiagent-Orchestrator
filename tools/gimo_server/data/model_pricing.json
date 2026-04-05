@@ -1,90 +1,134 @@
 {
     "claude-opus-4": {
         "input": 15.0,
-        "output": 75.0
+        "output": 75.0,
+        "context_window": 200000,
+        "quality_tier": 5
     },
     "claude-sonnet-4-5": {
         "input": 3.0,
-        "output": 15.0
+        "output": 15.0,
+        "context_window": 200000,
+        "quality_tier": 4
     },
     "claude-haiku-4-5": {
         "input": 0.80,
-        "output": 4.0
+        "output": 4.0,
+        "context_window": 200000,
+        "quality_tier": 2
     },
     "claude-3-opus-20240229": {
         "input": 15.0,
-        "output": 75.0
+        "output": 75.0,
+        "context_window": 200000,
+        "quality_tier": 5
     },
     "claude-3-5-sonnet-20241022": {
         "input": 3.0,
-        "output": 15.0
+        "output": 15.0,
+        "context_window": 200000,
+        "quality_tier": 4
     },
     "claude-3-5-haiku-20241022": {
         "input": 0.25,
-        "output": 1.25
+        "output": 1.25,
+        "context_window": 200000,
+        "quality_tier": 2
     },
     "gpt-4.1": {
         "input": 2.0,
-        "output": 8.0
+        "output": 8.0,
+        "context_window": 1047576,
+        "quality_tier": 4
     },
     "gpt-4.1-mini": {
         "input": 0.40,
-        "output": 1.60
+        "output": 1.60,
+        "context_window": 1047576,
+        "quality_tier": 3
     },
     "gpt-4.1-nano": {
         "input": 0.10,
-        "output": 0.40
+        "output": 0.40,
+        "context_window": 1047576,
+        "quality_tier": 1
     },
     "gpt-4o": {
         "input": 2.5,
-        "output": 10.0
+        "output": 10.0,
+        "context_window": 128000,
+        "quality_tier": 4
     },
     "gpt-4o-mini": {
         "input": 0.15,
-        "output": 0.60
+        "output": 0.60,
+        "context_window": 128000,
+        "quality_tier": 2
     },
     "gpt-4-turbo": {
         "input": 10.0,
-        "output": 30.0
+        "output": 30.0,
+        "context_window": 128000,
+        "quality_tier": 4
     },
     "gemini-2.5-pro": {
         "input": 1.25,
-        "output": 10.0
+        "output": 10.0,
+        "context_window": 1048576,
+        "quality_tier": 5
     },
     "gemini-2.0-flash": {
         "input": 0.10,
-        "output": 0.40
+        "output": 0.40,
+        "context_window": 1048576,
+        "quality_tier": 3
     },
     "gemini-1.5-pro": {
         "input": 3.5,
-        "output": 10.5
+        "output": 10.5,
+        "context_window": 2097152,
+        "quality_tier": 4
     },
     "gemini-1.5-flash": {
         "input": 0.35,
-        "output": 1.05
+        "output": 1.05,
+        "context_window": 1048576,
+        "quality_tier": 2
     },
     "deepseek-v3": {
         "input": 0.27,
-        "output": 1.10
+        "output": 1.10,
+        "context_window": 131072,
+        "quality_tier": 4
     },
     "deepseek-chat": {
         "input": 0.14,
-        "output": 0.28
+        "output": 0.28,
+        "context_window": 131072,
+        "quality_tier": 3
     },
     "deepseek-coder": {
         "input": 0.14,
-        "output": 0.28
+        "output": 0.28,
+        "context_window": 131072,
+        "quality_tier": 3
     },
     "qwen-2.5-72b": {
         "input": 0.35,
-        "output": 0.40
+        "output": 0.40,
+        "context_window": 131072,
+        "quality_tier": 4
     },
     "meta-llama-3-70b": {
         "input": 0.70,
-        "output": 0.90
+        "output": 0.90,
+        "context_window": 128000,
+        "quality_tier": 4
     },
     "local": {
         "input": 0.0,
-        "output": 0.0
+        "output": 0.0,
+        "context_window": 8192,
+        "quality_tier": 1
     }
 }

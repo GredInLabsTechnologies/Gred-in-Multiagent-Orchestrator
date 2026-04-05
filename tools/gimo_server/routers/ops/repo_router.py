@@ -50,70 +50,45 @@ def _sanitize_path(path_str: str) -> str:
 
 @router.get("")
 def list_repos(
+    request: Request,
     auth: AuthContext = Depends(require_read),
     _rl: None = Depends(check_rate_limit),
 ):
-    repos = RepoService.list_repos()
     registry = load_repo_registry()
+    seen_paths: set[str] = set()
+    verified_repos: list[dict[str, str]] = []
 
-    current_paths = {str(Path(p).resolve()) for p in registry.get("repos", [])}
-    changed = False
-    new_repos_list = list(registry.get("repos", []))
-
-    for r in repos:
-        raw_path = (r.path or "").strip()
-        if not raw_path:
-            continue
-        try:
-            rp = str(Path(raw_path).resolve())
-            if rp not in current_paths:
-                new_repos_list.append(rp)
-                current_paths.add(rp)
-                changed = True
-        except ValueError:
-            pass
-
-    merged_paths: set[str] = set()
-    merged_repos: list[dict[str, str]] = []
-    empty_path_repos: list[dict[str, str]] = []
-    for r in repos:
-        raw_path = (r.path or "").strip()
-        if not raw_path:
-            empty_path_repos.append({"name": r.name, "path": ""})
-            continue
-        try:
-            rp = str(Path(raw_path).resolve())
-            if rp not in merged_paths:
-                merged_paths.add(rp)
-                merged_repos.append({"name": r.name, "path": rp})
-        except Exception:
-            continue
-
+    # Return only explicitly registered repos (verified on disk)
     for p in registry.get("repos", []):
         try:
             resolved = Path(p).resolve()
             if not resolved.exists() or not resolved.is_dir():
                 continue
             rp = str(resolved)
-            if rp in merged_paths:
+            if rp in seen_paths:
                 continue
-            merged_paths.add(rp)
-            merged_repos.append({"name": resolved.name, "path": rp})
+            seen_paths.add(rp)
+            verified_repos.append({"name": resolved.name, "path": rp})
         except Exception:
             continue
 
-    merged_repos.extend(empty_path_repos)
-
-    if changed:
-        registry["repos"] = new_repos_list
-        save_repo_registry(registry)
+    # Include current workspace from header if not already registered
+    ws_header = request.headers.get("X-Gimo-Workspace", "")
+    if ws_header:
+        try:
+            ws_resolved = str(Path(ws_header).resolve())
+            if ws_resolved not in seen_paths and Path(ws_resolved).is_dir():
+                seen_paths.add(ws_resolved)
+                verified_repos.append({"name": Path(ws_resolved).name, "path": ws_resolved})
+        except Exception:
+            pass
 
     active_repo = registry.get("active_repo")
 
     return {
         "root": _sanitize_path(str(REPO_ROOT_DIR)),
         "active_repo": _sanitize_path(active_repo) if active_repo else None,
-        "repos": [{"name": r["name"], "path": _sanitize_path(r["path"])} for r in merged_repos],
+        "repos": [{"name": r["name"], "path": _sanitize_path(r["path"])} for r in verified_repos],
     }
 
 

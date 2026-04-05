@@ -154,8 +154,9 @@ def providers_test(
         return
     if status_code == 200:
         console.print(f"[green]Provider '{provider_id}' endpoint is reachable.[/green]")
-        # Also check auth status for known providers
-        auth_code, auth_data = api_request(config, "GET", f"/ops/connectors/{provider_id}/auth-status")
+        # Also check auth status — normalize ID (claude-account → claude)
+        auth_id = provider_id.replace("-account", "")
+        auth_code, auth_data = api_request(config, "GET", f"/ops/connectors/{auth_id}/auth-status")
         if auth_code == 200 and isinstance(auth_data, dict):
             authed = auth_data.get("authenticated", False)
             method = auth_data.get("method", "n/a")

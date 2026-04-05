@@ -513,8 +513,12 @@ class CustomPlanService:
         )
 
     @classmethod
-    def _has_failed_dependency(cls, node: PlanNode, node_map: Dict[str, PlanNode]) -> bool:
-        return any(node_map.get(dep) and node_map[dep].status in {"error", "skipped"} for dep in node.depends_on)
+    def _has_failed_dependency(cls, node: PlanNode, node_map: Dict[str, PlanNode]) -> tuple[bool, Optional[str]]:
+        for dep in node.depends_on:
+            dep_node = node_map.get(dep)
+            if dep_node and dep_node.status in {"error", "skipped"}:
+                return True, dep_node.error or f"upstream {dep} failed"
+        return False, None
 
     @classmethod
     def _overlapping_files(cls, artifacts: Dict[str, Dict[str, Any]]) -> Dict[str, List[str]]:
@@ -563,9 +567,10 @@ class CustomPlanService:
             runnable: List[str] = []
             for node_id in layer:
                 node = node_map[node_id]
-                if cls._has_failed_dependency(node, node_map):
+                has_failed, root_error = cls._has_failed_dependency(node, node_map)
+                if has_failed:
                     node.status = "skipped"
-                    node.error = "Skipped because an upstream dependency failed"
+                    node.error = f"Cascaded from: {root_error}"
                     await cls._finalize_node_execution(
                         plan,
                         plan_id,
@@ -859,7 +864,7 @@ class CustomPlanService:
             cost_usd = usage.get("cost_usd", 0.0)
         except Exception as exc:
             node.status = "error"
-            node.error = str(exc)[:500]
+            node.error = str(exc)[:2000]
 
         changed_files: List[str] = []
         diff_text = ""
@@ -873,7 +878,7 @@ class CustomPlanService:
                     commit_sha = GitService.commit_all(sandbox_handle.worktree_path, f"Plan node {node.id} completed")
             except Exception as exc:
                 node.status = "error"
-                node.error = str(exc)[:500]
+                node.error = str(exc)[:2000]
                 changed_files = []
                 diff_text = ""
                 commit_sha = ""

@@ -304,6 +304,7 @@ def doctor() -> None:
         console.print(f"[yellow][>] Start the server: [cyan]gimo up[/cyan] or check URL in .gimo/config.yaml[/yellow]")
 
     # ── CLI Bond check (Identity-First Auth) ──────────────────────────
+    cli_bond_missing = False
     cli_bond = load_cli_bond()
     if cli_bond:
         jwt_token = cli_bond.get("jwt", "")
@@ -324,8 +325,7 @@ def doctor() -> None:
             console.print(f"[red][X] CLI Bond:[/red] expired or invalid")
             console.print(f"[yellow][>] Renew with: [cyan]gimo login --web[/cyan][/yellow]")
     else:
-        console.print(f"[dim][~] CLI Bond:[/dim] not configured")
-        console.print(f"[dim]     Upgrade: [cyan]gimo login --web[/cyan] for machine-bound auth[/dim]")
+        cli_bond_missing = True
 
     # ── Legacy bond check ─────────────────────────────────────────────
     bond = load_bond(server_url)
@@ -342,6 +342,11 @@ def doctor() -> None:
         if not cli_bond:
             console.print(f"[red][X] Legacy Bond:[/red] not found")
             console.print(f"[yellow][>] Run: gimo login {server_url}[/yellow]")
+
+    # Show CLI Bond hint only when no auth works at all
+    if cli_bond_missing and not bond:
+        console.print(f"[dim][~] CLI Bond:[/dim] not configured")
+        console.print(f"[dim]     Upgrade: [cyan]gimo login --web[/cyan] for machine-bound auth[/dim]")
 
     # ── Config check ──────────────────────────────────────────────────
     cfg_path = project_root() / ".gimo" / "config.yaml"

@@ -311,7 +311,9 @@ async def lifespan(app: FastAPI):
         try:
             from tools.gimo_server.services.sub_agent_manager import SubAgentManager
 
-            await SubAgentManager.startup_reconcile()
+            await asyncio.wait_for(SubAgentManager.startup_reconcile(), timeout=10.0)
+        except asyncio.TimeoutError:
+            logger.warning("SubAgent startup reconcile timed out (10s) — continuing without Ollama sync")
         except Exception as exc:
             logger.warning("SubAgent startup reconcile warning: %s", exc)
         try:
@@ -389,6 +391,12 @@ async def lifespan(app: FastAPI):
         await run_worker.start()
         app.state.run_worker = run_worker
 
+        # Core services ready — mark server as available for requests.
+        # Optional services (HW monitor, ExecutionAuthority, telemetry) continue
+        # below but do not gate readiness (Kubernetes liveness/readiness pattern).
+        app.state.ready = True
+        logger.info("GIMO Orchestrator ready (core services up)")
+
         # Start Hardware Monitor
         from tools.gimo_server.services.hardware_monitor_service import HardwareMonitorService
 
@@ -429,8 +437,7 @@ async def lifespan(app: FastAPI):
         supervisor = SupervisedTask()
         app.state.supervisor = supervisor
 
-        app.state.ready = True
-        logger.info("GIMO Orchestrator ready (lifespan complete)")
+        logger.info("GIMO Orchestrator optional services initialized")
         yield
 
         # Shutdown supervised tasks before services

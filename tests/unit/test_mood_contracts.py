@@ -68,7 +68,7 @@ async def test_workspace_only_mood_blocks_mutations_outside_workspace(tmp_path):
     result = await executor.execute_tool_call("write_file", {"path": str(outside), "content": "hello"})
 
     assert result["status"] == "error"
-    assert "inside workspace" in result["message"].lower()
+    assert "workspace" in result["message"].lower()
 
 
 @pytest.mark.asyncio

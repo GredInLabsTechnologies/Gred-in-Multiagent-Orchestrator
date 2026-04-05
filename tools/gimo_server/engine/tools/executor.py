@@ -109,8 +109,12 @@ class ToolExecutor:
 
     def _to_abs_path(self, path: str) -> str:
         if os.path.isabs(path):
-            return os.path.abspath(path)
-        return os.path.abspath(os.path.join(self.workspace_root, path))
+            resolved = os.path.abspath(path)
+        else:
+            resolved = os.path.abspath(os.path.join(self.workspace_root, path))
+        if self._contract.fs_mode == "workspace_only" and not self._is_within_workspace(resolved):
+            raise ValueError(f"Path escapes workspace boundary: {path}")
+        return resolved
 
     def _is_within_workspace(self, full_path: str) -> bool:
         try:

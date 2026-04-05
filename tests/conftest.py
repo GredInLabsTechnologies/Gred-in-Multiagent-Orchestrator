@@ -132,12 +132,21 @@ def test_client(_mock_gics_daemon, _mock_license_guard, _mock_lifespan_network):
 
 @pytest.fixture(scope="session", autouse=True)
 def _mock_gics_daemon():
-    """Prevent GicsService.start_daemon from blocking on GICS subprocess in tests."""
+    """Prevent GicsService from making real IPC calls to the GICS daemon in tests.
+
+    The previous mock only patched start/stop/health methods but left
+    GICSClient._call() unpatched — causing real named-pipe IPC attempts
+    that block on retry loops when the daemon isn't running.
+    """
     from tools.gimo_server.services.gics_service import GicsService
+    from vendor.gics.clients.python.gics_client import GICSClient
+
+    noop_response = {"jsonrpc": "2.0", "result": {}, "id": 1}
 
     with patch.object(GicsService, "start_daemon"), \
          patch.object(GicsService, "start_health_check"), \
-         patch.object(GicsService, "stop_daemon"):
+         patch.object(GicsService, "stop_daemon"), \
+         patch.object(GICSClient, "_call", return_value=noop_response):
         yield
 
 

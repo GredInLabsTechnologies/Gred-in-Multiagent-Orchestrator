@@ -54,7 +54,7 @@ def skills_run(
     """Execute a registered skill."""
     config = load_config()
     with console.status("[bold green]Executing skill..."):
-        status_code, payload = api_request(config, "POST", f"/ops/skills/{skill_id}/execute")
+        status_code, payload = api_request(config, "POST", f"/ops/skills/{skill_id}/execute", json_body={})
     if json_output:
         emit_output({"status_code": status_code, "result": payload}, json_output=True)
         return

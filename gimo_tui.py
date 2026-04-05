@@ -811,55 +811,7 @@ class GimoApp(App):
             if status == 200 and isinstance(payload, dict):
                 self._safe_call(self._apply_status_snapshot, payload)
             else:
-                self._safe_call(self._update_graph_widget, "[yellow]Status bridge disconnected.[/yellow]")
-            return
-            status, payload = _api_request(self.config, "GET", "/ops/operator/status")
-            if status == 200 and isinstance(payload, dict):
-                repo = payload.get("repo", "?")
-                branch = payload.get("branch", "?")
-                provider = payload.get("active_provider", "?")
-                model = payload.get("active_model", "?")
-                perm = payload.get("permissions", "suggest")
-                budget = payload.get("budget_status", "ok")
-                ctx = payload.get("context_status", "0%")
-                
-                # 1. Update Header
-                msg = f"REPO: {repo} | BRANCH: {branch} | MODEL: {model} | PERM: {perm} | BUDGET: {budget} | CTX: {ctx}"
-                self._safe_call(self._update_header, msg)
-                
-                # 2. Update Graph
-                text = (
-                    f"📁 Repo: [bold]{repo}[/bold] ({branch})\n"
-                    f"🧠 Orchestrator: [cyan]{provider}[/cyan]\n"
-                    f"   Model: [dim]{model}[/dim]"
-                )
-                self._safe_call(self._update_graph_widget, text)
-
-                # 3. Update Notices
-                alerts = payload.get("alerts", [])
-                if not alerts:
-                    self._safe_call(self._update_notices_widget, NO_NOTICES_MSG)
-                else:
-                    lines = []
-                    for n in alerts:
-                        lvl = n.get("level", "info")
-                        msg = n.get("message", "")
-                        icon = "⚠" if lvl == "warning" else "✗" if lvl == "error" else "ℹ"
-                        color = "yellow" if lvl == "warning" else "red" if lvl == "error" else "blue"
-                        lines.append(f"[{color}]{icon} {msg}[/{color}]")
-                    self._safe_call(self._update_notices_widget, "\n".join(lines))
-
-                # 4. Update Telemetry (Budget Bar)
-                budget_pct = payload.get("budget_percentage", 100.0)
-                from cli_policies import get_budget_color
-                color = get_budget_color(budget_pct)
-                bar_len = 20
-                fill = min(int(((100 - budget_pct) / 100) * bar_len), bar_len)
-                bar = "█" * fill + "░" * (bar_len - fill)
-                telemetry_text = f"Global Budget Consumption\n[{color}]{bar}[/{color}] {100-budget_pct:.1f}% used\n"
-                self._safe_call(self._update_eco_widget, telemetry_text)
-
-            else:
+                self._safe_call(self._update_header, "REPO: ? | BRANCH: ? | MODEL: ? | PERM: ? | BUDGET: ? | CTX: ?")
                 self._safe_call(self._update_graph_widget, "[yellow]Status bridge disconnected.[/yellow]")
         except Exception as e:
             self._safe_call(self._update_graph_widget, f"[red]Status Error: {e}[/red]")
