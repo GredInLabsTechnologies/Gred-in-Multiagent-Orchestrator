@@ -1,7 +1,6 @@
 orchestrator:
   auto_run_eligible: true
   budget_limit_usd: 10.0
-  preferred_model: claude-haiku-4-5-20251001
   verbose: false
 providers:
   anthropic:

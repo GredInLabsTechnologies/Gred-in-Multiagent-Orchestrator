@@ -31,12 +31,15 @@ def stream_events(
     *,
     path: str = "/ops/stream",
     timeout_seconds: float = DEFAULT_WATCH_TIMEOUT_SECONDS,
+    last_event_id: str = "",
 ):
     base_url, connect_timeout_seconds = api_settings(config)
     token = resolve_token("operator", config)
     headers = {"Accept": "text/event-stream", "X-GIMO-Surface": "cli"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if last_event_id:
+        headers["Last-Event-ID"] = last_event_id
     url = f"{base_url}{path}"
     timeout = httpx.Timeout(
         connect=connect_timeout_seconds,
@@ -45,6 +48,7 @@ def stream_events(
         pool=connect_timeout_seconds,
     )
 
+    _last_id = ""
     try:
         with httpx.Client(timeout=timeout) as client:
             with client.stream("GET", url, headers=headers) as response:
@@ -54,13 +58,21 @@ def stream_events(
                         continue
                     if line.startswith(":"):
                         continue
+                    # Track SSE event ID for reconnection
+                    if line.startswith("id:"):
+                        _last_id = line[3:].strip()
+                        continue
                     if not line.startswith("data:"):
                         continue
                     raw = line[5:].strip()
                     if not raw:
                         continue
                     try:
-                        yield json.loads(raw)
+                        parsed = json.loads(raw)
+                        # Expose last_event_id on the parsed dict for callers
+                        if _last_id and isinstance(parsed, dict):
+                            parsed["_last_event_id"] = _last_id
+                        yield parsed
                     except json.JSONDecodeError:
                         yield raw
     except httpx.ReadTimeout:

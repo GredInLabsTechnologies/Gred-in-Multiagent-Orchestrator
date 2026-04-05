@@ -31,8 +31,23 @@ def tui(
     config["orchestrator"]["verbose"] = verbose or config["orchestrator"].get("verbose", False)
 
     from gimo_tui import GimoApp
+    from gimo_cli.api import api_request
+    from gimo_cli.config import project_root
+
+    # Create a real thread via the backend (not a hardcoded ID)
+    ws_root = str(project_root())
+    status_code, thread_data = api_request(
+        config, "POST", "/ops/threads",
+        params={"workspace_root": ws_root, "title": "TUI Agentic Session"},
+    )
+    if status_code == 201 and isinstance(thread_data, dict):
+        thread_id = str(thread_data.get("id") or "tui_fallback")
+    else:
+        # Fallback if server is not running — TUI will show error on first chat
+        thread_id = "tui_fallback"
+
     console.print("[dim]Launching TUI...[/dim]")
-    app_tui = GimoApp(config=config, thread_id="tui_default")
+    app_tui = GimoApp(config=config, thread_id=thread_id)
     app_tui.verbose = config["orchestrator"]["verbose"]
     app_tui.run()
 
@@ -113,4 +128,26 @@ def chat(
             console.print(str(resp))
         return
 
-    interactive_chat(config)
+    # Interactive mode: launch TUI (unified terminal experience)
+    # CLI's interactive_chat() remains available as fallback if Textual is unavailable
+    try:
+        from gimo_tui import GimoApp
+        from gimo_cli.api import api_request
+        from gimo_cli.config import project_root as _project_root
+
+        ws_root = str(_project_root())
+        status_code, thread_data = api_request(
+            config, "POST", "/ops/threads",
+            params={"workspace_root": ws_root, "title": "Chat Agentic Session"},
+        )
+        if status_code == 201 and isinstance(thread_data, dict):
+            tid = str(thread_data.get("id") or "chat_fallback")
+        else:
+            tid = "chat_fallback"
+
+        app_tui = GimoApp(config=config, thread_id=tid)
+        app_tui.verbose = config["orchestrator"]["verbose"]
+        app_tui.run()
+    except ImportError:
+        # Textual not available — fall back to Rich-based CLI chat
+        interactive_chat(config)

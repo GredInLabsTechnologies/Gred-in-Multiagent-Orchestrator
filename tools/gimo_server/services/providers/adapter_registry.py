@@ -21,6 +21,14 @@ def build_provider_adapter(
     auth_mode = str(entry.auth_mode or "").strip().lower()
 
     if canonical_type in {"codex", "claude"} and auth_mode == "account":
+        # HTTP-first: if an API key is available, prefer the HTTP adapter
+        # over subprocess — avoids Windows cmd.exe 8191-char limit entirely.
+        if canonical_type in _ANTHROPIC_TYPES:
+            import os
+            api_key = resolve_secret(entry) or os.environ.get("ANTHROPIC_API_KEY", "").strip()
+            if api_key:
+                base_url = entry.base_url or DEFAULT_BASE_URLS.get(canonical_type, "https://api.anthropic.com")
+                return AnthropicAdapter(base_url=base_url, model=entry.model, api_key=api_key)
         binary = "codex" if canonical_type == "codex" else "claude"
         return CliAccountAdapter(binary=binary)
 

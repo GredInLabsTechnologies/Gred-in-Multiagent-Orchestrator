@@ -41,6 +41,11 @@ class NotificationService:
     _pending: Dict[str, Dict[str, Any]] = {}
     _flush_task: Optional[asyncio.Task] = None
 
+    # ── SSE event IDs + replay buffer ────────────────────────────────────────
+    _next_event_id: int = 1
+    _replay_buffer: List[tuple[int, str]] = []  # (id, serialised message)
+    _replay_buffer_max: int = 500
+
     @classmethod
     def configure(cls, *, queue_maxsize: int | None = None):
         if queue_maxsize is not None:
@@ -61,6 +66,8 @@ class NotificationService:
         if cls._flush_task and not cls._flush_task.done():
             cls._flush_task.cancel()
         cls._flush_task = None
+        cls._next_event_id = 1
+        cls._replay_buffer = []
 
     @classmethod
     def get_metrics(cls) -> Dict[str, Any]:
@@ -69,14 +76,26 @@ class NotificationService:
             "subscribers": len(cls._subscribers),
             "queue_maxsize": cls._queue_maxsize,
             "pending_coalesce": len(cls._pending),
+            "last_event_id": cls._next_event_id - 1,
+            "replay_buffer_size": len(cls._replay_buffer),
         }
 
     @classmethod
-    async def subscribe(cls) -> asyncio.Queue:
+    async def subscribe(cls, *, last_event_id: int = 0) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=cls._queue_maxsize)
         state = SubscriberState(queue=queue)
         cls._subscribers.append(state)
-        logger.info("New SSE client connected. Total: %d", len(cls._subscribers))
+
+        # Replay missed events if client reconnected with Last-Event-ID
+        if last_event_id > 0:
+            for eid, msg in cls._replay_buffer:
+                if eid > last_event_id:
+                    try:
+                        queue.put_nowait(msg)
+                    except asyncio.QueueFull:
+                        break
+
+        logger.info("New SSE client connected (last_event_id=%d). Total: %d", last_event_id, len(cls._subscribers))
         cls._ensure_flush_task()
         return queue
 
@@ -106,7 +125,15 @@ class NotificationService:
 
     @classmethod
     async def _broadcast_now(cls, event_type: str, payload: Dict[str, Any]):
-        message = json.dumps({"event": event_type, "data": payload})
+        event_id = cls._next_event_id
+        cls._next_event_id += 1
+        message = json.dumps({"id": event_id, "event": event_type, "data": payload})
+
+        # Append to replay buffer (bounded ring)
+        cls._replay_buffer.append((event_id, message))
+        if len(cls._replay_buffer) > cls._replay_buffer_max:
+            cls._replay_buffer = cls._replay_buffer[-cls._replay_buffer_max:]
+
         stale: List[SubscriberState] = []
 
         for sub in list(cls._subscribers):

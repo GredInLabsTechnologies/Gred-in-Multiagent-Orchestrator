@@ -14,8 +14,9 @@ from rich.panel import Panel
 
 from cli_policies import get_budget_color
 
-# Re-use critical logic from gimo 
-from gimo import _api_settings, _resolve_token, _api_request, _save_config
+# Use canonical gimo_cli modules directly (not legacy gimo.py shim)
+from gimo_cli.api import api_request as _api_request, api_settings as _api_settings, resolve_token
+from gimo_cli.config import save_config as _save_config
 from terminal_command_executor import (
     TerminalCommandContext,
     TerminalCommandOutcome,
@@ -481,146 +482,7 @@ class GimoApp(App):
             self._set_input_state(False)
             self.execute_slash_command(val)
             return
-             
-        # Handle slash commands natively 
-        if val.startswith("/"):
-            from cli_commands import dispatch_slash_command
-            from gimo import _api_request
-            from rich.panel import Panel
 
-            def show_help():
-                from cli_commands import get_help_text
-                self._write_log(Panel(get_help_text(), title="Chat Commands", border_style="cyan"))
-
-            def show_workspace():
-                self._write_log(Panel(str(self.config.get("workspace_root", "Unknown")), title="Workspace", border_style="blue"))
-
-            def show_thread():
-                self._write_log(Panel(str(self.thread_id), title="Thread", border_style="blue"))
-
-            def unknown_command(cmd: str):
-                self._write_log(f"[yellow]Unknown command: {cmd}. Use /help.[/yellow]")
-
-            @work(thread=True)
-            def do_slash_fetch(action: str):
-                if action == "status":
-                    self.update_status()
-                    self.call_from_thread(self._write_log, "[green]Status refreshed.[/green]")
-                elif action == "provider_list":
-                    st, py = _api_request(self.config, "GET", "/ops/provider")
-                    if st == 200 and isinstance(py, dict):
-                        lines = ["[cyan]Configured Providers:[/cyan]"]
-                        for pid, pdata in py.get("providers", {}).items():
-                            lines.append(f" - [bold]{pid}[/bold] (Type: {pdata.get('type', 'unknown')})")
-                        self.call_from_thread(self._write_log, Panel("\n".join(lines)))
-                    else:
-                        self.call_from_thread(self._write_log, f"[red]Failed to fetch providers ({st})[/red]")
-                elif action == "models":
-                    st, py = _api_request(self.config, "GET", "/ops/provider/models")
-                    if st == 200 and isinstance(py, list):
-                        lines = ["[cyan]Available Models:[/cyan]"]
-                        for item in py:
-                            m = item.get("id", str(item)) if isinstance(item, dict) else str(item)
-                            lines.append(f" - {m}")
-                        self.call_from_thread(self._write_log, Panel("\n".join(lines)))
-                    else:
-                        self.call_from_thread(self._write_log, f"[red]Failed to fetch models: {py}[/red]")
-                elif action == "workers":
-                    self.update_status()
-                    self.call_from_thread(self._write_log, "[green]Detailed workers topology refreshed in sidebar.[/green]")
-                # ── P0 new actions ────────────────────────────────────────────
-                elif action == "undo":
-                    import subprocess as _sp
-                    res = _sp.run(["git", "revert", "--no-edit", "HEAD"], capture_output=True, text=True, check=False)
-                    if res.returncode == 0:
-                        self.call_from_thread(self._write_log, Panel(res.stdout.strip() or "Revert successful.", title="✓ /undo", border_style="green"))
-                    else:
-                        self.call_from_thread(self._write_log, Panel(res.stderr.strip() or "Revert failed.", title="✗ /undo failed", border_style="red"))
-                elif action == "reset":
-                    st, py = _api_request(self.config, "POST", f"/ops/threads/{self.thread_id}/reset")
-                    if st in {200, 204}:
-                        self.call_from_thread(self._write_log, "[green]✓ Contexto del thread reiniciado.[/green]")
-                    else:
-                        self.call_from_thread(self._write_log, f"[red]Reset failed ({st}): {py}[/red]")
-                elif action == "tokens":
-                    self.call_from_thread(self._write_log, "[dim]Token data available via /tokens in the CLI interactive chat o consultable vía logs en background.[/dim]")
-                elif action == "diff":
-                    st, py = _api_request(self.config, "GET", "/ops/files/diff")
-                    if st == 200:
-                        diff_text = py.get("diff") or py.get("content") or str(py) if isinstance(py, dict) else str(py)
-                        self.call_from_thread(self._write_log, Panel(diff_text or "[dim]No diff.[/dim]", title="📄 /diff", border_style="yellow"))
-                    else:
-                        self.call_from_thread(self._write_log, f"[red]Diff unavailable ({st}): {py}[/red]")
-                elif action.startswith("effort:"):
-                    val = action.split(":", 1)[1]
-                    st, py = _api_request(self.config, "POST", f"/ops/threads/{self.thread_id}/config", json_body={"effort": val})
-                    msg = f"[green]✓ Esfuerzo: {val}[/green]" if st in {200, 204} else f"[red]effort failed ({st}): {py}[/red]"
-                    self.call_from_thread(self._write_log, msg)
-                elif action.startswith("permissions:"):
-                    val = action.split(":", 1)[1]
-                    st, py = _api_request(self.config, "POST", f"/ops/threads/{self.thread_id}/config", json_body={"permissions": val})
-                    msg = f"[green]✓ Permisos: perm:{val}[/green]" if st in {200, 204} else f"[red]permissions failed ({st}): {py}[/red]"
-                    self.call_from_thread(self._write_log, msg)
-                elif action.startswith("add:"):
-                    path_val = action.split(":", 1)[1]
-                    st, py = _api_request(self.config, "POST", f"/ops/threads/{self.thread_id}/context/add", json_body={"path": path_val})
-                    msg = f"[green]✓ Añadido: {path_val}[/green]" if st in {200, 201} else f"[red]add failed ({st}): {py}[/red]"
-                    self.call_from_thread(self._write_log, msg)
-                elif action == "debug":
-                    self.verbose = not self.verbose
-                    self.call_from_thread(self._write_log, f"[dim]Debug mode {'enabled' if self.verbose else 'disabled'}[/dim]")
-                elif action.startswith("merge:"):
-                    run_id = action.split(":", 1)[1]
-                    if not run_id:
-                        # Infer from status
-                        st, py = _api_request(self.config, "GET", "/ops/operator/status")
-                        if st == 200: 
-                            run_id = py.get("active_run_id")
-                    
-                    if not run_id:
-                        self.call_from_thread(self._write_log, "[yellow]No active run found to merge.[/yellow]")
-                        return
-
-                    st, py = _api_request(self.config, "POST", f"/ops/runs/{run_id}/merge")
-                    if st == 200:
-                        self.call_from_thread(self._write_log, f"[green]✓ Run {run_id} merged successfully.[/green]")
-                        self.update_status()
-                    else:
-                        self.call_from_thread(self._write_log, f"[red]Merge failed ({st}): {py}[/red]")
-
-
-            callbacks = {
-                "show_help": show_help,
-                "show_workspace": show_workspace,
-                "show_thread": show_thread,
-                "exit_session": self.exit,
-                "handle_provider": lambda arg: do_slash_fetch("provider_list") if arg == "list" else self._write_log("[yellow]Legacy TUI slash handler is unreachable.[/yellow]"),
-                "list_models": lambda: do_slash_fetch("models"),
-                "handle_model": lambda arg: self._write_log("[yellow]Legacy TUI slash handler is unreachable.[/yellow]"),
-                "show_workers": lambda: do_slash_fetch("workers"),
-                "show_status": lambda: do_slash_fetch("status"),
-                # ── P0 new commands ───────────────────────────────────────────
-                "undo": lambda: do_slash_fetch("undo"),
-                "clear_view": self.action_clear_log,
-                "reset_context": lambda: do_slash_fetch("reset"),
-                "show_tokens": lambda: do_slash_fetch("tokens"),
-                "show_diff": lambda: do_slash_fetch("diff"),
-                "set_effort": lambda val: do_slash_fetch(f"effort:{val}"),
-                "set_permissions": lambda val: do_slash_fetch(f"permissions:{val}"),
-                "add_file": lambda path: do_slash_fetch(f"add:{path}"),
-                "toggle_debug": lambda: do_slash_fetch("debug"),
-                "merge_run": lambda run_id: do_slash_fetch(f"merge:{run_id}"),
-                "invalid_arg": lambda msg: self._write_log(f"[yellow]⚠ {msg}[/yellow]"),
-                "unknown_command": unknown_command,
-            }
-
-            parts = val.split(maxsplit=1)
-            cmd = parts[0]
-            arg = parts[1] if len(parts) > 1 else ""
-            is_cmd, _ = dispatch_slash_command(cmd, arg, callbacks)
-            if is_cmd:
-                return
-            
         # Normal chat
         self._write_log(Panel(val, title="You", border_style="bold blue", padding=(0,1)))
         
@@ -632,8 +494,8 @@ class GimoApp(App):
     @work(exclusive=True, thread=True)
     def fetch_stream(self, user_input: str) -> None:
         base_url, timeout_seconds = _api_settings(self.config)
-        auth_token = _resolve_token()
-        headers = {"Accept": "text/event-stream"}
+        auth_token = resolve_token("operator", self.config)
+        headers = {"Accept": "text/event-stream", "X-GIMO-Surface": "tui"}
         if auth_token:
             headers["Authorization"] = f"Bearer {auth_token}"
         self._stream_active = True
@@ -651,7 +513,7 @@ class GimoApp(App):
                 with client.stream(
                     "POST",
                     f"{base_url}/ops/threads/{self.thread_id}/chat/stream",
-                    params={"content": user_input},
+                    json={"content": user_input},
                     headers=headers,
                 ) as response:
                     self._active_response = response
@@ -752,6 +614,59 @@ class GimoApp(App):
             self._safe_call(self._write_log, f"\n[bold red]Orchestrator Error:[/bold red] {data.get('message', 'Unknown')}\n")
             self._safe_call(self._set_input_state, True)
 
+        elif evt == "session_start":
+            mood = data.get("mood", "neutral")
+            mood_icon = {"positive": "+", "negative": "!", "neutral": "~"}.get(mood, "~")
+            self._safe_call(self._write_event, f"Session started (mood: {mood_icon})")
+
+        elif evt == "user_question":
+            question = data.get("question", "")
+            options = data.get("options", [])
+            context = data.get("context", "")
+            parts = [f"[bold yellow]{question}[/bold yellow]"]
+            if context:
+                parts.append(f"[dim]{context}[/dim]")
+            if options:
+                parts.append("Options: " + ", ".join(str(o) for o in options))
+            self._safe_call(self._write_log, Panel(
+                "\n".join(parts),
+                title="Agent Question",
+                border_style="yellow",
+            ))
+
+        elif evt == "plan_proposed":
+            title = data.get("title", "Proposed Plan")
+            steps = data.get("steps", [])
+            lines = [f"[bold]{title}[/bold]"]
+            for i, step in enumerate(steps, 1):
+                desc = step.get("description", str(step)) if isinstance(step, dict) else str(step)
+                lines.append(f"  {i}. {desc}")
+            self._safe_call(self._write_log, Panel(
+                "\n".join(lines),
+                title="Plan Proposed",
+                border_style="cyan",
+            ))
+            self._safe_call(self._write_event, "Plan proposed — awaiting approval.")
+            self._safe_call(self._set_input_state, True)
+            inp = self.query_one("#chat-input", Input)
+            inp.placeholder = ">>> Type 'approve' or 'reject'..."
+
+        elif evt == "confirmation_required":
+            tool_name = data.get("tool_name", "?")
+            message = data.get("message", "")
+            self._safe_call(self._write_log, Panel(
+                f"{message}\n\nTool: [bold]{tool_name}[/bold]",
+                title="Confirmation Required",
+                border_style="yellow",
+            ))
+            self.pending_approval_data = data
+            self._safe_call(self._set_input_state, True)
+            inp = self.query_one("#chat-input", Input)
+            inp.placeholder = ">>> Type 'Y' to confirm or 'N' to deny..."
+
+        elif evt == "context_request_pending":
+            self._safe_call(self._write_event, "Context request pending...")
+
     def _render_tui_post_run_report(self, run_data: dict, usage: dict):
         """Render a compact version of the CLI post-run report in the TUI log."""
         goal = run_data.get("goal") or "n/a"
@@ -787,7 +702,7 @@ class GimoApp(App):
     @work(thread=True)
     def submit_approval(self, tool_call_id: str, approved: bool):
         base_url, timeout_seconds = _api_settings(self.config)
-        auth_token = _resolve_token()
+        auth_token = resolve_token("operator", self.config)
         headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
         try:
             with httpx.Client(timeout=timeout_seconds) as client:

@@ -160,7 +160,7 @@ class CliAccountAdapter(ProviderAdapter):
         # On Windows, command-line length is limited (~8191 chars via CreateProcess).
         # For large prompts (e.g., multi-turn chat with tool results),
         # write prompt to a temp file and pipe it via stdin.
-        use_stdin = sys.platform == "win32" and len(prompt) > 6000
+        use_stdin = sys.platform == "win32"
         cmd = self._build_cmd(prompt if not use_stdin else "", stdin_mode=use_stdin)
         logger.info("[cli-account] running: %s (stdin=%s, prompt_len=%d)", cmd[0], use_stdin, len(prompt))
 
