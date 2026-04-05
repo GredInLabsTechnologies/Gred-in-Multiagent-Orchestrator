@@ -18,6 +18,11 @@ from typing import get_args
 
 from tools.gimo_server.models.agent import AgentRole
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tools.gimo_server.models.surface import SurfaceIdentity
+
 
 @dataclass(frozen=True)
 class GimoContract:
@@ -44,6 +49,9 @@ class GimoContract:
     # ── CONTEXT (WHEN/WHY) ────────────────────────────────────────────────
     created_at: datetime
     license_plan: str  # "free" | "pro" | "enterprise" | "unknown"
+
+    # ── SAGP (SURFACE) ────────────────────────────────────────────────────
+    surface: SurfaceIdentity | None = None  # None for legacy callers
 
     def is_admin(self) -> bool:
         """Check if caller has admin privileges."""

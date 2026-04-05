@@ -382,12 +382,38 @@ def register_native_tools(mcp: FastMCP):
             return f"Error: {e}"
 
     @mcp.tool()
-    async def gimo_spawn_subagent(name: str, task: str, role: str = "worker") -> str:
+    async def gimo_spawn_subagent(
+        name: str,
+        task: str,
+        role: str = "worker",
+        provider: str = "auto",
+        model: str = "auto",
+        execution_policy: str = "workspace_safe",
+    ) -> str:
+        """Spawn a governed sub-agent with optional provider/model selection.
+
+        Args:
+            name: Agent name
+            task: Task description for the agent
+            role: Agent role (worker, reviewer, etc.)
+            provider: Provider ID or "auto" for automatic selection
+            model: Model ID or "auto" for automatic selection
+            execution_policy: Execution policy (read_only, workspace_safe, etc.)
+        """
         try:
             from tools.gimo_server.services.sub_agent_manager import SubAgentManager
-            req = {"modelPreference": "default", "constraints": {"role": role, "task": task}}
+            req = {
+                "modelPreference": model if model != "auto" else "default",
+                "constraints": {
+                    "role": role,
+                    "task": task,
+                    "provider": provider,
+                    "model": model,
+                    "execution_policy": execution_policy,
+                },
+            }
             agent = await SubAgentManager.create_sub_agent(parent_id="mcp", request=req)
-            return f"Spawned: {agent.id}"
+            return f"Spawned: {agent.id} (provider={provider}, model={model}, policy={execution_policy})"
         except Exception as e: return str(e)
 
     @mcp.tool()
@@ -588,5 +614,68 @@ def register_native_tools(mcp: FastMCP):
 
         except Exception as e:
             return f"gimo_reject_plan error: {e}"
+
+    @mcp.tool()
+    async def gimo_generate_team_config(plan_id: str) -> str:
+        """Generate Claude Code Agent Teams config from a GIMO plan.
+
+        Returns a JSON config that Claude can use to spawn teammates,
+        each governed by GIMO via MCP with appropriate execution policies.
+
+        Args:
+            plan_id: Plan/draft ID to generate team config from
+        """
+        try:
+            import json
+            from tools.gimo_server.services.agent_teams_service import AgentTeamsService
+            from tools.gimo_server.services.ops_service import OpsService
+
+            # Try to load plan content
+            content = None
+            if plan_id.startswith("r_"):
+                run = OpsService.get_run(plan_id)
+                if run:
+                    approved = OpsService.get_approved(run.approved_id)
+                    content = approved.content if approved else None
+            else:
+                draft = OpsService.get_draft(plan_id)
+                content = draft.content if draft else None
+
+            if not content:
+                return json.dumps({"error": f"Plan not found: {plan_id}"})
+
+            plan_data = json.loads(content) if isinstance(content, str) else content
+            config = AgentTeamsService.generate_team_config(plan_data)
+            return json.dumps(config, indent=2)
+        except Exception as e:
+            return f"Error generating team config: {e}"
+
+    @mcp.tool()
+    async def gimo_gics_model_reliability(model_id: str) -> str:
+        """Get GICS reliability record for a specific model.
+
+        Args:
+            model_id: Model identifier (e.g. "claude-sonnet-4-6", "gpt-4o")
+        """
+        try:
+            import json
+            from tools.gimo_server.services.sagp_gateway import SagpGateway
+
+            result = SagpGateway.get_gics_insight(prefix=f"model:{model_id}", limit=50)
+            return json.dumps(result, indent=2, default=str)
+        except Exception as e:
+            return f"Error: {e}"
+
+    @mcp.tool()
+    async def gimo_gics_anomaly_report() -> str:
+        """Get all models with active anomaly flags from GICS."""
+        try:
+            import json
+            from tools.gimo_server.services.sagp_gateway import SagpGateway
+
+            result = SagpGateway.get_gics_insight(prefix="anomaly:", limit=100)
+            return json.dumps(result, indent=2, default=str)
+        except Exception as e:
+            return f"Error: {e}"
 
     logger.info("Registered Native Tools")

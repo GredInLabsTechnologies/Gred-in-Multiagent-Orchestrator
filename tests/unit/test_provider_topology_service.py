@@ -39,9 +39,9 @@ def test_inject_cli_account_providers_adds_missing_entries_when_clis_exist(monke
     )
 
     assert "codex-account" in out
-    assert "claude-account" in out
     assert out["codex-account"].auth_mode == "account"
-    assert out["claude-account"].auth_mode == "account"
+    # SAGP: claude-account is no longer auto-injected (Anthropic April 2026 policy)
+    assert "claude-account" not in out
 
 
 def test_inject_cli_account_providers_no_duplicate_when_custom_account_exists(monkeypatch):
@@ -148,6 +148,11 @@ def test_ensure_default_config_without_detected_cli_keeps_roles_unset(monkeypatc
     monkeypatch.setattr("tools.gimo_server.services.providers.service_impl.OPS_DATA_DIR", tmp_path)
     monkeypatch.setattr(ProviderService, "CONFIG_FILE", config_file)
     monkeypatch.setattr(shutil, "which", lambda _binary: None)
+    # Block Ollama socket detection (SAGP fallback) and ANTHROPIC_API_KEY
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    import socket as _socket
+    _orig_create_connection = _socket.create_connection
+    monkeypatch.setattr(_socket, "create_connection", lambda *a, **kw: (_ for _ in ()).throw(OSError("mocked")))
 
     ProviderService.ensure_default_config()
 

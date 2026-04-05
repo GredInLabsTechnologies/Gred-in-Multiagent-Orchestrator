@@ -207,9 +207,9 @@ def test_normalize_config_auto_injects_codex_and_claude_account_when_clis_exist(
 
     assert normalized.active == "local-1"
     assert "codex-account" in normalized.providers
-    assert "claude-account" in normalized.providers
     assert normalized.providers["codex-account"].auth_mode == "account"
-    assert normalized.providers["claude-account"].auth_mode == "account"
+    # SAGP: claude-account is no longer auto-injected
+    assert "claude-account" not in normalized.providers
 
 
 def test_normalize_config_does_not_inject_when_clis_missing(monkeypatch):
@@ -257,9 +257,10 @@ def test_normalize_config_auto_injection_is_idempotent_and_keeps_roles(monkeypat
     assert first.roles is not None and second.roles is not None
     assert first.roles.orchestrator.provider_id == second.roles.orchestrator.provider_id == "local-1"
     assert list(first.providers.keys()).count("codex-account") == 1
-    assert list(first.providers.keys()).count("claude-account") == 1
     assert list(second.providers.keys()).count("codex-account") == 1
-    assert list(second.providers.keys()).count("claude-account") == 1
+    # SAGP: claude-account is no longer auto-injected
+    assert "claude-account" not in first.providers
+    assert "claude-account" not in second.providers
 
 
 def test_normalize_config_does_not_inject_default_id_when_custom_account_provider_exists(monkeypatch):

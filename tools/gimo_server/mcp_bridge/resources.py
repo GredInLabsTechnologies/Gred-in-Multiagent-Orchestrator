@@ -65,4 +65,47 @@ def register_resources(mcp: FastMCP):
         """Recent security audit logs"""
         return await _fetch_resource("/ui/audit?limit=50")
 
-    logger.info("Registered 8 MCP Resources")
+    # ── SAGP Governance Resources ───────────────────────────────────────
+    @mcp.resource("governance://snapshot")
+    async def get_governance_snapshot() -> str:
+        """Complete SAGP governance snapshot: policy, trust, budget, GICS, proofs"""
+        try:
+            from tools.gimo_server.models.surface import SurfaceIdentity
+            from tools.gimo_server.services.sagp_gateway import SagpGateway
+            surface = SurfaceIdentity(surface_type="mcp_generic", surface_name="mcp-resource")
+            snapshot = SagpGateway.get_snapshot(surface=surface)
+            return json.dumps(snapshot.to_dict(), indent=2)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    @mcp.resource("governance://policies")
+    async def get_governance_policies() -> str:
+        """All available execution policies and their configurations"""
+        try:
+            from tools.gimo_server.services.execution.execution_policy_service import EXECUTION_POLICIES
+            policies = {}
+            for name, p in EXECUTION_POLICIES.items():
+                policies[name] = {
+                    "fs_mode": p.fs_mode,
+                    "network_mode": p.network_mode,
+                    "max_cost_per_turn_usd": p.max_cost_per_turn_usd,
+                    "hitl_required": p.hitl_required,
+                    "allowed_tools_count": len(p.allowed_tools),
+                }
+            return json.dumps(policies, indent=2)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    @mcp.resource("gics://health")
+    async def get_gics_health() -> str:
+        """GICS daemon health summary: alive status, entry count"""
+        try:
+            from tools.gimo_server.services.gics_service import GicsService
+            gics = GicsService()
+            alive = hasattr(gics, "_daemon") and gics._daemon is not None
+            count = gics.count_prefix("") if hasattr(gics, "count_prefix") else 0
+            return json.dumps({"daemon_alive": alive, "entry_count": count}, indent=2)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    logger.info("Registered 11 MCP Resources")

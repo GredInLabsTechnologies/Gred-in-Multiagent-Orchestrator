@@ -36,9 +36,12 @@ class ProviderService:
     def ensure_default_config(cls) -> None:
         """Create provider.json template if missing.
 
-        Priority: codex CLI (if installed) → claude CLI (if installed) → empty config.
-        Never default to Ollama — the user may not have it installed.
+        Priority: ANTHROPIC_API_KEY env → codex CLI → ollama local → empty config.
+        Claude CLI account mode is NOT auto-provisioned (violates Anthropic's
+        April 2026 third-party harness policy).  Users who need Claude should
+        set ANTHROPIC_API_KEY for pay-as-you-go API access.
         """
+        import os as _os
         import shutil as _shutil
         OPS_DATA_DIR.mkdir(parents=True, exist_ok=True)
         if cls.CONFIG_FILE.exists():
@@ -48,6 +51,22 @@ class ProviderService:
         active: str = ""
         orch_model: str = ""
 
+        # 1. Anthropic API key (pay-as-you-go, policy-compliant)
+        anthropic_key = _os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if anthropic_key:
+            providers["anthropic-api"] = ProviderEntry(
+                type="anthropic",
+                provider_type="anthropic",
+                display_name="Anthropic API",
+                auth_mode="api_key",
+                model="claude-sonnet-4-6",
+                model_id="claude-sonnet-4-6",
+                capabilities=cls.capabilities_for("anthropic"),
+            )
+            active = "anthropic-api"
+            orch_model = "claude-sonnet-4-6"
+
+        # 2. Codex CLI (OpenAI has not restricted its CLI)
         if _shutil.which("codex") is not None:
             providers["codex-account"] = ProviderEntry(
                 type="codex",
@@ -58,22 +77,40 @@ class ProviderService:
                 model_id="gpt-5-codex",
                 capabilities=cls.capabilities_for("codex"),
             )
-            active = "codex-account"
-            orch_model = "gpt-5-codex"
-
-        if _shutil.which("claude") is not None:
-            providers["claude-account"] = ProviderEntry(
-                type="claude",
-                provider_type="claude",
-                display_name="Claude Account Mode",
-                auth_mode="account",
-                model="claude-3-7-sonnet-latest",
-                model_id="claude-3-7-sonnet-latest",
-                capabilities=cls.capabilities_for("claude"),
-            )
             if not active:
-                active = "claude-account"
-                orch_model = "claude-3-7-sonnet-latest"
+                active = "codex-account"
+                orch_model = "gpt-5-codex"
+
+        # 3. Claude CLI detected but NOT auto-provisioned — warn user
+        if _shutil.which("claude") is not None and not anthropic_key:
+            logger.warning(
+                "[SAGP] Claude CLI detected but NOT auto-provisioned. "
+                "Anthropic's April 2026 policy prohibits third-party OAuth harnesses. "
+                "Set ANTHROPIC_API_KEY for pay-as-you-go API access, or use GIMO as "
+                "an MCP server from within Claude App/Code (first-party, allowed)."
+            )
+
+        # 4. Ollama local fallback
+        if not active:
+            import socket as _socket
+            try:
+                with _socket.create_connection(("127.0.0.1", 11434), timeout=1):
+                    ollama_up = True
+            except OSError:
+                ollama_up = False
+            if ollama_up or _shutil.which("ollama") is not None:
+                providers["ollama-local"] = ProviderEntry(
+                    type="ollama_local",
+                    provider_type="ollama_local",
+                    display_name="Ollama Local",
+                    auth_mode="none",
+                    base_url="http://localhost:11434/v1",
+                    model="qwen2.5-coder:3b",
+                    model_id="qwen2.5-coder:3b",
+                    capabilities=cls.capabilities_for("ollama_local"),
+                )
+                active = "ollama-local"
+                orch_model = "qwen2.5-coder:3b"
 
         roles = None
         if active and orch_model:

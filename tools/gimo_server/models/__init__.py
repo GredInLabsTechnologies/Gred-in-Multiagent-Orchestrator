@@ -56,5 +56,9 @@ from .web_search import (
     WebSearchProvider, WebSearchQuery, WebSearchResult, WebSearchFusionResponse,
 )
 
+# SAGP models
+from .surface import SurfaceIdentity as SurfaceIdentity, SurfaceType as SurfaceType
+from .governance import GovernanceVerdict as GovernanceVerdict, GovernanceSnapshot as GovernanceSnapshot
+
 # Compatibility aliases
 RoleProfile = role_profile

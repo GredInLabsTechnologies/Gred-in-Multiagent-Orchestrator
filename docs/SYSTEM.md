@@ -1,7 +1,7 @@
 # GIMO — Gred in Multiagent Orchestrator (System & Operations)
 
 **Status**: AUTHORITATIVE (Source of Truth)
-**Last verified**: 2026-03-04
+**Last verified**: 2026-04-05
 
 This document defines **what GIMO is today** (not a roadmap). If something conflicts with this doc, this doc wins.
 
@@ -244,22 +244,43 @@ High level:
 │  - /api/license/*, /api/checkout, /api/webhooks/stripe     │
 │  - Deploy: Vercel (gimo-web.vercel.app)                    │
 ├─────────────────────────────────────────────────────────────┤
+│ SAGP Layer (Surface-Agnostic Governance Protocol)          │
+│  - SagpGateway: central governance entry point             │
+│  - SurfaceIdentity: 9 surface types with capabilities      │
+│  - GovernanceVerdict: immutable action evaluation result    │
+│  - SurfaceNegotiationService: auto-detect surface type     │
+│  - AgentBrokerService: governed multi-provider spawn       │
+│  - AgentTeamsService: Claude Agent Teams integration       │
+│  See docs/architecture/SAGP.md for full specification.     │
+├─────────────────────────────────────────────────────────────┤
 │ FastAPI (tools/gimo_server/main.py)                        │
 │  - /status, /ui/*, /tree, /file, /search, /diff            │
 │  - /ops/* (drafts/approve/runs/config/provider/evals/...)  │
 │  - /auth/* (session, login, provider accounts)             │
 │  middlewares: panic│cors│correlation│rate_limit│auth        │
-│  routers: 13 modular routers under routers/ops/            │
+│  routers: 27 modular routers under routers/ops/            │
 ├─────────────────────────────────────────────────────────────┤
-│ Services (52+ in tools/gimo_server/services/)              │
+│ MCP Server (tools/gimo_server/mcp_bridge/server.py)        │
+│  - 180+ tools (dynamic bridge + native + governance)       │
+│  - 11 resources (governance, GICS, system)                 │
+│  - 7 prompts (governance, multi-agent, operational)        │
+│  - MCP App dashboard (ui://gimo-dashboard)                 │
+│  - Auto-starts HTTP backend on demand                      │
+├─────────────────────────────────────────────────────────────┤
+│ Services (60+ in tools/gimo_server/services/)              │
 │  - OpsService, ProviderService, RunWorker, GraphEngine     │
 │  - ProviderCatalogService, ProviderCapabilityService       │
 │  - CostService, TrustEngine, ObservabilityService          │
 │  - MergeGateService, PolicyService, SkillsService          │
+│  - SagpGateway, SurfaceNegotiationService                  │
+│  - AgentBrokerService, AgentTeamsService                   │
+│  - SurfaceResponseService                                  │
 ├─────────────────────────────────────────────────────────────┤
 │ Adapters (tools/gimo_server/adapters/)                     │
 │  - OpenAICompatible, ClaudeCode, Codex, Gemini             │
 │  - GenericCLI, MCPClient                                   │
+│  NOTE: CliAccountAdapter for Claude is BLOCKED (SAGP).     │
+│  Claude access requires ANTHROPIC_API_KEY or MCP.          │
 ├─────────────────────────────────────────────────────────────┤
 │ Storage (.orch_data/ops)                                   │
 │  - plan.json, config.json, provider.json                   │
@@ -431,18 +452,70 @@ The UI:
 
 ---
 
-## 9) Multi-agent direction (frozen specification boundary)
+## 9) SAGP — Surface-Agnostic Governance Protocol
+
+SAGP is the governance layer that all surfaces must traverse. It was introduced after Anthropic's April 2026 policy change blocking third-party OAuth token usage. GIMO transformed from an “LLM consumer” to a **”governance authority”** that any surface consumes.
+
+### 9.1 Core components
+
+| Component | File | Role |
+|---|---|---|
+| `SurfaceIdentity` | `models/surface.py` | Identifies calling surface (type, name, capabilities) |
+| `GovernanceVerdict` | `models/governance.py` | Immutable result of action evaluation |
+| `GovernanceSnapshot` | `models/governance.py` | Aggregate governance state at a point in time |
+| `SagpGateway` | `services/sagp_gateway.py` | Central gateway — orchestrates existing services |
+| `SurfaceNegotiationService` | `services/surface_negotiation_service.py` | Auto-detects surface from headers/UA/transport |
+| `SurfaceResponseService` | `services/surface_response_service.py` | Formats responses per surface capabilities |
+| `AgentBrokerService` | `services/agent_broker_service.py` | Governed multi-provider agent spawning |
+| `AgentTeamsService` | `services/agent_teams_service.py` | Generates Claude Agent Teams configs |
+
+### 9.2 Governance evaluation flow
+
+```
+Surface → SagpGateway.evaluate_action()
+  1. Resolve execution policy
+  2. Check tool allowed by policy
+  3. Get risk band (LOW/MEDIUM/HIGH)
+  4. Query trust score + circuit breaker state
+  5. Estimate cost
+  6. Check budget
+  7. Determine HITL requirement
+  8. Generate proof ID
+  → GovernanceVerdict (allowed, reasoning, constraints)
+```
+
+### 9.3 MCP governance tools (8)
+
+`gimo_evaluate_action`, `gimo_estimate_cost`, `gimo_get_trust_profile`, `gimo_get_governance_snapshot`, `gimo_get_gics_insight`, `gimo_verify_proof_chain`, `gimo_get_execution_policy`, `gimo_get_budget_status`.
+
+### 9.4 Compliance: CliAccountAdapter for Claude is BLOCKED
+
+- `adapter_registry.py`: Claude + account mode → `ValueError` (must use API key or MCP)
+- `service_impl.py`: Claude CLI not auto-provisioned
+- `topology_service.py`: `claude-account` removed from injection specs
+
+Codex CLI is unaffected. See [SAGP Architecture](architecture/SAGP.md) for full specification.
+
+### 9.5 Surface auto-discovery
+
+CLI command `gimo surface connect <surface>` auto-discovers Python, repo root, and config paths. Uses `PYTHONPATH` env var (not `cwd`) for Claude Desktop compatibility.
+
+---
+
+## 10) Multi-agent direction (frozen specification boundary)
 
 GIMO is being used as the operational substrate for multi-agent execution.
 
 **Important**: This doc does not describe a roadmap. It defines the boundary conditions any multi-agent executor must respect:
 
 - Any future “step graph” system must preserve the guardrails in §2.4.
+- All multi-agent execution must traverse SAGP governance (§9).
 - **Multi-Surface Stabilization (Phase 7B)**:
   - Canonical authority is strictly server-side.
   - Clients (App, CLI, TUI) consume the same backend contracts (`/ops/operator/status`, `/ops/notices`).
   - Deprecated paths (`/mcp`, path-based repo selection) are marked as legacy and slated for removal.
   - The official App façade is hosted at `/mcp/app`.
+  - The canonical MCP bridge is the **SAGP bridge** at `mcp_bridge/server.py`.
 
 ---
 
@@ -464,10 +537,11 @@ python scripts\\ci\\quality_gates.py
 
 ### Capas
 0. **GIMO Web (Next.js 16)** - Landing, auth, licencias, Stripe (apps/web)
-1. **Services (Python)** - 52+ servicios, GraphEngine es el nucleo
-2. **REST API (FastAPI)** - ~100+ endpoints en `/ops/*`, `/ui/*`, `/auth/*`
-3. **MCP Server (FastMCP)** - 14 tools para IDEs via stdio/SSE
-4. **Frontend (React+Vite)** - Dashboard en puerto 5173
+1. **SAGP Layer** - Surface-Agnostic Governance Protocol (SagpGateway, SurfaceIdentity, GovernanceVerdict)
+2. **Services (Python)** - 60+ servicios, GraphEngine es el nucleo
+3. **REST API (FastAPI)** - ~100+ endpoints en `/ops/*`, `/ui/*`, `/auth/*`
+4. **MCP Server (FastMCP)** - 180+ tools (dynamic + native + governance), 11 resources, 7 prompts
+5. **Frontend (React+Vite)** - Dashboard en puerto 5173
 
 ### Sistema de Storage
 - **Actual**: JSON file-backed para OPS state, SQLite para cost/trust/eval storage.

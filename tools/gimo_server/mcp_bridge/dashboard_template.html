@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GIMO Governance Dashboard</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #c9d1d9;
+  --text-muted: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --red: #f85149;
+  --purple: #bc8cff;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 16px;
+  font-size: 14px;
+}
+h1 { color: var(--accent); font-size: 20px; margin-bottom: 16px; }
+h2 { color: var(--text); font-size: 15px; margin-bottom: 8px; font-weight: 600; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.badge-green { background: rgba(63,185,80,0.15); color: var(--green); }
+.badge-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
+.badge-red { background: rgba(248,81,73,0.15); color: var(--red); }
+.badge-blue { background: rgba(88,166,255,0.15); color: var(--accent); }
+
+.trust-bar {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  margin: 4px 0;
+  overflow: hidden;
+}
+.trust-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.metric-row:last-child { border-bottom: none; }
+.metric-label { color: var(--text-muted); }
+.metric-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.policy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 6px;
+}
+.policy-chip {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  text-align: center;
+  background: var(--border);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.policy-chip.active { background: rgba(88,166,255,0.2); border: 1px solid var(--accent); }
+.policy-chip:hover { background: rgba(88,166,255,0.1); }
+
+.btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+.btn:hover { background: rgba(88,166,255,0.1); }
+.btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+
+#status-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 6px 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+}
+</style>
+</head>
+<body>
+
+<h1>GIMO Governance Dashboard</h1>
+
+<div class="grid">
+  <!-- Trust Heatmap -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Trust Profile</h2>
+      <span class="badge badge-green" id="trust-state">CLOSED</span>
+    </div>
+    <div id="trust-dimensions">
+      <div class="metric-row">
+        <span class="metric-label">Provider</span>
+        <span class="metric-value" id="trust-provider">0.85</span>
+      </div>
+      <div class="trust-bar"><div class="trust-fill" id="bar-provider" style="width:85%;background:var(--green)"></div></div>
+      <div class="metric-row">
+        <span class="metric-label">Model</span>
+        <span class="metric-value" id="trust-model">0.85</span>
+      </div>
+      <div class="trust-bar"><div class="trust-fill" id="bar-model" style="width:85%;background:var(--green)"></div></div>
+      <div class="metric-row">
+        <span class="metric-label">Tool</span>
+        <span class="metric-value" id="trust-tool">0.85</span>
+      </div>
+      <div class="trust-bar"><div class="trust-fill" id="bar-tool" style="width:85%;background:var(--green)"></div></div>
+    </div>
+  </div>
+
+  <!-- Budget Gauge -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Budget Status</h2>
+      <span class="badge badge-blue" id="budget-alert">OK</span>
+    </div>
+    <div id="budget-info">
+      <div class="metric-row">
+        <span class="metric-label">Remaining</span>
+        <span class="metric-value" id="budget-remaining">--</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Burn Rate</span>
+        <span class="metric-value" id="budget-burn">--</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Forecast</span>
+        <span class="metric-value" id="budget-forecast">--</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- GICS Health -->
+  <div class="card">
+    <div class="card-header">
+      <h2>GICS Health</h2>
+      <span class="badge badge-green" id="gics-state">ALIVE</span>
+    </div>
+    <div>
+      <div class="metric-row">
+        <span class="metric-label">Daemon</span>
+        <span class="metric-value" id="gics-daemon">--</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Entries</span>
+        <span class="metric-value" id="gics-entries">--</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Proof Chain</span>
+        <span class="metric-value" id="proof-length">--</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Policies -->
+<div class="card" style="margin-bottom:12px">
+  <div class="card-header"><h2>Execution Policies</h2></div>
+  <div class="policy-grid">
+    <div class="policy-chip active" data-policy="read_only">read_only</div>
+    <div class="policy-chip" data-policy="docs_research">docs_research</div>
+    <div class="policy-chip" data-policy="propose_only">propose_only</div>
+    <div class="policy-chip" data-policy="workspace_safe">workspace_safe</div>
+    <div class="policy-chip" data-policy="workspace_experiment">workspace_experiment</div>
+    <div class="policy-chip" data-policy="security_audit">security_audit</div>
+  </div>
+</div>
+
+<!-- Actions -->
+<div class="card">
+  <div class="card-header"><h2>Governance Actions</h2></div>
+  <div class="btn-row">
+    <button class="btn" id="btn-refresh">Refresh Snapshot</button>
+    <button class="btn" id="btn-verify">Verify Proof Chain</button>
+    <button class="btn" id="btn-gics">GICS Insight</button>
+    <button class="btn" id="btn-trust">Trust Dashboard</button>
+  </div>
+</div>
+
+<div id="status-bar">
+  <span id="surface-info">Surface: MCP App</span>
+  <span id="last-update">Last update: --</span>
+</div>
+
+<script>
+// Bidirectional MCP Apps communication via postMessage
+const MCP_RPC = {
+  id: 0,
+  call(method, params) {
+    const id = ++this.id;
+    window.parent.postMessage({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/call",
+      params: { name: method, arguments: params }
+    }, "*");
+    return id;
+  }
+};
+
+// Update dashboard from snapshot data
+function updateFromSnapshot(data) {
+  if (data.trust_profile) {
+    for (const [dim, score] of Object.entries(data.trust_profile)) {
+      const el = document.getElementById(`trust-${dim}`);
+      const bar = document.getElementById(`bar-${dim}`);
+      if (el) el.textContent = score.toFixed(2);
+      if (bar) {
+        const pct = Math.round(score * 100);
+        bar.style.width = pct + '%';
+        bar.style.background = score >= 0.7 ? 'var(--green)' : score >= 0.4 ? 'var(--yellow)' : 'var(--red)';
+      }
+    }
+  }
+  if (data.budget_status) {
+    const b = data.budget_status;
+    const rem = document.getElementById('budget-remaining');
+    if (rem && b.remaining_usd !== undefined) rem.textContent = `$${b.remaining_usd.toFixed(2)}`;
+  }
+  if (data.gics_health) {
+    const g = data.gics_health;
+    const daemon = document.getElementById('gics-daemon');
+    const entries = document.getElementById('gics-entries');
+    const state = document.getElementById('gics-state');
+    if (daemon) daemon.textContent = g.daemon_alive ? 'Running' : 'Down';
+    if (entries) entries.textContent = g.entry_count || 0;
+    if (state) {
+      state.textContent = g.daemon_alive ? 'ALIVE' : 'DOWN';
+      state.className = `badge ${g.daemon_alive ? 'badge-green' : 'badge-red'}`;
+    }
+  }
+  if (data.proof_chain_length !== undefined) {
+    const pl = document.getElementById('proof-length');
+    if (pl) pl.textContent = data.proof_chain_length;
+  }
+  document.getElementById('last-update').textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+}
+
+// Button handlers
+document.getElementById('btn-refresh').addEventListener('click', () => {
+  MCP_RPC.call('gimo_get_governance_snapshot', {});
+});
+document.getElementById('btn-verify').addEventListener('click', () => {
+  MCP_RPC.call('gimo_verify_proof_chain', { thread_id: '' });
+});
+document.getElementById('btn-gics').addEventListener('click', () => {
+  MCP_RPC.call('gimo_get_gics_insight', { prefix: '', limit: 20 });
+});
+document.getElementById('btn-trust').addEventListener('click', () => {
+  MCP_RPC.call('gimo_get_trust_profile', {});
+});
+
+// Policy chip selection
+document.querySelectorAll('.policy-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.policy-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    MCP_RPC.call('gimo_get_execution_policy', { policy_name: chip.dataset.policy });
+  });
+});
+
+// Listen for responses from MCP host
+window.addEventListener('message', (event) => {
+  if (event.data && event.data.jsonrpc === '2.0' && event.data.result) {
+    try {
+      const data = typeof event.data.result === 'string'
+        ? JSON.parse(event.data.result)
+        : event.data.result;
+      if (data.surface_type || data.trust_profile) {
+        updateFromSnapshot(data);
+      }
+    } catch (e) {
+      // Non-JSON result, ignore
+    }
+  }
+});
+</script>
+</body>
+</html>

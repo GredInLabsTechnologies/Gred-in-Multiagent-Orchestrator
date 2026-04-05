@@ -110,6 +110,19 @@ class ContractFactory:
         else:
             license_plan = "unknown"
 
+        # 6. SAGP SURFACE — Detect from X-Gimo-Surface header
+        surface = None
+        surface_header = request.headers.get("X-Gimo-Surface", "").strip()
+        if surface_header:
+            from tools.gimo_server.models.surface import SurfaceIdentity
+            surface = SurfaceIdentity(
+                surface_type=surface_header if surface_header in (
+                    "claude_app", "vscode", "cursor", "cli", "tui",
+                    "web", "chatgpt_app", "mcp_generic", "agent_sdk",
+                ) else "mcp_generic",
+                surface_name=request.headers.get("User-Agent", surface_header),
+            )
+
         contract = GimoContract(
             caller_role=caller_role,
             agent_trust_ceiling=agent_trust_ceiling,
@@ -120,6 +133,7 @@ class ContractFactory:
             valid_scopes=valid_scopes,
             created_at=datetime.now(timezone.utc),
             license_plan=license_plan,
+            surface=surface,
         )
 
         logger.debug(

@@ -84,7 +84,11 @@ def _register_dynamic():
 
 def _register_native():
     from tools.gimo_server.mcp_bridge.native_tools import register_native_tools
+    from tools.gimo_server.mcp_bridge.governance_tools import register_governance_tools
+    from tools.gimo_server.mcp_bridge.mcp_app_dashboard import register_dashboard_app
     register_native_tools(mcp)
+    register_governance_tools(mcp)
+    register_dashboard_app(mcp)
 
 
 async def _startup_and_run() -> None:

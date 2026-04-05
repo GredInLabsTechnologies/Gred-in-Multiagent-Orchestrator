@@ -1,0 +1,17 @@
+# GIMO Governance Rules
+# Declarative rules that GIMO enforces server-side for agents working in this workspace.
+# See https://gimo.dev/docs/governance for full reference.
+
+rules:
+  # Master switch for telemetry (off by default)
+  telemetry:
+    profile: "off"  # off | minimal | standard | full
+
+  # Protected paths — agents cannot modify these
+  # protected_paths: []
+
+  # Style guidance — injected into agent prompts as soft constraints
+  # style: "follow existing patterns"
+
+  # Language preference for agent responses
+  # language: "en"

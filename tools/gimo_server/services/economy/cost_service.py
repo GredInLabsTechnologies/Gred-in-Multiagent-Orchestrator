@@ -41,8 +41,14 @@ class CostService:
         # Claude 4.x
         "opus-4": "claude-opus-4",
         "claude-opus-4": "claude-opus-4",
+        "opus-4.5": "claude-opus-4-5",
+        "claude-opus-4-5": "claude-opus-4-5",
+        "opus-4.6": "claude-opus-4-6",
+        "claude-opus-4-6": "claude-opus-4-6",
         "sonnet-4.5": "claude-sonnet-4-5",
         "claude-sonnet-4-5": "claude-sonnet-4-5",
+        "sonnet-4.6": "claude-sonnet-4-6",
+        "claude-sonnet-4-6": "claude-sonnet-4-6",
         "haiku-4.5": "claude-haiku-4-5",
         "claude-haiku-4-5": "claude-haiku-4-5",
         # Claude 3.x (legacy)

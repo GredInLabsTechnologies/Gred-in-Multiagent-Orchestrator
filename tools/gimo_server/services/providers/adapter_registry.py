@@ -31,8 +31,19 @@ def build_provider_adapter(
                 if base_url.endswith("/v1"):
                     base_url = base_url.removesuffix("/v1")
                 return AnthropicAdapter(base_url=base_url, model=entry.model, api_key=api_key)
-        binary = "codex" if canonical_type == "codex" else "claude"
-        return CliAccountAdapter(binary=binary)
+            # SAGP: Claude CLI account mode is DEPRECATED — violates Anthropic's
+            # April 2026 third-party harness policy.  Codex CLI is unaffected.
+            import logging as _logging
+            _logging.getLogger("orchestrator.providers").warning(
+                "[SAGP] CliAccountAdapter for Claude is deprecated. "
+                "Set ANTHROPIC_API_KEY or use GIMO as MCP server from Claude App."
+            )
+            raise ValueError(
+                "Claude CLI account mode is no longer supported (Anthropic April 2026 policy). "
+                "Set ANTHROPIC_API_KEY for pay-as-you-go API access, or use GIMO as an MCP "
+                "server from within Claude App/Code (first-party, allowed)."
+            )
+        return CliAccountAdapter(binary="codex")
 
     # Anthropic/Claude with API key → dedicated adapter (x-api-key + /v1/messages)
     if canonical_type in _ANTHROPIC_TYPES and auth_mode != "account":

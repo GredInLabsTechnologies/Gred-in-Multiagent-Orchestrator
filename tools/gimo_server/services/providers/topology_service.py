@@ -37,6 +37,8 @@ class ProviderTopologyService:
         capabilities_for: Callable[[str | None], Dict[str, Any]],
     ) -> Dict[str, ProviderEntry]:
         out = dict(providers)
+        # SAGP: Claude CLI account mode is DEPRECATED (Anthropic April 2026 policy).
+        # Only codex CLI auto-injection remains — OpenAI has not restricted its CLI.
         specs = [
             {
                 "provider_type": "codex",
@@ -44,13 +46,6 @@ class ProviderTopologyService:
                 "binary": "codex",
                 "display_name": "Codex Account Mode",
                 "model": "gpt-5-codex",
-            },
-            {
-                "provider_type": "claude",
-                "provider_id": "claude-account",
-                "binary": "claude",
-                "display_name": "Claude Account Mode",
-                "model": "claude-3-7-sonnet-latest",
             },
         ]
 

@@ -79,4 +79,45 @@ def register_prompts(mcp: FastMCP):
             )
         ]
 
-    logger.info("Registered 5 MCP Prompts")
+    # ── SAGP Governance Prompts ────────────────────────────────────────
+    @mcp.prompt("governance_check")
+    def prompt_governance_check(tool_name: str, policy: str = "workspace_safe") -> list[PromptMessage]:
+        """Pre-action governance evaluation workflow."""
+        return [
+            PromptMessage(
+                role="user",
+                content=TextContent(
+                    type="text",
+                    text=(
+                        f"Before executing '{tool_name}', perform a governance check:\n"
+                        f"1. Call gimo_evaluate_action(tool_name='{tool_name}', policy='{policy}') to get the verdict.\n"
+                        f"2. If 'requires_approval' is true, ask me before proceeding.\n"
+                        f"3. If 'allowed' is false, explain why and suggest alternatives.\n"
+                        f"4. Show the cost estimate and risk band."
+                    ),
+                ),
+            )
+        ]
+
+    @mcp.prompt("multi_agent_plan")
+    def prompt_multi_agent_plan(goal: str) -> list[PromptMessage]:
+        """Plan creation with provider selection per worker."""
+        return [
+            PromptMessage(
+                role="user",
+                content=TextContent(
+                    type="text",
+                    text=(
+                        f"Create a multi-agent plan for: {goal}\n\n"
+                        "For each worker agent:\n"
+                        "1. Select the best provider/model using gimo_estimate_cost to compare options.\n"
+                        "2. Assign an execution_policy appropriate for the task risk level.\n"
+                        "3. Use gimo_spawn_subagent with explicit provider, model, and policy.\n"
+                        "4. Check governance with gimo_evaluate_action before each high-risk step.\n"
+                        "5. Show the total estimated cost breakdown."
+                    ),
+                ),
+            )
+        ]
+
+    logger.info("Registered 7 MCP Prompts")
