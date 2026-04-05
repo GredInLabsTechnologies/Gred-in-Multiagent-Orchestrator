@@ -28,12 +28,13 @@ def session_with_repo(test_client, tmp_path):
     repo_dir.mkdir()
     (repo_dir / "app.py").write_text("print('hello')", encoding="utf-8")
     
-    # Create a dummy registry pointing to tmp repo
+    # Create a dummy registry pointing to tmp repo (save original for cleanup)
     settings = get_settings()
     registry_path = settings.repo_registry_path
     registry_path.parent.mkdir(parents=True, exist_ok=True)
-    registry_path.write_text(json.dumps({"repos": [str(repo_dir.resolve())]}))
-    
+    old_registry = registry_path.read_text(encoding="utf-8") if registry_path.exists() else None
+    registry_path.write_text(json.dumps({"repos": [str(repo_dir.resolve())]}), encoding="utf-8")
+
     # Get handle
     mapping = AppSessionService.get_handle_mapping()
     repo_handle = None
@@ -41,15 +42,20 @@ def session_with_repo(test_client, tmp_path):
         if str(Path(path).resolve()) == str(repo_dir.resolve()):
             repo_handle = handle
             break
-    
+
     assert repo_handle is not None
-    
+
     # Bind repo
     test_client.post(f"/ops/app/sessions/{session_id}/repo/select", json={"repo_id": repo_handle})
-    
-    yield session_id, repo_handle
-    
-    app.dependency_overrides.clear()
+
+    try:
+        yield session_id, repo_handle
+    finally:
+        if old_registry is not None:
+            registry_path.write_text(old_registry, encoding="utf-8")
+        elif registry_path.exists():
+            registry_path.unlink()
+        app.dependency_overrides.clear()
 
 def test_recon_generates_read_proofs(test_client, session_with_repo):
     session_id, _ = session_with_repo

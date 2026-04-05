@@ -753,7 +753,11 @@ class AgenticLoopService:
 
         for iteration in range(max_turns):
             iterations_used = iteration + 1
-            await emit_event("iteration_start", {"iteration": iterations_used, "mood": mood})
+            await emit_event("iteration_start", {
+                "iteration": iterations_used,
+                "mood": mood,
+                "cumulative_cost": round(total_cost, 6),
+            })
 
             predicted_max_tokens = cls._predict_max_tokens(task_key, model)
             try:
@@ -895,6 +899,8 @@ class AgenticLoopService:
                                 "status": "denied",
                                 "duration": 0.0,
                                 "risk": risk,
+                                "iteration_cost": 0.0,
+                                "cumulative_cost": round(total_cost, 6),
                             },
                         )
                         continue
@@ -945,6 +951,8 @@ class AgenticLoopService:
                                 "duration": 0.0,
                                 "risk": risk,
                                 "policy": resolved_execution_policy,
+                                "iteration_cost": 0.0,
+                                "cumulative_cost": round(total_cost, 6),
                             },
                         )
                         continue
@@ -1146,6 +1154,8 @@ class AgenticLoopService:
                         "message": result_message[:200],
                         "duration": duration,
                         "risk": risk,
+                        "iteration_cost": round(iteration_cost, 6),
+                        "cumulative_cost": round(total_cost, 6),
                     },
                 )
 

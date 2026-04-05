@@ -28,6 +28,8 @@ def build_provider_adapter(
             api_key = resolve_secret(entry) or os.environ.get("ANTHROPIC_API_KEY", "").strip()
             if api_key:
                 base_url = entry.base_url or DEFAULT_BASE_URLS.get(canonical_type, "https://api.anthropic.com")
+                if base_url.endswith("/v1"):
+                    base_url = base_url.removesuffix("/v1")
                 return AnthropicAdapter(base_url=base_url, model=entry.model, api_key=api_key)
         binary = "codex" if canonical_type == "codex" else "claude"
         return CliAccountAdapter(binary=binary)
@@ -35,6 +37,8 @@ def build_provider_adapter(
     # Anthropic/Claude with API key → dedicated adapter (x-api-key + /v1/messages)
     if canonical_type in _ANTHROPIC_TYPES and auth_mode != "account":
         base_url = entry.base_url or DEFAULT_BASE_URLS.get(canonical_type, "https://api.anthropic.com")
+        if base_url.endswith("/v1"):
+            base_url = base_url.removesuffix("/v1")
         return AnthropicAdapter(
             base_url=base_url,
             model=entry.model,

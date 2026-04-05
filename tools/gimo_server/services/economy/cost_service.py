@@ -87,6 +87,16 @@ class CostService:
         "local": "local",
     }
 
+    # Conservative tier defaults (USD per 1M tokens), derived from
+    # actual averages of known models per tier in model_pricing.json.
+    TIER_DEFAULT_PRICING: Dict[int, Dict[str, float]] = {
+        1: {"input": 0.10, "output": 0.20},   # nano: local-class
+        2: {"input": 0.40, "output": 1.50},   # small: mini/haiku-class
+        3: {"input": 0.80, "output": 2.00},   # balanced: flash/deepseek-class
+        4: {"input": 3.00, "output": 12.00},  # premium: sonnet/gpt-4o-class
+        5: {"input": 12.00, "output": 60.00}, # flagship: opus/o1-pro-class
+    }
+
     @classmethod
     def get_provider(cls, model_name: str) -> str:
         """Infers provider from model name."""
@@ -137,6 +147,13 @@ class CostService:
                 if mapped_key in cls.PRICING_REGISTRY:
                     return cls.PRICING_REGISTRY[mapped_key]
                 
+        # Tier-based fallback: infer tier from model name, return conservative defaults.
+        # Prevents silent $0 for unknown models (breaks cascade routing + budget tracking).
+        if "local" not in m_name:
+            from ..model_inventory_service import _infer_tier
+            tier = _infer_tier(m_name)
+            if tier in cls.TIER_DEFAULT_PRICING:
+                return cls.TIER_DEFAULT_PRICING[tier]
         return cls.PRICING_REGISTRY.get("local", {"input": 0.0, "output": 0.0})
 
     @classmethod

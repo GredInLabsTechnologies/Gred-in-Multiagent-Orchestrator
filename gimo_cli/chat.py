@@ -75,6 +75,12 @@ class ConsoleTerminalSurface(TerminalSurfaceAdapter):
         provider = str(snapshot.get("active_provider") or "unknown")
         model = str(snapshot.get("active_model") or "unknown")
         permissions = str(snapshot.get("permissions") or "suggest")
+        _hitl_desc = {
+            "suggest": "agent proposes, you approve",
+            "auto-edit": "auto-applies file edits",
+            "full-auto": "fully autonomous execution",
+        }
+        permissions_hint = _hitl_desc.get(permissions, "")
         workspace_mode = str(snapshot.get("workspace_mode") or "ephemeral")
         orchestrator_authority = str(snapshot.get("orchestrator_authority") or "gimo")
         branch = str(snapshot.get("branch") or "?")
@@ -92,7 +98,7 @@ class ConsoleTerminalSurface(TerminalSurfaceAdapter):
         lines = [
             f"System: [bold]v{version}[/bold]",
             f"Provider: [cyan]{provider}[/cyan] / {model}",
-            f"Permissions: [bold]{permissions}[/bold]",
+            f"Permissions: [bold]{permissions}[/bold] [dim]({permissions_hint})[/dim]" if permissions_hint else f"Permissions: [bold]{permissions}[/bold]",
             f"Workspace mode: [bold]{workspace_mode}[/bold]",
             f"Orchestrator authority: [bold]{orchestrator_authority}[/bold]",
             f"Workspace: [dim]{self._workspace_root}[/dim]",

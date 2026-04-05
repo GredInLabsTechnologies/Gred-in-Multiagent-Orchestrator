@@ -89,8 +89,16 @@ class TestGetPricing:
         assert pricing["input"] == 3.0
         assert pricing["output"] == 15.0
 
-    def test_unknown_model_falls_back_to_local(self, _load_sample_pricing):
+    def test_unknown_model_uses_tier_default(self, _load_sample_pricing):
+        """Unknown non-local models get conservative tier-based pricing (not $0)."""
         pricing = CostService.get_pricing("totally-unknown-model-xyz")
+        # _infer_tier defaults to tier 3 for unrecognized names
+        assert pricing["input"] > 0, "Unknown model should not silently cost $0"
+        assert pricing["output"] > 0
+
+    def test_local_model_falls_back_to_zero(self, _load_sample_pricing):
+        """Models with 'local' in the name still get $0 pricing."""
+        pricing = CostService.get_pricing("local-custom-model")
         assert pricing == {"input": 0.0, "output": 0.0}
 
 
