@@ -47,6 +47,8 @@ def register_governance_tools(mcp: FastMCP):
                 policy_name=policy,
             )
             return json.dumps(verdict.to_dict(), indent=2)
+        except json.JSONDecodeError as e:
+            return json.dumps({"error": "INVALID_TOOL_ARGS", "detail": str(e)})
         except Exception as e:
             logger.error("gimo_evaluate_action failed: %s", e)
             return json.dumps({"error": str(e)})
@@ -93,8 +95,9 @@ def register_governance_tools(mcp: FastMCP):
         try:
             from tools.gimo_server.services.trust_engine import TrustEngine
             from tools.gimo_server.services.storage.trust_storage import TrustStorage
+            from tools.gimo_server.services.storage_service import StorageService
 
-            storage = TrustStorage()
+            storage = TrustStorage(gics_service=StorageService._shared_gics)
             engine = TrustEngine(trust_store=storage)
 
             if dimension_key:

@@ -236,3 +236,35 @@ def audit(
     last_line = lines[-1] if lines else "no audit lines"
     table.add_row("Audit Tail", str(result["audit_tail"]["status_code"]), str(last_line)[:120])
     console.print(table)
+
+
+@app.command()
+def graph(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Display the orchestration graph."""
+    cfg = load_config()
+    status_code, payload = api_request(cfg, "GET", "/ops/graph")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        emit_output(payload, json_output=True)
+        return
+    console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(f"[dim]{payload}[/dim]")
+
+
+@app.command()
+def capabilities(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Display server capabilities."""
+    cfg = load_config()
+    status_code, payload = api_request(cfg, "GET", "/ops/capabilities")
+    if status_code != 200:
+        console.print(f"[red]Failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+    if json_output:
+        emit_output(payload, json_output=True)
+        return
+    console.print_json(data=payload) if isinstance(payload, (dict, list)) else console.print(f"[dim]{payload}[/dim]")

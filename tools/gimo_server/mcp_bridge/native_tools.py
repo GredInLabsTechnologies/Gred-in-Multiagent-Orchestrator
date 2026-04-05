@@ -275,107 +275,144 @@ def register_native_tools(mcp: FastMCP):
     async def gimo_propose_structured_plan(task_instructions: str) -> str:
         """Generates a structured multi-step plan with task dependencies and Mermaid graph."""
         try:
-            from tools.gimo_server.services.ops_service import OpsService
             from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
+            from .bridge import proxy_to_api
             plan_data = await _generate_plan_for_task(task_instructions)
             graph = _generate_mermaid_graph(plan_data)
-            draft = OpsService.create_draft(
-                prompt=task_instructions,
-                content=TaskDescriptorService.canonicalize_plan_content(plan_data),
-                context={"structured": True, "mermaid": graph},
-                provider="mcp_planner",
+            import json
+            result = await proxy_to_api(
+                "POST", "/ops/drafts",
+                __body={
+                    "prompt": task_instructions,
+                    "content": TaskDescriptorService.canonicalize_plan_content(plan_data),
+                    "context": {"structured": True, "mermaid": graph},
+                    "provider": "mcp_planner",
+                },
             )
-            return f"🚀 Plan propuesto (Draft: {draft.id}):\\n```mermaid\\n{graph}\\n```"
+            return f"{result}\\n```mermaid\\n{graph}\\n```"
         except Exception as e: return f"Error: {e}"
 
     @mcp.tool()
     async def gimo_create_draft(task_instructions: str, target_agent_id: str = "auto") -> str:
-        """Creates an Ops Draft based on task instructions with Mermaid planning"""
+        """Creates an Ops Draft based on task instructions with Mermaid planning."""
         try:
-            from tools.gimo_server.services.ops_service import OpsService
             from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
+            from .bridge import proxy_to_api
             plan_data = await _generate_plan_for_task(task_instructions)
             graph = _generate_mermaid_graph(plan_data)
-            draft = OpsService.create_draft(
-                prompt=task_instructions,
-                content=TaskDescriptorService.canonicalize_plan_content(plan_data),
-                context={"structured": True, "mermaid": graph},
-                provider="mcp",
+            result = await proxy_to_api(
+                "POST", "/ops/drafts",
+                __body={
+                    "prompt": task_instructions,
+                    "content": TaskDescriptorService.canonicalize_plan_content(plan_data),
+                    "context": {"structured": True, "mermaid": graph},
+                    "provider": "mcp",
+                },
             )
-            return f"Draft: {draft.id}\\n```mermaid\\n{graph}\\n```"
+            return f"{result}\\n```mermaid\\n{graph}\\n```"
         except Exception as e: return str(e)
 
     @mcp.tool()
     async def gimo_run_task(task_instructions: str, target_agent_id: str = "auto") -> str:
-        """Automatically create and execute a whole plan based on instructions."""
+        """Automatically create, approve, and execute a plan through the full governance chain."""
         try:
-            from tools.gimo_server.services.ops_service import OpsService
             from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
+            from .bridge import proxy_to_api
+            import json
             plan_data = await _generate_plan_for_task(task_instructions)
             graph = _generate_mermaid_graph(plan_data)
-            draft = OpsService.create_draft(
-                prompt=task_instructions,
-                content=TaskDescriptorService.canonicalize_plan_content(plan_data),
-                context={"structured": True, "mermaid": graph},
-                provider="mcp_auto",
+            # 1. Create draft via HTTP (audit log, rate limit)
+            draft_result = await proxy_to_api(
+                "POST", "/ops/drafts",
+                __body={
+                    "prompt": task_instructions,
+                    "content": TaskDescriptorService.canonicalize_plan_content(plan_data),
+                    "context": {"structured": True, "mermaid": graph},
+                    "provider": "mcp_auto",
+                },
             )
-            appr = OpsService.approve_draft(draft.id, approved_by="auto")
-            run = OpsService.create_run(appr.id)
-            return f"Running. Run ID: {run.id}\\nPlan:\\n```mermaid\\n{graph}\\n```"
+            # Extract draft ID from response
+            draft_id = None
+            for line in draft_result.splitlines():
+                try:
+                    data = json.loads(line.lstrip("✅ Success (201):").strip())
+                    draft_id = data.get("id")
+                    break
+                except (json.JSONDecodeError, ValueError):
+                    continue
+            if not draft_id:
+                return f"Draft creation failed:\\n{draft_result}"
+            # 2. Approve via HTTP (risk gate, intent gate, auto_run gate)
+            approve_result = await proxy_to_api(
+                "POST", f"/ops/drafts/{draft_id}/approve",
+                __query={"auto_run": "true"},
+            )
+            return f"{approve_result}\\nPlan:\\n```mermaid\\n{graph}\\n```"
         except Exception as e: return str(e)
 
     @mcp.tool()
-    def gimo_resolve_handover(run_id: str, decision: str, edited_state: dict = None) -> str:
+    async def gimo_resolve_handover(run_id: str, decision: str, edited_state: dict = None) -> str:
         """Resume a blocked run after human intervention/handover decision."""
-        try:
-            from tools.gimo_server.services.ops_service import OpsService
-            OpsService.update_run_status(run_id, "running", msg=f"Resolved: {decision}")
-            return "OK"
-        except Exception as e: return str(e)
+        from .bridge import proxy_to_api
+        return await proxy_to_api(
+            "POST", f"/ops/runs/{run_id}/resume",
+            __body={"decision": decision},
+        )
 
     @mcp.tool()
-    def gimo_get_draft(draft_id: str) -> str:
+    async def gimo_get_draft(draft_id: str) -> str:
         """Returns the raw plan content for a given draft."""
-        try:
-            from tools.gimo_server.services.ops_service import OpsService
-            draft = OpsService.get_draft(draft_id)
-            return draft.content if draft else "Not found"
-        except Exception as e: return str(e)
+        from .bridge import proxy_to_api
+        return await proxy_to_api("GET", f"/ops/drafts/{draft_id}")
 
     @mcp.tool()
-    def gimo_approve_draft(draft_id: str) -> str:
-        """Veto/Approve a draft. This generates a concrete Run."""
-        try:
-            from tools.gimo_server.services.ops_service import OpsService
-            approved = OpsService.approve_draft(draft_id, approved_by="human")
-            run = OpsService.create_run(approved.id)
-            return f"Approved. Run: {run.id}"
-        except Exception as e: return str(e)
+    async def gimo_approve_draft(draft_id: str, auto_run: bool = True) -> str:
+        """Approve a draft through the full governance chain (risk gate, intent gate, auto_run gate, audit log).
+
+        Args:
+            draft_id: ID of the draft to approve
+            auto_run: Whether to automatically run after approval (default True)
+        """
+        from .bridge import proxy_to_api
+        return await proxy_to_api(
+            "POST", f"/ops/drafts/{draft_id}/approve",
+            __query={"auto_run": str(auto_run).lower()},
+        )
 
     @mcp.tool()
-    def gimo_get_task_status(run_id: str) -> str:
+    async def gimo_get_task_status(run_id: str) -> str:
         """Check if a run is pending, running, or done."""
-        try:
-            from tools.gimo_server.services.ops_service import OpsService
-            run = OpsService.get_run(run_id)
-            return f"Status: {run.status}" if run else "Not found"
-        except Exception as e: return str(e)
+        from .bridge import proxy_to_api
+        return await proxy_to_api("GET", f"/ops/runs/{run_id}")
 
     @mcp.tool()
-    def gimo_get_plan_graph(draft_or_run_id: str) -> str:
+    async def gimo_get_plan_graph(draft_or_run_id: str) -> str:
         """Returns the Mermaid graph visualization for a draft or run."""
         try:
-            from tools.gimo_server.services.ops_service import OpsService
-            content = None
+            from .bridge import proxy_to_api
+            import json
             if draft_or_run_id.startswith("r_"):
-                run = OpsService.get_run(draft_or_run_id)
-                if run:
-                    approved = OpsService.get_approved(run.approved_id)
-                    content = approved.content if approved else None
+                result = await proxy_to_api("GET", f"/ops/runs/{draft_or_run_id}")
+                try:
+                    data = json.loads(result.split("\n", 1)[-1])
+                    approved_id = data.get("approved_id", "")
+                    if approved_id:
+                        approved_result = await proxy_to_api("GET", f"/ops/approved/{approved_id}")
+                        approved_data = json.loads(approved_result.split("\n", 1)[-1])
+                        content = approved_data.get("content")
+                    else:
+                        content = None
+                except (json.JSONDecodeError, ValueError):
+                    return f"Could not parse run data for {draft_or_run_id}"
             else:
-                draft = OpsService.get_draft(draft_or_run_id)
-                content = draft.content if draft else None
-            if not content: return f"No plan found for {draft_or_run_id}"
+                result = await proxy_to_api("GET", f"/ops/drafts/{draft_or_run_id}")
+                try:
+                    data = json.loads(result.split("\n", 1)[-1])
+                    content = data.get("content")
+                except (json.JSONDecodeError, ValueError):
+                    return f"Could not parse draft data for {draft_or_run_id}"
+            if not content:
+                return f"No plan found for {draft_or_run_id}"
             graph = _generate_mermaid_graph(content)
             return f"```mermaid\\n{graph}\\n```"
         except Exception as e:
@@ -628,18 +665,28 @@ def register_native_tools(mcp: FastMCP):
         try:
             import json
             from tools.gimo_server.services.agent_teams_service import AgentTeamsService
-            from tools.gimo_server.services.ops_service import OpsService
+            from .bridge import proxy_to_api
 
-            # Try to load plan content
+            # Load plan content via HTTP
             content = None
             if plan_id.startswith("r_"):
-                run = OpsService.get_run(plan_id)
-                if run:
-                    approved = OpsService.get_approved(run.approved_id)
-                    content = approved.content if approved else None
+                result = await proxy_to_api("GET", f"/ops/runs/{plan_id}")
+                try:
+                    data = json.loads(result.split("\n", 1)[-1])
+                    approved_id = data.get("approved_id", "")
+                    if approved_id:
+                        approved_result = await proxy_to_api("GET", f"/ops/approved/{approved_id}")
+                        approved_data = json.loads(approved_result.split("\n", 1)[-1])
+                        content = approved_data.get("content")
+                except (json.JSONDecodeError, ValueError):
+                    pass
             else:
-                draft = OpsService.get_draft(plan_id)
-                content = draft.content if draft else None
+                result = await proxy_to_api("GET", f"/ops/drafts/{plan_id}")
+                try:
+                    data = json.loads(result.split("\n", 1)[-1])
+                    content = data.get("content")
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
             if not content:
                 return json.dumps({"error": f"Plan not found: {plan_id}"})

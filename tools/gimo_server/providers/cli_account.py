@@ -176,11 +176,12 @@ class CliAccountAdapter(ProviderAdapter):
                     with open(tf_path, "rb") as f:
                         completed = await asyncio.to_thread(
                             _subprocess.run,
-                            cmd,
+                            " ".join(cmd),  # string form for shell
                             capture_output=True,
                             env=env,
                             timeout=300,
                             stdin=f,
+                            shell=True,  # required for npm .cmd shims  # nosec B602
                         )
                 finally:
                     import os as _os
@@ -188,10 +189,11 @@ class CliAccountAdapter(ProviderAdapter):
             else:
                 completed = await asyncio.to_thread(
                     _subprocess.run,
-                    cmd,
+                    " ".join(cmd),  # string form for shell
                     capture_output=True,
                     env=env,
                     timeout=300,
+                    shell=True,  # required for npm .cmd shims  # nosec B602
                 )
             stdout = completed.stdout or b""
             stderr = completed.stderr or b""

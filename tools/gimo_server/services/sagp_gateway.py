@@ -162,8 +162,10 @@ class SagpGateway:
     def get_gics_insight(cls, *, prefix: str = "", limit: int = 20) -> Dict[str, Any]:
         """Read-only GICS access."""
         try:
-            from ..services.gics_service import GicsService
-            gics = GicsService()
+            from .storage_service import StorageService
+            gics = StorageService._shared_gics
+            if gics is None:
+                return {"entries": [], "count": 0, "error": "GICS not initialized"}
             entries = gics.scan(prefix=prefix)
             # Apply limit after scan (scan doesn't accept limit)
             entries = entries[:limit] if limit else entries
@@ -177,7 +179,7 @@ class SagpGateway:
         """Delegate to ExecutionProofChain.verify()."""
         try:
             from ..security.execution_proof import ExecutionProofChain
-            from ..services.storage.storage_service import StorageService
+            from .storage_service import StorageService
             storage = StorageService()
             raw_proofs = storage.list_proofs(thread_id) if hasattr(storage, "list_proofs") else []
             if not raw_proofs:
@@ -206,7 +208,8 @@ class SagpGateway:
         try:
             from ..services.trust_engine import TrustEngine
             from ..services.storage.trust_storage import TrustStorage
-            storage = TrustStorage()
+            from .storage_service import StorageService
+            storage = TrustStorage(gics_service=StorageService._shared_gics)
             engine = TrustEngine(trust_store=storage)
             record = engine.query_dimension(dimension_key)
             score = float(record.get("score", 0.0))
@@ -221,7 +224,8 @@ class SagpGateway:
         try:
             from ..services.trust_engine import TrustEngine
             from ..services.storage.trust_storage import TrustStorage
-            storage = TrustStorage()
+            from .storage_service import StorageService
+            storage = TrustStorage(gics_service=StorageService._shared_gics)
             engine = TrustEngine(trust_store=storage)
             record = engine.query_dimension("provider")
             return str(record.get("circuit_state", "closed"))
@@ -252,9 +256,11 @@ class SagpGateway:
     def _get_gics_health(cls) -> Dict[str, Any]:
         """Get GICS health summary."""
         try:
-            from ..services.gics_service import GicsService
-            gics = GicsService()
-            alive = hasattr(gics, "_daemon") and gics._daemon is not None
+            from .storage_service import StorageService
+            gics = StorageService._shared_gics
+            if gics is None:
+                return {"daemon_alive": False, "entry_count": 0}
+            alive = hasattr(gics, "_supervisor") and gics._supervisor is not None
             raw_count = gics.count_prefix("") if hasattr(gics, "count_prefix") else 0
             return {"daemon_alive": alive, "entry_count": raw_count or 0}
         except Exception:
@@ -266,7 +272,7 @@ class SagpGateway:
         if not thread_id:
             return 0
         try:
-            from ..services.storage.storage_service import StorageService
+            from .storage_service import StorageService
             storage = StorageService()
             raw_proofs = storage.list_proofs(thread_id) if hasattr(storage, "list_proofs") else []
             return len(raw_proofs)

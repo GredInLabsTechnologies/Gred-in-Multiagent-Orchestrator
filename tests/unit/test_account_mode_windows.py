@@ -62,7 +62,8 @@ class TestCliAccountAdapterWindows:
         adapter = mod.CliAccountAdapter(binary="codex")
         await adapter.generate("hello", {})
 
-        assert any("codex" in str(c) for c in captured["cmd"])
+        # cmd is now a string (shell=True), not a list
+        assert "codex" in str(captured["cmd"])
 
     @pytest.mark.asyncio
     async def test_generate_uses_exec_on_linux(self, _fake_linux, monkeypatch):

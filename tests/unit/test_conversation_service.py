@@ -83,8 +83,8 @@ def test_add_turn_rejects_unsupported_agent_id(tmp_path):
     try:
         thread = ConversationService.create_thread(workspace_root=str(tmp_path), title="guard")
 
-        with pytest.raises(ValueError, match="Unsupported thread agent_id"):
-            ConversationService.add_turn(thread.id, agent_id="worker-rogue")
+        with pytest.raises(ValueError, match="Invalid agent_id"):
+            ConversationService.add_turn(thread.id, agent_id="123-invalid")
 
         stored = ConversationService.get_thread(thread.id)
         assert stored is not None

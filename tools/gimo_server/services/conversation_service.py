@@ -28,7 +28,7 @@ class ConversationService:
     """
 
     THREADS_DIR: Path = OPS_DATA_DIR / "threads"
-    _ALLOWED_TURN_AGENT_IDS = frozenset({"user", "User", "system", "orchestrator"})
+    _AGENT_ID_RE = __import__("re").compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
     _locks_guard = threading.Lock()
     _thread_locks: dict[str, threading.RLock] = {}
 
@@ -256,13 +256,12 @@ class ConversationService:
 
     @classmethod
     def _validate_turn_agent_id(cls, agent_id: str) -> str:
-        normalized = str(agent_id or "").strip()
+        normalized = str(agent_id or "").strip().lower()
         if not normalized:
             raise ValueError("agent_id is required")
-        if normalized not in cls._ALLOWED_TURN_AGENT_IDS:
-            allowed = ", ".join(sorted(cls._ALLOWED_TURN_AGENT_IDS))
+        if not cls._AGENT_ID_RE.match(normalized):
             raise ValueError(
-                f"Unsupported thread agent_id '{normalized}'. Allowed values: {allowed}"
+                f"Invalid agent_id '{normalized}'. Must match [a-zA-Z][a-zA-Z0-9_-]{{0,63}}"
             )
         return normalized
 

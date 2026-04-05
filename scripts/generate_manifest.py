@@ -29,9 +29,17 @@ def generate_manifest():
             
             params = []
             for param in operation.get("parameters", []):
+                schema = param.get("schema", {})
+                # Resolve anyOf (Optional[X] produces anyOf: [{type: X}, {type: null}])
+                ptype = schema.get("type", "string")
+                if ptype == "string" and "anyOf" in schema:
+                    for variant in schema["anyOf"]:
+                        if isinstance(variant, dict) and variant.get("type") != "null":
+                            ptype = variant.get("type", "string")
+                            break
                 params.append({
                     "name": param["name"],
-                    "type": param["schema"].get("type", "string"),
+                    "type": ptype,
                     "required": param.get("required", False),
                     "in": param.get("in", "query")
                 })

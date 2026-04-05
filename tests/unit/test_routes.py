@@ -282,10 +282,10 @@ def test_add_turn_route_rejects_unsupported_agent_id(client, tmp_path):
     try:
         thread = ConversationService.create_thread(workspace_root=str(tmp_path), title="turn-guard")
 
-        response = client.post(f"/ops/threads/{thread.id}/turns?agent_id=rogue-orchestrator")
+        response = client.post(f"/ops/threads/{thread.id}/turns?agent_id=123-invalid")
 
         assert response.status_code == 400
-        assert "Unsupported thread agent_id" in response.json()["detail"]
+        assert "Invalid agent_id" in response.json()["detail"]
     finally:
         ConversationService.THREADS_DIR = original_threads_dir
 
