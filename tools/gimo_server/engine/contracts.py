@@ -23,7 +23,8 @@ class StageOutput(BaseModel):
     status: Literal["continue", "halt", "retry", "fail"]
     artifacts: Dict[str, Any] = Field(default_factory=dict)
     journal_entry: Optional[JournalEntry] = None
-    error: Optional[str] = None
+    error: str = ""
+    caused_by: Optional[str] = None
 
 
 class FileTaskSpec(BaseModel):

@@ -288,14 +288,23 @@ class AgenticLoopService:
     @classmethod
     def release_thread_execution(cls, thread_id: str, owner_id: str | None = None) -> None:
         ops_service = cls._get_ops_service()
-        if ops_service is not None and owner_id:
-            ops_service.release_execution_lock(cls.THREAD_LOCK_SCOPE, thread_id, owner_id)
-            return
-
+        if ops_service is not None:
+            try:
+                ops_service.release_execution_lock(cls.THREAD_LOCK_SCOPE, thread_id, owner_id or "")
+            except Exception:
+                logger.warning(
+                    "Lock release via OpsService failed for %s (owner=%s) — forcing memory cleanup",
+                    thread_id, owner_id, exc_info=True,
+                )
+        # Always clean up in-memory state regardless of OpsService result
         with cls._thread_execution_lock:
             active_owner = cls._active_thread_executions.get(thread_id)
-            if owner_id is None or active_owner == owner_id:
-                cls._active_thread_executions.pop(thread_id, None)
+            if active_owner and active_owner != owner_id:
+                logger.warning(
+                    "Lock owner mismatch on release: stored=%s, releasing=%s — releasing anyway",
+                    active_owner, owner_id,
+                )
+            cls._active_thread_executions.pop(thread_id, None)
 
     @classmethod
     def heartbeat_thread_execution(cls, thread_id: str, owner_id: str) -> Dict[str, Any] | None:
@@ -1305,8 +1314,14 @@ class AgenticLoopService:
                 session_id=session_id,
             )
         finally:
-            await cls._stop_heartbeat(stop_event, heartbeat_task)
-            cls.release_thread_execution(thread_id, owner_id)
+            try:
+                await cls._stop_heartbeat(stop_event, heartbeat_task)
+            except Exception:
+                logger.exception("Heartbeat stop failed for thread %s", thread_id)
+            try:
+                cls.release_thread_execution(thread_id, owner_id)
+            except Exception:
+                logger.exception("Lock release failed for thread %s", thread_id)
 
     @classmethod
     async def _run_stream_reserved(
@@ -1437,8 +1452,14 @@ class AgenticLoopService:
             ):
                 yield event
         finally:
-            await cls._stop_heartbeat(stop_event, heartbeat_task)
-            cls.release_thread_execution(thread_id, owner_id)
+            try:
+                await cls._stop_heartbeat(stop_event, heartbeat_task)
+            except Exception:
+                logger.exception("Heartbeat stop failed for thread %s", thread_id)
+            try:
+                cls.release_thread_execution(thread_id, owner_id)
+            except Exception:
+                logger.exception("Lock release failed for thread %s", thread_id)
 
     @classmethod
     async def resume_session(
@@ -1547,8 +1568,14 @@ class AgenticLoopService:
                 session_id=session_id,
             )
         finally:
-            await cls._stop_heartbeat(stop_event, heartbeat_task)
-            cls.release_thread_execution(thread_id, owner_id)
+            try:
+                await cls._stop_heartbeat(stop_event, heartbeat_task)
+            except Exception:
+                logger.exception("Heartbeat stop failed for thread %s", thread_id)
+            try:
+                cls.release_thread_execution(thread_id, owner_id)
+            except Exception:
+                logger.exception("Lock release failed for thread %s", thread_id)
 
     @staticmethod
     async def run_node(

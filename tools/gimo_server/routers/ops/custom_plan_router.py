@@ -41,6 +41,19 @@ async def get_plan(
     return plan
 
 
+@router.get("/custom-plans/{plan_id}/estimate")
+async def estimate_plan_cost(
+    plan_id: str,
+    auth: AuthContext = Depends(verify_token),
+    rl: None = Depends(check_rate_limit),
+):
+    """Pre-execution cost estimation per node."""
+    estimate = CustomPlanService.estimate_plan_cost(plan_id)
+    if "error" in estimate:
+        raise HTTPException(status_code=404, detail=estimate["error"])
+    return estimate
+
+
 @router.post("/custom-plans", response_model=CustomPlan, status_code=201)
 async def create_plan(
     body: CreatePlanRequest,

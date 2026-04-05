@@ -22,21 +22,30 @@ class QaGate(ExecutionStage):
             return StageOutput(
                 status="fail",
                 artifacts={"qa_verdict": "TIMEOUT", "qa_command": test_command},
+                error=f"QA timeout after {timeout}s: {test_command}",
             )
 
         out = (stdout or b"").decode("utf-8", errors="replace")
         err = (stderr or b"").decode("utf-8", errors="replace")
         ok = proc.returncode == 0
 
+        if ok:
+            return StageOutput(
+                status="continue",
+                artifacts={
+                    "qa_verdict": "PASS", "qa_command": test_command,
+                    "qa_return_code": 0,
+                    "qa_stdout_tail": out[-2000:], "qa_stderr_tail": err[-2000:],
+                },
+            )
         return StageOutput(
-            status="continue" if ok else "fail",
+            status="fail",
             artifacts={
-                "qa_verdict": "PASS" if ok else "FAIL",
-                "qa_command": test_command,
+                "qa_verdict": "FAIL", "qa_command": test_command,
                 "qa_return_code": proc.returncode,
-                "qa_stdout_tail": out[-2000:],
-                "qa_stderr_tail": err[-2000:],
+                "qa_stdout_tail": out[-2000:], "qa_stderr_tail": err[-2000:],
             },
+            error=f"QA failed (exit {proc.returncode}): {err[-500:]}" if err else f"QA failed (exit {proc.returncode})",
         )
 
     async def rollback(self, input: StageInput) -> None:

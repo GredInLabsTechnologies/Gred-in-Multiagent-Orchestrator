@@ -124,12 +124,17 @@ class CliAccountAdapter(ProviderAdapter):
         self._is_claude = "claude" in self.binary.lower()
         self._is_codex = "codex" in self.binary.lower()
 
-    def _build_cmd(self, prompt: str) -> List[str]:
+    def _build_cmd(self, prompt: str, stdin_mode: bool = False) -> List[str]:
         """Build the correct command for this CLI binary."""
         if self._is_claude:
+            if stdin_mode:
+                # Read from stdin — no -p flag needed, claude reads piped input
+                return [self.binary, "-p", "-"]
             # claude -p "<prompt>"  (print/non-interactive mode)
             return [self.binary, "-p", str(prompt)]
         else:
+            if stdin_mode:
+                return [self.binary, "exec", "-", "--json"]
             # codex exec "<prompt>" --json  (JSONL output)
             return [self.binary, "exec", str(prompt), "--json"]
 
@@ -150,19 +155,44 @@ class CliAccountAdapter(ProviderAdapter):
         if shutil.which(self.binary) is None:
             raise RuntimeError(f"CLI binary not found: {self.binary}")
 
-        cmd = self._build_cmd(prompt)
         env = self._build_env()
-        logger.info("[cli-account] running: %s", " ".join(cmd))
+
+        # On Windows, command-line length is limited (~8191 chars via CreateProcess).
+        # For large prompts (e.g., multi-turn chat with tool results),
+        # write prompt to a temp file and pipe it via stdin.
+        use_stdin = sys.platform == "win32" and len(prompt) > 6000
+        cmd = self._build_cmd(prompt if not use_stdin else "", stdin_mode=use_stdin)
+        logger.info("[cli-account] running: %s (stdin=%s, prompt_len=%d)", cmd[0], use_stdin, len(prompt))
 
         if sys.platform == "win32":
             import subprocess as _subprocess
-            completed = await asyncio.to_thread(
-                _subprocess.run,
-                cmd,
-                capture_output=True,
-                env=env,
-                timeout=300,
-            )
+            if use_stdin:
+                # Pipe prompt via stdin to bypass command-line length limit
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tf:
+                    tf.write(prompt)
+                    tf_path = tf.name
+                try:
+                    with open(tf_path, "rb") as f:
+                        completed = await asyncio.to_thread(
+                            _subprocess.run,
+                            cmd,
+                            capture_output=True,
+                            env=env,
+                            timeout=300,
+                            stdin=f,
+                        )
+                finally:
+                    import os as _os
+                    _os.unlink(tf_path)
+            else:
+                completed = await asyncio.to_thread(
+                    _subprocess.run,
+                    cmd,
+                    capture_output=True,
+                    env=env,
+                    timeout=300,
+                )
             stdout = completed.stdout or b""
             stderr = completed.stderr or b""
             returncode = completed.returncode

@@ -143,7 +143,7 @@ def smart_timeout(path: str, config: dict[str, Any]) -> float | None:
     # Runs polling can be slow under load — use generation timeout
     if "/runs/" in path:
         return float(hints.get("generation_timeout_s", 180))
-    return float(hints.get("default_timeout_s", 15))
+    return float(hints.get("default_timeout_s", 30))
 
 
 def api_settings(config: dict[str, Any]) -> tuple[str, float]:

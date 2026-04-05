@@ -55,12 +55,12 @@ def test_smart_timeout_stream_endpoints_have_no_timeout(mock_fetch, mock_config)
 
 
 @patch("gimo_cli.api.fetch_capabilities")
-def test_smart_timeout_default_endpoints_use_15s(mock_fetch, mock_config):
-    """Default endpoints use 15s from server hint."""
+def test_smart_timeout_default_endpoints_use_server_hint(mock_fetch, mock_config):
+    """Default endpoints use server-provided default_timeout_s hint."""
     mock_fetch.return_value = {
         "hints": {
             "generation_timeout_s": 120,
-            "default_timeout_s": 15,
+            "default_timeout_s": 30,
         }
     }
 
@@ -69,7 +69,7 @@ def test_smart_timeout_default_endpoints_use_15s(mock_fetch, mock_config):
     assert timeout == 120.0
 
     timeout = _smart_timeout("/ops/mastery/status", mock_config)
-    assert timeout == 15.0
+    assert timeout == 30.0
 
 
 @patch("gimo_cli.api.fetch_capabilities")
@@ -119,4 +119,4 @@ def test_smart_timeout_missing_hints_uses_safe_defaults(mock_fetch, mock_config)
     assert timeout == 180.0  # Safe default for generation
 
     timeout = _smart_timeout("/ops/status", mock_config)
-    assert timeout == 15.0  # Safe default for queries
+    assert timeout == 30.0  # Safe default for queries (raised from 15 in R8)

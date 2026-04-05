@@ -242,12 +242,21 @@ class CustomPlanService:
         with cls._execution_lock:
             tracked_owner = cls._active_plan_executions.get(plan_id)
             resolved_owner = owner_id or tracked_owner
-            if owner_id is None or tracked_owner == resolved_owner:
-                cls._active_plan_executions.pop(plan_id, None)
+            if tracked_owner and tracked_owner != resolved_owner:
+                logger.warning(
+                    "Plan lock owner mismatch on release: stored=%s, releasing=%s — releasing anyway",
+                    tracked_owner, resolved_owner,
+                )
+            cls._active_plan_executions.pop(plan_id, None)
 
         if ops_service is not None and resolved_owner:
-            ops_service.release_execution_lock(cls.PLAN_LOCK_SCOPE, plan_id, resolved_owner)
-            return
+            try:
+                ops_service.release_execution_lock(cls.PLAN_LOCK_SCOPE, plan_id, resolved_owner)
+            except Exception:
+                logger.warning(
+                    "Plan lock release via OpsService failed for %s (owner=%s) — memory cleanup done",
+                    plan_id, resolved_owner, exc_info=True,
+                )
 
     @classmethod
     def heartbeat_plan_execution(cls, plan_id: str, owner_id: str) -> Dict[str, Any] | None:
@@ -347,6 +356,50 @@ class CustomPlanService:
             from .plan_migration_service import PlanMigrationService
             plan.nodes = PlanMigrationService.migrate_nodes(plan.nodes)
         return plan
+
+    @classmethod
+    def estimate_plan_cost(cls, plan_id: str) -> Dict[str, Any]:
+        """Pre-execution cost estimation per node. Globally novel — no tool does this."""
+        from .economy.cost_service import CostService
+
+        plan = cls.get_plan(plan_id)
+        if not plan:
+            return {"error": f"Plan {plan_id} not found", "nodes": [], "total_estimated_usd": 0.0}
+
+        node_estimates: List[Dict[str, Any]] = []
+        total = 0.0
+        for node in plan.nodes:
+            # Determine model from routing_decision or fallback
+            model = "claude-sonnet-4-6"
+            if node.routing_decision and node.routing_decision.binding:
+                model = node.routing_decision.binding.model_id or model
+
+            # Estimate input tokens: system prompt + task description
+            text_len = len(node.prompt or "") + len(node.role_definition or "")
+            if node.task_descriptor:
+                text_len += len(node.task_descriptor.description or "")
+            estimated_input = max(int(text_len * 0.35), 200)  # chars → tokens (~0.35 ratio)
+
+            # Estimate output tokens by role
+            estimated_output = 1500 if node.is_orchestrator else 3000
+
+            cost = CostService.calculate_cost(model, estimated_input, estimated_output)
+            node_estimates.append({
+                "node_id": node.id,
+                "label": node.label,
+                "role": "orchestrator" if node.is_orchestrator else "worker",
+                "model": model,
+                "estimated_input_tokens": estimated_input,
+                "estimated_output_tokens": estimated_output,
+                "estimated_cost_usd": cost,
+            })
+            total += cost
+
+        return {
+            "plan_id": plan_id,
+            "nodes": node_estimates,
+            "total_estimated_usd": round(total, 6),
+        }
 
     @classmethod
     def create_plan(cls, req: CreatePlanRequest) -> CustomPlan:
@@ -736,8 +789,14 @@ class CustomPlanService:
                 skill_command=skill_command,
             )
         finally:
-            await cls._stop_heartbeat(stop_event, heartbeat_task)
-            cls.release_plan_execution(plan_id, owner_id)
+            try:
+                await cls._stop_heartbeat(stop_event, heartbeat_task)
+            except Exception:
+                logger.exception("Plan heartbeat stop failed for %s", plan_id)
+            try:
+                cls.release_plan_execution(plan_id, owner_id)
+            except Exception:
+                logger.exception("Plan lock release failed for %s", plan_id)
 
     @classmethod
     async def _execute_node(
@@ -1102,8 +1161,12 @@ class CustomPlanService:
     ) -> None:
         from ..services.notification_service import NotificationService
         cls._save(plan)
+        caused_by = None
+        if node.error and node.error.startswith("Cascaded from:"):
+            caused_by = node.error.removeprefix("Cascaded from:").strip()
         await NotificationService.publish("custom_node_status", {
-            "plan_id": plan_id, "node_id": node.id, "status": node.status, "output": node.output, "error": node.error
+            "plan_id": plan_id, "node_id": node.id, "status": node.status,
+            "output": node.output, "error": node.error, "caused_by": caused_by,
         })
         if skill_run_id and skill_id:
             msg = f"Error in node {node.label}: {node.error}" if node.error else f"Finished node {node.label}"

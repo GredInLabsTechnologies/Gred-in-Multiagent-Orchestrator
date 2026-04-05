@@ -42,7 +42,7 @@ async def test_capabilities_returns_all_required_fields(mock_request, mock_auth)
     # Hints structure
     assert "generation_timeout_s" in caps["hints"]
     assert "default_timeout_s" in caps["hints"]
-    assert caps["hints"]["default_timeout_s"] == 15
+    assert caps["hints"]["default_timeout_s"] == 30
 
     # Service health structure
     assert "mastery" in caps["service_health"]

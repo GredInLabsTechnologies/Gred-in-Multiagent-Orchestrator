@@ -17,6 +17,7 @@ app.add_typer(threads_app, name="threads")
 
 @threads_app.command("list")
 def threads_list(
+    limit: int = typer.Option(20, "--limit", "-n", help="Max threads to display."),
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """List conversation threads."""
@@ -25,11 +26,13 @@ def threads_list(
     if status_code != 200:
         console.print(f"[red]Failed ({status_code}): {payload}[/red]")
         raise typer.Exit(1)
+    if isinstance(payload, list) and limit > 0:
+        payload = payload[:limit]
     if json_output:
         emit_output(payload, json_output=True)
         return
     if isinstance(payload, list):
-        table = Table(title="Threads", show_header=True)
+        table = Table(title=f"Threads (showing {len(payload)})", show_header=True)
         table.add_column("ID", style="cyan")
         table.add_column("Title", style="white")
         table.add_column("Turns", style="magenta")

@@ -75,6 +75,8 @@ def test_run_uses_auto_run_and_saves_backend_payload(tmp_path, monkeypatch):
 
     def _fake_api_request(config, method, path, *, params=None, **_kwargs):
         del config
+        if path == "/ops/drafts/d_123" and method == "GET":
+            return 200, {"id": "d_123", "context": {}}
         if path == "/ops/drafts/d_123/approve":
             captured["method"] = method
             captured["path"] = path

@@ -115,7 +115,7 @@ class Pipeline:
 
         finished_at = datetime.now(timezone.utc)
         err_text = str(last_error) if last_error else "Max retries exceeded"
-        failed_output = StageOutput(status="fail", artifacts={"error": err_text})
+        failed_output = StageOutput(status="fail", artifacts={"error": err_text}, error=err_text)
         failed_output.journal_entry = self._create_journal_entry(
             stage, input, failed_output, finished_at, finished_at, "failed",
         )

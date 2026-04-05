@@ -143,7 +143,7 @@ class CapabilitiesService:
             "system_load": load_level,
             "hints": {
                 "generation_timeout_s": gen_timeout,
-                "default_timeout_s": 15,
+                "default_timeout_s": 30,
                 "stream_timeout_s": 0,  # no timeout for SSE streams
                 "operation_timeouts": {
                     "/approve": gen_timeout,
@@ -153,6 +153,9 @@ class CapabilitiesService:
                     "/events": 0,
                     "/generate": gen_timeout,
                     "/merge": 60,
+                    "/mastery": 30,
+                    "/observability": 30,
+                    "/trust": 30,
                 },
             },
             "service_health": {

@@ -373,9 +373,10 @@ class EngineService:
         for idx, stage_output in enumerate(results):
             if stage_output.status == "fail":
                 final_status = "error"
-                err_detail = stage_output.artifacts.get("error", "unknown")
+                err_detail = stage_output.error or stage_output.artifacts.get("error", "no detail")
                 stage_name = stage_output.artifacts.get("stage", f"stage_{idx}")
-                final_msg = f"Stage failed [{stage_name}]: {err_detail}"[:2000]
+                caused = f" (caused_by: {stage_output.caused_by})" if stage_output.caused_by else ""
+                final_msg = f"Stage failed [{stage_name}]: {err_detail}{caused}"[:2000]
                 break
             if stage_output.status == "halt":
                 # Already halted (e.g. HUMAN_APPROVAL_REQUIRED) — leave status as-is

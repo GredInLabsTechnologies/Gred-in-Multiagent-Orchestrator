@@ -11,12 +11,15 @@ class GitPipeline(ExecutionStage):
         try:
             handled = await MergeGateService.execute_run(run_id)
             
+            if handled:
+                return StageOutput(status="continue", artifacts={"git_pipeline_result": {"handled": True}})
             return StageOutput(
-                status="continue" if handled else "fail",
-                artifacts={"git_pipeline_result": {"handled": bool(handled)}}
+                status="fail",
+                artifacts={"git_pipeline_result": {"handled": False}},
+                error="git pipeline did not handle the run",
             )
         except Exception as e:
-            return StageOutput(status="fail", artifacts={"error": str(e)})
+            return StageOutput(status="fail", artifacts={"error": str(e)}, error=str(e))
 
     async def rollback(self, input: StageInput) -> None:
         # Revert merge/branch if needed

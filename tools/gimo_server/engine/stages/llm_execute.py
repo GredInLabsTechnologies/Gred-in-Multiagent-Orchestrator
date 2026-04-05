@@ -13,7 +13,7 @@ class LlmExecute(ExecutionStage):
     async def execute(self, input: StageInput) -> StageOutput:
         prompt = input.context.get("prompt")
         if not prompt:
-            return StageOutput(status="fail", artifacts={"error": "Missing prompt in context"})
+            return StageOutput(status="fail", artifacts={"error": "Missing prompt in context"}, error="Missing prompt in context")
 
         gen_context = input.context.get("gen_context", {})
         multi_pass = input.context.get("ace_multi_pass", False)
@@ -74,7 +74,7 @@ class LlmExecute(ExecutionStage):
                 },
             )
         except Exception as e:
-            return StageOutput(status="fail", artifacts={"error": str(e)})
+            return StageOutput(status="fail", artifacts={"error": str(e)}, error=str(e))
 
     async def rollback(self, input: StageInput) -> None:
         """LLM execution is stateless, nothing to rollback."""

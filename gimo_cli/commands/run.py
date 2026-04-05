@@ -33,6 +33,28 @@ def run(
 ) -> None:
     """Approve a draft and optionally start its backend run."""
     config = load_config()
+
+    # Pre-execution cost estimation (globally novel — no tool does this)
+    # Resolve the custom plan ID from the draft context
+    _draft_code, _draft = api_request(config, "GET", f"/ops/drafts/{plan_id}")
+    _cp_id = ""
+    if _draft_code == 200 and isinstance(_draft, dict):
+        _ctx = _draft.get("context") or {}
+        _cp_id = str(_ctx.get("custom_plan_id") or _ctx.get("plan_id") or "")
+    est_code, estimate = (0, {}) if not _cp_id else api_request(config, "GET", f"/ops/custom-plans/{_cp_id}/estimate")
+    if est_code == 200 and isinstance(estimate, dict) and estimate.get("nodes"):
+        from rich.table import Table
+
+        table = Table(title="Cost Estimate", border_style="cyan", show_lines=False)
+        table.add_column("Node", style="bold")
+        table.add_column("Model", style="dim")
+        table.add_column("Est. Cost", justify="right")
+        for n in estimate["nodes"]:
+            table.add_row(n["node_id"], n["model"], f"~${n['estimated_cost_usd']:.4f}")
+        total = estimate.get("total_estimated_usd", 0.0)
+        table.add_row("[bold]Total[/bold]", "", f"[bold]~${total:.4f}[/bold]")
+        console.print(table)
+
     if confirm and sys.stdin.isatty():
         action = "approve and execute" if auto else "approve without execution"
         if not typer.confirm(f"Proceed to {action} draft {plan_id}?", default=True):

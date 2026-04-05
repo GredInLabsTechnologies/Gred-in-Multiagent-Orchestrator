@@ -58,6 +58,13 @@ class RemoteFetchMixin:
                 enriched.append(m)
                 continue
             p = pricing.get(m.id) or {}
+            # Alias resolution: try stripping -latest suffix, or match by prefix
+            if not p:
+                base = m.id.replace("-latest", "")
+                for key in pricing:
+                    if key.startswith(base):
+                        p = pricing[key]
+                        break
             updates = {}
             if m.quality_tier is None and p.get("quality_tier") is not None:
                 updates["quality_tier"] = str(p["quality_tier"])
