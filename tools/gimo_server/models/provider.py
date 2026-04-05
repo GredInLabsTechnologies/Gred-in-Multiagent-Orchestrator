@@ -184,6 +184,19 @@ class ToolEntry(BaseModel):
 CliDependencyStatus = Literal["pending", "running", "done", "error"]
 
 
+class CliDependencyInfo(BaseModel):
+    """Info about a CLI dependency (binary) used by a provider."""
+    id: str
+    provider_type: str = ""
+    binary: str = ""
+    installed: bool = False
+    version: Optional[str] = None
+    installable: bool = True
+    install_method: str = "npm"
+    install_command: str = ""
+    message: str = ""
+
+
 class CliDependencyInstallRequest(BaseModel):
     dependency_id: str
 

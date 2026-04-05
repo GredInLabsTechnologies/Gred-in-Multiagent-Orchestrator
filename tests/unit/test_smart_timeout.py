@@ -64,8 +64,9 @@ def test_smart_timeout_default_endpoints_use_15s(mock_fetch, mock_config):
         }
     }
 
+    # Runs use generation timeout (may be slow under load)
     timeout = _smart_timeout("/ops/runs/123", mock_config)
-    assert timeout == 15.0
+    assert timeout == 120.0
 
     timeout = _smart_timeout("/ops/mastery/status", mock_config)
     assert timeout == 15.0
@@ -80,9 +81,9 @@ def test_smart_timeout_fallback_when_server_unreachable(mock_fetch, mock_config)
     timeout = _smart_timeout("/ops/generate-plan", mock_config)
     assert timeout == 180.0
 
-    # Default endpoints fallback to 15s
+    # Runs fallback to generation timeout (180s)
     timeout = _smart_timeout("/ops/runs/123", mock_config)
-    assert timeout == 15.0
+    assert timeout == 180.0
 
     # Streams still no timeout
     timeout = _smart_timeout("/ops/stream", mock_config)

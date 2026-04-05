@@ -58,15 +58,22 @@ class CapabilitiesService:
             logger.warning("HardwareMonitorService unavailable, defaulting to 'safe'")
 
         # Active model and provider (from ProviderService)
+        # Uses same resolution as OperatorStatusService: canonical roles first, legacy fallback
         active_model, active_provider = None, None
         try:
-            from .provider_service import ProviderService
+            from .provider_service_impl import ProviderService
             cfg = ProviderService.get_config()
-            if cfg and cfg.active_provider:
-                active_provider = cfg.active_provider
-                provider_cfg = cfg.providers.get(active_provider)
-                if provider_cfg:
-                    active_model = provider_cfg.model
+            if cfg:
+                binding = cfg.primary_orchestrator_binding() if hasattr(cfg, "primary_orchestrator_binding") else None
+                if binding:
+                    active_provider = binding.provider_id
+                    active_model = binding.model
+                else:
+                    active_provider = getattr(cfg, "active", None)
+                    providers = getattr(cfg, "providers", None) or {}
+                    active_entry = providers.get(active_provider) if active_provider else None
+                    if active_entry:
+                        active_model = active_entry.configured_model_id() if hasattr(active_entry, "configured_model_id") else getattr(active_entry, "model", None)
         except Exception:
             logger.warning("ProviderService unavailable, model info will be None")
 

@@ -92,6 +92,7 @@ def e2e_env(ops_dir):
     from tools.gimo_server.services import provider_service_impl
     from tools.gimo_server.services import runtime_policy_service as rps_mod
     from tools.gimo_server.services import run_worker as rw_mod
+    from tools.gimo_server.resilience import SupervisedTask
 
     # 1. Redirigir OPS a directorio temporal
     _original_dirs = {
@@ -144,19 +145,15 @@ def e2e_env(ops_dir):
     _orig_tick = rw_mod.RunWorker._tick
     rw_mod.RunWorker._tick = lambda self: asyncio.sleep(0)
 
-    # 5. Captura de tasks
+    # 5. Captura de tasks via SupervisedTask.spawn
     queued: list[Awaitable[object]] = []
-    original_create_task = asyncio.create_task
+    _orig_spawn = SupervisedTask.spawn
 
-    def _capture_tasks(coro):
-        code = getattr(coro, "cr_code", None)
-        if code and code.co_name == "execute_run":
-            queued.append(coro)
-            return None
-        return original_create_task(coro)
+    def _capture_spawn(self, coro, *, name="", on_failure=None, timeout=None):
+        queued.append(coro)
+        return None
 
-    _orig_create_task_ref = run_router.asyncio.create_task
-    run_router.asyncio.create_task = _capture_tasks
+    SupervisedTask.spawn = _capture_spawn
 
     # 6. Auth override
     app.dependency_overrides[verify_token] = _override_auth
@@ -167,7 +164,7 @@ def e2e_env(ops_dir):
 
     # Teardown: restaurar todo
     app.dependency_overrides.pop(verify_token, None)
-    run_router.asyncio.create_task = _orig_create_task_ref
+    SupervisedTask.spawn = _orig_spawn
     rw_mod.RunWorker._tick = _orig_tick
     provider_service_impl.ProviderService.static_generate = _orig_generate
     rps_mod.RuntimePolicyService.evaluate_draft_policy = _orig_evaluate

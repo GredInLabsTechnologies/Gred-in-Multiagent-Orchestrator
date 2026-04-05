@@ -19,9 +19,9 @@ logger = logging.getLogger("orchestrator.hardware")
 LoadLevel = Literal["safe", "caution", "critical"]
 
 DEFAULT_THRESHOLDS = {
-    "safe":     {"cpu": 60, "ram": 70},
-    "caution":  {"cpu": 80, "ram": 85},
-    "critical": {"cpu": 92, "ram": 93},
+    "safe":     {"cpu": 70, "ram": 75},
+    "caution":  {"cpu": 85, "ram": 90},
+    "critical": {"cpu": 96, "ram": 97},
 }
 
 LOG_DIR = OPS_DATA_DIR / "logs"

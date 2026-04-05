@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import logging
 import shutil
 import time
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 from ...ops_models import (
@@ -23,9 +26,45 @@ from ._base import (
 )
 from ._cli_account import _fetch_claude_cli_models
 
+_logger = logging.getLogger("orchestrator.provider_catalog.remote")
+_PRICING_CACHE: dict | None = None
+
+
+def _load_pricing() -> dict:
+    global _PRICING_CACHE
+    if _PRICING_CACHE is not None:
+        return _PRICING_CACHE
+    try:
+        path = Path(__file__).resolve().parent.parent.parent / "data" / "model_pricing.json"
+        _PRICING_CACHE = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        _logger.debug("Could not load model_pricing.json for metadata enrichment")
+        _PRICING_CACHE = {}
+    return _PRICING_CACHE
+
 
 class RemoteFetchMixin:
     """Remote model fetching and catalog building."""
+
+    @classmethod
+    def _enrich_from_pricing(cls, models: List[NormalizedModelInfo]) -> List[NormalizedModelInfo]:
+        """Fill missing quality_tier/context_window from model_pricing.json."""
+        pricing = _load_pricing()
+        if not pricing:
+            return models
+        enriched = []
+        for m in models:
+            if m.quality_tier is not None and m.context_window is not None:
+                enriched.append(m)
+                continue
+            p = pricing.get(m.id) or {}
+            updates = {}
+            if m.quality_tier is None and p.get("quality_tier") is not None:
+                updates["quality_tier"] = str(p["quality_tier"])
+            if m.context_window is None and p.get("context_window") is not None:
+                updates["context_window"] = p["context_window"]
+            enriched.append(m.model_copy(update=updates) if updates else m)
+        return enriched
 
     @classmethod
     async def list_installed_models(cls, provider_type: str) -> List[NormalizedModelInfo]:
@@ -183,6 +222,10 @@ class RemoteFetchMixin:
 
         installed = await cls.list_installed_models(canonical)
         available, warnings = await cls.list_available_models(canonical, payload=effective_payload)
+
+        # Enrich models with metadata from pricing DB when missing
+        installed = cls._enrich_from_pricing(installed)
+        available = cls._enrich_from_pricing(available)
 
         installed_ids = {m.id for m in installed}
         available_ids = {m.id for m in available}

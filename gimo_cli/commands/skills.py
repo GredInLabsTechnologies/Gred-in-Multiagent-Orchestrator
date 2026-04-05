@@ -58,7 +58,7 @@ def skills_run(
     if json_output:
         emit_output({"status_code": status_code, "result": payload}, json_output=True)
         return
-    if status_code == 200:
+    if 200 <= status_code < 300:
         console.print(f"[green]Skill '{skill_id}' executed successfully.[/green]")
         if isinstance(payload, dict):
             console.print_json(data=payload)

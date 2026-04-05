@@ -401,8 +401,18 @@ class CustomPlanService:
             n for n in plan.nodes
             if n.is_orchestrator or n.node_type == "orchestrator" or n.role == "orchestrator"
         ]
-        if len(orchestrators) != 1:
-            raise ValueError("Plan must have exactly one orchestrator node")
+        if len(orchestrators) == 0 and plan.nodes:
+            # Auto-promote first node to orchestrator when LLM didn't mark one
+            plan.nodes[0].is_orchestrator = True
+            plan.nodes[0].role = "orchestrator"
+            logger.info("Auto-promoted first node '%s' to orchestrator", plan.nodes[0].id)
+        elif len(orchestrators) > 1:
+            # Keep only the first orchestrator, demote the rest
+            for extra in orchestrators[1:]:
+                extra.is_orchestrator = False
+                if extra.role == "orchestrator":
+                    extra.role = "worker"
+            logger.info("Demoted %d extra orchestrator nodes", len(orchestrators) - 1)
 
         cls._assert_no_cycles(plan.nodes)
 

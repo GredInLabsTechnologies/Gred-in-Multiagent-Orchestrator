@@ -18,7 +18,7 @@ try:
         McpServerConfig, ProviderConfig,
         ProviderValidateRequest, ProviderValidateResponse, ProviderSelectionRequest,
         ProviderModelInstallRequest, ProviderModelInstallResponse,
-        ToolEntry, CliDependencyStatus, CliDependencyInstallRequest, CliDependencyInstallResponse,
+        ToolEntry, CliDependencyStatus, CliDependencyInfo, CliDependencyInstallRequest, CliDependencyInstallResponse,
         CircuitBreakerConfigModel, PHASE4_INTENT_CLASSES,
         ExecutionDecisionCode, IntentDecisionAudit, RuntimePolicyConfig,
         BaselineManifest, PolicyDecision, PolicyRuleMatch, PolicyRule, PolicyConfig,

@@ -93,14 +93,15 @@ async def test_capabilities_service_health_reflects_gics_state(mock_auth):
 
 
 @pytest.mark.asyncio
-@patch("tools.gimo_server.services.provider_service.ProviderService")
+@patch("tools.gimo_server.services.provider_service_impl.ProviderService")
 async def test_capabilities_active_model_from_provider_service(mock_provider, mock_request, mock_auth):
-    """Active model extracted from ProviderService config."""
+    """Active model extracted from ProviderService config via primary_orchestrator_binding."""
+    mock_binding = MagicMock()
+    mock_binding.provider_id = "ollama"
+    mock_binding.model = "qwen2.5-coder:3b"
+
     mock_cfg = MagicMock()
-    mock_cfg.active_provider = "ollama"
-    mock_cfg.providers = {
-        "ollama": MagicMock(model="qwen2.5-coder:3b")
-    }
+    mock_cfg.primary_orchestrator_binding.return_value = mock_binding
     mock_provider.get_config.return_value = mock_cfg
 
     caps = await CapabilitiesService.get_capabilities(mock_request, mock_auth)
@@ -109,7 +110,7 @@ async def test_capabilities_active_model_from_provider_service(mock_provider, mo
 
 
 @pytest.mark.asyncio
-@patch("tools.gimo_server.services.provider_service.ProviderService")
+@patch("tools.gimo_server.services.provider_service_impl.ProviderService")
 async def test_capabilities_handles_provider_service_failure(mock_provider, mock_request, mock_auth):
     """If ProviderService fails, returns None gracefully."""
     mock_provider.get_config.side_effect = Exception("Provider unavailable")

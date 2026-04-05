@@ -15,7 +15,7 @@ async def _create_process(cmd: List[str], **kwargs) -> asyncio.subprocess.Proces
         return await asyncio.create_subprocess_shell(" ".join(cmd), **kwargs)
     return await asyncio.create_subprocess_exec(*cmd, **kwargs)
 
-from ...ops_models import CliDependencyInstallResponse, CliDependencyStatus
+from ...ops_models import CliDependencyInstallResponse, CliDependencyInfo
 
 
 class ProviderConnectorService:
@@ -234,20 +234,20 @@ class ProviderConnectorService:
 
     @classmethod
     async def list_cli_dependencies(cls) -> Dict[str, Any]:
-        items: list[CliDependencyStatus] = []
+        items: list[CliDependencyInfo] = []
         for dep_id, dep in cls._DEPENDENCIES.items():
             binary = str(dep.get("binary") or "")
             installed = cls._is_cli_installed(binary)
             version = await cls._resolve_cli_version(binary, str(dep.get("version_arg") or "--version"))
             items.append(
-                CliDependencyStatus(
+                CliDependencyInfo(
                     id=dep_id,
                     provider_type=str(dep.get("provider_type") or ""),
                     binary=binary,
                     installed=installed,
                     version=version,
                     installable=True,
-                    install_method=str(dep.get("install_method") or "npm"),  # type: ignore[arg-type]
+                    install_method=str(dep.get("install_method") or "npm"),
                     install_command=str(dep.get("install_command") or ""),
                     message="installed" if installed else "missing",
                 )

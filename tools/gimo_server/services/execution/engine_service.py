@@ -370,10 +370,12 @@ class EngineService:
         # Update run status based on pipeline outcome
         final_status = "done"
         final_msg = "Pipeline completed successfully"
-        for stage_output in results:
+        for idx, stage_output in enumerate(results):
             if stage_output.status == "fail":
                 final_status = "error"
-                final_msg = stage_output.artifacts.get("error", "Stage failed")
+                err_detail = stage_output.artifacts.get("error", "unknown")
+                stage_name = stage_output.artifacts.get("stage", f"stage_{idx}")
+                final_msg = f"Stage failed [{stage_name}]: {err_detail}"[:2000]
                 break
             if stage_output.status == "halt":
                 # Already halted (e.g. HUMAN_APPROVAL_REQUIRED) — leave status as-is

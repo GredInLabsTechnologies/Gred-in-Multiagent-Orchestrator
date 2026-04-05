@@ -50,9 +50,9 @@ def _draft_body() -> dict:
 def _install_task_capture(monkeypatch):
     from tools.gimo_server.routers.ops import plan_router, run_router
     from tools.gimo_server.ops_models import PolicyDecision
+    from tools.gimo_server.resilience import SupervisedTask
 
     queued: list[Awaitable[object]] = []
-    original_create_task = asyncio.create_task
 
     async def _fake_execute_run(run_id: str, composition: str | None = None):
         del composition
@@ -77,14 +77,14 @@ def _install_task_capture(monkeypatch):
     )
     monkeypatch.setattr(run_router.EngineService, "execute_run", _fake_execute_run)
 
-    def _capture_selected_tasks(coro):
-        code = getattr(coro, "cr_code", None)
-        if code and code.co_name == "_fake_execute_run":
-            queued.append(coro)
-            return None
-        return original_create_task(coro)
+    _original_spawn = SupervisedTask.spawn
 
-    monkeypatch.setattr(run_router.asyncio, "create_task", _capture_selected_tasks)
+    def _capture_spawn(self, coro, *, name="", on_failure=None, timeout=None):
+        queued.append(coro)
+        # Update run status to "running" like the real spawn would trigger
+        return None
+
+    monkeypatch.setattr(SupervisedTask, "spawn", _capture_spawn)
     return queued
 
 

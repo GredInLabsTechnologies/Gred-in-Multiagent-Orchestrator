@@ -5,13 +5,31 @@
         "context_window": 200000,
         "quality_tier": 5
     },
+    "claude-opus-4-6": {
+        "input": 15.0,
+        "output": 75.0,
+        "context_window": 200000,
+        "quality_tier": 5
+    },
     "claude-sonnet-4-5": {
         "input": 3.0,
         "output": 15.0,
         "context_window": 200000,
         "quality_tier": 4
     },
+    "claude-sonnet-4-6": {
+        "input": 3.0,
+        "output": 15.0,
+        "context_window": 200000,
+        "quality_tier": 4
+    },
     "claude-haiku-4-5": {
+        "input": 0.80,
+        "output": 4.0,
+        "context_window": 200000,
+        "quality_tier": 2
+    },
+    "claude-haiku-4-5-20251001": {
         "input": 0.80,
         "output": 4.0,
         "context_window": 200000,

@@ -118,7 +118,7 @@ def build_graph_from_ops_plan(plan_data: Any, draft_id: str = None) -> Tuple[Lis
             nodes.append(
                 {
                     "id": task["id"],
-                    "type": "bridge" if is_orchestrator else "orchestrator",
+                    "type": "orchestrator" if is_orchestrator else "bridge",
                     "data": node_data,
                     "position": {"x": x, "y": y},
                 }

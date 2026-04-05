@@ -13,6 +13,7 @@ from tools.gimo_server.main import app
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.resilience import SupervisedTask
 
 
 def _override_auth() -> AuthContext:
@@ -165,7 +166,7 @@ def test_app_surface_uses_bound_snapshot_and_closes_cross_surface_lifecycle(monk
         approved_id = approve_res.json()["approved"]["id"]
         assert approve_res.json()["run"] is None
 
-        with patch("tools.gimo_server.routers.ops.run_router.asyncio.create_task", side_effect=_capture_task):
+        with patch.object(SupervisedTask, "spawn", lambda self, coro, **kw: _capture_task(coro)):
             create_run_res = client.post("/ops/runs", json={"approved_id": approved_id})
 
         assert create_run_res.status_code == 201

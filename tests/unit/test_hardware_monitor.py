@@ -73,22 +73,22 @@ class TestLoadLevel:
 
     def test_caution_level_cpu(self):
         svc = HardwareMonitorService()
-        snap = _make_snapshot(cpu=82.0, ram=50.0)
+        snap = _make_snapshot(cpu=88.0, ram=50.0)
         assert svc.get_load_level(snap) == "caution"
 
     def test_caution_level_ram(self):
         svc = HardwareMonitorService()
-        snap = _make_snapshot(cpu=50.0, ram=87.0)
+        snap = _make_snapshot(cpu=50.0, ram=92.0)
         assert svc.get_load_level(snap) == "caution"
 
     def test_critical_level_cpu(self):
         svc = HardwareMonitorService()
-        snap = _make_snapshot(cpu=95.0, ram=50.0)
+        snap = _make_snapshot(cpu=97.0, ram=50.0)
         assert svc.get_load_level(snap) == "critical"
 
     def test_critical_level_ram(self):
         svc = HardwareMonitorService()
-        snap = _make_snapshot(cpu=50.0, ram=95.0)
+        snap = _make_snapshot(cpu=50.0, ram=98.0)
         assert svc.get_load_level(snap) == "critical"
 
     def test_critical_when_gpu_vram_exhausted(self):
@@ -106,12 +106,12 @@ class TestCustomThresholds:
     def test_update_thresholds_changes_behavior(self):
         svc = HardwareMonitorService()
 
-        # Default: cpu=82 is caution (threshold is 80)
-        snap = _make_snapshot(cpu=82.0, ram=50.0)
+        # Default: cpu=88 is caution (threshold is 85)
+        snap = _make_snapshot(cpu=88.0, ram=50.0)
         assert svc.get_load_level(snap) == "caution"
 
-        # Raise caution threshold to 90 — cpu=82 should now be safe
-        svc.update_thresholds({"caution": {"cpu": 90, "ram": 90}})
+        # Raise caution threshold to 95 — cpu=88 should now be safe
+        svc.update_thresholds({"caution": {"cpu": 95, "ram": 95}})
         assert svc.get_load_level(snap) == "safe"
 
 
@@ -122,7 +122,7 @@ class TestCustomThresholds:
 class TestSafetyChecks:
     def test_is_local_safe_false_when_critical(self):
         svc = HardwareMonitorService()
-        svc._history.append(_make_snapshot(cpu=95.0, ram=50.0))
+        svc._history.append(_make_snapshot(cpu=97.0, ram=50.0))
         assert svc.is_local_safe() is False
 
     def test_is_local_safe_true_when_safe(self):
@@ -133,22 +133,22 @@ class TestSafetyChecks:
     def test_is_local_safe_false_caution_large_model(self):
         """Caution + model > 4 GB should be unsafe."""
         svc = HardwareMonitorService()
-        svc._history.append(_make_snapshot(cpu=82.0, ram=50.0))
+        svc._history.append(_make_snapshot(cpu=88.0, ram=50.0))
         assert svc.is_local_safe(model_size_gb=8.0) is False
 
     def test_should_defer_run_critical(self):
         svc = HardwareMonitorService()
-        svc._history.append(_make_snapshot(cpu=95.0, ram=50.0))
+        svc._history.append(_make_snapshot(cpu=97.0, ram=50.0))
         assert svc.should_defer_run(weight="light") is True
 
     def test_should_defer_run_caution_heavy(self):
         svc = HardwareMonitorService()
-        svc._history.append(_make_snapshot(cpu=82.0, ram=50.0))
+        svc._history.append(_make_snapshot(cpu=88.0, ram=50.0))
         assert svc.should_defer_run(weight="heavy") is True
 
     def test_should_defer_run_caution_medium(self):
         svc = HardwareMonitorService()
-        svc._history.append(_make_snapshot(cpu=82.0, ram=50.0))
+        svc._history.append(_make_snapshot(cpu=88.0, ram=50.0))
         assert svc.should_defer_run(weight="medium") is False
 
     def test_should_defer_run_safe(self):

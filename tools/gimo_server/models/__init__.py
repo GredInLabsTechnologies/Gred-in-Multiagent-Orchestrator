@@ -17,7 +17,7 @@ from .provider import (
     NormalizedModelInfo, ProviderModelsCatalogResponse, McpServerConfig, ProviderConfig,
     ProviderValidateRequest, ProviderValidateResponse, ProviderSelectionRequest,
     ProviderModelInstallRequest, ProviderModelInstallResponse,
-    ToolEntry, CliDependencyStatus, CliDependencyInstallRequest, CliDependencyInstallResponse
+    ToolEntry, CliDependencyStatus, CliDependencyInfo, CliDependencyInstallRequest, CliDependencyInstallResponse
 )
 from .policy import (
     CircuitBreakerConfigModel, PHASE4_INTENT_CLASSES, ExecutionDecisionCode, IntentDecisionAudit,
