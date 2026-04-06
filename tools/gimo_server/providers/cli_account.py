@@ -166,35 +166,16 @@ class CliAccountAdapter(ProviderAdapter):
 
         if sys.platform == "win32":
             import subprocess as _subprocess
-            if use_stdin:
-                # Pipe prompt via stdin to bypass command-line length limit
-                import tempfile
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tf:
-                    tf.write(prompt)
-                    tf_path = tf.name
-                try:
-                    with open(tf_path, "rb") as f:
-                        completed = await asyncio.to_thread(
-                            _subprocess.run,
-                            " ".join(cmd),  # string form for shell
-                            capture_output=True,
-                            env=env,
-                            timeout=300,
-                            stdin=f,
-                            shell=True,  # required for npm .cmd shims  # nosec B602
-                        )
-                finally:
-                    import os as _os
-                    _os.unlink(tf_path)
-            else:
-                completed = await asyncio.to_thread(
-                    _subprocess.run,
-                    " ".join(cmd),  # string form for shell
-                    capture_output=True,
-                    env=env,
-                    timeout=300,
-                    shell=True,  # required for npm .cmd shims  # nosec B602
-                )
+            prompt_bytes = prompt.encode("utf-8") if use_stdin else None
+            completed = await asyncio.to_thread(
+                _subprocess.run,
+                " ".join(cmd),  # string form for shell
+                capture_output=True,
+                env=env,
+                timeout=300,
+                input=prompt_bytes,
+                shell=True,  # required for npm .cmd shims  # nosec B602
+            )
             stdout = completed.stdout or b""
             stderr = completed.stderr or b""
             returncode = completed.returncode

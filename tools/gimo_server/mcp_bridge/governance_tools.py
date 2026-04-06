@@ -10,6 +10,12 @@ from mcp.server.fastmcp import FastMCP
 logger = logging.getLogger("mcp_bridge.governance_tools")
 
 
+def _mcp_surface(name: str = "mcp-governance-tool"):
+    """Shared MCP surface identity for consistent governance tracking."""
+    from tools.gimo_server.models.surface import SurfaceIdentity
+    return SurfaceIdentity(surface_type="mcp", surface_name=name)
+
+
 def register_governance_tools(mcp: FastMCP):
 
     @mcp.tool()
@@ -31,14 +37,10 @@ def register_governance_tools(mcp: FastMCP):
             policy: Execution policy name (read_only, docs_research, propose_only, workspace_safe, workspace_experiment, security_audit)
         """
         try:
-            from tools.gimo_server.models.surface import SurfaceIdentity
             from tools.gimo_server.services.sagp_gateway import SagpGateway
 
             tool_args = json.loads(tool_args_json) if tool_args_json else {}
-            surface = SurfaceIdentity(
-                surface_type="mcp_generic",
-                surface_name="mcp-governance-tool",
-            )
+            surface = _mcp_surface()
             verdict = SagpGateway.evaluate_action(
                 surface=surface,
                 tool_name=tool_name,
@@ -118,13 +120,9 @@ def register_governance_tools(mcp: FastMCP):
             thread_id: Optional thread ID for thread-specific state
         """
         try:
-            from tools.gimo_server.models.surface import SurfaceIdentity
             from tools.gimo_server.services.sagp_gateway import SagpGateway
 
-            surface = SurfaceIdentity(
-                surface_type="mcp_generic",
-                surface_name="mcp-governance-tool",
-            )
+            surface = _mcp_surface()
             snapshot = SagpGateway.get_snapshot(
                 surface=surface,
                 thread_id=thread_id,
@@ -207,12 +205,21 @@ def register_governance_tools(mcp: FastMCP):
         """
         try:
             from tools.gimo_server.services.economy.cost_service import CostService
+            from tools.gimo_server.services.storage_service import StorageService
 
             CostService.load_pricing()
+            storage = StorageService()
+            total_spend = storage.cost.get_total_spend(days=30)
+            spend_rate = storage.cost.get_spend_rate(hours=24)
+            by_model = storage.cost.aggregate_by_model(days=30) or []
+
             return json.dumps({
                 "status": "active",
                 "pricing_loaded": CostService._PRICING_LOADED,
                 "scope": scope,
+                "spend_30d_usd": round(total_spend, 4),
+                "burn_rate_hourly_usd": round(spend_rate, 6),
+                "top_models": by_model[:5],
             }, indent=2, default=str)
         except Exception as e:
             logger.error("gimo_get_budget_status failed: %s", e)

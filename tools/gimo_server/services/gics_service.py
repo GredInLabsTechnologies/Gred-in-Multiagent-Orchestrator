@@ -177,9 +177,12 @@ class GicsService:
     # ── Health check ──────────────────────────────────────────────────────────
 
     async def _health_loop(self) -> None:
+        first = True
         while True:
             try:
-                await asyncio.sleep(60)
+                if not first:
+                    await asyncio.sleep(60)
+                first = False
                 await self._rpc.aping()
                 self._last_alive = True
             except asyncio.CancelledError:

@@ -307,6 +307,34 @@ async def get_run(
     return run
 
 
+@router.get(
+    "/runs/{run_id}/events",
+    responses={404: {"description": RUN_NOT_FOUND}},
+)
+async def get_run_events(
+    request: Request,
+    run_id: str,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """Stream run log entries as SSE events."""
+    from starlette.responses import StreamingResponse
+    import json as _json
+
+    OpsService.set_gics(getattr(request.app.state, "gics", None))
+    run = OpsService.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
+
+    async def _generate():
+        logs = getattr(run, "log", None) or []
+        for i, entry in enumerate(logs):
+            data = entry if isinstance(entry, dict) else {"msg": str(entry)}
+            yield f"id: {i}\ndata: {_json.dumps(data, default=str)}\n\n"
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")
+
+
 @router.post(
     "/runs/{run_id}/replay",
     responses={404: {"description": RUN_NOT_FOUND}},

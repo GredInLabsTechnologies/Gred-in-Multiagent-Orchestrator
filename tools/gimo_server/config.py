@@ -442,15 +442,16 @@ def _resolve_gics_daemon_script(base_dir: Path) -> Path:
 
     Resolution order:
     1) ORCH_GICS_DAEMON_SCRIPT (explicit override)
-    2) <repo_root>/vendor/gics/dist/src/daemon/server.js (canonical)
+    2) <repo_root>/vendor/gics/dist/src/cli/index.js (canonical CLI entry point)
 
+    The supervisor runs `node <cli_path> daemon start`, so cli/index.js is required (not daemon/server.js).
     If canonical is missing, still return canonical path so diagnostics remain clear.
     """
     env_override = os.environ.get("ORCH_GICS_DAEMON_SCRIPT", "").strip()
     if env_override:
         return Path(env_override).resolve()
 
-    canonical = base_dir / "vendor" / "gics" / "dist" / "src" / "daemon" / "server.js"
+    canonical = base_dir / "vendor" / "gics" / "dist" / "src" / "cli" / "index.js"
 
     if canonical.exists():
         return canonical

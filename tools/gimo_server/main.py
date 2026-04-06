@@ -575,6 +575,11 @@ def _register_core_routes(app: FastAPI, settings):
         asyncio.get_event_loop().create_task(_trigger_graceful_shutdown())
         return JSONResponse({"status": "shutting_down", "pid": pid})
 
+    @app.get("/ops/openapi")
+    async def ops_openapi():
+        """Alias for /openapi.json under /ops/ namespace."""
+        return JSONResponse(app.openapi())
+
     @app.get("/")
     async def root_route():
         """Serve the SPA index when available, otherwise return a basic health payload."""

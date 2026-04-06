@@ -391,10 +391,25 @@ class RunWorker:
             if not run:
                 return
 
-            # Phase 5B: No run without ValidatedTaskSpec
+            # Phase 5B: Require ValidatedTaskSpec for bounded execution.
+            # For prompt-based runs (drafts, child runs), skip bounded context
+            # and delegate directly to EngineService which handles composition routing.
             task_spec = getattr(run, "validated_task_spec", None)
             if not task_spec:
-                msg = "[Phase 5B] Execution rejected: No ValidatedTaskSpec found. Recon required."
+                has_prompt = bool(getattr(run, "child_prompt", None))
+                if not has_prompt:
+                    approved = OpsService.get_approved(getattr(run, "approved_id", None))
+                    if approved:
+                        has_prompt = bool(getattr(approved, "prompt", None))
+                    if not has_prompt and approved:
+                        draft = OpsService.get_draft(approved.draft_id)
+                        has_prompt = bool(draft and getattr(draft, "prompt", None))
+                if has_prompt:
+                    OpsService.append_log(run_id, level="INFO", msg="[Phase 5B] No TaskSpec — routing via EngineService (prompt-based)")
+                    from .engine_service import EngineService
+                    await EngineService.execute_run(run_id)
+                    return
+                msg = "[Phase 5B] Execution rejected: No ValidatedTaskSpec and no prompt found."
                 OpsService.append_log(run_id, level="ERROR", msg=msg)
                 OpsService.update_run_status(run_id, "error", msg="Missing ValidatedTaskSpec")
                 return

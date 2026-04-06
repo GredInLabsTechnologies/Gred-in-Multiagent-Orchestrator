@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.ops_models import ProviderConfig, OpsConfig, ProviderSelectionRequest
@@ -136,3 +136,17 @@ async def set_config(
     result = OpsService.set_config(config)
     audit_log("OPS", "/ops/config", "set", operation="WRITE", actor=_actor_label(auth))
     return result
+
+
+@router.get("/cost/compare")
+async def compare_costs(
+    model_a: Annotated[str, Query(..., min_length=1)],
+    model_b: Annotated[str, Query(..., min_length=1)],
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    from tools.gimo_server.services.economy.cost_service import CostService
+    try:
+        return CostService.get_impact_comparison(model_a, model_b)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

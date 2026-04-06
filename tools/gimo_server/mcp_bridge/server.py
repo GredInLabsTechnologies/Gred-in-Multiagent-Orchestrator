@@ -247,14 +247,28 @@ async def _startup_and_run() -> None:
     # Auto-start GIMO HTTP backend so dynamic tools work immediately
     _auto_start_backend()
 
-    _register_dynamic()
-    _register_native()
+    try:
+        _register_dynamic()
+    except Exception as exc:
+        logger.error("Failed to register dynamic MCP tools: %s", exc)
+
+    try:
+        _register_native()
+    except Exception as exc:
+        logger.error("Failed to register native MCP tools: %s", exc)
 
     # Resources and prompts
-    from tools.gimo_server.mcp_bridge.resources import register_resources
-    from tools.gimo_server.mcp_bridge.prompts import register_prompts
-    register_resources(mcp)
-    register_prompts(mcp)
+    try:
+        from tools.gimo_server.mcp_bridge.resources import register_resources
+        register_resources(mcp)
+    except Exception as exc:
+        logger.error("Failed to register MCP resources: %s", exc)
+
+    try:
+        from tools.gimo_server.mcp_bridge.prompts import register_prompts
+        register_prompts(mcp)
+    except Exception as exc:
+        logger.error("Failed to register MCP prompts: %s", exc)
 
     await mcp.run_stdio_async()
 

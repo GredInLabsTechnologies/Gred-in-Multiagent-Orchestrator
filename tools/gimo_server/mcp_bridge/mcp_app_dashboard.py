@@ -25,13 +25,10 @@ def register_dashboard_app(mcp: FastMCP):
         """
         try:
             # Build a snapshot to embed as initial state
-            from tools.gimo_server.models.surface import SurfaceIdentity
+            from tools.gimo_server.mcp_bridge.governance_tools import _mcp_surface
             from tools.gimo_server.services.sagp_gateway import SagpGateway
 
-            surface = SurfaceIdentity(
-                surface_type="claude_app",
-                surface_name="gimo-dashboard",
-            )
+            surface = _mcp_surface("gimo-dashboard")
             snapshot = SagpGateway.get_snapshot(surface=surface)
             snapshot_json = json.dumps(snapshot.to_dict(), indent=2)
 

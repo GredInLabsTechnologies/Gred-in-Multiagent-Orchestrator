@@ -325,31 +325,41 @@ async def cold_room_access(response: Response, request: Request) -> LoginRespons
 
 @router.get("/check")
 async def check_session(request: Request):
-    """Check if the current session cookie is valid. No auth required."""
+    """Check if the current session (cookie or Bearer token) is valid. No auth required."""
+    # 1. Try cookie-based session first
     cookie_value = request.cookies.get(SESSION_COOKIE_NAME)
-    if not cookie_value:
-        return {"authenticated": False}
-    session = session_store.validate(cookie_value)
-    if not session:
-        return {"authenticated": False}
-
-    data = {
-        "authenticated": True,
-        "role": session.role,
-    }
-
-    if session.firebase_user:
-        data.update(
-            {
-                "email": session.email,
-                "displayName": session.display_name,
-                "plan": session.plan,
-                "firebaseUser": True,
-                "sessionRole": session.role,
+    if cookie_value:
+        session = session_store.validate(cookie_value)
+        if session:
+            data = {
+                "authenticated": True,
+                "role": session.role,
             }
-        )
+            if session.firebase_user:
+                data.update(
+                    {
+                        "email": session.email,
+                        "displayName": session.display_name,
+                        "plan": session.plan,
+                        "firebaseUser": True,
+                        "sessionRole": session.role,
+                    }
+                )
+            return data
 
-    return data
+    # 2. Try Bearer token
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        import hmac
+        from tools.gimo_server.config import TOKENS
+        from tools.gimo_server.security.auth import _resolve_role
+        token = auth_header[7:].strip()
+        if token and len(token) >= 16:
+            for known_token in TOKENS:
+                if hmac.compare_digest(token, known_token):
+                    return {"authenticated": True, "role": _resolve_role(known_token)}
+
+    return {"authenticated": False}
 
 
 @router.get("/profile")

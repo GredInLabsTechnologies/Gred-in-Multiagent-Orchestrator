@@ -180,6 +180,9 @@ def watch(
     config = load_config()
     events: list[Any] = []
 
+    if not json_output:
+        console.print(f"[dim]Watching for events (timeout={timeout_seconds}s, limit={limit})...[/dim]")
+
     try:
         for event in stream_events(config, timeout_seconds=timeout_seconds):
             events.append(event)

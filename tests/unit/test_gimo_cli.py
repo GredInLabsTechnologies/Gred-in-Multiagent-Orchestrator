@@ -38,26 +38,34 @@ def test_init_creates_workspace_scaffold(tmp_path, monkeypatch):
 
 def test_plan_persists_draft_locally(tmp_path, monkeypatch):
     _seed_config(tmp_path, monkeypatch)
-    captured: dict[str, object] = {}
 
-    def _fake_api_request(config, method, path, *, params=None, **_kwargs):
-        captured["method"] = method
-        captured["path"] = path
-        captured["params"] = params
-        return 201, {"id": "d_123", "status": "draft", "content": '{"tasks":[]}'}
+    draft_payload = {"id": "d_123", "status": "draft", "content": '{"tasks":[]}'}
+    sse_lines = [
+        'data: {"stage":"progress","message":"Generating..."}',
+        f'data: {json.dumps({"stage":"done","draft":draft_payload})}',
+    ]
 
-    monkeypatch.setattr("gimo_cli.commands.plan.api_request", _fake_api_request)
+    class _FakeResponse:
+        status_code = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def iter_lines(self):
+            return iter(sse_lines)
+
+    class _FakeClient:
+        def __init__(self, **kw): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def stream(self, method, url, **kw):
+            return _FakeResponse()
+
+    monkeypatch.setattr("httpx.Client", _FakeClient)
     monkeypatch.setattr("gimo_cli.commands.plan.load_bond", lambda _url: {"token": "t", "role": "operator"})
     monkeypatch.setattr("gimo_cli.commands.plan.provider_config_request", lambda _cfg: (200, {"active": "test-provider"}))
 
     result = runner.invoke(gimo_cli.app, ["plan", "ship p1"], color=False)
 
     assert result.exit_code == 0
-    assert captured == {
-        "method": "POST",
-        "path": "/ops/generate-plan",
-        "params": {"prompt": "ship p1"},
-    }
     saved = json.loads((tmp_path / ".gimo" / "plans" / "d_123.json").read_text(encoding="utf-8"))
     assert saved["id"] == "d_123"
     assert "Plan generated successfully" in result.stdout

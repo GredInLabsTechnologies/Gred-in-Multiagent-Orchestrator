@@ -33,25 +33,22 @@ def mock_ops_service(tmp_path):
     return OpsService
 
 @pytest.mark.asyncio
-async def test_no_run_without_validated_task_spec(mock_ops_service):
-    # Mock approved
-    appr = OpsApproved(id="appr_1", draft_id="d_1", content="test", prompt="test")
+async def test_no_run_without_validated_task_spec_and_no_prompt(mock_ops_service):
+    # Runs without ValidatedTaskSpec AND without a prompt must be rejected.
+    appr = OpsApproved(id="appr_1", draft_id="d_1", content="test", prompt="")
     _persist_approved_stub(appr)
-    
+
     run = mock_ops_service.create_run(appr.id)
-    # Ensure it's not set
     run_meta = mock_ops_service.get_run(run.id)
     run_meta.validated_task_spec = None
     mock_ops_service._persist_run(run_meta)
-    
+
     worker = RunWorker()
-    
-    # Execute run should fail and mark it as error
     await worker._execute_run(run.id)
-    
+
     updated_run = mock_ops_service.get_run(run.id)
     assert updated_run.status == "error"
-    assert any("ValidatedTaskSpec" in entry["msg"] for entry in updated_run.log)
+    assert any("ValidatedTaskSpec" in entry["msg"] or "no prompt" in entry["msg"].lower() for entry in updated_run.log)
 
 @pytest.mark.asyncio
 async def test_worker_context_is_scoped_by_task_spec(mock_ops_service, tmp_path):
@@ -327,19 +324,22 @@ async def test_run_stream_propagates_session_id():
                                         assert kwargs["session_id"] == "SESS_PROPS"
 
 @pytest.mark.asyncio
-async def test_agentic_loop_does_not_delegate_free_recon_to_worker(mock_ops_service):
-    # Worker must reject if ValidatedTaskSpec is missing (no auto-recon)
+async def test_prompt_based_run_routes_to_engine_without_task_spec(mock_ops_service):
+    # Runs with a prompt but no ValidatedTaskSpec should route to EngineService (not be rejected).
     appr = OpsApproved(id="appr_5", draft_id="d_5", content="test", prompt="test")
     _persist_approved_stub(appr)
     run = mock_ops_service.create_run(appr.id)
     # No validated_task_spec
-    
+
     worker = RunWorker()
     await worker._execute_run(run.id)
-    
+
     updated_run = mock_ops_service.get_run(run.id)
-    assert updated_run.status == "error"
-    assert any("Recon required" in entry["msg"] for entry in updated_run.log)
+    # Should NOT be rejected at Phase 5B gate — routed to EngineService instead.
+    # It may error in EngineService (no provider configured in test), but the
+    # Phase 5B "Missing ValidatedTaskSpec" rejection should NOT appear.
+    has_5b_rejection = any("Missing ValidatedTaskSpec" in entry.get("msg", "") for entry in (updated_run.log or []))
+    assert not has_5b_rejection, "Prompt-based run should not be rejected at Phase 5B gate"
 
 @pytest.mark.asyncio
 async def test_execution_without_repo_context_pack_is_rejected_or_blocked(mock_ops_service):

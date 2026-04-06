@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
 import typer
 from rich.panel import Panel
 
 from gimo_cli import app, console
-from gimo_cli.api import api_request, provider_config_request, resolve_server_url
+from gimo_cli.api import api_request, api_settings, provider_config_request, resolve_server_url, resolve_token
 from gimo_cli.bond import load_bond, load_cli_bond
 from gimo_cli.config import load_config, plans_dir, project_root
 from gimo_cli.stream import emit_output, write_json
@@ -51,18 +53,50 @@ def plan(
             console.print("[yellow]-> Set provider:[/yellow] [cyan]gimo providers set <name>[/cyan]")
             raise typer.Exit(1)
 
-    with console.status("[bold green]Generating plan..."):
-        status_code, payload = api_request(
-            config,
-            "POST",
-            "/ops/generate-plan",
-            params={"prompt": description},
-            extra_headers={"X-Gimo-Workspace": str(ws_path)},
-            role="operator",
-        )
+    base_url, connect_timeout = api_settings(config)
+    token = resolve_token("operator", config)
+    headers = {"Accept": "text/event-stream", "X-GIMO-Surface": "cli", "X-Gimo-Workspace": str(ws_path)}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    url = f"{base_url}/ops/generate-plan-stream"
+    timeout = httpx.Timeout(connect=connect_timeout, read=180.0, write=connect_timeout, pool=connect_timeout)
 
-    if status_code != 201 or not isinstance(payload, dict):
-        console.print(f"[red]Plan generation failed ({status_code}): {payload}[/red]")
+    payload = None
+    with console.status("[bold green]Generating plan...") as status:
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                with client.stream("POST", url, params={"prompt": description}, headers=headers) as resp:
+                    if resp.status_code != 200:
+                        resp.read()
+                        console.print(f"[red]Plan generation failed ({resp.status_code}): {resp.text}[/red]")
+                        raise typer.Exit(1)
+                    for line in resp.iter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        raw = line[5:].strip()
+                        if not raw:
+                            continue
+                        try:
+                            event = json.loads(raw)
+                        except json.JSONDecodeError:
+                            continue
+                        stage = event.get("stage", "")
+                        if stage == "progress":
+                            status.update(f"[bold green]{event.get('message', 'Generating...')}[/bold green]")
+                        elif stage == "done":
+                            payload = event.get("draft")
+                        elif stage == "error":
+                            console.print(f"[red]Plan generation failed: {event.get('error', 'unknown')}[/red]")
+                            raise typer.Exit(1)
+        except httpx.ReadTimeout:
+            console.print("[red]Plan generation timed out (180s).[/red]")
+            raise typer.Exit(1)
+        except httpx.HTTPError as exc:
+            console.print(f"[red]Connection error: {exc}[/red]")
+            raise typer.Exit(1)
+
+    if not isinstance(payload, dict):
+        console.print("[red]Plan generation failed: no draft received.[/red]")
         raise typer.Exit(1)
 
     draft_id = str(payload.get("id") or "")
