@@ -260,7 +260,7 @@ class SagpGateway:
             gics = StorageService._shared_gics
             if gics is None:
                 return {"daemon_alive": False, "entry_count": 0}
-            alive = hasattr(gics, "_supervisor") and gics._supervisor is not None
+            alive = getattr(gics, "_last_alive", False)
             raw_count = gics.count_prefix("") if hasattr(gics, "count_prefix") else 0
             return {"daemon_alive": alive, "entry_count": raw_count or 0}
         except Exception:

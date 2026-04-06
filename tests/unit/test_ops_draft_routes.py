@@ -77,7 +77,9 @@ def test_phase4_approve_blocks_when_risk_too_high(monkeypatch, client):
     assert res.json()["detail"] == "RISK_SCORE_TOO_HIGH"
 
 
-def test_phase4_approve_disables_auto_run_when_not_eligible(monkeypatch, client):
+def test_phase4_approve_explicit_auto_run_overrides_eligibility(monkeypatch, client):
+    """When auto_run=true is explicitly requested, trust the caller and run
+    even if execution_decision is not AUTO_RUN_ELIGIBLE (R12-#5 fix)."""
     from tools.gimo_server.routers.ops import run_router
 
     draft = OpsDraft(
@@ -92,13 +94,46 @@ def test_phase4_approve_disables_auto_run_when_not_eligible(monkeypatch, client)
         prompt="p",
         content="ok",
     )
+    mock_run = OpsRun(id="r_phase4", approved_id="a_phase4", status="pending")
+
+    monkeypatch.setattr(run_router.OpsService, "get_draft", lambda _id: draft)
+    monkeypatch.setattr(run_router.OpsService, "approve_draft", lambda *_args, **_kwargs: approved)
+    monkeypatch.setattr(run_router.OpsService, "create_run", lambda _approved_id: mock_run)
+    monkeypatch.setattr(run_router.OpsService, "update_run_status", lambda *a, **kw: mock_run)
+    monkeypatch.setattr(run_router, "_spawn_run", lambda *a, **kw: None)
+
+    res = client.post("/ops/drafts/d_phase4/approve?auto_run=true")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["run"] is not None
+    assert data["run"]["id"] == "r_phase4"
+
+
+def test_phase4_approve_default_auto_run_respects_eligibility(monkeypatch, client):
+    """When auto_run is NOT explicitly set (uses config default), execution_decision
+    must be AUTO_RUN_ELIGIBLE for the run to proceed."""
+    from tools.gimo_server.routers.ops import run_router
+
+    draft = OpsDraft(
+        id="d_phase4_default",
+        prompt="p",
+        context={"execution_decision": "HUMAN_APPROVAL_REQUIRED"},
+        status="draft",
+    )
+    approved = OpsApproved(
+        id="a_phase4_default",
+        draft_id="d_phase4_default",
+        prompt="p",
+        content="ok",
+    )
     called = {"create_run": False}
 
     monkeypatch.setattr(run_router.OpsService, "get_draft", lambda _id: draft)
     monkeypatch.setattr(run_router.OpsService, "approve_draft", lambda *_args, **_kwargs: approved)
     monkeypatch.setattr(run_router.OpsService, "create_run", lambda _approved_id: called.__setitem__("create_run", True))
 
-    res = client.post("/ops/drafts/d_phase4/approve?auto_run=true")
+    # No auto_run param → uses config default, which should respect eligibility
+    res = client.post("/ops/drafts/d_phase4_default/approve")
     assert res.status_code == 200
     data = res.json()
     assert data["run"] is None

@@ -406,10 +406,12 @@ class ProviderConnectorService:
                 "gemini_cli": "gemini",
             }[connector_id]
             installed = cls._is_cli_installed(binary)
+            # Verify the binary actually runs, not just exists on PATH
+            version = await cls._resolve_cli_version(binary) if installed else None
             return {
                 "id": connector_id,
-                "healthy": installed,
-                "details": {"installed": installed, "binary": binary},
+                "healthy": installed and version is not None,
+                "details": {"installed": installed, "binary": binary, "version": version},
             }
 
         if connector_id == "openai_compat":

@@ -76,6 +76,17 @@ def init(
 
     config = default_config()
     save_config(config)
+
+    # Register the workspace with the backend so it appears in /ops/repos
+    try:
+        _cfg = load_config()
+        api_request(_cfg, "POST", "/ops/repos/register", json_body={
+            "path": str(project_root()),
+            "name": project_root().name,
+        })
+    except Exception:
+        pass  # Server might not be running during init — that's OK
+
     payload = {
         "initialized": True,
         "config_path": str(config_path()),

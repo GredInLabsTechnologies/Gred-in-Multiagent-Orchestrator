@@ -25,6 +25,9 @@ async def trust_query(
     storage = StorageService(gics=getattr(request.app.state, "gics", None))
     engine = TrustEngine(storage.trust)
     result = engine.query_dimension(dimension_key)
+    # Include the effective score that SAGP actually uses (0.85 default for fresh installs)
+    raw_score = float(result.get("score", 0.0))
+    result["effective_score"] = raw_score if raw_score > 0.0 else 0.85
     audit_log("OPS", "/ops/trust/query", dimension_key, operation="READ", actor=_actor_label(auth))
     return result
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 from typing import List, Optional, Annotated
 import asyncio
+import logging
+
+logger = logging.getLogger("ops.run_router")
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
@@ -150,9 +153,10 @@ async def approve_draft(
     excluded_intents = [i.upper() for i in (config.auto_run_excluded_intents or [])]
     auto_run_blocked_by_intent = intent_effective in excluded_intents
 
+    explicit_auto = auto_run is True  # caller explicitly requested execution
     should_run = (
         (auto_run if auto_run is not None else config.default_auto_run)
-        and execution_decision == "AUTO_RUN_ELIGIBLE"
+        and (explicit_auto or execution_decision == "AUTO_RUN_ELIGIBLE")
         and not auto_run_blocked_by_intent
     )
 
@@ -193,8 +197,8 @@ async def approve_draft(
                 run = OpsService.get_run(existing_id)
             else:
                 pass
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.error("Auto-run creation failed for draft %s: %s", draft_id, exc)
 
     return OpsApproveResponse(approved=approved, run=run)
 

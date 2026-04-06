@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import socket
 import subprocess
 import sys
@@ -72,14 +73,159 @@ def _auto_start_backend() -> None:
         logger.warning("Failed to auto-start GIMO backend: %s", exc)
 
 
-def _register_dynamic():
-    from tools.gimo_server.mcp_bridge.registrar import register_all
-    from tools.gimo_server.mcp_bridge.resources import register_resources
-    from tools.gimo_server.mcp_bridge.prompts import register_prompts
+# ── OpenAPI-derived tool naming ───────────────────────────────────────────
 
-    register_all(mcp)
-    register_resources(mcp)
-    register_prompts(mcp)
+
+def _build_name_map(spec: dict) -> dict[str, str]:
+    """Derive gimo_* tool names from OpenAPI operationIds.
+
+    Naming rule: extract meaningful path segments from the endpoint path,
+    join with underscores, and prefix with ``gimo_``.  When two routes
+    produce the same name (e.g. GET and POST on the same path), the HTTP
+    method is appended as a suffix.
+    """
+    names: dict[str, str] = {}
+    used: dict[str, str] = {}  # candidate → first operationId that claimed it
+
+    for path, methods in spec.get("paths", {}).items():
+        if not path.startswith("/ops/"):
+            continue
+        for method, details in methods.items():
+            if method not in ("get", "post", "put", "delete", "patch"):
+                continue
+            op_id = details.get("operationId")
+            if not op_id:
+                continue
+
+            segments = [
+                s.replace("-", "_")
+                for s in path.split("/")
+                if s and s != "ops" and not s.startswith("{")
+            ]
+            candidate = "gimo_" + "_".join(segments)
+
+            if candidate in used:
+                # Rename both: prior owner gets its method appended too
+                prior_op = used[candidate]
+                if prior_op in names and names[prior_op] == candidate:
+                    # Find the prior method
+                    for p2, m2s in spec.get("paths", {}).items():
+                        for m2, d2 in m2s.items():
+                            if d2.get("operationId") == prior_op:
+                                names[prior_op] = f"{candidate}_{m2}"
+                                break
+                candidate = f"{candidate}_{method}"
+
+            used[candidate] = op_id
+            names[op_id] = candidate
+
+    return names
+
+
+# ── Registration ──────────────────────────────────────────────────────────
+
+
+def _register_dynamic():
+    """Register MCP tools derived from the FastAPI OpenAPI spec at runtime.
+
+    Uses FastMCP's OpenAPIProvider so that tool definitions are always in
+    sync with the actual HTTP endpoints — zero drift by construction.
+    """
+    import httpx
+    from fastmcp.server.providers.openapi import OpenAPIProvider
+
+    # Import the FastAPI app purely for its OpenAPI spec (no server started).
+    from tools.gimo_server.main import app as fastapi_app
+
+    spec = fastapi_app.openapi()
+
+    # Build the httpx client that OpenAPIProvider will use for every call.
+    from tools.gimo_server.mcp_bridge.bridge import _get_auth_token
+    headers: dict[str, str] = {}
+    token = _get_auth_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    workspace = os.environ.get("ORCH_REPO_ROOT", "")
+    if workspace:
+        headers["X-Gimo-Workspace"] = workspace
+
+    client = httpx.AsyncClient(
+        base_url="http://127.0.0.1:9325",
+        headers=headers,
+        timeout=30.0,
+    )
+
+    mcp_names = _build_name_map(spec)
+
+    def _ops_only(route, mcp_type):
+        """Only expose /ops/* routes as MCP tools."""
+        if not route.path.startswith("/ops/"):
+            return None
+        return mcp_type
+
+    provider = OpenAPIProvider(
+        spec,
+        client=client,
+        mcp_names=mcp_names,
+        route_map_fn=_ops_only,
+        validate_output=False,  # Permissive — backend already validates
+    )
+    mcp.add_provider(provider)
+
+    # Static aliases with curated signatures (kept for backward compat)
+    _register_static_aliases()
+
+    logger.info(
+        "OpenAPIProvider registered %d tools from OpenAPI spec (+ static aliases).",
+        len(mcp_names),
+    )
+
+
+def _register_static_aliases():
+    """Register hand-crafted tool aliases with ergonomic signatures."""
+    from tools.gimo_server.mcp_bridge.bridge import proxy_to_api
+
+    async def plan_create(
+        objective: str,
+        acceptance_criteria: list,
+        intent_class: str,
+        prompt: str | None = None,
+    ) -> str:
+        """Create a structured execution draft from objective + acceptance criteria."""
+        body = {
+            "objective": objective,
+            "acceptance_criteria": acceptance_criteria,
+            "execution": {"intent_class": intent_class},
+        }
+        if prompt is not None:
+            body["prompt"] = prompt
+        return await proxy_to_api("POST", "/ops/drafts", __body=body)
+
+    async def plan_execute(draft_id: str, auto_run: bool = True) -> str:
+        """Approve a draft and optionally trigger auto-run."""
+        return await proxy_to_api(
+            "POST",
+            "/ops/drafts/{draft_id}/approve",
+            __path_params={"draft_id": draft_id},
+            __query={"auto_run": auto_run},
+        )
+
+    async def cost_estimate(nodes: list | None = None, initial_state: dict | None = None) -> str:
+        """Estimate workflow cost using the mastery predictor endpoint."""
+        return await proxy_to_api(
+            "POST",
+            "/ops/mastery/predict",
+            __body={
+                "nodes": nodes or [],
+                "initial_state": initial_state or {},
+            },
+        )
+
+    for alias in (plan_create, plan_execute, cost_estimate):
+        try:
+            mcp.add_tool(alias)
+        except Exception as e:
+            logger.error("Failed to register MCP alias %s: %s", alias.__name__, e)
 
 
 def _register_native():
@@ -103,6 +249,12 @@ async def _startup_and_run() -> None:
 
     _register_dynamic()
     _register_native()
+
+    # Resources and prompts
+    from tools.gimo_server.mcp_bridge.resources import register_resources
+    from tools.gimo_server.mcp_bridge.prompts import register_prompts
+    register_resources(mcp)
+    register_prompts(mcp)
 
     await mcp.run_stdio_async()
 

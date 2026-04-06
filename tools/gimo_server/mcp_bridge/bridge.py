@@ -55,11 +55,14 @@ async def proxy_to_api(method: str, path: str, **kwargs) -> str:
     query_params = kwargs.pop("__query", {})
     body = kwargs.pop("__body", None)
 
-    # Attach auth token
+    # Attach auth token and workspace context
     headers = {}
     token = _get_auth_token()
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    workspace = os.environ.get("ORCH_REPO_ROOT", "")
+    if workspace:
+        headers["X-Gimo-Workspace"] = workspace
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:

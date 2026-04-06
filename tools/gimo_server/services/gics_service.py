@@ -63,6 +63,7 @@ class GicsService:
         self._supervisor: Optional[GICSDaemonSupervisor] = None
         self._client: Optional[GICSClient] = None
         self._health_task: Optional[asyncio.Task] = None
+        self._last_alive: bool = False  # Updated by health loop — reflects actual liveness
 
         # Per-key locks to prevent read-modify-write races in reliability tracking.
         # Threading locks (not asyncio) because the GICS IPC calls are synchronous.
@@ -104,12 +105,14 @@ class GicsService:
             self._supervisor.start(wait=True, timeout=15.0)
             logger.info("GICS daemon ready.")
             self._client = self._make_client()
+            self._last_alive = True
         except Exception as exc:
             logger.error("Failed to start GICS daemon: %s", exc)
             self._supervisor = None
 
     def stop_daemon(self) -> None:
         """Stop the GICS daemon and close client connections."""
+        self._last_alive = False
         self.stop_health_check()
         if self._client:
             try:
@@ -178,9 +181,11 @@ class GicsService:
             try:
                 await asyncio.sleep(60)
                 await self._rpc.aping()
+                self._last_alive = True
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                self._last_alive = False
                 logger.warning("GICS health check error: %s", exc)
 
     def start_health_check(self) -> None:

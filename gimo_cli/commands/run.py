@@ -26,6 +26,7 @@ def run(
     plan_id: str = typer.Argument(..., help="Draft id to approve and execute"),
     auto: bool = typer.Option(True, "--auto/--approve-only", help="Spawn the backend run immediately after approval."),
     confirm: bool = typer.Option(True, "--confirm/--no-confirm", help="Confirm before approval when interactive."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt (alias for --no-confirm)."),
     wait: bool = typer.Option(True, "--wait/--no-wait", help="Poll the run until it reaches a terminal status."),
     poll_interval: float = typer.Option(DEFAULT_POLL_INTERVAL_SECONDS, "--poll-interval", min=0.1, help="Polling interval in seconds."),
     timeout_seconds: float = typer.Option(300.0, "--timeout", min=1.0, help="Maximum wait time when polling."),
@@ -55,7 +56,7 @@ def run(
         table.add_row("[bold]Total[/bold]", "", f"[bold]~${total:.4f}[/bold]")
         console.print(table)
 
-    if confirm and sys.stdin.isatty():
+    if confirm and not yes and sys.stdin.isatty():
         action = "approve and execute" if auto else "approve without execution"
         if not typer.confirm(f"Proceed to {action} draft {plan_id}?", default=True):
             console.print("[yellow]Run aborted by user.[/yellow]")

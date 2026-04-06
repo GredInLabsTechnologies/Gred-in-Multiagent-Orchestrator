@@ -9,6 +9,9 @@ setlocal EnableDelayedExpansion
 set "ROOT_DIR=%~dp0"
 cd /d "%ROOT_DIR%" || (echo [ERROR] No se pudo entrar al repo root & exit /b 1)
 
+:: Prevent stale .pyc bytecache from shadowing on-disk source changes
+set "PYTHONDONTWRITEBYTECODE=1"
+
 set "PYTHON_EXE=.venv\Scripts\python.exe"
 if not exist "%PYTHON_EXE%" set "PYTHON_EXE=python"
 
@@ -57,6 +60,9 @@ if "!NEED_BOOTSTRAP!"=="1" (
     call :do_bootstrap || exit /b 1
     set "PYTHON_EXE=.venv\Scripts\python.exe"
 )
+
+:: Clean stale __pycache__ from prior runs
+for /d /r "tools\gimo_server" %%D in (__pycache__) do if exist "%%D" rd /s /q "%%D" >nul 2>&1
 
 :: Sync .env.local
 call :sync_env_local
