@@ -121,9 +121,15 @@ class RemoteFetchMixin:
             warnings.append("This provider may not expose a universal /models endpoint. Showing curated defaults.")
             return _fallback_models_for(canonical), warnings
 
-        # Codex uses CLI account sessions — remote /models is not reachable via account token.
-        if canonical == "codex" and not (payload and payload.api_key):
-            return _fallback_models_for(canonical), warnings
+        # Codex shares OpenAI's /v1/models endpoint. If account mode has no
+        # resolvable credentials, try the OPENAI_API_KEY env var so that real
+        # models are returned instead of the stale hardcoded fallback.
+        if canonical == "codex" and not (payload and (payload.api_key or payload.account)):
+            import os
+            env_key = os.environ.get("OPENAI_API_KEY", "").strip()
+            if env_key:
+                payload = ProviderValidateRequest(api_key=env_key)
+            # Fall through to OPENAI_COMPAT_CATALOG_TYPES handler below.
 
         if canonical in {"vllm", "llama-cpp", "tgi", "azure-openai", "aws-bedrock", "vertex-ai"}:
             remote = await cls._fetch_remote_if_auth(canonical, payload)

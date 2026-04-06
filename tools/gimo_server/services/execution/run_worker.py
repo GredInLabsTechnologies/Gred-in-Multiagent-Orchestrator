@@ -48,10 +48,6 @@ def _task_weight_for_run(run) -> "TaskWeight":
         pass
     return TaskWeight.MEDIUM
 
-# Default per-run timeout if nothing else configured.
-DEFAULT_RUN_TIMEOUT = 300  # 5 min
-
-
 class RunWorker:
     """Async background worker for OPS run execution."""
 
@@ -133,7 +129,10 @@ class RunWorker:
 
     def _is_still_active(self, run_id: str) -> bool:
         run = OpsService.get_run(run_id)
-        return run is not None and run.status in ("pending", "running", "awaiting_subagents", "awaiting_review")
+        return run is not None and run.status in (
+            "pending", "running", "awaiting_subagents", "awaiting_review",
+            "HUMAN_APPROVAL_REQUIRED",
+        )
 
     # --- LEGACY PATHS REMOVED (OBSOLETE) ---
     @staticmethod

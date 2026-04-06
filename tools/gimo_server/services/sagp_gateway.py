@@ -212,11 +212,10 @@ class SagpGateway:
             storage = TrustStorage(gics_service=StorageService._shared_gics)
             engine = TrustEngine(trust_store=storage)
             record = engine.query_dimension(dimension_key)
-            score = float(record.get("score", 0.0))
-            # Fresh installs have no events → score=0. Use conservative default.
-            return score if score > 0.0 else 0.85
+            score = float(record.get("score", 0.85))
+            return score
         except Exception:
-            return 0.85  # Conservative default
+            return 0.85
 
     @classmethod
     def _get_circuit_state(cls) -> str:

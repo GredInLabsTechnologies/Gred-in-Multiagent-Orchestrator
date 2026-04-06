@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json as _json
+import logging
 import shutil
 from typing import List, Tuple
 
@@ -14,6 +15,8 @@ from ._base import (
     _run_sync,
     _fallback_models_for,
 )
+
+logger = logging.getLogger("orchestrator.provider_catalog.cli_account")
 
 
 async def _fetch_claude_cli_models() -> List[NormalizedModelInfo]:

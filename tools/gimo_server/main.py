@@ -276,6 +276,11 @@ async def lifespan(app: FastAPI):
         gics_service.start_daemon()
         gics_service.start_health_check()
         app.state.gics = gics_service
+        if not getattr(gics_service, "_last_alive", False):
+            logger.warning(
+                "GICS daemon is NOT alive — operating in degraded mode. "
+                "Install Node.js >= 18 for historical reliability data."
+            )
 
         # Share GICS with StorageService so all callers (even those using
         # StorageService() without explicit gics=) get persistence.

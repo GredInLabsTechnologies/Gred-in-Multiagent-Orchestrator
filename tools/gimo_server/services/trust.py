@@ -105,7 +105,7 @@ class TrustService:
     def _empty_record(self, key: str) -> TrustRecord:
         return TrustRecord(
             dimension_key=key,
-            score=0.0,
+            score=0.85,
             policy="require_review",
             approvals=0,
             failures=0,

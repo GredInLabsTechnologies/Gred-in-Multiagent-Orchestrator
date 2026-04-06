@@ -31,8 +31,8 @@ def _spawn_run(request: Request, run_id: str, composition: str | None = None) ->
     async def _on_failure(exc: Exception) -> None:
         try:
             OpsService.update_run_status(run_id, "error", msg=f"Execution failed: {str(exc)[:200]}")
-        except Exception:
-            pass
+        except Exception as status_exc:
+            logger.error("on_failure handler error for run %s: %s", run_id, status_exc)
 
     if supervisor:
         supervisor.spawn(
@@ -178,13 +178,14 @@ async def approve_draft(
                 try:
                     run = OpsService.update_run_status(run.id, "running", msg="Execution started via draft approval auto-run")
                     _spawn_run(request, run.id, composition=composition)
-                except Exception:
+                except Exception as exc:
+                    logger.error("Spawn failed for draft %s, falling back to worker: %s", draft_id, exc)
                     try:
                         worker = getattr(request.app.state, "run_worker", None)
                         if worker is not None:
                             worker.notify()
-                    except Exception:
-                        pass
+                    except Exception as wk_exc:
+                        logger.error("Worker fallback also failed for draft %s: %s", draft_id, wk_exc)
             else:
                 _spawn_run(request, run.id, composition=composition)
             
@@ -268,14 +269,14 @@ async def create_run(
         try:
             run = OpsService.update_run_status(run.id, "running", msg="Execution started via /ops/runs")
             _spawn_run(request, run.id)
-        except Exception:
-            # Fallback to worker wake-up if direct launch fails for any reason.
+        except Exception as exc:
+            logger.error("Spawn failed for run %s, falling back to worker: %s", run.id, exc)
             try:
                 worker = getattr(request.app.state, "run_worker", None)
                 if worker is not None:
                     worker.notify()
-            except Exception:
-                pass
+            except Exception as wk_exc:
+                logger.error("Worker fallback also failed for run %s: %s", run.id, wk_exc)
 
     audit_log("OPS", "/ops/runs", run.id, operation="WRITE", actor=_actor_label(auth))
     return run
@@ -401,13 +402,14 @@ async def rerun(
         try:
             run = OpsService.update_run_status(run.id, "running", msg="Execution started via /ops/runs/{run_id}/rerun")
             _spawn_run(request, run.id)
-        except Exception:
+        except Exception as exc:
+            logger.error("Rerun spawn failed for run %s, falling back to worker: %s", run_id, exc)
             try:
                 worker = getattr(request.app.state, "run_worker", None)
                 if worker is not None:
                     worker.notify()
-            except Exception:
-                pass
+            except Exception as wk_exc:
+                logger.error("Rerun worker fallback also failed for run %s: %s", run_id, wk_exc)
 
     audit_log("OPS", f"/ops/runs/{run_id}/rerun", run.id, operation="WRITE", actor=_actor_label(auth))
     return run

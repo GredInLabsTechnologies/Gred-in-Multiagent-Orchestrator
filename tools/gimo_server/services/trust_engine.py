@@ -240,7 +240,7 @@ class TrustEngine:
             "failures": 0,
             "auto_approvals": 0,
             "streak": 0,
-            "score": 0.0,
+            "score": 0.85,
             "policy": "require_review",
             "circuit_state": "closed",
             "circuit_opened_at": None,

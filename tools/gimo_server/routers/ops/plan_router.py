@@ -558,6 +558,8 @@ async def generate_plan_stream(
                     "draft_id": draft.id,
                     "custom_plan_id": custom_plan.id,
                     "task_count": len(plan.tasks),
+                    "content": draft.content,
+                    "status": draft.status,
                 },
                 "duration": round(duration, 1),
                 "status": "success",

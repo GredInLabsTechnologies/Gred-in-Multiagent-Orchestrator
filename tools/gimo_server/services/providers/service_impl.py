@@ -756,7 +756,23 @@ class ProviderService:
         provider_type = cls.normalize_provider_type(provider_entry.provider_type if provider_entry else effective_provider)
         
         try:
-            response = await adapter.generate(prompt, context)
+            from ..timeout.adaptive_timeout_service import AdaptiveTimeoutService
+            _llm_timeout = AdaptiveTimeoutService.predict_timeout(
+                context.get("task_type", "run"), context
+            )
+            response = await asyncio.wait_for(
+                adapter.generate(prompt, context), timeout=_llm_timeout
+            )
+        except asyncio.TimeoutError:
+            cls._record_outcome_safe(
+                provider_type=provider_type,
+                model_id=str(requested_model or getattr(adapter, "model", "unknown")),
+                success=False, start_ts=start_ts, cost_usd=0.0, task_type=str(task_type)
+            )
+            raise TimeoutError(
+                f"LLM call timed out after {_llm_timeout:.0f}s "
+                f"(provider={effective_provider}, model={model_name})"
+            )
         except Exception:
             cls._record_outcome_safe(
                 provider_type=provider_type,
