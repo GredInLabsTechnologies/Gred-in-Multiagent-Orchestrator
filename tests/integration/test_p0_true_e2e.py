@@ -241,7 +241,11 @@ def test_file_task_writes_to_disk(e2e_env, tmp_path):
 
 
 def test_policy_gate_denial_stops_pipeline(e2e_env):
-    """Cuando PolicyGate deniega, el pipeline NO ejecuta LlmExecute."""
+    """Approved runs skip PolicyGate (approval is terminal).
+
+    Changing policy to deny AFTER approval must NOT block execution
+    because the human already approved the draft.
+    """
     client, queued, active_policy = e2e_env
 
     # Crear draft con policy allow
@@ -256,14 +260,15 @@ def test_policy_gate_denial_stops_pipeline(e2e_env):
     run = approve_res.json().get("run")
     assert run is not None
 
-    # Cambiar policy a deny ANTES de ejecutar pipeline
+    # Cambiar policy a deny DESPUÉS de aprobar — no debe afectar
     active_policy[0] = _policy_deny
     _run_queued_tasks(queued)
 
     get_run_res = client.get(f"/ops/runs/{run['id']}")
     completed = get_run_res.json()
-    assert completed["status"] == "error", \
-        f"Expected error from policy denial, got {completed['status']}"
+    # Approval is terminal: approved runs bypass gates regardless of policy changes
+    assert completed["status"] == "done", \
+        f"Expected done (approval is terminal), got {completed['status']}"
 
 
 def test_high_risk_score_halts_pipeline(e2e_env):

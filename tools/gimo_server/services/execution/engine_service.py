@@ -271,6 +271,10 @@ class EngineService:
         if workspace_path:
             context["workspace_root"] = workspace_path
 
+        # Inject approved_id so downstream gates can detect pre-approved runs
+        if run.approved_id:
+            context["approved_id"] = run.approved_id
+
         # Inject draft prompt into context so LLM stages have access to it
         if draft and getattr(draft, "prompt", None) and "prompt" not in context:
             context["prompt"] = draft.prompt

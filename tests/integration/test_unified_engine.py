@@ -52,13 +52,17 @@ async def test_execute_run_infers_multi_agent_composition_for_parent_flows() -> 
         "tools.gimo_server.services.ops_service.OpsService.update_run_status",
         return_value=fake_run,
     ), patch(
+        "tools.gimo_server.services.ops_service.OpsService.append_log",
+        return_value=fake_run,
+    ), patch(
         "tools.gimo_server.services.engine_service.EngineService.run_composition",
         new_callable=AsyncMock,
     ) as mock_run_composition:
         mock_run_composition.return_value = []
         await EngineService.execute_run("r_parent")
 
-    mock_run_composition.assert_awaited_once_with("multi_agent", "r_parent", fake_draft.context)
+    expected_ctx = {**fake_draft.context, "approved_id": "a1"}
+    mock_run_composition.assert_awaited_once_with("multi_agent", "r_parent", expected_ctx)
 
 
 @pytest.mark.asyncio
