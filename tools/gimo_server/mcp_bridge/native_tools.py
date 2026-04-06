@@ -275,67 +275,42 @@ def register_native_tools(mcp: FastMCP):
     async def gimo_propose_structured_plan(task_instructions: str) -> str:
         """Generates a structured multi-step plan with task dependencies and Mermaid graph."""
         try:
-            from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
             from .bridge import proxy_to_api
-            plan_data = await _generate_plan_for_task(task_instructions)
-            graph = _generate_mermaid_graph(plan_data)
-            import json
             result = await proxy_to_api(
                 "POST", "/ops/drafts",
-                __body={
-                    "prompt": task_instructions,
-                    "content": TaskDescriptorService.canonicalize_plan_content(plan_data),
-                    "context": {"structured": True, "mermaid": graph},
-                    "provider": "mcp_planner",
-                },
+                __body={"prompt": task_instructions, "provider": "mcp_planner"},
             )
-            return f"{result}\\n```mermaid\\n{graph}\\n```"
+            return result
         except Exception as e: return f"Error: {e}"
 
     @mcp.tool()
     async def gimo_create_draft(task_instructions: str, target_agent_id: str = "auto") -> str:
         """Creates an Ops Draft based on task instructions with Mermaid planning."""
         try:
-            from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
             from .bridge import proxy_to_api
-            plan_data = await _generate_plan_for_task(task_instructions)
-            graph = _generate_mermaid_graph(plan_data)
             result = await proxy_to_api(
                 "POST", "/ops/drafts",
-                __body={
-                    "prompt": task_instructions,
-                    "content": TaskDescriptorService.canonicalize_plan_content(plan_data),
-                    "context": {"structured": True, "mermaid": graph},
-                    "provider": "mcp",
-                },
+                __body={"prompt": task_instructions, "provider": "mcp"},
             )
-            return f"{result}\\n```mermaid\\n{graph}\\n```"
+            return result
         except Exception as e: return str(e)
 
     @mcp.tool()
     async def gimo_run_task(task_instructions: str, target_agent_id: str = "auto") -> str:
         """Automatically create, approve, and execute a plan through the full governance chain."""
         try:
-            from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
             from .bridge import proxy_to_api
             import json
-            plan_data = await _generate_plan_for_task(task_instructions)
-            graph = _generate_mermaid_graph(plan_data)
-            # 1. Create draft via HTTP (audit log, rate limit)
+            # 1. Create draft via HTTP (no LLM — instant)
             draft_result = await proxy_to_api(
                 "POST", "/ops/drafts",
-                __body={
-                    "prompt": task_instructions,
-                    "content": TaskDescriptorService.canonicalize_plan_content(plan_data),
-                    "context": {"structured": True, "mermaid": graph},
-                    "provider": "mcp_auto",
-                },
+                __body={"prompt": task_instructions, "provider": "mcp_auto"},
             )
             # Extract draft ID from response
             draft_id = None
             for line in draft_result.splitlines():
                 try:
-                    data = json.loads(line.lstrip("✅ Success (201):").strip())
+                    data = json.loads(line.lstrip("\u2705 Success (201):").strip())
                     draft_id = data.get("id")
                     break
                 except (json.JSONDecodeError, ValueError):
@@ -347,7 +322,7 @@ def register_native_tools(mcp: FastMCP):
                 "POST", f"/ops/drafts/{draft_id}/approve",
                 __query={"auto_run": "true"},
             )
-            return f"{approve_result}\\nPlan:\\n```mermaid\\n{graph}\\n```"
+            return approve_result
         except Exception as e: return str(e)
 
     @mcp.tool()
@@ -426,6 +401,7 @@ def register_native_tools(mcp: FastMCP):
         provider: str = "auto",
         model: str = "auto",
         execution_policy: str = "workspace_safe",
+        workspace_path: str = "",
     ) -> str:
         """Spawn a governed sub-agent with optional provider/model selection.
 
@@ -436,10 +412,14 @@ def register_native_tools(mcp: FastMCP):
             provider: Provider ID or "auto" for automatic selection
             model: Model ID or "auto" for automatic selection
             execution_policy: Execution policy (read_only, workspace_safe, etc.)
+            workspace_path: Workspace directory (defaults to ORCH_REPO_ROOT)
         """
         try:
+            import os
             from tools.gimo_server.services.sub_agent_manager import SubAgentManager
+            ws = workspace_path or os.environ.get("ORCH_REPO_ROOT", ".")
             req = {
+                "workspace_path": ws,
                 "modelPreference": model if model != "auto" else "default",
                 "constraints": {
                     "role": role,
@@ -529,7 +509,7 @@ def register_native_tools(mcp: FastMCP):
                 # Send chat message
                 resp = await client.post(
                     f"{BACKEND_URL}/ops/threads/{thread_id}/chat",
-                    params={"content": message},
+                    json={"content": message},
                     headers=headers,
                 )
 

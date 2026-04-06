@@ -39,10 +39,10 @@ def test_init_creates_workspace_scaffold(tmp_path, monkeypatch):
 def test_plan_persists_draft_locally(tmp_path, monkeypatch):
     _seed_config(tmp_path, monkeypatch)
 
-    draft_payload = {"id": "d_123", "status": "draft", "content": '{"tasks":[]}'}
+    result_payload = {"draft_id": "d_123", "custom_plan_id": "cp_1", "task_count": 1}
     sse_lines = [
-        'data: {"stage":"progress","message":"Generating..."}',
-        f'data: {json.dumps({"stage":"done","draft":draft_payload})}',
+        'data: {"stage":"analyzing_prompt","progress":0.1,"message":"Analyzing..."}',
+        f'data: {json.dumps({"result": result_payload, "duration": 1.2, "status": "success"})}',
     ]
 
     class _FakeResponse:
@@ -67,7 +67,7 @@ def test_plan_persists_draft_locally(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     saved = json.loads((tmp_path / ".gimo" / "plans" / "d_123.json").read_text(encoding="utf-8"))
-    assert saved["id"] == "d_123"
+    assert saved["draft_id"] == "d_123"
     assert "Plan generated successfully" in result.stdout
 
 

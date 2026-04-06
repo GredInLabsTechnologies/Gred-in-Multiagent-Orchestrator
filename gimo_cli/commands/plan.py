@@ -80,14 +80,16 @@ def plan(
                             event = json.loads(raw)
                         except json.JSONDecodeError:
                             continue
-                        stage = event.get("stage", "")
-                        if stage == "progress":
-                            status.update(f"[bold green]{event.get('message', 'Generating...')}[/bold green]")
-                        elif stage == "done":
-                            payload = event.get("draft")
-                        elif stage == "error":
-                            console.print(f"[red]Plan generation failed: {event.get('error', 'unknown')}[/red]")
+                        if "result" in event:
+                            payload = event["result"]
+                        elif "error" in event:
+                            console.print(f"[red]Plan generation failed: {event['error']}[/red]")
                             raise typer.Exit(1)
+                        elif "stage" in event:
+                            msg = event.get("message") or event["stage"]
+                            pct = event.get("progress", "")
+                            pct_str = f" ({int(float(pct)*100)}%)" if pct else ""
+                            status.update(f"[bold green]{msg}{pct_str}[/bold green]")
         except httpx.ReadTimeout:
             console.print("[red]Plan generation timed out (180s).[/red]")
             raise typer.Exit(1)
@@ -99,7 +101,7 @@ def plan(
         console.print("[red]Plan generation failed: no draft received.[/red]")
         raise typer.Exit(1)
 
-    draft_id = str(payload.get("id") or "")
+    draft_id = str(payload.get("draft_id") or payload.get("id") or "")
     if not draft_id:
         console.print("[red]Backend returned a draft without id.[/red]")
         raise typer.Exit(1)

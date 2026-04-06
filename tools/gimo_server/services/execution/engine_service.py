@@ -379,7 +379,8 @@ class EngineService:
                 final_msg = f"Stage failed [{stage_name}]: {err_detail}{caused}"[:2000]
                 break
             if stage_output.status == "halt":
-                # Already halted (e.g. HUMAN_APPROVAL_REQUIRED) — leave status as-is
+                decision = stage_output.artifacts.get("execution_decision", "HUMAN_APPROVAL_REQUIRED")
+                OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg=f"Pipeline halted: {decision}")
                 return results
 
         OpsService.update_run_status(run_id, final_status, msg=final_msg)

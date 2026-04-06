@@ -13,6 +13,7 @@ Compliance: GICS_1_3_4_CLIENT_CONSUMPTION_SCOPE.md — GIMO section.
 import asyncio
 import logging
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -91,16 +92,25 @@ class GicsService:
             )
             return
 
+        node_path = shutil.which("node")
+        if not node_path:
+            logger.warning(
+                "Node.js not found on PATH — GICS daemon cannot start. "
+                "Install Node.js >= 18 and ensure 'node' is on PATH."
+            )
+            return
+
         gics_data_path = Path(self._data_path)
         gics_data_path.mkdir(parents=True, exist_ok=True)
 
-        logger.info("Starting GICS daemon (cli=%s, address=%s) …", self._cli_path, self._address)
+        logger.info("Starting GICS daemon (cli=%s, address=%s, node=%s) …", self._cli_path, self._address, node_path)
         try:
             self._supervisor = GICSDaemonSupervisor(
                 cli_path=self._cli_path,
                 address=self._address,
                 token_path=self._token_path,
                 data_path=self._data_path,
+                node_executable=node_path,
             )
             self._supervisor.start(wait=True, timeout=15.0)
             logger.info("GICS daemon ready.")
@@ -108,6 +118,15 @@ class GicsService:
             self._last_alive = True
         except Exception as exc:
             logger.error("Failed to start GICS daemon: %s", exc)
+            if hasattr(self._supervisor, 'process') and self._supervisor.process:
+                stderr = self._supervisor.process.stderr
+                if stderr:
+                    try:
+                        err_output = stderr.read()
+                        if err_output:
+                            logger.error("GICS daemon stderr: %s", err_output.decode(errors="replace"))
+                    except Exception:
+                        pass
             self._supervisor = None
 
     def stop_daemon(self) -> None:

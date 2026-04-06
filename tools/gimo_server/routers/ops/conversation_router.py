@@ -56,8 +56,8 @@ class CreateThreadRequest(BaseModel):
 
 @router.post("", response_model=GimoThread, status_code=201)
 async def create_thread(
-    workspace_root: str,
     auth: Annotated[AuthContext, Depends(verify_token)],
+    workspace_root: str = Query(default=".", description="Workspace root directory"),
     body: CreateThreadRequest = Body(default_factory=CreateThreadRequest),
     title: str = Query(default=None, description="Thread title (deprecated, use request body)"),
     x_gimo_surface: Optional[str] = Header(default=None, alias="X-GIMO-Surface"),

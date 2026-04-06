@@ -96,6 +96,29 @@ async def list_connectors(
     return data
 
 
+@router.get("/connectors/health")
+async def connectors_health_aggregate(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """Aggregate health check across all connectors."""
+    _require_role(auth, "operator")
+    connectors = ProviderService.list_connectors()
+    items = connectors.get("connectors", [])
+    results = []
+    for c in items:
+        cid = c.get("id", "unknown")
+        try:
+            health = await ProviderService.connector_health(cid)
+            results.append({"id": cid, "healthy": health.get("healthy", False), **health})
+        except Exception:
+            results.append({"id": cid, "healthy": False, "error": "health check failed"})
+    healthy_count = sum(1 for r in results if r.get("healthy"))
+    audit_log("OPS", "/ops/connectors/health", str(len(results)), operation="READ", actor=_actor_label(auth))
+    return {"total": len(results), "healthy": healthy_count, "connectors": results}
+
+
 @router.get("/connectors/{connector_id}/health", responses={404: {"description": "Not Found"}})
 async def connector_health(
     request: Request,

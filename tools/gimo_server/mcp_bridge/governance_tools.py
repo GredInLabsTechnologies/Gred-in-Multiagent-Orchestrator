@@ -95,19 +95,15 @@ def register_governance_tools(mcp: FastMCP):
             dimension_key: Optional dimension to query (e.g. "provider:anthropic", "model:gpt-4o"). Empty returns all dimensions.
         """
         try:
-            from tools.gimo_server.services.trust_engine import TrustEngine
-            from tools.gimo_server.services.storage.trust_storage import TrustStorage
-            from tools.gimo_server.services.storage_service import StorageService
-
-            storage = TrustStorage(gics_service=StorageService._shared_gics)
-            engine = TrustEngine(trust_store=storage)
+            from tools.gimo_server.services.sagp_gateway import SagpGateway
 
             if dimension_key:
-                record = engine.query_dimension(dimension_key)
-                return json.dumps(record, indent=2, default=str)
+                score = SagpGateway._get_trust_score(dimension_key)
+                return json.dumps({"dimension_key": dimension_key, "effective_score": score}, indent=2)
             else:
-                dashboard = engine.dashboard(limit=20)
-                return json.dumps(dashboard, indent=2, default=str)
+                dimensions = ["provider", "model", "tool"]
+                result = {d: SagpGateway._get_trust_score(d) for d in dimensions}
+                return json.dumps(result, indent=2)
         except Exception as e:
             logger.error("gimo_get_trust_profile failed: %s", e)
             return json.dumps({"error": str(e)})

@@ -12,6 +12,13 @@ class RiskGate(ExecutionStage):
         self.calibrator = calibrator or RiskCalibrator()
 
     async def execute(self, input: StageInput) -> StageOutput:
+        # 0. Skip if draft already approved (approval is terminal)
+        if input.context.get("approved_id"):
+            return StageOutput(
+                status="continue",
+                artifacts={"gate_skipped": True, "reason": "draft already approved"}
+            )
+
         # 1. Get calibrated thresholds for this intent
         intent_audit = input.artifacts.get("intent_audit", {})
         intent_effective = intent_audit.get("intent_effective", "SAFE_REFACTOR")

@@ -9,6 +9,13 @@ class PolicyGate(ExecutionStage):
         return "policy_gate"
 
     async def execute(self, input: StageInput) -> StageOutput:
+        # 0. Skip if draft already approved (approval is terminal)
+        if input.context.get("approved_id"):
+            return StageOutput(
+                status="continue",
+                artifacts={"gate_skipped": True, "reason": "draft already approved"}
+            )
+
         # 1. Evaluate Runtime Policy
         path_scope = input.context.get("path_scope", [])
         estimated_files = input.context.get("estimated_files_changed")
