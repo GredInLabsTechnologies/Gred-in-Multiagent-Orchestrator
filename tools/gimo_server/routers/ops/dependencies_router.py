@@ -18,6 +18,13 @@ async def list_system_dependencies(
 ):
     _require_role(auth, "operator")
     data = await ProviderService.list_cli_dependencies()
+    gics = getattr(request.app.state, "gics", None)
+    failure = getattr(gics, "last_start_failure", None) if gics is not None else None
+    if failure is not None:
+        data["gics_failure_reason"] = failure.reason
+        data["gics_failure_message"] = failure.message
+        if failure.detail is not None:
+            data["gics_failure_detail"] = failure.detail
     audit_log("OPS", "/ops/system/dependencies", str(data.get("count", 0)), operation="READ", actor=_actor_label(auth))
     return data
 

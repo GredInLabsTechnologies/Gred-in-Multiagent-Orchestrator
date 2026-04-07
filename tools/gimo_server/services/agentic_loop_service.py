@@ -803,6 +803,16 @@ class AgenticLoopService:
             if content:
                 await emit_event("text_delta", {"content": content})
 
+            if not content and not tool_calls and finish_reason == "stop":
+                final_response = "[Hollow completion: LLM returned empty content and no tool calls]"
+                finish_reason = "error"
+                await emit_event("hollow_completion_error", {
+                    "thread_id": thread_id,
+                    "turn": iteration,
+                    "model": model,
+                })
+                break
+
             if not tool_calls:
                 final_response = content or ""
                 break

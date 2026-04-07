@@ -678,3 +678,46 @@ class TestToolParseErrorLogging:
             result = AgenticLoopService._parse_tool_arguments('{"key": "value"}')
         assert result == {"key": "value"}
         assert not any("Malformed" in msg for msg in caplog.messages)
+
+
+@pytest.mark.asyncio
+async def test_agentic_loop_hollow_completion_raises(tmp_path: Path):
+    """R17 Cluster B: empty content + no tool_calls + finish_reason=stop must
+    surface an explicit hollow_completion_error event and a diagnostic final
+    response — never a silent empty string."""
+    adapter = AsyncMock()
+    adapter.chat_with_tools = AsyncMock(
+        return_value={
+            "content": None,
+            "tool_calls": [],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 0, "total_tokens": 1},
+            "finish_reason": "stop",
+        }
+    )
+
+    events: list[tuple[str, dict]] = []
+
+    async def emit(event_type: str, payload: dict) -> None:
+        events.append((event_type, payload))
+
+    result = await AgenticLoopService._run_loop(
+        adapter=adapter,
+        provider_id="test-provider",
+        model="test-model",
+        workspace_root=str(tmp_path),
+        token="system",
+        mood="neutral",
+        mood_profile=get_mood_profile("neutral"),
+        messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}],
+        max_turns=3,
+        temperature=0.0,
+        tools=[],
+        task_key="agentic_chat",
+        emit=emit,
+    )
+
+    assert result.finish_reason == "error"
+    assert "Hollow completion" in result.response
+    hollow_events = [p for (t, p) in events if t == "hollow_completion_error"]
+    assert len(hollow_events) == 1
+    assert hollow_events[0]["model"] == "test-model"

@@ -16,8 +16,23 @@ import os
 import shutil
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+@dataclass(frozen=True)
+class GicsStartFailure:
+    """Structured record of why GicsService.start_daemon failed.
+
+    Preserves the degraded-mode contract: start_daemon never raises, but
+    callers (and the /ops/system/dependencies route) can introspect why
+    the daemon is unavailable.
+    """
+
+    reason: str  # "cli_not_found" | "node_not_found" | "spawn_error"
+    message: str
+    detail: Optional[str] = None
 
 from ..config import GICS_DAEMON_SCRIPT, GICS_SOCKET_PATH, GICS_TOKEN_PATH, OPS_DATA_DIR
 from vendor.gics.clients.python.gics_client import GICSClient, GICSDaemonSupervisor
@@ -65,6 +80,7 @@ class GicsService:
         self._client: Optional[GICSClient] = None
         self._health_task: Optional[asyncio.Task] = None
         self._last_alive: bool = False  # Updated by health loop — reflects actual liveness
+        self._last_start_failure: Optional[GicsStartFailure] = None
 
         # Per-key locks to prevent read-modify-write races in reliability tracking.
         # Threading locks (not asyncio) because the GICS IPC calls are synchronous.
@@ -78,6 +94,11 @@ class GicsService:
                 self._outcome_locks[key] = threading.Lock()
             return self._outcome_locks[key]
 
+    @property
+    def last_start_failure(self) -> Optional[GicsStartFailure]:
+        """Most recent reason start_daemon failed (None if it succeeded or was never called)."""
+        return self._last_start_failure
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def start_daemon(self) -> None:
@@ -87,16 +108,29 @@ class GicsService:
             return
 
         if not self._cli_path:
-            logger.error(
-                "GICS CLI not found at %s — daemon cannot start.", GICS_DAEMON_SCRIPT
+            self._last_start_failure = GicsStartFailure(
+                reason="cli_not_found",
+                message=f"GICS CLI not found at {GICS_DAEMON_SCRIPT} — daemon cannot start.",
+                detail=str(GICS_DAEMON_SCRIPT),
+            )
+            logger.warning(
+                "GICS daemon unavailable [reason=cli_not_found]: %s",
+                self._last_start_failure.message,
             )
             return
 
         node_path = shutil.which("node")
         if not node_path:
+            self._last_start_failure = GicsStartFailure(
+                reason="node_not_found",
+                message=(
+                    "Node.js not found on PATH — GICS daemon cannot start. "
+                    "Install Node.js >= 18 and ensure 'node' is on PATH."
+                ),
+            )
             logger.warning(
-                "Node.js not found on PATH — GICS daemon cannot start. "
-                "Install Node.js >= 18 and ensure 'node' is on PATH."
+                "GICS daemon unavailable [reason=node_not_found]: %s",
+                self._last_start_failure.message,
             )
             return
 
@@ -117,7 +151,15 @@ class GicsService:
             self._client = self._make_client()
             self._last_alive = True
         except Exception as exc:
-            logger.error("Failed to start GICS daemon: %s", exc)
+            self._last_start_failure = GicsStartFailure(
+                reason="spawn_error",
+                message=f"Failed to start GICS daemon: {exc}",
+                detail=repr(exc),
+            )
+            logger.warning(
+                "GICS daemon unavailable [reason=spawn_error]: %s",
+                self._last_start_failure.message,
+            )
             if hasattr(self._supervisor, 'process') and self._supervisor.process:
                 stderr = self._supervisor.process.stderr
                 if stderr:
