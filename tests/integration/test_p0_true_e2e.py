@@ -241,34 +241,37 @@ def test_file_task_writes_to_disk(e2e_env, tmp_path):
 
 
 def test_policy_gate_denial_stops_pipeline(e2e_env):
-    """Approved runs skip PolicyGate (approval is terminal).
+    """R17 Cluster A: PolicyGate runs even on approved runs.
 
-    Changing policy to deny AFTER approval must NOT block execution
-    because the human already approved the draft.
+    The previous "approval is terminal" doctrine (R14.1 silent gate-skip on
+    approved_id) was the root cause of issues #1/#5/#6/#11/#12 — runs were
+    born hollow because gates short-circuited and produced gate_skipped:true
+    artifacts. Cluster A removes the silent skip: gates now always execute,
+    and approval is recorded in the verdict, not used as a license to bypass
+    evaluation. A policy change to deny AFTER approval correctly blocks
+    execution because the gate runs against the live policy.
     """
     client, queued, active_policy = e2e_env
 
-    # Crear draft con policy allow
     draft_res = client.post("/ops/drafts", json=_draft_body())
     assert draft_res.status_code == 201
     draft = draft_res.json()
     assert draft["status"] == "draft"
 
-    # Aprobar
     approve_res = client.post(f"/ops/drafts/{draft['id']}/approve?auto_run=true")
     assert approve_res.status_code == 200
     run = approve_res.json().get("run")
     assert run is not None
 
-    # Cambiar policy a deny DESPUÉS de aprobar — no debe afectar
+    # Switch policy to deny after approval — gate now runs against the live
+    # policy and must block the run.
     active_policy[0] = _policy_deny
     _run_queued_tasks(queued)
 
     get_run_res = client.get(f"/ops/runs/{run['id']}")
     completed = get_run_res.json()
-    # Approval is terminal: approved runs bypass gates regardless of policy changes
-    assert completed["status"] == "done", \
-        f"Expected done (approval is terminal), got {completed['status']}"
+    assert completed["status"] == "error", \
+        f"Expected error (gate denies post-approval), got {completed['status']}"
 
 
 def test_high_risk_score_halts_pipeline(e2e_env):
