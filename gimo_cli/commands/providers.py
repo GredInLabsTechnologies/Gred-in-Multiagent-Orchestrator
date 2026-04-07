@@ -146,28 +146,61 @@ def providers_test(
     provider_id: str = typer.Argument(..., help="Provider ID to test."),
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
-    """Test connectivity for a provider."""
+    """Test connectivity for a provider.
+
+    R17 Cluster E.2: thin client of /ops/providers/diagnostics — all probing
+    logic lives in the backend ProviderDiagnosticsService so doctor and
+    providers test see identical results.
+    """
     config = load_config()
-    status_code, payload = api_request(config, "GET", f"/ops/connectors/{provider_id}/health")
+    status_code, payload = api_request(
+        config, "GET", "/ops/providers/diagnostics", role="operator",
+    )
     if json_output:
-        emit_output({"status_code": status_code, "result": payload}, json_output=True)
-        return
-    if status_code == 200:
-        console.print(f"[green]Provider '{provider_id}' endpoint is reachable.[/green]")
-        # Also check auth status — normalize ID (claude-account → claude)
-        auth_id = provider_id.replace("-account", "")
-        auth_code, auth_data = api_request(config, "GET", f"/ops/connectors/{auth_id}/auth-status")
-        if auth_code == 200 and isinstance(auth_data, dict):
-            authed = auth_data.get("authenticated", False)
-            method = auth_data.get("method", "n/a")
-            if authed:
-                console.print(f"[green]Auth: authenticated ({method})[/green]")
-            else:
-                console.print(f"[yellow]Auth: not authenticated — run [cyan]gimo providers login {provider_id}[/cyan][/yellow]")
+        # Filter to the requested provider when emitting JSON
+        if status_code == 200 and isinstance(payload, dict):
+            entries = [
+                e for e in (payload.get("entries") or [])
+                if e.get("provider_id") == provider_id
+            ]
+            emit_output(
+                {"status_code": status_code, "result": entries[0] if entries else None},
+                json_output=True,
+            )
         else:
-            console.print(f"[dim]Auth status: unknown[/dim]")
+            emit_output({"status_code": status_code, "result": payload}, json_output=True)
+        return
+
+    if status_code != 200 or not isinstance(payload, dict):
+        console.print(f"[red]Diagnostics fetch failed ({status_code}): {payload}[/red]")
+        raise typer.Exit(1)
+
+    entries = payload.get("entries") or []
+    target = next((e for e in entries if e.get("provider_id") == provider_id), None)
+    if target is None:
+        console.print(f"[red]Provider '{provider_id}' not found in diagnostics report.[/red]")
+        raise typer.Exit(1)
+
+    reachable = target.get("reachable")
+    auth_status = target.get("auth_status", "missing")
+    method = target.get("method") or "n/a"
+    error = target.get("error")
+
+    if reachable:
+        console.print(f"[green]Provider '{provider_id}' endpoint is reachable.[/green]")
     else:
-        console.print(f"[red]Provider '{provider_id}' test failed ({status_code}): {payload}[/red]")
+        console.print(f"[red]Provider '{provider_id}' endpoint is unreachable.[/red]")
+        if error:
+            console.print(f"[red]  {error}[/red]")
+
+    if auth_status == "ok":
+        console.print(f"[green]Auth: authenticated ({method})[/green]")
+    elif auth_status == "expired":
+        console.print(f"[yellow]Auth: expired — run [cyan]gimo providers login {provider_id}[/cyan][/yellow]")
+    elif auth_status == "error":
+        console.print(f"[red]Auth: probe error[/red]")
+    else:
+        console.print(f"[yellow]Auth: not authenticated — run [cyan]gimo providers login {provider_id}[/cyan][/yellow]")
 
 
 @providers_app.command("models")

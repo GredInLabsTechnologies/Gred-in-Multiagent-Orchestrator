@@ -55,7 +55,32 @@ class TrustEngine:
         top = records[:limit]
         for record in top:
             self.storage.upsert_trust_record(record)
-        return top
+        # R17 Cluster E.1: emit canonical TrustDashboardEntry rows. Renderer
+        # (gimo_cli/render.py::TRUST_STATUS) reads ``dimension``, ``score``,
+        # ``state``; legacy aliases ``dimension_key`` / ``circuit_state`` are
+        # preserved for the web UI hook + MCP bridge consumers.
+        return [self._to_dashboard_entry(record) for record in top]
+
+    @staticmethod
+    def _to_dashboard_entry(record: Dict[str, Any]) -> Dict[str, Any]:
+        dimension_key = record.get("dimension_key", "")
+        circuit_state = record.get("circuit_state", "closed")
+        return {
+            "dimension": dimension_key,
+            "score": record.get("score", 0.0),
+            "state": circuit_state,
+            "policy": record.get("policy", "require_review"),
+            "approvals": record.get("approvals", 0),
+            "rejections": record.get("rejections", 0),
+            "failures": record.get("failures", 0),
+            "auto_approvals": record.get("auto_approvals", 0),
+            "streak": record.get("streak", 0),
+            "last_updated": record.get("last_updated"),
+            # Legacy aliases for backwards-compat
+            "dimension_key": dimension_key,
+            "circuit_state": circuit_state,
+            "circuit_opened_at": record.get("circuit_opened_at"),
+        }
 
     def _build_records(self, events: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         # list_trust_events returns newest-first; streak needs oldest-first.

@@ -80,6 +80,32 @@ class TrustRecord(BaseModel):
     circuit_state: Literal["open", "closed", "half-open"] = "closed"
     last_updated: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
+
+class TrustDashboardEntry(BaseModel):
+    """Canonical row shape for the trust dashboard, aligned with the renderer.
+
+    R17 Cluster E.1: unifies the backend output with the field names consumed
+    by gimo_cli/render.py::TRUST_STATUS (``dimension``, ``score``, ``state``)
+    so dashboard columns render. Legacy field aliases (``dimension_key``,
+    ``circuit_state``) are preserved for the web UI hook
+    (useSecurityService.ts) and MCP bridge consumers that already key off
+    them.
+    """
+
+    dimension: str
+    score: float = Field(default=0.0, ge=0.0, le=1.0)
+    state: str
+    policy: str
+    approvals: int = 0
+    rejections: int = 0
+    failures: int = 0
+    auto_approvals: int = 0
+    streak: int = 0
+    last_updated: Optional[str] = None
+    dimension_key: str
+    circuit_state: str
+    circuit_opened_at: Optional[str] = None
+
 class TrustEvent(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     dimension_key: str  # "tool|path|model|task_type"

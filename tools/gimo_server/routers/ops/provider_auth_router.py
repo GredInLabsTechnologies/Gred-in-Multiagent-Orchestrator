@@ -7,9 +7,36 @@ from tools.gimo_server.services.provider_service import ProviderService
 from tools.gimo_server.services.codex_auth_service import CodexAuthService
 from tools.gimo_server.services.claude_auth_service import ClaudeAuthService
 from tools.gimo_server.services.provider_account_service import ProviderAccountService
+from tools.gimo_server.services.providers.provider_diagnostics_service import (
+    ProviderDiagnosticsService,
+)
+from tools.gimo_server.models import ProviderDiagnosticReport
 from .common import _require_role, _actor_label
 
 router = APIRouter()
+
+
+@router.get("/providers/diagnostics", response_model=ProviderDiagnosticReport)
+async def providers_diagnostics(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """R17 Cluster E.2 — backend-authoritative provider diagnostics.
+
+    Single source of truth for ``gimo doctor`` and ``gimo providers test``.
+    Probes connector reachability + auth status for every configured provider.
+    """
+    _require_role(auth, "operator")
+    report = await ProviderDiagnosticsService.report()
+    audit_log(
+        "OPS",
+        "/ops/providers/diagnostics",
+        f"total={report.total} healthy={report.healthy}",
+        operation="READ",
+        actor=_actor_label(auth),
+    )
+    return report
 
 
 def _enrich_with_vault_key(provider: str, data: dict) -> dict:

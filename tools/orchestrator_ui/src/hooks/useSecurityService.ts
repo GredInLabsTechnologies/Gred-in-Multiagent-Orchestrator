@@ -86,7 +86,9 @@ export const useSecurityService = (_token?: string) => {
 
             if (response.ok) {
                 const data = await response.json();
-                setTrustDashboard(data.items || []);
+                // R17 Cluster E.1: backend envelope canonicalized to ``entries``;
+                // ``items`` retained as a legacy alias.
+                setTrustDashboard(data.entries || data.items || []);
             } else {
                 console.error('Failed to fetch trust dashboard');
             }

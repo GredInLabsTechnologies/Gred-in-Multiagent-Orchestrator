@@ -1046,6 +1046,42 @@ paths:
               schema: { $ref: '#/components/schemas/OpsDraft' }
         '403': { description: Forbidden }
 
+  /ops/providers/diagnostics:
+    get:
+      summary: Aggregate provider diagnostics report (R17 Cluster E.2)
+      operationId: getOpsProvidersDiagnostics
+      tags: [ops]
+      description: |
+        Backend-authoritative diagnostics for all configured providers.
+        Single source of truth for `gimo doctor` and `gimo providers test`.
+        Probes connector reachability and normalized auth status per provider.
+        Roles: operator, admin.
+      responses:
+        '200':
+          description: Diagnostics report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  healthy: { type: integer }
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        provider_id: { type: string }
+                        reachable: { type: boolean }
+                        auth_status:
+                          type: string
+                          enum: [ok, missing, expired, error]
+                        method: { type: string, nullable: true }
+                        latency_ms: { type: number, nullable: true }
+                        error: { type: string, nullable: true }
+                        details: { type: object }
+        '403': { description: Forbidden }
+
   /ops/provider:
     get:
       summary: Get provider configuration (redacted keys)

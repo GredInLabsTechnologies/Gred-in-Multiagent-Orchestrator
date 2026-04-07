@@ -17,12 +17,14 @@ from .provider import (
     NormalizedModelInfo, ProviderModelsCatalogResponse, McpServerConfig, ProviderConfig,
     ProviderValidateRequest, ProviderValidateResponse, ProviderSelectionRequest,
     ProviderModelInstallRequest, ProviderModelInstallResponse,
-    ToolEntry, CliDependencyStatus, CliDependencyInfo, CliDependencyInstallRequest, CliDependencyInstallResponse
+    ToolEntry, CliDependencyStatus, CliDependencyInfo, CliDependencyInstallRequest, CliDependencyInstallResponse,
+    ProviderDiagnosticEntry, ProviderDiagnosticReport,
 )
 from .policy import (
     CircuitBreakerConfigModel, PHASE4_INTENT_CLASSES, ExecutionDecisionCode, IntentDecisionAudit,
     RuntimePolicyConfig, BaselineManifest, PolicyDecision, PolicyRuleMatch,
-    PolicyRule, PolicyConfig, TrustRecord, TrustEvent, StrategyFinalStatus, ModelStrategyAudit
+    PolicyRule, PolicyConfig, TrustRecord, TrustEvent, TrustDashboardEntry,
+    StrategyFinalStatus, ModelStrategyAudit
 )
 from .economy import (
     QualityRating, ProviderBudget, CascadeConfig, EcoModeConfig, UserEconomyConfig,

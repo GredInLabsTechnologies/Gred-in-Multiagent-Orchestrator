@@ -43,7 +43,10 @@ async def trust_dashboard(
     engine = TrustEngine(storage.trust)
     result = engine.dashboard(limit=limit)
     audit_log("OPS", "/ops/trust/dashboard", str(limit), operation="READ", actor=_actor_label(auth))
-    return {"items": result, "count": len(result)}
+    # R17 Cluster E.1: canonical envelope is ``entries`` (matches the CLI
+    # renderer's ``unwrap="entries"``). ``items`` is preserved as a legacy
+    # alias for the web UI hook (useSecurityService.ts) and MCP bridge.
+    return {"entries": result, "items": result, "count": len(result)}
 
 @router.get("/trust/suggestions")
 async def trust_suggestions(

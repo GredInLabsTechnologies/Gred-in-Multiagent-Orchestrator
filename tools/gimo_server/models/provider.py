@@ -208,3 +208,35 @@ class CliDependencyInstallResponse(BaseModel):
     message: str
     progress: Optional[float] = None
     logs: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# R17 Cluster E.2 — backend-authoritative provider diagnostics
+# ---------------------------------------------------------------------------
+
+
+class ProviderDiagnosticEntry(BaseModel):
+    """One row of the provider diagnostics report.
+
+    ``auth_status`` values:
+        - ``ok``       : credentials present and authenticated
+        - ``missing``  : no credentials configured
+        - ``expired``  : credentials present but rejected
+        - ``error``    : auth probe failed unexpectedly
+    """
+
+    provider_id: str
+    reachable: bool = False
+    auth_status: Literal["ok", "missing", "expired", "error"] = "missing"
+    method: Optional[str] = None
+    latency_ms: Optional[float] = None
+    error: Optional[str] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ProviderDiagnosticReport(BaseModel):
+    """Aggregate diagnostics report consumed by `gimo doctor` and `gimo providers test`."""
+
+    entries: List[ProviderDiagnosticEntry] = Field(default_factory=list)
+    total: int = 0
+    healthy: int = 0

@@ -373,60 +373,42 @@ def doctor() -> None:
         console.print(f"[yellow][!] Git:[/yellow] detection failed")
 
     # ── Provider check ────────────────────────────────────────────────
+    # R17 Cluster E.2: doctor is now a thin client of the backend
+    # /ops/providers/diagnostics endpoint. All probing logic lives server-side
+    # in ProviderDiagnosticsService.
     active_bond = bond if bond else (cli_bond if cli_bond else None)
     if active_bond:
         try:
-            token_for_check = ""
-            if bond:
-                token_for_check = bond.get("token", "")
-            elif cli_bond:
-                token_for_check = cli_bond.get("jwt", "")
-
-            if token_for_check:
-                with httpx.Client(timeout=5.0) as client:
-                    prov_resp = client.get(
-                        f"{server_url}/ops/provider",
-                        headers={"Authorization": f"Bearer {token_for_check}"}
+            cfg_for_call = load_config(require_project=False)
+            status_code, payload = api_request(
+                cfg_for_call, "GET", "/ops/providers/diagnostics", role="operator",
+            )
+            if status_code == 200 and isinstance(payload, dict):
+                entries = payload.get("entries") or []
+                total = payload.get("total", len(entries))
+                healthy = payload.get("healthy", 0)
+                if not entries:
+                    console.print(f"[red][X] Provider:[/red] none configured")
+                    console.print(f"[yellow][>] Set provider: [cyan]gimo providers set <name>[/cyan][/yellow]")
+                else:
+                    console.print(
+                        f"[green][OK] Providers:[/green] {healthy}/{total} healthy"
                     )
-                    if prov_resp.status_code == 200:
-                        prov_data = prov_resp.json()
-                        active = prov_data.get("active") or prov_data.get("orchestrator_provider", "unknown")
-                        providers = prov_data.get("providers", {})
-
-                        if not active or active == "none":
-                            console.print(f"[red][X] Provider:[/red] not configured")
-                            console.print(f"[yellow][>] Set provider: [cyan]gimo providers set <name>[/cyan][/yellow]")
-                        elif active and active in providers:
-                            ptype = providers[active].get("provider_type", "unknown")
-                            model_id = prov_data.get("model_id", "default")
-                            console.print(f"[green][OK] Provider:[/green] {active} ({ptype}, model: {model_id})")
-
-                            try:
-                                health_resp = client.get(
-                                    f"{server_url}/ops/connectors/{active}/health",
-                                    headers={"Authorization": f"Bearer {token_for_check}"},
-                                    timeout=8.0,
-                                )
-                                if health_resp.status_code == 200:
-                                    health_result = health_resp.json()
-                                    st = health_result.get("status", "unknown")
-                                    if st == "ok":
-                                        console.print(f"[green][OK] Provider connectivity:[/green] healthy")
-                                    elif st == "degraded":
-                                        console.print(f"[yellow][!] Provider connectivity:[/yellow] degraded")
-                                    else:
-                                        console.print(f"[yellow][!] Provider connectivity:[/yellow] {st}")
-                                else:
-                                    console.print(f"[yellow][!] Provider connectivity:[/yellow] test failed ({health_resp.status_code})")
-                            except httpx.TimeoutException:
-                                console.print(f"[yellow][!] Provider connectivity:[/yellow] timeout (slow network or provider down)")
-                            except Exception as health_exc:
-                                console.print(f"[yellow][!] Provider connectivity:[/yellow] {str(health_exc)[:60]}")
+                    for entry in entries:
+                        pid = entry.get("provider_id", "?")
+                        reach = entry.get("reachable")
+                        auth_st = entry.get("auth_status", "missing")
+                        if reach and auth_st == "ok":
+                            console.print(f"   [green][OK][/green] {pid} (auth={auth_st})")
                         else:
-                            console.print(f"[yellow][!] Provider:[/yellow] active '{active}' not in providers list")
-                            console.print(f"[yellow][>] Check: [cyan]gimo providers list[/cyan][/yellow]")
-                    else:
-                        console.print(f"[yellow][!] Provider:[/yellow] could not fetch ({prov_resp.status_code})")
+                            tag = "[red][X][/red]" if not reach else "[yellow][!][/yellow]"
+                            err = entry.get("error") or ""
+                            extra = f" — {err}" if err else ""
+                            console.print(
+                                f"   {tag} {pid} (reachable={reach}, auth={auth_st}){extra}"
+                            )
+            else:
+                console.print(f"[yellow][!] Provider:[/yellow] diagnostics fetch failed ({status_code})")
         except Exception as exc:
             console.print(f"[yellow][!] Provider:[/yellow] check failed: {str(exc)[:60]}")
 
