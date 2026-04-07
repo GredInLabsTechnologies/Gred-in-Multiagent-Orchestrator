@@ -721,6 +721,8 @@ def register_native_tools(mcp: FastMCP):
 
             # Load plan content via HTTP
             content = None
+            draft_status: str | None = None
+            draft_error: str | None = None
             if plan_id.startswith("r_"):
                 result = await proxy_to_api("GET", f"/ops/runs/{plan_id}")
                 try:
@@ -737,6 +739,8 @@ def register_native_tools(mcp: FastMCP):
                 try:
                     data = json.loads(result.split("\n", 1)[-1])
                     content = data.get("content")
+                    draft_status = data.get("status")
+                    draft_error = data.get("error")
                 except (json.JSONDecodeError, ValueError):
                     pass
                 # R17.1: any missing content here is a backend bug —
@@ -744,6 +748,16 @@ def register_native_tools(mcp: FastMCP):
                 # The bridge no longer maintains a parallel pipeline.
 
             if not content:
+                # R17.2: surface the backend's real failure reason instead of
+                # collapsing to a generic 'Plan not found or empty' message.
+                # /ops/generate-plan persists the failure cause on the draft
+                # (status='error', error='...'); the MCP client must reflect it.
+                if draft_status == "error" or draft_error:
+                    return json.dumps({
+                        "error": draft_error or f"Plan generation failed for {plan_id}",
+                        "draft_id": plan_id,
+                        "draft_status": draft_status or "error",
+                    })
                 return json.dumps({"error": f"Plan not found or empty: {plan_id}"})
 
             try:

@@ -151,6 +151,51 @@ async def test_auth_probe_routes_claude_account_with_custom_id():
     claude_mock.assert_awaited_once()
 
 
+# ───────────────────────────────────────────────────────────────────────
+# (3) R17.2 — objective mode must surface the backend's real failure
+# ───────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_objective_mode_surfaces_backend_error_when_draft_status_error(live_mcp):
+    """When /ops/generate-plan persists a draft with status='error' and a
+    populated 'error' field, gimo_generate_team_config MUST surface that
+    real reason instead of the generic 'Plan not found or empty' message."""
+    import json as _json
+
+    fn = live_mcp._tool_manager._tools["gimo_generate_team_config"].fn
+
+    create_response = "✅ Success (201):\n" + _json.dumps({"id": "d_err"})
+    error_draft = {
+        "id": "d_err",
+        "status": "error",
+        "error": "Plan generation failed: provider timeout",
+        "content": None,
+    }
+    get_response = "✅ Success (200):\n" + _json.dumps(error_draft)
+
+    async def fake_proxy(method, path, **kwargs):
+        if method == "POST" and path == "/ops/generate-plan":
+            return create_response
+        if method == "GET" and path == "/ops/drafts/d_err":
+            return get_response
+        return "✅ Success (200):\n{}"
+
+    with patch(
+        "tools.gimo_server.mcp_bridge.bridge.proxy_to_api",
+        side_effect=fake_proxy,
+    ):
+        result = await fn(objective="Build something that times out")
+
+    parsed = _json.loads(result)
+    assert "Plan not found or empty" not in parsed.get("error", ""), (
+        "R17.2 regression: objective mode hid the real backend error"
+    )
+    assert "provider timeout" in parsed["error"]
+    assert parsed.get("draft_status") == "error"
+    assert parsed.get("draft_id") == "d_err"
+
+
 @pytest.mark.asyncio
 async def test_auth_probe_legacy_id_fallback_when_no_entry():
     """When no entry exists in cfg, the legacy ID-based heuristic still
