@@ -60,14 +60,13 @@ def register_governance_tools(mcp: FastMCP):
         model: str,
         tokens_in: int = 1000,
         tokens_out: int = 500,
-        input_tokens: int | None = None,
-        output_tokens: int | None = None,
     ) -> str:
         """Estimate the cost of an LLM call.
 
-        Canonical params: ``model``, ``tokens_in``, ``tokens_out`` (integers).
-        Deprecated aliases (one-round): ``input_tokens`` → ``tokens_in``,
-        ``output_tokens`` → ``tokens_out``. Aliases emit DeprecationWarning.
+        Canonical params (the published MCP schema is the single source of
+        truth — derived from EstimateCostInput): ``model``, ``tokens_in``,
+        ``tokens_out``. The legacy ``input_tokens`` / ``output_tokens``
+        aliases were removed in R17.1 after the one-round deprecation.
 
         Args:
             model: Model name (e.g. "claude-sonnet-4-6", "gpt-4o", "deepseek-v3")
@@ -78,16 +77,8 @@ def register_governance_tools(mcp: FastMCP):
             from tools.gimo_server.services.economy.cost_service import CostService
             from .native_inputs import EstimateCostInput
 
-            # Aliases (one-round deprecated): if provided, they OVERRIDE the
-            # canonical defaults so callers using only the legacy names still
-            # work. Explicitly passing both is allowed; alias wins for parity
-            # with the legacy contract.
-            params = EstimateCostInput.from_call(
-                model=model,
-                tokens_in=None if input_tokens is not None else tokens_in,
-                tokens_out=None if output_tokens is not None else tokens_out,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
+            params = EstimateCostInput(
+                model=model, tokens_in=tokens_in, tokens_out=tokens_out
             )
 
             pricing = CostService.get_pricing(params.model)

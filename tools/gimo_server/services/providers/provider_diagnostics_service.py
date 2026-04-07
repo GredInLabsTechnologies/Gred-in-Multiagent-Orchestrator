@@ -77,18 +77,38 @@ class ProviderDiagnosticsService:
     async def _auth_probe(cls, provider_id: str):
         """Return ``(auth_status, method, error)``.
 
-        Mirrors ``provider_auth_router._enrich_with_vault_key`` semantics so
-        the CLI surfaces see the same answer the auth-status routes return.
+        Decides the probe path by inspecting the normalized ``ProviderEntry``
+        (``auth_mode`` + ``provider_type``) — NOT by hardcoded provider IDs —
+        so that custom account-mode IDs (e.g. ``codex-main``, ``claude-prod``)
+        are routed to the correct CLI auth service. R17.1 fix for the
+        false-negative regression introduced in R17 Cluster E.2.
         """
         from tools.gimo_server.services.codex_auth_service import CodexAuthService
         from tools.gimo_server.services.claude_auth_service import ClaudeAuthService
+        from tools.gimo_server.services.provider_service import ProviderService
         from tools.gimo_server.services.providers.secret_store import get_secret
 
-        normalized = (provider_id or "").lower()
+        cfg = ProviderService.get_config()
+        entry = (cfg.providers.get(provider_id) if cfg else None)
+
+        # Determine the auth family from the normalized entry, falling back to
+        # the legacy ID-based heuristic only when no entry is configured.
+        auth_mode = (getattr(entry, "auth_mode", None) or "").lower() if entry else ""
+        ptype = (getattr(entry, "provider_type", None) or getattr(entry, "type", None) or "").lower() if entry else ""
+
+        is_account = auth_mode == "account"
+        # Legacy fallback: when no entry is registered, infer from the raw ID.
+        if not entry:
+            legacy = (provider_id or "").lower()
+            if legacy in {"codex", "codex-account"}:
+                ptype, is_account = "codex", True
+            elif legacy in {"claude", "claude-account", "anthropic"}:
+                ptype, is_account = "claude", True
+
         try:
-            if normalized in {"codex", "codex-account"}:
+            if is_account and ptype in {"codex"}:
                 data = await CodexAuthService.get_auth_status()
-            elif normalized in {"claude", "claude-account", "anthropic"}:
+            elif is_account and ptype in {"claude", "anthropic"}:
                 data = await ClaudeAuthService.get_auth_status()
             else:
                 data = {}
@@ -99,7 +119,7 @@ class ProviderDiagnosticsService:
             return ("ok", str(data.get("method") or "cli"), None)
 
         # Vault-stored API key fallback (mirrors _enrich_with_vault_key)
-        raw = normalized
+        raw = (provider_id or "").lower()
         variants = {raw, raw.replace("-", "_"), f"{raw}-account", f"{raw}_account"}
         for v in variants:
             env_name = f"ORCH_PROVIDER_{v.upper()}_API_KEY"

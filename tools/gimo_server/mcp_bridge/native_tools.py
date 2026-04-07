@@ -691,18 +691,19 @@ def register_native_tools(mcp: FastMCP):
                     "detail": str(ve),
                 })
 
-            # Objective mode: create a draft, then proceed with the new plan_id.
+            # Objective mode (R17.1): delegate to the canonical backend
+            # endpoint /ops/generate-plan, which is the SINGLE authoritative
+            # path for structured plan materialization (validation,
+            # canonicalization, CustomPlan registration). The bridge no
+            # longer maintains a parallel pipeline.
             if params.objective is not None:
                 create_result = await proxy_to_api(
-                    "POST", "/ops/drafts",
-                    __body={
-                        "prompt": params.objective,
-                        "provider": "mcp_team_config",
-                    },
+                    "POST", "/ops/generate-plan",
+                    __query={"prompt": params.objective},
                 )
                 if not isinstance(create_result, str) or not create_result.startswith("✅ Success"):
                     return json.dumps({
-                        "error": "Failed to create draft from objective",
+                        "error": "Failed to generate plan from objective via /ops/generate-plan",
                         "detail": (create_result or "")[:300],
                     })
                 try:
@@ -712,7 +713,7 @@ def register_native_tools(mcp: FastMCP):
                     plan_id = None
                 if not plan_id:
                     return json.dumps({
-                        "error": "Draft created but no id returned",
+                        "error": "/ops/generate-plan returned no draft id",
                         "detail": create_result[:300],
                     })
             else:
@@ -733,87 +734,14 @@ def register_native_tools(mcp: FastMCP):
                     pass
             else:
                 result = await proxy_to_api("GET", f"/ops/drafts/{plan_id}")
-                draft_prompt = None
                 try:
                     data = json.loads(result.split("\n", 1)[-1])
                     content = data.get("content")
-                    draft_prompt = data.get("prompt")
                 except (json.JSONDecodeError, ValueError):
                     pass
-
-                # Fallback: drafts created via gimo_propose_structured_plan have content=None.
-                # Materialize a real structured draft IN-PLACE — equivalent to what the
-                # backend POST /ops/generate-plan path produces, including CustomPlan
-                # registration and execution context. This ensures that the same draft
-                # later goes through approve_draft() with composition='custom_plan'.
-                if not content and draft_prompt:
-                    import re as _re
-                    from tools.gimo_server.services.provider_service import ProviderService
-                    from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
-                    from tools.gimo_server.services.custom_plan_service import CustomPlanService
-                    from tools.gimo_server.ops_models import OpsPlan
-
-                    sys_prompt = (
-                        "You are a senior systems architect. Generate a JSON execution plan "
-                        "for the following task. Output ONLY valid JSON, no markdown fences, "
-                        "no explanations.\n\n"
-                        "Schema: {\"id\": str, \"title\": str, \"objective\": str, "
-                        "\"tasks\": [{\"id\": str, \"title\": str, \"scope\": str, "
-                        "\"description\": str, \"depends\": [str], \"agent_assignee\": "
-                        "{\"role\": \"orchestrator\"|\"worker\", \"goal\": str, "
-                        "\"backstory\": str, \"model\": str, \"system_prompt\": str, "
-                        "\"instructions\": [str]}}]}\n\n"
-                        "EXACTLY ONE task must have role='orchestrator'. Workers depend on "
-                        f"orchestrator. Keep ≤5 workers.\n\nUSER TASK:\n{draft_prompt}\n\n"
-                        "Now output the JSON:"
-                    )
-                    try:
-                        resp = await ProviderService.static_generate(
-                            sys_prompt, context={"task_type": "disruptive_planning"}
-                        )
-                        raw = (resp.get("content") or "").strip()
-                        raw = _re.sub(r"```(?:json)?\s*\n?", "", raw).strip()
-                        if raw.endswith("```"):
-                            raw = raw[:-3].strip()
-                        s, e = raw.find("{"), raw.rfind("}")
-                        if s >= 0 and e > s:
-                            raw = raw[s:e + 1]
-                        plan_data_inline = json.loads(raw)
-
-                        # Mirror the backend pipeline: validate, canonicalize, register CustomPlan
-                        ops_plan = OpsPlan.model_validate(plan_data_inline)
-                        canonical = TaskDescriptorService.canonicalize_plan_data(plan_data_inline)
-                        custom_plan = CustomPlanService.create_plan_from_llm(
-                            canonical, name=ops_plan.title, description=ops_plan.objective,
-                        )
-                        content = TaskDescriptorService.canonicalize_plan_content(canonical)
-
-                        # Preserve any existing draft context fields, merge in the
-                        # structured-plan markers that approve_draft() relies on.
-                        existing_ctx = {}
-                        if isinstance(data, dict):
-                            existing_ctx = dict(data.get("context") or {})
-                        existing_ctx.update({
-                            "structured": True,
-                            "custom_plan_id": custom_plan.id,
-                            "execution_decision": "AUTO_RUN_ELIGIBLE",
-                        })
-
-                        update_result = await proxy_to_api(
-                            "PUT", f"/ops/drafts/{plan_id}",
-                            __body={"content": content, "context": existing_ctx},
-                        )
-                        if not isinstance(update_result, str) or not update_result.startswith("✅ Success"):
-                            return json.dumps({
-                                "error": f"Failed to persist materialized draft {plan_id}",
-                                "detail": (update_result or "")[:300],
-                            })
-                        logger.debug("Materialized draft %s in-place: %s", plan_id, update_result[:120])
-                    except Exception as gen_exc:
-                        return json.dumps({
-                            "error": f"Failed to materialize plan for {plan_id}",
-                            "detail": f"{type(gen_exc).__name__}: {str(gen_exc)[:300]}",
-                        })
+                # R17.1: any missing content here is a backend bug —
+                # /ops/generate-plan is the canonical materialization path.
+                # The bridge no longer maintains a parallel pipeline.
 
             if not content:
                 return json.dumps({"error": f"Plan not found or empty: {plan_id}"})

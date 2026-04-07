@@ -14,7 +14,6 @@ Verifies:
 from __future__ import annotations
 
 import json
-import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -82,37 +81,12 @@ async def test_estimate_cost_accepts_int_params(gov_registered):
 
 
 @pytest.mark.asyncio
-async def test_native_tool_deprecated_alias_warns(gov_registered):
-    """Legacy input_tokens/output_tokens aliases must still work but warn."""
+async def test_native_tool_deprecated_aliases_removed(gov_registered):
+    """R17.1: input_tokens/output_tokens aliases were removed; calling with
+    them must raise TypeError because they are no longer in the signature."""
     fn = gov_registered["gimo_estimate_cost"]
-
-    with patch(
-        "tools.gimo_server.services.economy.cost_service.CostService.get_pricing",
-        return_value={"input": 1.0, "output": 2.0},
-    ), patch(
-        "tools.gimo_server.services.economy.cost_service.CostService.calculate_cost",
-        return_value=0.001,
-    ), patch(
-        "tools.gimo_server.services.economy.cost_service.CostService.get_provider",
-        return_value="anthropic",
-    ):
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            result = await fn(model="m", input_tokens=1234, output_tokens=567)
-
-    parsed = json.loads(result)
-    assert parsed["tokens_in"] == 1234
-    assert parsed["tokens_out"] == 567
-    assert any(
-        issubclass(w.category, DeprecationWarning)
-        and "input_tokens" in str(w.message)
-        for w in caught
-    ), f"expected DeprecationWarning for input_tokens, got: {[str(w.message) for w in caught]}"
-    assert any(
-        issubclass(w.category, DeprecationWarning)
-        and "output_tokens" in str(w.message)
-        for w in caught
-    )
+    with pytest.raises(TypeError):
+        await fn(model="m", input_tokens=1234, output_tokens=567)
 
 
 # ── #10: gimo_generate_team_config — objective / plan_id / XOR ────────────
@@ -189,7 +163,9 @@ async def test_generate_team_config_objective_mode(native_registered):
             },
         }],
     }
-    create_response = "✅ Success (201):\n" + json.dumps({"id": "d_new"})
+    create_response = "✅ Success (201):\n" + json.dumps({
+        "id": "d_new", "content": json.dumps(fake_plan),
+    })
     get_response = "✅ Success (200):\n" + json.dumps({
         "id": "d_new",
         "content": json.dumps(fake_plan),
@@ -199,8 +175,8 @@ async def test_generate_team_config_objective_mode(native_registered):
     calls = []
 
     async def fake_proxy(method, path, **kwargs):
-        calls.append((method, path))
-        if method == "POST" and path == "/ops/drafts":
+        calls.append((method, path, kwargs))
+        if method == "POST" and path == "/ops/generate-plan":
             return create_response
         if method == "GET" and path.startswith("/ops/drafts/"):
             return get_response
@@ -217,9 +193,15 @@ async def test_generate_team_config_objective_mode(native_registered):
 
     parsed = json.loads(result)
     assert parsed.get("team") == "obj_ok"
-    # Confirm the create-draft POST happened first
-    assert ("POST", "/ops/drafts") in calls
-    assert any(m == "GET" and p == "/ops/drafts/d_new" for m, p in calls)
+    # R17.1: objective mode MUST delegate to /ops/generate-plan, not /ops/drafts.
+    assert any(m == "POST" and p == "/ops/generate-plan" for m, p, _ in calls), (
+        f"objective mode must call /ops/generate-plan, got: {[(m,p) for m,p,_ in calls]}"
+    )
+    # And it must NOT use the legacy /ops/drafts POST path
+    assert not any(m == "POST" and p == "/ops/drafts" for m, p, _ in calls), (
+        "objective mode must not maintain a parallel pipeline via /ops/drafts"
+    )
+    assert any(m == "GET" and p == "/ops/drafts/d_new" for m, p, _ in calls)
 
 
 # ── #11: gimo_verify_proof_chain — optional thread_id ─────────────────────
