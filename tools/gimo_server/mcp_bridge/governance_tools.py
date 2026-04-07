@@ -58,29 +58,50 @@ def register_governance_tools(mcp: FastMCP):
     @mcp.tool()
     async def gimo_estimate_cost(
         model: str,
-        input_tokens: int = 1000,
-        output_tokens: int = 500,
+        tokens_in: int = 1000,
+        tokens_out: int = 500,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
     ) -> str:
         """Estimate the cost of an LLM call.
 
+        Canonical params: ``model``, ``tokens_in``, ``tokens_out`` (integers).
+        Deprecated aliases (one-round): ``input_tokens`` → ``tokens_in``,
+        ``output_tokens`` → ``tokens_out``. Aliases emit DeprecationWarning.
+
         Args:
             model: Model name (e.g. "claude-sonnet-4-6", "gpt-4o", "deepseek-v3")
-            input_tokens: Number of input tokens
-            output_tokens: Number of output tokens
+            tokens_in: Number of input tokens
+            tokens_out: Number of output tokens
         """
         try:
             from tools.gimo_server.services.economy.cost_service import CostService
+            from .native_inputs import EstimateCostInput
 
-            pricing = CostService.get_pricing(model)
-            total = CostService.calculate_cost(model, input_tokens, output_tokens)
-            provider = CostService.get_provider(model)
+            # Aliases (one-round deprecated): if provided, they OVERRIDE the
+            # canonical defaults so callers using only the legacy names still
+            # work. Explicitly passing both is allowed; alias wins for parity
+            # with the legacy contract.
+            params = EstimateCostInput.from_call(
+                model=model,
+                tokens_in=None if input_tokens is not None else tokens_in,
+                tokens_out=None if output_tokens is not None else tokens_out,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+
+            pricing = CostService.get_pricing(params.model)
+            total = CostService.calculate_cost(
+                params.model, params.tokens_in, params.tokens_out
+            )
+            provider = CostService.get_provider(params.model)
             return json.dumps({
-                "model": model,
+                "model": params.model,
                 "provider": provider,
                 "input_price_per_1m": pricing["input"],
                 "output_price_per_1m": pricing["output"],
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
+                "tokens_in": params.tokens_in,
+                "tokens_out": params.tokens_out,
                 "total_cost_usd": total,
             }, indent=2)
         except Exception as e:
@@ -146,16 +167,38 @@ def register_governance_tools(mcp: FastMCP):
             return json.dumps({"error": str(e)})
 
     @mcp.tool()
-    async def gimo_verify_proof_chain(thread_id: str) -> str:
+    async def gimo_verify_proof_chain(thread_id: str | None = None) -> str:
         """Verify the integrity of the execution proof chain for a thread.
 
+        If ``thread_id`` is omitted, falls back to the most recently updated
+        thread (the "most recent verified chain").
+
         Args:
-            thread_id: Thread ID whose proof chain to verify
+            thread_id: Optional thread ID whose proof chain to verify.
         """
         try:
             from tools.gimo_server.services.sagp_gateway import SagpGateway
+            from .native_inputs import VerifyProofChainInput
 
-            result = SagpGateway.verify_proof_chain(thread_id=thread_id)
+            params = VerifyProofChainInput(thread_id=thread_id)
+            resolved_id = params.thread_id
+
+            if not resolved_id:
+                # Fallback: most recently updated thread.
+                from tools.gimo_server.services.conversation_service import (
+                    ConversationService,
+                )
+                threads = ConversationService.list_threads()
+                if not threads:
+                    return json.dumps({
+                        "error": "No threads found; cannot verify any proof chain.",
+                    })
+                resolved_id = threads[0].id
+
+            result = SagpGateway.verify_proof_chain(thread_id=resolved_id)
+            if isinstance(result, dict):
+                result.setdefault("resolved_thread_id", resolved_id)
+                result.setdefault("thread_id_was_inferred", thread_id is None)
             return json.dumps(result, indent=2)
         except Exception as e:
             logger.error("gimo_verify_proof_chain failed: %s", e)

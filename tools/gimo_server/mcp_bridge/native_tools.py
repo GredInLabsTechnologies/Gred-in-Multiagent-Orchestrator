@@ -659,19 +659,64 @@ def register_native_tools(mcp: FastMCP):
             return f"gimo_reject_plan error: {e}"
 
     @mcp.tool()
-    async def gimo_generate_team_config(plan_id: str) -> str:
+    async def gimo_generate_team_config(
+        plan_id: str | None = None,
+        objective: str | None = None,
+    ) -> str:
         """Generate Claude Code Agent Teams config from a GIMO plan.
 
-        Returns a JSON config that Claude can use to spawn teammates,
-        each governed by GIMO via MCP with appropriate execution policies.
+        Exactly one of ``plan_id`` or ``objective`` must be provided.
+
+        - ``plan_id`` mode: Loads an existing draft/run and generates the team
+          config from its content.
+        - ``objective`` mode (R17): Creates a new draft from the free-text
+          objective and materializes it before generating the team config.
 
         Args:
-            plan_id: Plan/draft ID to generate team config from
+            plan_id: Existing plan/draft ID to generate team config from.
+            objective: Free-text objective; a draft will be created and
+                materialized.
         """
         try:
             import json
             from tools.gimo_server.services.agent_teams_service import AgentTeamsService
             from .bridge import proxy_to_api
+            from .native_inputs import GenerateTeamConfigInput
+
+            try:
+                params = GenerateTeamConfigInput(plan_id=plan_id, objective=objective)
+            except Exception as ve:
+                return json.dumps({
+                    "error": "Invalid arguments for gimo_generate_team_config",
+                    "detail": str(ve),
+                })
+
+            # Objective mode: create a draft, then proceed with the new plan_id.
+            if params.objective is not None:
+                create_result = await proxy_to_api(
+                    "POST", "/ops/drafts",
+                    __body={
+                        "prompt": params.objective,
+                        "provider": "mcp_team_config",
+                    },
+                )
+                if not isinstance(create_result, str) or not create_result.startswith("✅ Success"):
+                    return json.dumps({
+                        "error": "Failed to create draft from objective",
+                        "detail": (create_result or "")[:300],
+                    })
+                try:
+                    body = create_result.split("\n", 1)[-1]
+                    plan_id = json.loads(body).get("id")
+                except (json.JSONDecodeError, ValueError, IndexError):
+                    plan_id = None
+                if not plan_id:
+                    return json.dumps({
+                        "error": "Draft created but no id returned",
+                        "detail": create_result[:300],
+                    })
+            else:
+                plan_id = params.plan_id
 
             # Load plan content via HTTP
             content = None
