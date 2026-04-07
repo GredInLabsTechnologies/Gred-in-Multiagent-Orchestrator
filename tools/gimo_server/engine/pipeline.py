@@ -3,7 +3,7 @@ import asyncio
 import hashlib
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from pydantic import BaseModel
 from .contracts import StageInput, StageOutput, ExecutionStage, JournalEntry
 from .journal import RunJournal
@@ -16,7 +16,13 @@ class PipelineConfig(BaseModel):
     stop_on_failure: bool = True
 
 class Pipeline:
-    def __init__(self, run_id: str, stages: List[ExecutionStage], config: Optional[PipelineConfig] = None):
+    def __init__(
+        self,
+        run_id: str,
+        stages: List[ExecutionStage],
+        config: Optional[PipelineConfig] = None,
+        on_stage_transition: Optional[Callable[[str, str], None]] = None,
+    ):
         self.run_id = run_id
         self.stages = stages
         self.config = config or PipelineConfig()
@@ -24,6 +30,9 @@ class Pipeline:
         self.artifacts: Dict[str, Any] = {}
         self.journal: List[JournalEntry] = []
         self._journal_store: Optional[RunJournal] = None
+        # R17 Cluster A: heartbeat hook fired on every stage transition.
+        # Signature: (stage_name, phase) where phase ∈ {"start", "end"}.
+        self._on_stage_transition = on_stage_transition
 
     def _ensure_journal_store(self, context: Dict[str, Any]) -> None:
         journal_path = context.get("journal_path")
@@ -44,9 +53,21 @@ class Pipeline:
                 artifacts=self.artifacts
             )
 
+            if self._on_stage_transition:
+                try:
+                    self._on_stage_transition(stage.name, "start")
+                except Exception:
+                    logger.debug("on_stage_transition(start) hook failed", exc_info=True)
+
             output = await self._execute_stage_with_retries(stage, stage_input)
             self.results[stage.name] = output
             execution_history.append((stage, stage_input))
+
+            if self._on_stage_transition:
+                try:
+                    self._on_stage_transition(stage.name, "end")
+                except Exception:
+                    logger.debug("on_stage_transition(end) hook failed", exc_info=True)
             
             if output.journal_entry:
                 self.journal.append(output.journal_entry)

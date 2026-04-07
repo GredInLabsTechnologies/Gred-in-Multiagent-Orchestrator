@@ -9,12 +9,10 @@ class PolicyGate(ExecutionStage):
         return "policy_gate"
 
     async def execute(self, input: StageInput) -> StageOutput:
-        # 0. Skip if draft already approved (approval is terminal)
-        if input.context.get("approved_id"):
-            return StageOutput(
-                status="continue",
-                artifacts={"gate_skipped": True, "reason": "draft already approved"}
-            )
+        # R17 Cluster A.5: gates always run regardless of `approved_id`.
+        # Approval is a precondition recorded in the verdict, NOT a license to
+        # bypass evaluation. The previous `gate_skipped:true` short-circuit was
+        # a silent skip — removed.
 
         # 1. Evaluate Runtime Policy
         path_scope = input.context.get("path_scope", [])
@@ -51,7 +49,8 @@ class PolicyGate(ExecutionStage):
             artifacts={
                 "policy_decision": policy_decision.model_dump(),
                 "intent_audit": intent_audit.model_dump(),
-                "execution_decision": intent_audit.execution_decision
+                "execution_decision": intent_audit.execution_decision,
+                "pre_approved": bool(input.context.get("approved_id")),
             }
         )
 

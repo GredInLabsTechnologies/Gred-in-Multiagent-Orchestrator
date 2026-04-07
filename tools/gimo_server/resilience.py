@@ -55,6 +55,31 @@ class SupervisedTask:
         await supervisor.shutdown()
     """
 
+    # Process-wide registry of every supervised/external task. Lifespan
+    # shutdown drains this so no fire-and-forget escapes the process. Used by
+    # the no-supervisor fallback path in the run router (R17 Cluster A).
+    _registry: "Set[asyncio.Task[Any]]" = set()
+
+    @classmethod
+    def register_external(cls, task: "asyncio.Task[Any]") -> None:
+        """Register a task that was created outside of an instance ``spawn``.
+        Used when no per-app supervisor is available (e.g. unit tests). The
+        task is auto-removed from the registry on completion.
+        """
+        cls._registry.add(task)
+        task.add_done_callback(lambda t: cls._registry.discard(t))
+
+    @classmethod
+    async def drain(cls, timeout: float = 10.0) -> None:
+        """Cancel and await every globally-registered task. Idempotent."""
+        tasks = list(cls._registry)
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        if tasks:
+            await asyncio.wait(tasks, timeout=timeout)
+        cls._registry.clear()
+
     def __init__(self) -> None:
         self._tasks: Dict[str, asyncio.Task[Any]] = {}
 

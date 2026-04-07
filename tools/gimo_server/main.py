@@ -447,6 +447,8 @@ async def lifespan(app: FastAPI):
 
         # Shutdown supervised tasks before services
         await supervisor.shutdown(timeout=15.0)
+        # Drain any externally-registered supervised tasks (R17 Cluster A)
+        await SupervisedTask.drain(timeout=10.0)
 
         # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
         logger.info("Shutting down GIMO Orchestrator...")

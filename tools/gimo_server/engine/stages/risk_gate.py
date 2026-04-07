@@ -12,12 +12,8 @@ class RiskGate(ExecutionStage):
         self.calibrator = calibrator or RiskCalibrator()
 
     async def execute(self, input: StageInput) -> StageOutput:
-        # 0. Skip if draft already approved (approval is terminal)
-        if input.context.get("approved_id"):
-            return StageOutput(
-                status="continue",
-                artifacts={"gate_skipped": True, "reason": "draft already approved"}
-            )
+        # R17 Cluster A.5: gates always run regardless of `approved_id`.
+        # Approval is recorded in the verdict, never used to silently skip.
 
         # 1. Get calibrated thresholds for this intent
         intent_audit = input.artifacts.get("intent_audit", {})
@@ -45,7 +41,8 @@ class RiskGate(ExecutionStage):
             artifacts={
                 "risk_thresholds": thresholds.model_dump(),
                 "calibrated_risk_score": risk_score,
-                "execution_decision": execution_decision
+                "execution_decision": execution_decision,
+                "pre_approved": bool(input.context.get("approved_id")),
             }
         )
 

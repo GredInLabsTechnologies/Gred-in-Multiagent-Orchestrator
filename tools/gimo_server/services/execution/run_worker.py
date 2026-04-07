@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,10 @@ logger = logging.getLogger("orchestrator.run_worker")
 
 # How often to poll for pending runs (seconds).
 POLL_INTERVAL = 5
+
+# R17 Cluster A: stale-running reclamation timeout. Runs in `running` whose
+# heartbeat is older than this many seconds are reclaimed back to `pending`.
+RECLAIM_TIMEOUT_SECONDS = int(os.environ.get("ORCH_RECLAIM_TIMEOUT", "60") or "60")
 
 
 def _task_weight_for_run(run) -> "TaskWeight":
@@ -103,6 +108,15 @@ class RunWorker:
             if self._is_still_active(rid)
         }
 
+        # R17 Cluster A: reclaim stale `running` runs whose heartbeat is older
+        # than RECLAIM_TIMEOUT_SECONDS. This recovers from worker crashes,
+        # process restarts, and hung executions. All transitions go through
+        # OpsService.update_run_status — no direct DB writes.
+        try:
+            self._reclaim_stale_running_runs()
+        except Exception:
+            logger.exception("Stale-run reclamation pass failed")
+
         available_slots = max_concurrent - len(self._running_ids)
         if available_slots <= 0:
             return
@@ -126,6 +140,48 @@ class RunWorker:
             if run.id not in self._running_ids:
                 self._running_ids.add(run.id)
                 asyncio.create_task(self._execute_run(run.id))
+
+    def _reclaim_stale_running_runs(self) -> None:
+        """R17 Cluster A: transition stale `running` runs back to `pending`.
+
+        A run is considered stale if its ``heartbeat_at`` (or ``started_at``
+        when no heartbeat exists yet) is older than ``RECLAIM_TIMEOUT_SECONDS``
+        AND it is not currently being executed by this worker (not in
+        ``self._running_ids``). All transitions flow through
+        ``OpsService.update_run_status`` — no direct DB writes.
+        """
+        now = datetime.now(timezone.utc)
+        try:
+            runs = OpsService.get_runs_by_status("running")
+            runs_iter = list(runs) if runs is not None else []
+        except Exception:
+            return
+        for run in runs_iter:
+            if run.id in self._running_ids:
+                continue  # this worker owns it; do not reclaim
+            heartbeat = getattr(run, "heartbeat_at", None) or getattr(run, "started_at", None)
+            if heartbeat is None:
+                # No heartbeat AND no start timestamp — fall back to created_at
+                heartbeat = getattr(run, "created_at", None)
+            if heartbeat is None:
+                continue
+            try:
+                if heartbeat.tzinfo is None:
+                    heartbeat = heartbeat.replace(tzinfo=timezone.utc)
+                delta = (now - heartbeat).total_seconds()
+            except Exception:
+                continue
+            if delta < RECLAIM_TIMEOUT_SECONDS:
+                continue
+            try:
+                OpsService.update_run_status(
+                    run.id,
+                    "pending",
+                    msg=f"Reclaimed by run_worker: heartbeat stale ({int(delta)}s)",
+                )
+                logger.warning("Reclaimed stale run %s after %ds without heartbeat", run.id, int(delta))
+            except Exception as exc:
+                logger.warning("Failed to reclaim stale run %s: %s", run.id, exc)
 
     def _is_still_active(self, run_id: str) -> bool:
         run = OpsService.get_run(run_id)

@@ -226,13 +226,36 @@ class EngineService:
 
     @staticmethod
     async def run_composition(
-        composition_name: str, 
-        run_id: str, 
-        initial_context: Dict[str, Any]
+        composition_name: str,
+        run_id: str,
+        initial_context: Dict[str, Any],
+        on_stage_transition=None,
     ) -> List[Any]:
         stages = EngineService._build_stages(composition_name)
-        pipeline = Pipeline(run_id=run_id, stages=stages)
+        pipeline = Pipeline(run_id=run_id, stages=stages, on_stage_transition=on_stage_transition)
         return await pipeline.run(initial_context)
+
+    @classmethod
+    def _planned_stage_names(cls, composition_name: str) -> List[str]:
+        """Return the canonical stage names for a composition (R17 Cluster A.6)."""
+        refs = cls._COMPOSITION_MAP.get(composition_name) or []
+        names: List[str] = []
+        for ref in refs:
+            cls_name = ref.split(":", 1)[1]
+            # Canonical name = ExecutionStage.name property. Fall back to a
+            # snake_case-from-PascalCase conversion that matches existing stage
+            # name properties (PolicyGate.name == "policy_gate", etc.).
+            try:
+                stage_cls = cls._resolve_stage(ref)
+                instance = stage_cls()
+                names.append(instance.name)
+            except Exception:
+                # Best-effort fallback to keep the invariant non-fatal under
+                # transient import errors — the run will fail elsewhere.
+                import re as _re
+                snake = _re.sub(r"(?<!^)(?=[A-Z])", "_", cls_name).lower()
+                names.append(snake)
+        return names
 
     @classmethod
     async def execute_run(cls, run_id: str, composition: Optional[str] = None):
@@ -368,9 +391,23 @@ class EngineService:
         # Inject journal path so the pipeline emits structured stage events
         context.setdefault("journal_path", str(OpsService.OPS_DIR / "run_journals" / f"{run_id}.jsonl"))
 
+        # R17 Cluster A: planned-stages invariant + heartbeat hook
+        planned_stages = set(cls._planned_stage_names(composition))
+        executed_stages: set[str] = set()
+
+        def _on_stage_transition(stage_name: str, phase: str) -> None:
+            if phase == "end":
+                executed_stages.add(stage_name)
+            try:
+                OpsService.heartbeat_run(run_id)
+            except Exception:
+                logger.debug("heartbeat hook failed for run %s", run_id, exc_info=True)
+
         # Start pipeline
         try:
-            results = await cls.run_composition(composition, run_id, context)
+            results = await cls.run_composition(
+                composition, run_id, context, on_stage_transition=_on_stage_transition
+            )
         except Exception as exc:
             OpsService.update_run_status(run_id, "error", msg=f"Pipeline error: {str(exc)[:200]}")
             raise
@@ -390,6 +427,23 @@ class EngineService:
                 decision = stage_output.artifacts.get("execution_decision", "HUMAN_APPROVAL_REQUIRED")
                 OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg=f"Pipeline halted: {decision}")
                 return results
+
+        # R17 Cluster A.6: honest-run invariant. If we are about to mark the
+        # run done, every planned stage must actually have executed. Silent
+        # short-circuits (e.g. the deleted gate-skip path) are no longer
+        # possible, but we enforce structurally to prevent regressions.
+        if final_status == "done" and planned_stages and executed_stages != planned_stages:
+            missing = sorted(planned_stages - executed_stages)
+            extra = sorted(executed_stages - planned_stages)
+            final_status = "error"
+            final_msg = (
+                f"silent_skip_error: planned_stages={sorted(planned_stages)} "
+                f"executed_stages={sorted(executed_stages)} missing={missing} extra={extra}"
+            )[:2000]
+            try:
+                OpsService.append_log(run_id, level="ERROR", msg=final_msg)
+            except Exception:
+                pass
 
         OpsService.update_run_status(run_id, final_status, msg=final_msg)
 

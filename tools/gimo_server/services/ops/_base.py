@@ -65,6 +65,9 @@ class OpsServiceBase:
             "WORKER_CRASHED_RECOVERABLE", "HUMAN_APPROVAL_REQUIRED", "done"
         },
         "running": {
+            # R17 Cluster A: `pending` is reachable so the run worker can
+            # reclaim runs whose heartbeat went stale (process crash, hang).
+            "pending",
             "done", "error", "cancelled", "awaiting_subagents", "awaiting_review",
             "MERGE_LOCKED", "MERGE_CONFLICT", "VALIDATION_FAILED_TESTS",
             "VALIDATION_FAILED_LINT", "RISK_SCORE_TOO_HIGH", "BASELINE_TAMPER_DETECTED",

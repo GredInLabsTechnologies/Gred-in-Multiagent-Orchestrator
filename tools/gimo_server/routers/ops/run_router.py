@@ -24,8 +24,14 @@ from tools.gimo_server.engine.journal import RunJournal
 from tools.gimo_server.resilience import SupervisedTask
 
 
-def _spawn_run(request: Request, run_id: str, composition: str | None = None) -> None:
-    """Launch a run via the supervisor (if available) or fall back to worker."""
+def _spawn_run(request: Request, run_id: str, composition: str | None = None) -> "asyncio.Task | None":
+    """Launch a run via the supervisor (or a tracked fallback) and return the task.
+
+    Status-after-ack contract (R17 Cluster A): callers must NOT transition the run
+    to ``running`` until this helper returns successfully. If the spawned task is
+    already done with an exception (synchronous failure), this raises ``RuntimeError``
+    so the caller can keep the run in ``pending`` and surface the error to the worker.
+    """
     supervisor: SupervisedTask | None = getattr(request.app.state, "supervisor", None)
 
     async def _on_failure(exc: Exception) -> None:
@@ -35,20 +41,39 @@ def _spawn_run(request: Request, run_id: str, composition: str | None = None) ->
             logger.error("on_failure handler error for run %s: %s", run_id, status_exc)
 
     if supervisor:
-        supervisor.spawn(
+        task = supervisor.spawn(
             EngineService.execute_run(run_id, composition=composition),
             name=f"run:{run_id}",
             on_failure=_on_failure,
             timeout=3600,
         )
     else:
-        # Fallback: no supervisor (e.g. tests) — still handle failures
+        # Fallback: no supervisor (e.g. tests) — still handle failures.
+        # Track via SupervisedTask process-wide registry for lifespan drain.
         async def _fallback() -> None:
             try:
                 await EngineService.execute_run(run_id, composition=composition)
             except Exception as exc:
                 await _on_failure(exc)
-        asyncio.create_task(_fallback())
+                raise
+        task = asyncio.create_task(_fallback())
+        try:
+            task.set_name(f"run:{run_id}")  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        if isinstance(task, asyncio.Task):
+            SupervisedTask.register_external(task)
+
+    # Verify the spawn did not synchronously fail with an exception. A task that
+    # is already done at this point indicates a configuration / coroutine error,
+    # not a normal completion (real execute_run is async and yields immediately).
+    # Some test paths monkeypatch asyncio.create_task to return None — treat
+    # that as opaque success (the test owns the lifecycle).
+    if task is not None and isinstance(task, asyncio.Task) and task.done():
+        exc = task.exception() if not task.cancelled() else None
+        if exc is not None:
+            raise RuntimeError(f"Spawn failed for run {run_id}: {exc}")
+    return task
 from tools.gimo_server.engine.replay import ReplayEngine
 from tools.gimo_server.engine.pipeline import Pipeline
 from .common import _require_role, _actor_label, _WORKFLOW_ENGINES
@@ -175,9 +200,10 @@ async def approve_draft(
             
             composition = "custom_plan" if context.get("custom_plan_id") else None
             if run.status == "pending":
+                # R17 Cluster A: status-after-ack — spawn FIRST, then transition.
                 try:
-                    run = OpsService.update_run_status(run.id, "running", msg="Execution started via draft approval auto-run")
                     _spawn_run(request, run.id, composition=composition)
+                    run = OpsService.update_run_status(run.id, "running", msg="Execution started via draft approval auto-run")
                 except Exception as exc:
                     logger.error("Spawn failed for draft %s, falling back to worker: %s", draft_id, exc)
                     try:
@@ -266,9 +292,10 @@ async def create_run(
     # We intentionally start merge-gate directly and set status to running to avoid
     # pending limbo and worker race on the same run.
     if run.status == "pending":
+        # R17 Cluster A: status-after-ack — spawn FIRST, then transition.
         try:
-            run = OpsService.update_run_status(run.id, "running", msg="Execution started via /ops/runs")
             _spawn_run(request, run.id)
+            run = OpsService.update_run_status(run.id, "running", msg="Execution started via /ops/runs")
         except Exception as exc:
             logger.error("Spawn failed for run %s, falling back to worker: %s", run.id, exc)
             try:
@@ -440,9 +467,10 @@ async def rerun(
         raise HTTPException(status_code=409, detail=f"RUN_CONTRACT_VIOLATION:{detail[:120]}")
 
     if run.status == "pending":
+        # R17 Cluster A: status-after-ack — spawn FIRST, then transition.
         try:
-            run = OpsService.update_run_status(run.id, "running", msg="Execution started via /ops/runs/{run_id}/rerun")
             _spawn_run(request, run.id)
+            run = OpsService.update_run_status(run.id, "running", msg="Execution started via /ops/runs/{run_id}/rerun")
         except Exception as exc:
             logger.error("Rerun spawn failed for run %s, falling back to worker: %s", run_id, exc)
             try:

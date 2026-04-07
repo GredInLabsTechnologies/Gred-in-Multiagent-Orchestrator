@@ -366,6 +366,37 @@ class RunMixin:
             return run
 
     @classmethod
+    def heartbeat_run(cls, run_id: str) -> Optional[OpsRun]:
+        """R17 Cluster A: record a wall-clock heartbeat for an executing run.
+
+        Wall-clock UTC is used (not monotonic) because reclamation must work
+        across process restarts, where monotonic clocks reset. The
+        ``heartbeat_at`` field already exists on ``OpsRun`` and is materialized
+        by the existing event store via ``merge_meta`` events.
+        Returns None silently if the run is gone (best-effort telemetry).
+        """
+        try:
+            with cls._lock():
+                run = cls._load_run_metadata(run_id)
+                if not run:
+                    return None
+                now = _utcnow()
+                cls._append_run_event(
+                    run_id,
+                    {
+                        "ts": now.isoformat(),
+                        "event": "merge_meta",
+                        "data": {"heartbeat_at": now.isoformat()},
+                    },
+                )
+                run = cls._materialize_run(run)
+                cls._compact_run_events_if_needed(run)
+                return run
+        except Exception as exc:
+            logger.debug("heartbeat_run failed for %s: %s", run_id, exc)
+            return None
+
+    @classmethod
     def set_run_stage(cls, run_id: str, stage: str, *, msg: str | None = None) -> OpsRun:
         with cls._lock():
             run = cls._load_run_metadata(run_id)
