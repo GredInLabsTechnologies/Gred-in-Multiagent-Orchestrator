@@ -8,6 +8,9 @@ from mcp.server.fastmcp import FastMCP
 _server_start_time = time.time()
 logger = logging.getLogger("mcp_bridge.native_tools")
 
+# Strong references to fire-and-forget background tasks (prevents GC mid-flight)
+_BACKGROUND_CHAT_TASKS: set = set()
+
 def register_native_tools(mcp: FastMCP):
     
     @mcp.tool()
@@ -306,17 +309,16 @@ def register_native_tools(mcp: FastMCP):
                 "POST", "/ops/drafts",
                 __body={"prompt": task_instructions, "provider": "mcp_auto"},
             )
-            # Extract draft ID from response
+            # Extract draft ID from proxy response (format: "✅ Success (201):\n{json}")
             draft_id = None
-            for line in draft_result.splitlines():
-                try:
-                    data = json.loads(line.lstrip("\u2705 Success (201):").strip())
-                    draft_id = data.get("id")
-                    break
-                except (json.JSONDecodeError, ValueError):
-                    continue
+            try:
+                body = draft_result.split("\n", 1)[-1]
+                data = json.loads(body)
+                draft_id = data.get("id")
+            except (json.JSONDecodeError, ValueError, IndexError):
+                pass
             if not draft_id:
-                return f"Draft creation failed:\\n{draft_result}"
+                return f"Draft creation failed:\n{draft_result}"
             # 2. Approve via HTTP (risk gate, intent gate, auto_run gate)
             approve_result = await proxy_to_api(
                 "POST", f"/ops/drafts/{draft_id}/approve",
@@ -474,16 +476,29 @@ def register_native_tools(mcp: FastMCP):
 
     @mcp.tool()
     async def gimo_chat(message: str, thread_id: str = "", workspace_root: str = "") -> str:
-        """Send a message to GIMO's agentic chat and get a response with tool execution.
+        """Send a message to GIMO's agentic chat (fire-and-return).
 
-        P2: Enhanced with conversational planning. If the agent proposes a plan or asks
-        a question, the response will include that information.
+        Because the agentic loop can take minutes (multi-turn LLM + tool execution)
+        and MCP stdio clients enforce a ~60s timeout, this tool does NOT block on the
+        response. It dispatches the chat in the background and returns immediately
+        with the thread_id. Callers must poll the thread to retrieve results.
 
         Creates a new thread if thread_id is empty.
-        Returns the assistant response, tool calls, and any pending actions (questions/plans).
+
+        Polling contract:
+          - GET /ops/threads/{thread_id} returns the full thread including all turns.
+          - When the agent finishes, new assistant turns appear with agent_id='orchestrator'
+            (the agentic loop persists assistant responses under that agent_id).
+          - On failure, a turn with agent_id='gimo_chat_error' is appended; its first
+            text item begins with '[gimo_chat error]'.
+
+        Returns:
+            A status string containing the thread_id and polling instructions.
+            Does NOT contain the assistant's response — fetch it from the thread.
         """
         from .bridge import proxy_to_api, _get_auth_token, BACKEND_URL
         import httpx
+        import asyncio
         import json
 
         try:
@@ -492,7 +507,7 @@ def register_native_tools(mcp: FastMCP):
             if token:
                 headers["Authorization"] = f"Bearer {token}"
 
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 # Create thread if needed
                 if not thread_id:
                     ws = workspace_root or "."
@@ -506,62 +521,73 @@ def register_native_tools(mcp: FastMCP):
                     thread_data = resp.json()
                     thread_id = thread_data.get("id", "")
 
-                # Send chat message
-                resp = await client.post(
-                    f"{BACKEND_URL}/ops/threads/{thread_id}/chat",
-                    json={"content": message},
-                    headers=headers,
-                )
+            # Fire-and-return: launch chat in background, return immediately
+            # The agentic loop can take minutes — MCP stdio times out at ~60s.
+            # On failure, the background task posts an error message to the thread so
+            # clients polling GET /ops/threads/{id} can discover it.
+            captured_thread_id = thread_id
+            captured_headers = dict(headers)
 
-                if resp.status_code != 200:
-                    return f"Chat failed: HTTP {resp.status_code} {resp.text[:200]}"
+            async def _record_error(client: httpx.AsyncClient, error_text: str) -> None:
+                """Record a background failure as a properly-attributed system turn.
+                Uses /turns?agent_id=gimo_chat_error (NOT /messages, which hardcodes
+                agent_id='User' and would falsely attribute the error to the user)."""
+                try:
+                    turn_resp = await client.post(
+                        f"{BACKEND_URL}/ops/threads/{captured_thread_id}/turns",
+                        params={"agent_id": "gimo_chat_error"},
+                        headers=captured_headers,
+                    )
+                    if turn_resp.status_code in (200, 201):
+                        turn_data = turn_resp.json()
+                        turn_id = turn_data.get("id")
+                        if turn_id:
+                            await client.post(
+                                f"{BACKEND_URL}/ops/threads/{captured_thread_id}/turns/{turn_id}/items",
+                                params={"type": "text", "content": f"[gimo_chat error] {error_text[:500]}"},
+                                headers=captured_headers,
+                            )
+                except Exception:
+                    pass
 
-                result = resp.json()
-                response_text = result.get("response", "")
-                tool_calls = result.get("tool_calls", [])
-                usage = result.get("usage", {})
-                finish_reason = result.get("finish_reason", "stop")
+            async def _background_chat():
+                try:
+                    async with httpx.AsyncClient(timeout=300.0) as bg_client:
+                        chat_resp = await bg_client.post(
+                            f"{BACKEND_URL}/ops/threads/{captured_thread_id}/chat",
+                            json={"content": message},
+                            headers=captured_headers,
+                        )
+                        if chat_resp.status_code >= 400:
+                            await _record_error(
+                                bg_client,
+                                f"HTTP {chat_resp.status_code}: {chat_resp.text[:300]}",
+                            )
+                except Exception as exc:
+                    try:
+                        async with httpx.AsyncClient(timeout=10.0) as err_client:
+                            await _record_error(
+                                err_client,
+                                f"{type(exc).__name__}: {str(exc)[:300]}",
+                            )
+                    except Exception:
+                        pass
 
-                # P2: Check thread state for pending actions
-                thread_resp = await client.get(
-                    f"{BACKEND_URL}/ops/threads/{thread_id}",
-                    headers=headers,
-                )
-                thread_state = thread_resp.json() if thread_resp.status_code == 200 else {}
-                proposed_plan = thread_state.get("proposed_plan")
-                workflow_phase = thread_state.get("workflow_phase", "intake")
-                profile_summary = thread_state.get("profile_summary") or {}
-                agent_preset = (
-                    profile_summary.get("agent_preset")
-                    or thread_state.get("agent_preset")
-                    or "plan_orchestrator"
-                )
+            # Keep a strong reference to prevent GC of the background task
+            _task = asyncio.ensure_future(_background_chat())
+            _BACKGROUND_CHAT_TASKS.add(_task)
+            _task.add_done_callback(_BACKGROUND_CHAT_TASKS.discard)
 
-                # Format output
-                parts = [f"Thread: {thread_id} | Preset: {agent_preset} | Workflow phase: {workflow_phase}"]
-                if tool_calls:
-                    parts.append(f"\nTool calls ({len(tool_calls)}):")
-                    for tc in tool_calls:
-                        status_icon = "+" if tc.get("status") == "success" else "x"
-                        parts.append(f"  [{status_icon}] {tc.get('name', '?')} ({tc.get('risk', 'LOW')}) {tc.get('duration', 0):.1f}s")
-
-                parts.append(f"\nResponse:\n{response_text}")
-
-                # P2: Indicate pending actions
-                if finish_reason == "user_question":
-                    parts.append("\n[AWAITING USER ANSWER] Send another message to continue.")
-                elif finish_reason == "plan_proposed" and proposed_plan:
-                    plan_title = proposed_plan.get("title", "Execution Plan")
-                    task_count = len(proposed_plan.get("tasks", []))
-                    parts.append(f"\n[PLAN PROPOSED] {plan_title} ({task_count} tasks)")
-                    parts.append("Use gimo_approve_plan() to approve or gimo_reject_plan() to reject.")
-
-                tokens = usage.get("total_tokens", 0)
-                cost = usage.get("cost_usd", 0)
-                if tokens:
-                    parts.append(f"\n[{tokens:,} tokens | ${cost:.4f}]")
-
-                return "\n".join(parts)
+            return (
+                f"Chat dispatched (fire-and-return) on thread {thread_id}.\n"
+                f"The agentic loop is running in the background — this tool does NOT "
+                f"return the assistant response inline.\n"
+                f"To poll: GET /ops/threads/{thread_id}. When the agent finishes, new "
+                f"turns appear with agent_id='orchestrator'. On failure a turn with "
+                f"agent_id='gimo_chat_error' is appended (item content begins with "
+                f"'[gimo_chat error]').\n"
+                f"Thread ID: {thread_id}"
+            )
 
         except Exception as e:
             return f"gimo_chat error: {e}"
@@ -662,16 +688,100 @@ def register_native_tools(mcp: FastMCP):
                     pass
             else:
                 result = await proxy_to_api("GET", f"/ops/drafts/{plan_id}")
+                draft_prompt = None
                 try:
                     data = json.loads(result.split("\n", 1)[-1])
                     content = data.get("content")
+                    draft_prompt = data.get("prompt")
                 except (json.JSONDecodeError, ValueError):
                     pass
 
-            if not content:
-                return json.dumps({"error": f"Plan not found: {plan_id}"})
+                # Fallback: drafts created via gimo_propose_structured_plan have content=None.
+                # Materialize a real structured draft IN-PLACE — equivalent to what the
+                # backend POST /ops/generate-plan path produces, including CustomPlan
+                # registration and execution context. This ensures that the same draft
+                # later goes through approve_draft() with composition='custom_plan'.
+                if not content and draft_prompt:
+                    import re as _re
+                    from tools.gimo_server.services.provider_service import ProviderService
+                    from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
+                    from tools.gimo_server.services.custom_plan_service import CustomPlanService
+                    from tools.gimo_server.ops_models import OpsPlan
 
-            plan_data = json.loads(content) if isinstance(content, str) else content
+                    sys_prompt = (
+                        "You are a senior systems architect. Generate a JSON execution plan "
+                        "for the following task. Output ONLY valid JSON, no markdown fences, "
+                        "no explanations.\n\n"
+                        "Schema: {\"id\": str, \"title\": str, \"objective\": str, "
+                        "\"tasks\": [{\"id\": str, \"title\": str, \"scope\": str, "
+                        "\"description\": str, \"depends\": [str], \"agent_assignee\": "
+                        "{\"role\": \"orchestrator\"|\"worker\", \"goal\": str, "
+                        "\"backstory\": str, \"model\": str, \"system_prompt\": str, "
+                        "\"instructions\": [str]}}]}\n\n"
+                        "EXACTLY ONE task must have role='orchestrator'. Workers depend on "
+                        f"orchestrator. Keep ≤5 workers.\n\nUSER TASK:\n{draft_prompt}\n\n"
+                        "Now output the JSON:"
+                    )
+                    try:
+                        resp = await ProviderService.static_generate(
+                            sys_prompt, context={"task_type": "disruptive_planning"}
+                        )
+                        raw = (resp.get("content") or "").strip()
+                        raw = _re.sub(r"```(?:json)?\s*\n?", "", raw).strip()
+                        if raw.endswith("```"):
+                            raw = raw[:-3].strip()
+                        s, e = raw.find("{"), raw.rfind("}")
+                        if s >= 0 and e > s:
+                            raw = raw[s:e + 1]
+                        plan_data_inline = json.loads(raw)
+
+                        # Mirror the backend pipeline: validate, canonicalize, register CustomPlan
+                        ops_plan = OpsPlan.model_validate(plan_data_inline)
+                        canonical = TaskDescriptorService.canonicalize_plan_data(plan_data_inline)
+                        custom_plan = CustomPlanService.create_plan_from_llm(
+                            canonical, name=ops_plan.title, description=ops_plan.objective,
+                        )
+                        content = TaskDescriptorService.canonicalize_plan_content(canonical)
+
+                        # Preserve any existing draft context fields, merge in the
+                        # structured-plan markers that approve_draft() relies on.
+                        existing_ctx = {}
+                        if isinstance(data, dict):
+                            existing_ctx = dict(data.get("context") or {})
+                        existing_ctx.update({
+                            "structured": True,
+                            "custom_plan_id": custom_plan.id,
+                            "execution_decision": "AUTO_RUN_ELIGIBLE",
+                        })
+
+                        update_result = await proxy_to_api(
+                            "PUT", f"/ops/drafts/{plan_id}",
+                            __body={"content": content, "context": existing_ctx},
+                        )
+                        if not isinstance(update_result, str) or not update_result.startswith("✅ Success"):
+                            return json.dumps({
+                                "error": f"Failed to persist materialized draft {plan_id}",
+                                "detail": (update_result or "")[:300],
+                            })
+                        logger.debug("Materialized draft %s in-place: %s", plan_id, update_result[:120])
+                    except Exception as gen_exc:
+                        return json.dumps({
+                            "error": f"Failed to materialize plan for {plan_id}",
+                            "detail": f"{type(gen_exc).__name__}: {str(gen_exc)[:300]}",
+                        })
+
+            if not content:
+                return json.dumps({"error": f"Plan not found or empty: {plan_id}"})
+
+            try:
+                plan_data = json.loads(content) if isinstance(content, str) else content
+            except json.JSONDecodeError as parse_exc:
+                return json.dumps({
+                    "error": f"Plan content is not valid JSON for {plan_id}",
+                    "detail": str(parse_exc),
+                    "content_preview": str(content)[:200],
+                })
+
             config = AgentTeamsService.generate_team_config(plan_data)
             return json.dumps(config, indent=2)
         except Exception as e:

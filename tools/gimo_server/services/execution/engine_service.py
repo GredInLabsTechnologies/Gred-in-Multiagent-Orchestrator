@@ -178,6 +178,7 @@ class EngineService:
             "tools.gimo_server.engine.stages.risk_gate:RiskGate",
             "tools.gimo_server.engine.stages.llm_execute:LlmExecute",
             "tools.gimo_server.engine.stages.critic:Critic",
+            "tools.gimo_server.engine.stages.file_write:FileWrite",
         ],
         "custom_plan": [
             "tools.gimo_server.engine.stages.policy_gate:PolicyGate",
@@ -363,6 +364,9 @@ class EngineService:
                 f"output exactly what should be written to the file.\n\n"
                 f"Task: {context['prompt']}"
             )
+
+        # Inject journal path so the pipeline emits structured stage events
+        context.setdefault("journal_path", str(OpsService.OPS_DIR / "run_journals" / f"{run_id}.jsonl"))
 
         # Start pipeline
         try:

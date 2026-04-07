@@ -131,8 +131,9 @@ class FileWrite(ExecutionStage):
                 target_path = self._extract_fallback_path(llm_content, input.context)
             logger.info("[FileWrite] target_path extracted: %r (content[:80]=%r)", target_path, llm_content[:80])
             if not target_path:
-                status = "fail"
-                artifacts_out["error"] = "No tool calls and no target file path detected"
+                # No file operations needed — pass through (e.g., legacy_run text-only response)
+                logger.info("[FileWrite] No target path found — pass-through (no-op)")
+                status = "continue"
             else:
                 # Workspace bounds check: reject paths that escape the workspace
                 try:

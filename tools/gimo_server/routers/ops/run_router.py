@@ -328,9 +328,50 @@ async def get_run_events(
         raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
 
     async def _generate():
-        logs = getattr(run, "log", None) or []
-        for i, entry in enumerate(logs):
+        # 1. Stage-level events from the run journal (structured pipeline telemetry)
+        journal_path = OpsService.OPS_DIR / "run_journals" / f"{run_id}.jsonl"
+        journal_events: list[dict] = []
+        if journal_path.exists():
+            try:
+                for line in journal_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = _json.loads(line)
+                        entry.setdefault("source", "journal")
+                        journal_events.append(entry)
+                    except _json.JSONDecodeError:
+                        continue
+            except OSError:
+                pass
+
+        # 2. Coarse-grained run.log entries (free-text status messages)
+        log_events: list[dict] = []
+        for entry in (getattr(run, "log", None) or []):
             data = entry if isinstance(entry, dict) else {"msg": str(entry)}
+            data.setdefault("source", "run_log")
+            log_events.append(data)
+
+        # 3. Chronological merge. Journal entries use `started_at` (ISO8601 datetime),
+        # run.log uses `ts` (epoch float). Normalize both to a comparable float seconds.
+        from datetime import datetime as _dt
+        def _ts_key(e: dict) -> float:
+            for field in ("started_at", "ts", "timestamp", "finished_at"):
+                v = e.get(field)
+                if v is None:
+                    continue
+                if isinstance(v, (int, float)):
+                    return float(v)
+                if isinstance(v, str):
+                    try:
+                        return _dt.fromisoformat(v.replace("Z", "+00:00")).timestamp()
+                    except ValueError:
+                        continue
+            return 0.0
+        merged = sorted(journal_events + log_events, key=_ts_key)
+
+        for i, data in enumerate(merged):
             yield f"id: {i}\ndata: {_json.dumps(data, default=str)}\n\n"
 
     return StreamingResponse(_generate(), media_type="text/event-stream")

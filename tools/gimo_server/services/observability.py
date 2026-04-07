@@ -49,13 +49,26 @@ class ObservabilityService:
         cost_usd: float = 0.0,
         tools_executed: int = 0,
         tool_call_format: str = "none",
+        estimated: bool = False,
     ) -> None:
-        """Single sink for all LLM usage. Writes to all stores atomically."""
+        """Single sink for all LLM usage. Writes to all stores atomically.
+
+        When `estimated=True`, the tokens/cost are heuristic (e.g. CLI providers
+        with no exact usage). They are tracked separately in metrics so dashboards
+        can distinguish exact vs estimated totals and avoid presenting fabricated
+        precision as ground truth.
+        """
         total = prompt_tokens + completion_tokens
 
-        # 1. In-memory metrics (live dashboard)
-        cls._metrics["tokens_total"] += total
-        cls._metrics["cost_total_usd"] += cost_usd
+        # 1. In-memory metrics (live dashboard) — segregate estimated from exact
+        if estimated:
+            cls._metrics.setdefault("tokens_estimated", 0)
+            cls._metrics.setdefault("cost_estimated_usd", 0.0)
+            cls._metrics["tokens_estimated"] += total
+            cls._metrics["cost_estimated_usd"] += cost_usd
+        else:
+            cls._metrics["tokens_total"] += total
+            cls._metrics["cost_total_usd"] += cost_usd
 
         # 2. Audit log (append-only JSONL)
         cls.record_usage({
@@ -66,6 +79,7 @@ class ObservabilityService:
             "cost_usd": cost_usd,
             "tools_executed": tools_executed,
             "tool_call_format": tool_call_format,
+            "estimated": bool(estimated),
         })
 
         # 3. Thread metadata (per-conversation usage)
@@ -80,6 +94,7 @@ class ObservabilityService:
                         "completion_tokens": prev.get("completion_tokens", 0) + completion_tokens,
                         "cost_usd": prev.get("cost_usd", 0.0) + cost_usd,
                         "total_tokens": prev.get("total_tokens", 0) + total,
+                        "estimated": bool(prev.get("estimated") or estimated),
                     }
                     return True
 

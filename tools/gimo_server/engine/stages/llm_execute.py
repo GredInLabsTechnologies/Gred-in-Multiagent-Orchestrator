@@ -61,11 +61,19 @@ class LlmExecute(ExecutionStage):
                 except Exception:
                     break  # Critic unavailable — accept current output
 
+            content = final_resp.get("content", "")
+            if not content or not content.strip():
+                return StageOutput(
+                    status="fail",
+                    artifacts={"error": "LLM returned empty content"},
+                    error="LLM returned empty content",
+                )
+
             return StageOutput(
                 status="continue",
                 artifacts={
                     "llm_response": final_resp,
-                    "content": final_resp.get("content", ""),
+                    "content": content,
                     "usage": {
                         "prompt_tokens": final_resp.get("prompt_tokens"),
                         "completion_tokens": final_resp.get("completion_tokens"),

@@ -25,7 +25,12 @@ def redact_sensitive_data(content: str) -> str:
     return content
 
 
-# Audit Logger
+# Audit Logger — dedicated logger, NO global side-effect on import.
+# Previously this module called logging.basicConfig() at import time, which
+# silently overwrote the root logger's handlers and broke unrelated logging.
+# Now we configure a dedicated "gimo.audit" logger and expose its handler so
+# readers (e.g. FileService.tail_audit_lines) can synchronize with rotation
+# via the handler's own lock.
 os.makedirs(AUDIT_LOG_PATH.parent, exist_ok=True)
 _audit_handler = RotatingFileHandler(
     AUDIT_LOG_PATH,
@@ -33,11 +38,24 @@ _audit_handler = RotatingFileHandler(
     backupCount=AUDIT_LOG_BACKUP_COUNT,
     encoding="utf-8",
 )
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[_audit_handler],
+_audit_handler.setFormatter(
+    logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
 )
+
+_audit_logger = logging.getLogger("gimo.audit")
+_audit_logger.setLevel(logging.INFO)
+# Ensure idempotent setup (re-imports must not stack handlers)
+if not any(isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", None) == _audit_handler.baseFilename
+           for h in _audit_logger.handlers):
+    _audit_logger.addHandler(_audit_handler)
+# Don't bubble to root — audit lines must not appear on stdout / app loggers
+_audit_logger.propagate = False
+
+
+def get_audit_handler() -> RotatingFileHandler:
+    """Expose the rotating handler so readers can acquire its lock during rotation."""
+    return _audit_handler
+
 
 from .common import get_safe_actor
 
@@ -50,7 +68,7 @@ def audit_log(
     log_msg = (
         f"OP:{operation} | PATH:{path} | RANGE:{ranges} | HASH:{res_hash} | ACTOR:{safe_actor}"
     )
-    logging.info(log_msg)
+    _audit_logger.info(log_msg)
 
 
 def log_panic(
@@ -65,7 +83,7 @@ def log_panic(
     msg = (
         f"PANIC | ID:{correlation_id} | HASH:{payload_hash} | REASON:{reason} | ACTOR:{safe_actor}"
     )
-    logging.critical(msg)
+    _audit_logger.critical(msg)
 
     if traceback_str:
-        logging.error(f"PANIC_TRACE [{correlation_id}]:\n{traceback_str}")
+        _audit_logger.error(f"PANIC_TRACE [{correlation_id}]:\n{traceback_str}")

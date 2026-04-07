@@ -50,8 +50,10 @@ def test_smart_timeout_stream_endpoints_have_no_timeout(mock_fetch, mock_config)
     timeout = _smart_timeout("/ops/stream", mock_config)
     assert timeout is None
 
+    # /chat now uses generation_timeout_s (180s default) instead of None,
+    # to give chat calls a ceiling rather than blocking forever (R16 fix)
     timeout = _smart_timeout("/ops/chat", mock_config)
-    assert timeout is None
+    assert timeout == 180.0
 
 
 @patch("gimo_cli.api.fetch_capabilities")

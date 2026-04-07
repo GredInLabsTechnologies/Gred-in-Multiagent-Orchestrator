@@ -199,12 +199,16 @@ class CliAccountAdapter(ProviderAdapter):
             content = out or err or ""
 
         logger.info("[cli-account] response length: %d chars", len(content))
+        # Estimate tokens since CLI adapters don't report usage (~4 chars/token)
+        est_prompt = len(prompt.encode("utf-8", errors="ignore")) // 4
+        est_completion = len(content.encode("utf-8", errors="ignore")) // 4 if content else 0
         return {
             "content": content,
             "usage": {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
+                "prompt_tokens": est_prompt,
+                "completion_tokens": est_completion,
+                "total_tokens": est_prompt + est_completion,
+                "estimated": True,
             },
         }
 

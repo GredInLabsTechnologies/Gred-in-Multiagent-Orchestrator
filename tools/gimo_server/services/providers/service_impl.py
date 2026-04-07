@@ -784,15 +784,17 @@ class ProviderService:
         usage = response.get("usage", {})
         prompt_t = usage.get("prompt_tokens", 0)
         completion_t = usage.get("completion_tokens", 0)
-        
+        is_estimated = bool(usage.get("estimated"))
+
         model_name = requested_model or getattr(adapter, "model", cfg.providers[effective_provider].model)
         cost_usd = CostService.calculate_cost(model_name, prompt_t, completion_t)
-        
+
         result = {
             "provider": effective_provider, "model": model_name,
             "content": response["content"], "tokens_used": prompt_t + completion_t,
             "prompt_tokens": prompt_t, "completion_tokens": completion_t,
-            "cost_usd": cost_usd, "cache_hit": False
+            "cost_usd": cost_usd, "cache_hit": False,
+            "cost_estimated": is_estimated,
         }
 
         cls._record_outcome_safe(

@@ -61,8 +61,15 @@ async def test_execute_run_infers_multi_agent_composition_for_parent_flows() -> 
         mock_run_composition.return_value = []
         await EngineService.execute_run("r_parent")
 
-    expected_ctx = {**fake_draft.context, "approved_id": "a1"}
-    mock_run_composition.assert_awaited_once_with("multi_agent", "r_parent", expected_ctx)
+    # journal_path is injected by execute_run before run_composition
+    call_args = mock_run_composition.call_args
+    assert call_args is not None
+    assert call_args[0][0] == "multi_agent"
+    assert call_args[0][1] == "r_parent"
+    actual_ctx = call_args[0][2]
+    assert actual_ctx["wake_on_demand"] is True
+    assert actual_ctx["approved_id"] == "a1"
+    assert "journal_path" in actual_ctx
 
 
 @pytest.mark.asyncio

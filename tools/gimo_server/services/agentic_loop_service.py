@@ -727,7 +727,7 @@ class AgenticLoopService:
             session_id=session_id,
             workspace_contract=ws_contract,
         )
-        total_usage: Dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        total_usage: Dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "estimated": False}
         all_tool_logs: List[Dict[str, Any]] = []
         final_response = ""
         finish_reason = "stop"
@@ -777,6 +777,9 @@ class AgenticLoopService:
             usage = llm_result.get("usage", {}) or {}
             for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
                 total_usage[key] += int(usage.get(key, 0) or 0)
+            # Propagate estimation flag: any estimated turn taints the whole loop's totals
+            if usage.get("estimated"):
+                total_usage["estimated"] = True
 
             cls._record_completion_tokens(task_key, model, usage)
             iteration_cost = cls._calculate_usage_cost(model, usage)
@@ -1166,6 +1169,7 @@ class AgenticLoopService:
             final_response = last_content or "(Reached maximum iterations. Stopping.)"
 
         total_usage["cost_usd"] = total_cost
+        total_usage["cost_estimated"] = bool(total_usage.get("estimated"))
 
         # U4: Single telemetry sink — writes to metrics, audit log, and thread metadata.
         try:
@@ -1178,6 +1182,7 @@ class AgenticLoopService:
                 cost_usd=total_cost,
                 tools_executed=len(all_tool_logs),
                 tool_call_format=last_tool_call_format or "none",
+                estimated=bool(total_usage.get("estimated")),
             )
         except Exception:
             logger.debug("record_llm_usage failed", exc_info=True)

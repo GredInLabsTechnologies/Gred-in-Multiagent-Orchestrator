@@ -477,13 +477,71 @@ async def generate_plan_stream(
                 "remaining": round(estimated_duration * 0.6, 1),
             })
 
-            # Call LLM
+            # Call LLM with REAL heartbeat — yield events in real time via asyncio.Queue
             preferred_model = request.headers.get("X-Preferred-Model")
             context = {"task_type": "disruptive_planning"}
             if preferred_model:
                 context["model"] = preferred_model
 
-            resp = await ProviderService.static_generate(sys_prompt, context=context)
+            # Queue-based pattern: provider task and heartbeat task push events;
+            # generator yields them as they arrive (real-time, not buffered).
+            event_queue: asyncio.Queue = asyncio.Queue()
+            _SENTINEL_DONE = object()
+            _SENTINEL_ERR = object()
+
+            async def _provider_call():
+                try:
+                    result = await ProviderService.static_generate(sys_prompt, context=context)
+                    await event_queue.put((_SENTINEL_DONE, result))
+                except Exception as exc:
+                    await event_queue.put((_SENTINEL_ERR, exc))
+
+            async def _heartbeat():
+                tick = 0
+                try:
+                    while True:
+                        await asyncio.sleep(15)
+                        tick += 1
+                        await event_queue.put(("hb", tick))
+                except asyncio.CancelledError:
+                    pass
+
+            provider_task = asyncio.create_task(_provider_call())
+            heartbeat_task = asyncio.create_task(_heartbeat())
+            resp = None
+            provider_exc: Exception | None = None
+            try:
+                while True:
+                    kind, payload = await event_queue.get()
+                    if kind == "hb":
+                        yield emit_sse("progress", {
+                            "stage": "waiting_for_provider",
+                            "message": f"Waiting for provider response... ({payload * 15}s)",
+                            "progress": min(0.4 + payload * 0.03, 0.65),
+                            "elapsed": round(time.time() - start_time, 1),
+                        })
+                    elif kind is _SENTINEL_DONE:
+                        resp = payload
+                        break
+                    elif kind is _SENTINEL_ERR:
+                        provider_exc = payload
+                        break
+            finally:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                if not provider_task.done():
+                    provider_task.cancel()
+                    try:
+                        await provider_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+            if provider_exc is not None:
+                raise provider_exc
+
             raw = resp.get("content", "").strip()
 
             # Progress: parsing response (70%)

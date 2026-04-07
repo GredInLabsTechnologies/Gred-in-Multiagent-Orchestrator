@@ -63,7 +63,7 @@ class SagpGateway:
         risk_band = get_tool_risk_level(tool_name).lower()
 
         # 4. Trust score — lightweight: use static heuristic if engine unavailable
-        trust_score = cls._get_trust_score(tool_name)
+        trust_score = cls._get_trust_score("tool")
 
         # 5. Circuit breaker state
         circuit_state = cls._get_circuit_state()

@@ -138,8 +138,10 @@ def smart_timeout(path: str, config: dict[str, Any]) -> float | None:
     # Fallback for paths not covered by operation_timeouts
     if any(p in path for p in ("/generate-plan", "/slice0", "/threads/", "/mastery/analytics")):
         return float(hints.get("generation_timeout_s", 180))
-    if "/stream" in path or "/chat" in path or "/events" in path:
+    if "/stream" in path or "/events" in path:
         return None
+    if "/chat" in path:
+        return float(hints.get("generation_timeout_s", 180))
     # Runs polling can be slow under load — use generation timeout
     if "/runs/" in path:
         return float(hints.get("generation_timeout_s", 180))

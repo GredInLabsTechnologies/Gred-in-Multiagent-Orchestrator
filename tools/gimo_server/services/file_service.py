@@ -13,11 +13,16 @@ class FileService:
     def tail_audit_lines(limit: int = 200) -> List[str]:
         if not AUDIT_LOG_PATH.exists():
             return []
-        try:
-            lines = AUDIT_LOG_PATH.read_text(encoding="utf-8", errors="ignore").splitlines()
-            return lines[-limit:]
-        except Exception:
-            return []
+        # Acquire the RotatingFileHandler lock so reads cannot race with rotation.
+        # The handler holds this lock during emit() and doRollover(); by acquiring
+        # the same lock here we serialize against both, eliminating the ValueError
+        # / OSError window that previously had to be papered over with sleep+retry.
+        from tools.gimo_server.security.audit import get_audit_handler
+        handler = get_audit_handler()
+        with handler.lock:
+            return AUDIT_LOG_PATH.read_text(
+                encoding="utf-8", errors="ignore"
+            ).splitlines()[-limit:]
 
     @staticmethod
     def get_file_content(

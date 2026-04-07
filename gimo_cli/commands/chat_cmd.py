@@ -110,7 +110,8 @@ def chat(
                 json_body={"execution_policy": "workspace_safe"},
             )
 
-        _, resp = api_request(config, "POST", f"/ops/threads/{thread_id}/chat", json_body={"content": message})
+        with console.status("[bold green]Waiting for response..."):
+            _, resp = api_request(config, "POST", f"/ops/threads/{thread_id}/chat", json_body={"content": message})
         if isinstance(resp, dict):
             content = resp.get("response") or resp.get("content") or ""
             if verbose:
@@ -124,6 +125,9 @@ def chat(
             console.print(content)
             if verbose and thread_id:
                 console.print(f"[dim]thread: {thread_id}[/dim]")
+        elif isinstance(resp, str) and "timed out" in resp.lower():
+            console.print("[red]Chat request timed out (180s). The provider may be slow or unavailable.[/red]")
+            console.print("[yellow]-> Try again or check:[/yellow] [cyan]gimo providers test[/cyan]")
         else:
             console.print(str(resp))
         return
