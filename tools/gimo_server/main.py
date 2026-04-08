@@ -285,21 +285,26 @@ async def lifespan(app: FastAPI):
 
         ProviderService.ensure_default_config()
 
-        # Initialize GICS Daemon Service
-        gics_service = GicsService()
-        gics_service.start_daemon()
-        gics_service.start_health_check()
+        # R20-002/004: Initialize GICS + shared governance singletons via the
+        # single bootstrap helper. Both this process AND the MCP-bridge
+        # process must call the same helper so StorageService._shared_gics
+        # is populated in every process where governance reads happen.
+        from tools.gimo_server.services.bootstrap import init_governance_subsystem
+        gics_service = init_governance_subsystem(start_daemon=True)
+        if gics_service is None:
+            # Fall back to direct init so we don't regress in environments
+            # where bootstrap helper fails unexpectedly.
+            gics_service = GicsService()
+            gics_service.start_daemon()
+            gics_service.start_health_check()
+            from tools.gimo_server.services.storage_service import StorageService as _SS_fallback
+            _SS_fallback.set_shared_gics(gics_service)
         app.state.gics = gics_service
         if not getattr(gics_service, "_last_alive", False):
             logger.warning(
                 "GICS daemon is NOT alive — operating in degraded mode. "
                 "Install Node.js >= 18 for historical reliability data."
             )
-
-        # Share GICS with StorageService so all callers (even those using
-        # StorageService() without explicit gics=) get persistence.
-        from tools.gimo_server.services.storage_service import StorageService as _SS
-        _SS.set_shared_gics(gics_service)
 
         # Enable GICS-backed session revocation persistence
         from tools.gimo_server.security.auth import session_store as _session_store

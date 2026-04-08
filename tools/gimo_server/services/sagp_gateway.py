@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ..models.governance import GovernanceSnapshot, GovernanceVerdict
 from ..models.surface import SurfaceIdentity
@@ -88,8 +88,24 @@ class SagpGateway:
         # 9. Final decision
         allowed = tool_allowed and circuit_state != "open" and budget_ok
 
-        # 10. Create proof entry
-        proof_id = uuid.uuid4().hex[:16]
+        # 10. Create and PERSIST a real pre-action proof (R20-005).
+        # Previously this returned a synthetic uuid slice that was never
+        # written to any store, so downstream `verify_proof_chain` always
+        # returned length:0 for a thread where an `evaluate_action` call had
+        # just returned a proof_id. Now we append to an ExecutionProofChain
+        # and persist the proof to GICS under the canonical
+        # `ops:proof:<thread_id>:<proof_id>` key. If no thread_id is supplied,
+        # we still generate a synthetic id but mark it as ephemeral in the
+        # reasoning so callers know not to use it for chain verification.
+        proof_id = cls._persist_pre_action_proof(
+            thread_id=thread_id,
+            tool_name=tool_name,
+            tool_args=tool_args or {},
+            policy_name=effective_policy_name,
+            allowed=(tool_allowed and circuit_state != "open" and budget_ok),
+            surface_type=str(getattr(surface, "surface_type", "") or ""),
+            cost=estimated_cost,
+        )
 
         # Build reasoning
         reasons = []
@@ -182,23 +198,109 @@ class SagpGateway:
             from .storage_service import StorageService
             storage = StorageService()
             raw_proofs = storage.list_proofs(thread_id) if hasattr(storage, "list_proofs") else []
-            if not raw_proofs:
-                return {"thread_id": thread_id, "valid": True, "length": 0}
             chain = ExecutionProofChain.from_records(thread_id, raw_proofs)
-            valid = chain.verify()
+            state = chain.verification_state()
+            proofs = chain.to_list()
+            subject = None
+            executor = None
+            if proofs:
+                first = proofs[0]
+                last = proofs[-1]
+                subject = {
+                    "type": str(first.subject_type or "thread"),
+                    "id": str(first.subject_id or thread_id),
+                }
+                executor = {
+                    "type": str(last.executor_type or "tool"),
+                    "id": str(last.executor_id or last.tool_name),
+                }
+            # R20-002 secondary: be explicit that an empty chain is NOT valid.
+            # `valid` is true only when there is at least one proof AND the
+            # chain verification state is "present".
             return {
                 "thread_id": thread_id,
-                "valid": valid,
-                "length": len(chain._proofs),
+                "valid": bool(len(proofs) > 0 and state == "present"),
+                "state": state,
+                "length": len(proofs),
+                "subject": subject,
+                "executor": executor,
             }
         except Exception as exc:
             logger.warning("Proof chain verification failed: %s", exc)
             return {
                 "thread_id": thread_id,
                 "valid": False,
+                "state": "invalid",
                 "length": 0,
                 "error": str(exc),
             }
+
+    # ── Pre-action proof persistence (R20-005) ────────────────────────────
+
+    @classmethod
+    def _persist_pre_action_proof(
+        cls,
+        *,
+        thread_id: str,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        policy_name: str,
+        allowed: bool,
+        surface_type: str,
+        cost: float,
+    ) -> str:
+        """Persist a real pre-action proof entry to GICS.
+
+        Returns the proof_id of the persisted entry. If no thread_id was
+        supplied, returns an ephemeral id prefixed with ``ephemeral_`` so
+        callers never confuse it with a chain-verifiable id.
+        """
+        if not thread_id:
+            return f"ephemeral_{uuid.uuid4().hex[:16]}"
+        try:
+            from ..security.execution_proof import ExecutionProofChain
+            from .storage_service import StorageService
+
+            storage = StorageService()
+            gics = getattr(storage, "gics", None)
+            raw_proofs = storage.list_proofs(thread_id) if hasattr(storage, "list_proofs") else []
+            chain = ExecutionProofChain.from_records(thread_id, raw_proofs)
+            proof = chain.append(
+                tool_name=tool_name,
+                args={
+                    "kind": "pre_action",
+                    "policy_name": policy_name,
+                    "surface_type": surface_type,
+                    "args": dict(tool_args or {}),
+                },
+                result={
+                    "kind": "pre_action_verdict",
+                    "allowed": bool(allowed),
+                    "policy_name": policy_name,
+                },
+                mood="pre_action",
+                cost=float(cost or 0.0),
+                subject_type="thread",
+                subject_id=thread_id,
+                executor_type="sagp",
+                executor_id="sagp:evaluate_action",
+            )
+            if gics is not None:
+                try:
+                    gics.put(f"ops:proof:{thread_id}:{proof.proof_id}", proof.to_dict())
+                except Exception as exc:
+                    logger.debug("Pre-action proof persist (put) failed: %s", exc)
+            else:
+                logger.debug(
+                    "Pre-action proof appended but GICS unavailable — proof %s will be lost on restart",
+                    proof.proof_id,
+                )
+            return proof.proof_id
+        except Exception as exc:
+            logger.warning("Pre-action proof persistence failed: %s", exc)
+            # Honest fallback: mark as ephemeral so consumers don't expect
+            # chain verifiability.
+            return f"ephemeral_{uuid.uuid4().hex[:16]}"
 
     # ── Private helpers ───────────────────────────────────────────────────
 

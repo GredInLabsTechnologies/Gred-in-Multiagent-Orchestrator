@@ -64,19 +64,32 @@ class DraftMixin:
         content: Optional[str] = None,
         status: str = "draft",
         error: Optional[str] = None,
+        operator_class: Optional[str] = None,
     ) -> OpsDraft:
         cls.ensure_dirs()
         draft_id = f"d_{int(time.time() * 1000)}_{os.urandom(3).hex()}"
         canonical_content = cls._canonicalize_structured_content(content, context)
+        # R20-001: resolve operator_class. Explicit arg wins; otherwise look
+        # inside context (MCP/agent callers typically set it there); fall back
+        # to "human_ui" for backwards-compat HTTP UI callers.
+        _ctx = context or {}
+        resolved_operator_class = str(
+            operator_class
+            or _ctx.get("operator_class")
+            or "human_ui"
+        ).strip().lower()
+        if resolved_operator_class not in ("human_ui", "cognitive_agent"):
+            resolved_operator_class = "human_ui"
         draft = OpsDraft(
             id=draft_id,
             prompt=prompt,
-            context=context or {},
+            context=_ctx,
             provider=provider,
             content=canonical_content,
             status=status,  # type: ignore[arg-type]
             error=error,
             created_at=_utcnow(),
+            operator_class=resolved_operator_class,  # type: ignore[arg-type]
         )
         cls._draft_path(draft.id).write_text(draft.model_dump_json(indent=2), encoding="utf-8")
         if cls._gics:

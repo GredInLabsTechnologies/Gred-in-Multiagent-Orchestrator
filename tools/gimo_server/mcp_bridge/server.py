@@ -244,6 +244,21 @@ async def _startup_and_run() -> None:
     for d in ["drafts", "approved", "runs", "threads"]:
         (settings.ops_data_dir / d).mkdir(parents=True, exist_ok=True)
 
+    # R20-002 / R20-004: initialize the governance subsystem in the
+    # MCP-bridge process. Without this call, StorageService._shared_gics
+    # stays None here and every store-backed governance tool
+    # (gimo_verify_proof_chain, gimo_get_gics_insight, proof chain reads,
+    # trust reads) silently returns empty. The FastAPI process also calls
+    # this helper; it is idempotent per-process.
+    try:
+        from tools.gimo_server.services.bootstrap import init_governance_subsystem
+        init_governance_subsystem(start_daemon=True)
+    except Exception as exc:
+        logger.error(
+            "MCP bridge: init_governance_subsystem failed (%s) — proof/trust/gics reads will be empty",
+            exc,
+        )
+
     # Auto-start GIMO HTTP backend so dynamic tools work immediately
     _auto_start_backend()
 

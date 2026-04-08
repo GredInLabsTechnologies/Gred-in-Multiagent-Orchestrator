@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from ...config import OPS_RUN_TTL
 from ...ops_models import OpsRun
 from ..lifecycle_errors import RunNotFoundError
+from ..run_lifecycle import is_active_run_status, is_resumable_run_status
 from ._base import _utcnow, _json_dump
 
 logger = logging.getLogger("orchestrator.ops")
@@ -58,15 +59,15 @@ class RunMixin:
         elif event_type == "stage":
             run.stage = data.get("stage")
         elif event_type == "merge_meta":
-            for key in ("commit_before", "commit_after", "lock_id", "lock_expires_at", "heartbeat_at"):
-                if key in data:
-                    value = data.get(key)
-                    if key in {"lock_expires_at", "heartbeat_at"} and value:
-                        try:
-                            value = datetime.fromisoformat(str(value))
-                        except Exception:
-                            pass
-                    setattr(run, key, value)
+            for key, value in data.items():
+                if not hasattr(run, key):
+                    continue
+                if key in {"lock_expires_at", "heartbeat_at", "resume_requested_at"} and value:
+                    try:
+                        value = datetime.fromisoformat(str(value))
+                    except Exception:
+                        pass
+                setattr(run, key, value)
 
     @classmethod
     def _materialize_run(cls, run: OpsRun) -> OpsRun:
@@ -88,6 +89,29 @@ class RunMixin:
         payload = run.model_dump(mode="json")
         payload["log"] = []
         cls._run_path(run.id).write_text(_json_dump(payload), encoding="utf-8")
+
+    @classmethod
+    def merge_run_meta(cls, run_id: str, *, msg: str | None = None, **fields: Any) -> OpsRun:
+        with cls._lock():
+            run = cls._load_run_metadata(run_id)
+            if not run:
+                raise ValueError(f"Run {run_id} not found")
+            if msg:
+                cls._append_run_log_entry(run_id, level="INFO", msg=msg)
+            payload = {key: value for key, value in fields.items()}
+            if payload:
+                cls._append_run_event(
+                    run_id,
+                    {
+                        "ts": _utcnow().isoformat(),
+                        "event": "merge_meta",
+                        "data": payload,
+                    },
+                )
+            run = cls._materialize_run(run)
+            cls._compact_run_events_if_needed(run)
+            run.log = cls._read_run_logs(run_id, tail=cls._RUN_LOG_TAIL)
+            return run
 
     # --- Log store internals ---
 
@@ -186,6 +210,14 @@ class RunMixin:
 
             draft = cls.get_draft(approved.draft_id)
             context = dict((draft.context if draft else {}) or {})
+            # R20-001: propagate operator_class from the draft into the stage
+            # context so the policy gate / intent classifier can whitelist
+            # cognitive_agent operators (MCP, agent SDK) and avoid the
+            # "fallback_to_most_restrictive_human_review" branch.
+            if draft is not None:
+                context["operator_class"] = str(
+                    getattr(draft, "operator_class", None) or "human_ui"
+                )
             validated_task_spec = dict(context.get("validated_task_spec") or {})
             repo_context = dict(context.get("repo_context") or {})
             repo_context_pack = dict(context.get("repo_context_pack") or {})
@@ -364,6 +396,58 @@ class RunMixin:
                 cls._compact_run_events_if_needed(run)
             run.log = cls._read_run_logs(run_id, tail=cls._RUN_LOG_TAIL)
             return run
+
+    @classmethod
+    def resume_run(
+        cls,
+        run_id: str,
+        *,
+        decision: str = "approve",
+        edited_state: Optional[Dict[str, Any]] = None,
+    ) -> OpsRun:
+        run = cls.get_run(run_id)
+        if not run:
+            raise ValueError(f"Run {run_id} not found")
+        if not is_resumable_run_status(run.status):
+            raise RuntimeError(f"RUN_NOT_RESUMABLE:{run.id}:{run.status}")
+
+        normalized = str(decision or "approve").strip().lower()
+        now = _utcnow()
+        resume_context = dict(run.resume_context or {})
+        if isinstance(edited_state, dict):
+            resume_context.update(edited_state)
+        resume_context["handover_decision"] = normalized
+        resume_context["resume_requested_at"] = now.isoformat()
+
+        if normalized in {"approve", "approved", "resume", "continue"}:
+            resume_context["human_approval_granted"] = True
+            cls.merge_run_meta(
+                run_id,
+                msg=f"Handover decision recorded: {normalized}",
+                resume_context=resume_context,
+                last_handover_decision=normalized,
+                resume_requested_at=now.isoformat(),
+            )
+            resumed = cls.update_run_status(run_id, "pending", msg="Run re-queued after handover approval")
+            try:
+                from ..authority import ExecutionAuthority
+
+                ExecutionAuthority.get().run_worker.notify()
+            except Exception:
+                pass
+            return resumed
+
+        if normalized in {"reject", "rejected", "deny", "cancel", "cancelled"}:
+            cls.merge_run_meta(
+                run_id,
+                msg=f"Handover decision recorded: {normalized}",
+                resume_context=resume_context,
+                last_handover_decision=normalized,
+                resume_requested_at=now.isoformat(),
+            )
+            return cls.update_run_status(run_id, "cancelled", msg="Run cancelled after handover rejection")
+
+        raise RuntimeError(f"INVALID_HANDOVER_DECISION:{decision}")
 
     @classmethod
     def heartbeat_run(cls, run_id: str) -> Optional[OpsRun]:

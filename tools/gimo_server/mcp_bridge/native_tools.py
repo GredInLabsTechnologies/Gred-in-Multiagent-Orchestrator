@@ -1,3 +1,4 @@
+import json
 import time
 import sys
 import logging
@@ -369,7 +370,8 @@ def register_native_tools(mcp: FastMCP):
             logger.warning("gimo_resolve_handover: draft record failed: %s", exc)
         try:
             return await proxy_to_api(
-                "POST", f"/ops/workflows/{run_id}/resume",
+                "POST", f"/ops/runs/{run_id}/resume",
+                __body={"decision": decision, "edited_state": edited_state or {}},
             )
         except Exception as exc:
             return _json.dumps({
@@ -461,22 +463,30 @@ def register_native_tools(mcp: FastMCP):
         """
         try:
             import os
-            from tools.gimo_server.services.sub_agent_manager import SubAgentManager
+            from tools.gimo_server.services.agent_broker_service import AgentBrokerService, BrokerTaskDescriptor
             ws = workspace_path or os.environ.get("ORCH_REPO_ROOT", ".")
-            req = {
-                "workspace_path": ws,
-                "modelPreference": model if model != "auto" else "default",
-                "constraints": {
-                    "role": role,
-                    "task": task,
-                    "provider": provider,
-                    "model": model,
-                    "execution_policy": execution_policy,
-                },
-            }
-            # R18 Change 3 — route through governance-unified spawn path.
-            agent = await SubAgentManager.spawn_via_draft(parent_id="mcp", request=req)
-            return f"Spawned: {agent.id} (provider={provider}, model={model}, policy={execution_policy})"
+            result = await AgentBrokerService.spawn_governed_agent(
+                BrokerTaskDescriptor(
+                    name=name,
+                    task=task,
+                    role=role,
+                    preferred_provider=provider,
+                    preferred_model=model,
+                    execution_policy=execution_policy,
+                    workspace_path=ws,
+                    parent_id="mcp",
+                    # R20-003: surface the true caller instead of the
+                    # hardcoded "agent_sdk" tag previously used by the
+                    # broker. R20-001: MCP is a cognitive_agent operator.
+                    surface_type="mcp",
+                    surface_name=f"mcp:{name}",
+                    operator_class="cognitive_agent",
+                )
+            )
+            if result.get("spawned"):
+                result["name"] = name
+                result["workspace_path"] = ws
+            return json.dumps(result, indent=2, default=str)
         except Exception as e: return str(e)
 
     @mcp.tool()

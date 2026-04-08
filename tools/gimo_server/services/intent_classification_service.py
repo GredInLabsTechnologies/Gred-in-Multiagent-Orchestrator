@@ -125,6 +125,7 @@ class IntentClassificationService:
         risk_score: float,
         policy_decision: str,
         policy_status_code: str,
+        operator_class: str = "human_ui",
     ) -> IntentDecisionAudit:
         normalized_scope = cls._normalize_scope(path_scope)
         risk = float(risk_score or 0.0)
@@ -176,6 +177,22 @@ class IntentClassificationService:
 
         if effective in cls._LOW_RISK_AUTORUN:
             reasons.append("autorun_eligible_low_risk_intent")
+            return IntentDecisionAudit(
+                intent_declared=declared,
+                intent_effective=effective,
+                risk_score=risk,
+                decision_reason=",".join(reasons),
+                execution_decision="AUTO_RUN_ELIGIBLE",
+            )
+
+        # R20-001: cognitive_agent operators (MCP, agent SDK) do NOT fall
+        # through to the human-review fallback. The operator IS the approver;
+        # any deny/high-risk/always-review path above has already returned.
+        # Effective intent here is a medium-risk routine class that the human
+        # UI would normally bounce to approval — for cognitive agents it's a
+        # green-light with an explicit audit reason.
+        if str(operator_class or "").strip().lower() == "cognitive_agent":
+            reasons.append("cognitive_agent_operator_autorun_eligible")
             return IntentDecisionAudit(
                 intent_declared=declared,
                 intent_effective=effective,

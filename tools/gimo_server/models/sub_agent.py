@@ -1,6 +1,8 @@
 """Sub-agent lifecycle models."""
 from __future__ import annotations
-from typing import Optional
+
+from typing import Any, Dict, Literal, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -24,3 +26,15 @@ class SubAgent(BaseModel):
     description: str = ""
     currentTask: Optional[str] = None
     result: Optional[str] = None
+    provider: Optional[str] = None
+    executionPolicy: Optional[str] = None
+    draftId: Optional[str] = None
+    runId: Optional[str] = None
+    routing: Dict[str, Any] = Field(default_factory=dict)
+    delegation: Dict[str, Any] = Field(default_factory=dict)
+    authority: str = "ops_run"
+    # R20-007: inventory schema discriminator. "auto_discovery" = pulled from
+    # an installed Ollama / local catalog on startup; "spawn" = created via
+    # governed spawn_via_draft. Required so UI/MCP callers can filter out
+    # orphan spawn records accumulated from failed runs.
+    source: Literal["auto_discovery", "spawn"] = "spawn"

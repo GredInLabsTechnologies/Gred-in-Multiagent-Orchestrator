@@ -290,6 +290,13 @@ class EngineService:
         approved = OpsService.get_approved(run.approved_id)
         draft = OpsService.get_draft(approved.draft_id) if approved else None
         context = dict((draft.context if draft else {}) or {})
+        # R20-001: propagate operator_class from draft into stage context so
+        # the policy gate / intent classifier can whitelist cognitive_agent
+        # operators (MCP, agent SDK).
+        if draft is not None:
+            context["operator_class"] = str(
+                getattr(draft, "operator_class", None) or context.get("operator_class") or "human_ui"
+            )
         validated_task_spec = dict(getattr(run, "validated_task_spec", None) or {})
         workspace_path = str(validated_task_spec.get("workspace_path") or "").strip()
         if workspace_path:
@@ -324,6 +331,8 @@ class EngineService:
             context, _ = _apply_child_context(context, {}, is_child_run=True)
         if getattr(run, "child_prompt", None):
             context["prompt"] = run.child_prompt
+        if getattr(run, "resume_context", None):
+            context.update(dict(run.resume_context or {}))
 
         # Log explicit GICS degradation so operators know when historical reliability
         # is unavailable and routing falls back to static priors.

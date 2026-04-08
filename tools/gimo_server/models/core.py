@@ -36,6 +36,11 @@ class OpsCreateRunRequest(BaseModel):
     approved_id: str
 
 
+class OpsResumeRunRequest(BaseModel):
+    decision: str = "approve"
+    edited_state: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ChildRunRequest(BaseModel):
     parent_run_id: str
     prompt: str
@@ -60,6 +65,14 @@ class OpsPlan(BaseModel):
     tasks: List[OpsTask]
     constraints: List[str] = []
 
+# R20-001: OperatorClass is a decision input for the policy gate.
+# "human_ui" = human sitting in front of a UI (Web / CLI chat), default.
+# "cognitive_agent" = another agent / MCP bridge / agent SDK acting as operator.
+# The intent classifier white-lists cognitive_agent for non-deny verdicts so
+# MCP-driven drafts do not fall through to "fallback_to_most_restrictive_human_review".
+OperatorClass = Literal["human_ui", "cognitive_agent"]
+
+
 class OpsDraft(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
@@ -70,6 +83,9 @@ class OpsDraft(BaseModel):
     status: Literal["draft", "rejected", "approved", "error"] = "draft"
     error: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # R20-001: who is the operator of this draft. Defaults to human_ui for
+    # backwards-compat. MCP/agent surfaces must set "cognitive_agent".
+    operator_class: OperatorClass = "human_ui"
 
 class OpsApproved(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -114,6 +130,9 @@ class OpsRun(BaseModel):
     agent_preset: Optional[str] = None  # P10: Routing metadata persisted from draft
     execution_policy_name: Optional[str] = None  # P10: Execution policy persisted from draft
     routing_snapshot: Optional[Dict[str, Any]] = None  # P10: Serialized routing decision
+    resume_context: Optional[Dict[str, Any]] = None
+    last_handover_decision: Optional[str] = None
+    resume_requested_at: Optional[datetime] = None
 
 class ExecutorReport(BaseModel):
     run_id: str
