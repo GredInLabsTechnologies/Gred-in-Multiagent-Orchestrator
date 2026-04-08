@@ -135,8 +135,16 @@ class ObservabilityService:
 
             # --- Metrics Setup ---
             # Note: Prometheus or OTLP metrics could be added here.
-            # For now, we use PeriodicExportingMetricReader + Console
-            reader = PeriodicExportingMetricReader(ConsoleMetricExporter())
+            # For now, we use PeriodicExportingMetricReader, but we pipe the
+            # console exporter to os.devnull instead of stdout. Rationale:
+            # the background metric-export thread ticks on a timer and, when
+            # pytest (or any harness) closes the captured stdout, the
+            # exporter hits "I/O operation on closed file" and spams the log
+            # during teardown. Metrics are still recorded via the in-process
+            # counters and the UI span processor — the Console exporter was
+            # only ever a debug sink.
+            _metrics_sink = open(os.devnull, "w", encoding="utf-8")
+            reader = PeriodicExportingMetricReader(ConsoleMetricExporter(out=_metrics_sink))
             meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
             metrics.set_meter_provider(meter_provider)
             cls._meter = metrics.get_meter(__name__)

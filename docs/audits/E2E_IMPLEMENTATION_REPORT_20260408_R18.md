@@ -147,7 +147,7 @@ Server boot is the live validation for Change 1 (drift guard) â€” any Pydanticâ†
 
 ```
 python -m pytest tests/unit -q --timeout=60
-=========== 1376 passed, 1 skipped, 3 warnings in 157.96s ===========
+=========== 1377 passed, 1 skipped, 3 warnings in 164.16s ===========
 ```
 
 **Zero failures, zero regressions.** The two pre-existing red tests from the earlier PARTIAL snapshot of this report were resolved:
