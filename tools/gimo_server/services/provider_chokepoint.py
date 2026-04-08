@@ -84,3 +84,150 @@ def reset_for_tests() -> None:
     global _INVOCATION_COUNT, _LAST_PROVIDER
     _INVOCATION_COUNT = 0
     _LAST_PROVIDER = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R18 Change 2 — Layer 2: httpx transport guard
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Host suffixes considered "provider egress". Any HTTP request to one of these
+# hosts MUST happen inside a ``provider_invoke`` context; otherwise the
+# governance spine (policy/trust/cost/proof) never fires.
+PROVIDER_HOST_SUFFIXES: tuple[str, ...] = (
+    "api.openai.com",
+    "api.anthropic.com",
+    "generativelanguage.googleapis.com",
+    "api.mistral.ai",
+    "api.groq.com",
+    "api.together.xyz",
+    "api.deepseek.com",
+    "openrouter.ai",
+)
+
+_LAYER2_INSTALLED = False
+_LAYER3_INSTALLED = False
+_BYPASS_LOG: list[dict[str, Any]] = []
+
+
+def _is_provider_host(host: str | None) -> bool:
+    if not host:
+        return False
+    host = host.lower()
+    return any(host == s or host.endswith("." + s) or host.endswith(s) for s in PROVIDER_HOST_SUFFIXES)
+
+
+def install_transport_guard(strict: bool = False) -> bool:
+    """Layer 2 — wrap httpx transports so egress to provider hosts outside a
+    ``provider_invoke`` context is logged (and optionally blocked in strict
+    mode). Idempotent. Returns True on first install, False if already active.
+    """
+    global _LAYER2_INSTALLED
+    if _LAYER2_INSTALLED:
+        return False
+    try:
+        import httpx  # type: ignore
+    except Exception:
+        return False
+
+    orig_async = httpx.AsyncHTTPTransport.handle_async_request  # type: ignore[attr-defined]
+    orig_sync = httpx.HTTPTransport.handle_request  # type: ignore[attr-defined]
+
+    def _check(request: Any) -> None:
+        try:
+            host = request.url.host
+        except Exception:
+            return
+        if not _is_provider_host(host):
+            return
+        if _IN_FLIGHT.get() is None:
+            event = {"host": host, "url": str(request.url), "kind": "layer2"}
+            _BYPASS_LOG.append(event)
+            logger.warning("provider_chokepoint Layer 2: egress to %s outside provider_invoke", host)
+            if strict:
+                raise ProviderChokepointError(
+                    f"provider_chokepoint: egress to {host} outside provider_invoke context"
+                )
+
+    async def _guarded_async(self, request):  # type: ignore[no-untyped-def]
+        _check(request)
+        return await orig_async(self, request)
+
+    def _guarded_sync(self, request):  # type: ignore[no-untyped-def]
+        _check(request)
+        return orig_sync(self, request)
+
+    httpx.AsyncHTTPTransport.handle_async_request = _guarded_async  # type: ignore[assignment]
+    httpx.HTTPTransport.handle_request = _guarded_sync  # type: ignore[assignment]
+    _LAYER2_INSTALLED = True
+    logger.info("provider_chokepoint Layer 2 (httpx transport guard) installed (strict=%s)", strict)
+    return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R18 Change 2 — Layer 3: socket egress denylist
+# ─────────────────────────────────────────────────────────────────────────────
+
+def install_socket_guard(strict: bool = False) -> bool:
+    """Layer 3 — last-line defense: wrap ``socket.socket.connect`` so that
+    connections to provider hosts outside a ``provider_invoke`` context are
+    logged (and blocked in strict mode). Works even for non-httpx clients.
+    Idempotent. Uses DNS name resolution hints via ``socket.getnameinfo``
+    best-effort; if resolution fails, the check is skipped.
+    """
+    global _LAYER3_INSTALLED
+    if _LAYER3_INSTALLED:
+        return False
+    import socket
+
+    orig_connect = socket.socket.connect
+
+    # Keep a small resolved-IP→host cache to avoid reverse-DNS per-connect.
+    _host_cache: dict[str, str] = {}
+
+    def _resolve_from_getaddrinfo(ip: str) -> str | None:
+        if ip in _host_cache:
+            return _host_cache[ip]
+        try:
+            name, _ = socket.getnameinfo((ip, 0), 0)
+            _host_cache[ip] = name
+            return name
+        except Exception:
+            return None
+
+    def _guarded_connect(self, address):  # type: ignore[no-untyped-def]
+        try:
+            ip = address[0] if isinstance(address, tuple) else None
+            host = _resolve_from_getaddrinfo(ip) if ip else None
+            if host and _is_provider_host(host) and _IN_FLIGHT.get() is None:
+                event = {"host": host, "ip": ip, "kind": "layer3"}
+                _BYPASS_LOG.append(event)
+                logger.warning(
+                    "provider_chokepoint Layer 3: socket egress to %s (%s) outside provider_invoke",
+                    host, ip,
+                )
+                if strict:
+                    raise ProviderChokepointError(
+                        f"provider_chokepoint: socket egress to {host} outside provider_invoke"
+                    )
+        except ProviderChokepointError:
+            raise
+        except Exception:
+            pass
+        return orig_connect(self, address)
+
+    socket.socket.connect = _guarded_connect  # type: ignore[assignment]
+    _LAYER3_INSTALLED = True
+    logger.info("provider_chokepoint Layer 3 (socket egress guard) installed (strict=%s)", strict)
+    return True
+
+
+def get_bypass_log() -> list[dict[str, Any]]:
+    """Return the list of observed chokepoint bypasses (Layer 2/3 events)."""
+    return list(_BYPASS_LOG)
+
+
+def install_all_layers(strict: bool = False) -> dict[str, bool]:
+    return {
+        "layer2": install_transport_guard(strict=strict),
+        "layer3": install_socket_guard(strict=strict),
+    }

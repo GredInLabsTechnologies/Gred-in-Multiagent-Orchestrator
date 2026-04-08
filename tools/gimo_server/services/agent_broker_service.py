@@ -150,7 +150,8 @@ class AgentBrokerService:
                 "execution_policy": task.execution_policy,
             },
         }
-        agent = await SubAgentManager.create_sub_agent(parent_id="broker", request=req)
+        # R18 Change 3 — route through governance-unified spawn path.
+        agent = await SubAgentManager.spawn_via_draft(parent_id="broker", request=req)
 
         return {
             "spawned": True,

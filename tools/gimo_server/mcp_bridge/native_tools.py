@@ -474,7 +474,8 @@ def register_native_tools(mcp: FastMCP):
                     "execution_policy": execution_policy,
                 },
             }
-            agent = await SubAgentManager.create_sub_agent(parent_id="mcp", request=req)
+            # R18 Change 3 — route through governance-unified spawn path.
+            agent = await SubAgentManager.spawn_via_draft(parent_id="mcp", request=req)
             return f"Spawned: {agent.id} (provider={provider}, model={model}, policy={execution_policy})"
         except Exception as e: return str(e)
 

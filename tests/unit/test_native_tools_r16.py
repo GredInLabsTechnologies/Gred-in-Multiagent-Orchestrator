@@ -41,64 +41,38 @@ def registered_tools():
 # ── Fix #P2: gimo_generate_team_config must verify the materialization PUT ──
 
 @pytest.mark.asyncio
-async def test_generate_team_config_aborts_on_failed_put(registered_tools):
-    """If proxy_to_api returns an ❌ Error string for the PUT, the tool must
-    return an error JSON instead of generating a team config on top of an
-    unmaterialized draft."""
+async def test_generate_team_config_aborts_on_empty_draft(registered_tools):
+    """R17.1 contract: /ops/generate-plan is the single authoritative
+    materialization path. The bridge no longer maintains a parallel
+    in-place PUT pipeline, so a draft that lacks content must surface as
+    an error rather than being silently re-materialized.
+
+    R18 update: test rewritten to match the current R17.1 contract —
+    the previous assertion about "Failed to persist" referred to an
+    obsolete in-place PUT branch that was removed in R17.1.
+    """
     gimo_generate_team_config = registered_tools["gimo_generate_team_config"]
 
-    # GET /ops/drafts/{id} → draft with no content but with a prompt → triggers
-    # the materialization branch.
     get_response = "✅ Success (200):\n" + json.dumps({
         "id": "d_test",
         "content": None,
         "prompt": "Build a hello-world worker",
         "context": {},
     })
-    # PUT /ops/drafts/{id} → simulated 500 error.
-    put_response = "❌ Error (500):\nDB write failed"
 
     async def fake_proxy(method, path, **kwargs):
         if method == "GET":
             return get_response
-        if method == "PUT":
-            return put_response
         return "✅ Success (200):\n{}"
 
-    fake_plan_json = json.dumps({
-        "id": "p1",
-        "title": "Hello",
-        "objective": "say hi",
-        "tasks": [{
-            "id": "t1", "title": "do it", "scope": "all", "description": "x",
-            "depends": [],
-            "agent_assignee": {
-                "role": "orchestrator", "goal": "g", "backstory": "b",
-                "model": "m", "system_prompt": "s", "instructions": ["i"],
-            },
-        }],
-    })
-
-    fake_provider = AsyncMock(return_value={"content": fake_plan_json})
-    fake_canonical = {"plan": "canonical"}
-    fake_custom_plan = SimpleNamespace(id="cp_123")
-
-    fake_ops_plan = SimpleNamespace(title="Hello", objective="say hi")
-
     with patch.object(native_tools, "logger"), \
-         patch("tools.gimo_server.mcp_bridge.bridge.proxy_to_api", side_effect=fake_proxy), \
-         patch("tools.gimo_server.services.provider_service.ProviderService.static_generate", fake_provider), \
-         patch("tools.gimo_server.services.task_descriptor_service.TaskDescriptorService.canonicalize_plan_data", return_value=fake_canonical), \
-         patch("tools.gimo_server.services.task_descriptor_service.TaskDescriptorService.canonicalize_plan_content", return_value=fake_plan_json), \
-         patch("tools.gimo_server.services.custom_plan_service.CustomPlanService.create_plan_from_llm", return_value=fake_custom_plan), \
-         patch("tools.gimo_server.ops_models.OpsPlan.model_validate", return_value=fake_ops_plan):
+         patch("tools.gimo_server.mcp_bridge.bridge.proxy_to_api", side_effect=fake_proxy):
         result = await gimo_generate_team_config("d_test")
 
     parsed = json.loads(result)
     assert "error" in parsed, f"expected error JSON, got: {result}"
     assert "d_test" in parsed["error"]
-    assert "Failed to persist" in parsed["error"]
-    assert "❌ Error (500)" in parsed["detail"]
+    assert "not found or empty" in parsed["error"]
 
 
 # ── Fix #2/#3: gimo_chat fire-and-return contract ──────────────────────────

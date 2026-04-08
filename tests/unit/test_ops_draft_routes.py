@@ -166,12 +166,18 @@ def test_phase4_approve_auto_run_enters_running_immediately(monkeypatch, client)
         status="running",
     )
 
+    # Clear any supervisor left on app.state by earlier tests (test_integral_validation
+    # uses TestClient as a context manager, which runs the startup lifespan and leaves
+    # app.state.supervisor set — _spawn_run would then bypass our asyncio.create_task
+    # monkeypatch via the supervisor branch).
+    monkeypatch.setattr(app.state, "supervisor", None, raising=False)
+
     monkeypatch.setattr(run_router.OpsService, "get_draft", lambda _id: draft)
     monkeypatch.setattr(run_router.OpsService, "approve_draft", lambda *_args, **_kwargs: approved)
     monkeypatch.setattr(run_router.OpsService, "create_run", lambda _approved_id: created_run)
     monkeypatch.setattr(run_router.OpsService, "update_run_status", lambda *_a, **_k: updated_run)
 
-    def _capture_task(coro):
+    def _capture_task(coro, *, name=None, context=None):
         coro.close()
         return None
 
