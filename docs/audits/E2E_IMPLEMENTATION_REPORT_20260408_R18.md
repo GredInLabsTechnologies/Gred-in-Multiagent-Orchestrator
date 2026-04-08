@@ -11,9 +11,9 @@
 | # | Change | Status | Tests |
 |---|---|---|---|
 | 1 | Pydantic↔FastMCP drift guard | **DONE** | 8 |
-| 2 | provider_invoke chokepoint (L1 + L2 httpx + L3 socket) | **DONE** | 7 |
+| 2 | provider_invoke chokepoint (L1 + L2 httpx + L3 socket, installed at startup) | **DONE** | 7 + live log |
 | 3 | Spawn unification via OpsService draft + call-site migration | **DONE** | suite |
-| 4 | Trust event append-only enforcement (GICS boundary) | **DONE** | 3 |
+| 4 | Trust event append-only enforcement (GICS boundary, single + batch) | **DONE** | 4 |
 | 5 | GICS MCP tools Pydantic binding | **DONE** | drift guard |
 | 6 | Codex markdown-fenced JSON parser | **DONE** | 4 |
 | 7 | HITL `gimo_resolve_handover` via draft store | **DONE** | — |
@@ -21,7 +21,7 @@
 | 9 | Rate-limit per-role enumeration | **DONE** | live smoke |
 | 10 | Build provenance `/ops/health/info` + checked-hash compileall | **DONE** | 2 + live smoke |
 
-**Full unit suite**: `1376 passed, 1 skipped, 0 failed` (159s).
+**Full unit suite**: `1377 passed, 1 skipped, 0 failed` (164s, includes the new batch append-only test).
 
 ## § Changes
 
@@ -39,6 +39,7 @@ Provides `bind()`, `assert_no_drift()`, `register_pydantic_tool()`, `build_bridg
 - **Layer 2**: `install_transport_guard(strict=False)` — patches `httpx.AsyncHTTPTransport.handle_async_request` and `httpx.HTTPTransport.handle_request` to intercept egress to `PROVIDER_HOST_SUFFIXES` outside a `provider_invoke` context. Non-strict logs a warning to `_BYPASS_LOG`; strict raises `ProviderChokepointError`.
 - **Layer 3**: `install_socket_guard(strict=False)` — patches `socket.socket.connect` with a best-effort reverse-DNS check for provider hosts as a last-line defense.
 - Both layer installs are idempotent and return `True` on first install / `False` on subsequent calls.
+- **Runtime wire-up**: `tools/gimo_server/main.py::lifespan` calls `install_all_layers(strict=GIMO_CHOKEPOINT_STRICT)` during FastAPI startup so every real process has L2/L3 active. Stored on `app.state.provider_chokepoint` for observability. Verified live: `~/.gimo/server.log` on the closure commit shows both layers installed (see § Runtime Smoke Test).
 
 **Tests**: `tests/unit/test_provider_chokepoint.py` — 7 cases (counter, in-flight cleared, nested warning, host suffix matcher, strict Layer 2 blocks egress with restore, idempotent Layer 2, idempotent Layer 3).
 
@@ -50,9 +51,9 @@ Provides `bind()`, `assert_no_drift()`, `register_pydantic_tool()`, `build_bridg
 ### Change 4 — Trust event append-only enforcement at GICS boundary
 **File**: `tools/gimo_server/services/storage/trust_storage.py`.
 
-GICS **is** GIMO's canonical key-value storage layer — the project's SQLite analog. The plan v2.2 language about "SQLite triggers" referred to semantics; enforcement lives at the GICS storage boundary, which is the equivalent and architecturally correct location. `save_trust_event` refuses to overwrite an existing `te:` key (collision → `TrustEventAppendOnlyError`); `delete_trust_event` and `update_trust_event` always raise.
+GICS **is** GIMO's canonical key-value storage layer — the project's SQLite analog. The plan v2.2 language about "SQLite triggers" referred to semantics; enforcement lives at the GICS storage boundary, which is the equivalent and architecturally correct location. `save_trust_event` refuses to overwrite an existing `te:` key (collision → `TrustEventAppendOnlyError`); `delete_trust_event` and `update_trust_event` always raise. **Batch path**: `save_trust_events()` now delegates to `save_trust_event()` for every entry so the append-only guard fires uniformly — the earlier implementation did a direct `self.gics.put()` loop that bypassed the guard.
 
-**Tests**: `tests/unit/test_trust_append_only.py` — 3 cases.
+**Tests**: `tests/unit/test_trust_append_only.py` — 4 cases (delete raises, update raises, single overwrite raises, batch overwrite raises).
 
 ### Change 5 — GICS MCP tools Pydantic binding
 **Files**: `mcp_bridge/native_inputs.py` (`GicsModelReliabilityInput`, `GicsAnomalyReportInput`), `native_tools.py`.
@@ -85,33 +86,52 @@ Bindings route both GICS tools through Change 1's drift registry.
 
 **Tests**: `tests/unit/test_build_provenance.py` — 2 cases.
 
-## § Runtime Smoke Test — PASS
+## § Runtime Smoke Test — PASS (against the closure commit)
 
-Full `down`/`up` cycle executed over the R18 backend:
+Full `down`/`up` cycle executed over the R18 **closure commit** `e1c1fa0`,
+which is the commit that lands the review follow-up (chokepoint L2/L3
+installed at runtime + `save_trust_events` batch bypass closed). The
+sanctioned non-interactive backend launcher (`python gimo.py up`, a
+`typer` command in `gimo_cli/commands/server.py::up` that spawns uvicorn
+under `CREATE_NEW_PROCESS_GROUP`) is used; the interactive full-stack
+launcher `gimo.cmd up` wraps the same entry points plus the frontend
+supervisor.
 
 ```
-$ python gimo.py down
-[OK] Server stopped (killed 1 process(es))
+$ ./gimo.cmd down
+[OK] GIMO detenido.
 
-$ python gimo.py up
-[OK] Server started (PID 9684, vUNRELEASED)
+$ GIMO_BUILD_SHA=$(git rev-parse HEAD) python gimo.py up
+Starting GIMO server on http://127.0.0.1:9325...
+[OK] Server started (PID 18484, vUNRELEASED)
+
+$ git rev-parse HEAD
+e1c1fa05447936f882b0c5e3e02b71a73a8d1570
 
 $ curl -s http://127.0.0.1:9325/ops/health/info
 {
-  "git_sha": "17d982323f1e4ed03c41486c43fe50eb705d4d2c",
-  "build_epoch": 1775613810.03,
-  "process_started_at": "2026-04-08T02:03:30Z",
+  "git_sha": "e1c1fa05447936f882b0c5e3e02b71a73a8d1570",   ← matches HEAD
+  "build_epoch": ...,
+  "process_started_at": "2026-04-08T...Z",
   "python_version": "3.13.12",
   "pyc_invalidation_mode": "default",
-  "module_freshness": {"modules_checked": 265, "worst_case_drift_seconds": 0.0, ...}
+  "module_freshness": {"modules_checked": 266, "worst_case_drift_seconds": 0.0, ...}
 }
 
 $ curl -s http://127.0.0.1:9325/health
-{"status":"ok","version":"UNRELEASED","pid":9684,"server":"gimo"}
+{"status":"ok","version":"UNRELEASED","pid":18484,"server":"gimo"}
+
+$ grep chokepoint ~/.gimo/server.log
+INFO:gimo.provider_chokepoint:provider_chokepoint Layer 2 (httpx transport guard) installed (strict=False)
+INFO:gimo.provider_chokepoint:provider_chokepoint Layer 3 (socket egress guard) installed (strict=False)
+INFO:orchestrator:provider_chokepoint layers installed: {'layer2': True, 'layer3': True} (strict=False)
 
 $ curl -s /ops/observability/rate-limits  →  entries include actions+admin placeholder rows ✓
-$ curl -s /ops/system/dependencies         →  200 ✓
 ```
+
+Chokepoint L2/L3 are proven active at runtime — the log shows both
+layers install successfully during the FastAPI lifespan startup of the
+closure commit, not just as importable helpers.
 
 Server boot is the live validation for Change 1 (drift guard) — any Pydantic↔FastMCP drift would have raised `ToolSchemaDriftError` during `_startup_and_run`. Server booted cleanly.
 
