@@ -189,6 +189,20 @@ async def lifespan(app: FastAPI):
 
     app.state.start_time = time.time()
 
+    # R18 Change 2 — install provider chokepoint Layers 2/3 at startup so
+    # every real process has transport-level + socket-level egress guards
+    # active. Non-strict by default (logs to _BYPASS_LOG); strict mode is
+    # opt-in via GIMO_CHOKEPOINT_STRICT=1 for audit/CI runs.
+    try:
+        from tools.gimo_server.services.provider_chokepoint import install_all_layers
+        _strict = _os.environ.get("GIMO_CHOKEPOINT_STRICT", "").lower() in ("1", "true", "yes")
+        _installed = install_all_layers(strict=_strict)
+        app.state.provider_chokepoint = {"installed": _installed, "strict": _strict}
+        logger.info("provider_chokepoint layers installed: %s (strict=%s)", _installed, _strict)
+    except Exception as _pce:
+        logger.warning("provider_chokepoint install failed (non-fatal): %s", _pce)
+        app.state.provider_chokepoint = {"installed": False, "error": str(_pce)}
+
     # Ensure snapshot dir exists
     SnapshotService.ensure_snapshot_dir()
 

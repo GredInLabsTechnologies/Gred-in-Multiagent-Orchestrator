@@ -84,14 +84,15 @@ class TrustStorage:
     def save_trust_events(self, events: List[TrustEvent | Dict[str, Any]]) -> None:
         if not events or not self.gics:
             return
-            
+
+        # R18 Change 4 — batch path must go through the same append-only
+        # guard as the single-event path. Delegate to ``save_trust_event``
+        # so the overwrite check fires for every entry.
         for event in events:
             try:
-                event_data = event.model_dump() if isinstance(event, TrustEvent) else dict(event)
-                timestamp = _normalize_timestamp(event_data.get("timestamp"))
-                event_data["timestamp"] = timestamp
-                event_key = f"te:{event_data.get('dimension_key')}:{timestamp}"
-                self.gics.put(event_key, event_data)
+                self.save_trust_event(event)
+            except TrustEventAppendOnlyError:
+                raise
             except Exception as e:
                 logger.error("Failed to push batch trust event to GICS: %s", e)
 

@@ -5,14 +5,18 @@ The chokepoint uses a ``ContextVar`` to track in-flight invocations and a
 module-level counter to expose a tamper-evident invocation log to the
 governance gateway (and tests).
 
-Full R18 v2.2 Change 2 calls for three layers:
-  1. **Explicit wrapper** (this module) — adapters call ``provider_invoke``.
-  2. **httpx/SDK monkey-patch** — transport-level guard (deferred).
-  3. **Socket egress denylist** — last-line defense (deferred).
+All three R18 v2.2 layers are active:
+  1. **Explicit wrapper** (``provider_invoke``) — adapters call this.
+  2. **httpx transport guard** (``install_transport_guard``) — patches
+     ``httpx.{AsyncHTTPTransport,HTTPTransport}.handle_*_request`` to trip
+     on provider-host egress outside a ``provider_invoke`` context.
+  3. **Socket egress guard** (``install_socket_guard``) — patches
+     ``socket.socket.connect`` as a last-line defense for non-httpx clients.
 
-Layers 2 and 3 are documented as follow-up in the implementation report;
-this module delivers Layer 1 so every future adapter has a canonical
-chokepoint to wire into, and the SAGP gateway has a single place to hook.
+Layers 2/3 are installed automatically by the FastAPI lifespan startup
+(``main.py``) via ``install_all_layers``. Non-strict by default (logs to
+``_BYPASS_LOG``); strict mode is opt-in via ``GIMO_CHOKEPOINT_STRICT=1``
+to raise ``ProviderChokepointError`` on any off-context egress.
 """
 from __future__ import annotations
 
