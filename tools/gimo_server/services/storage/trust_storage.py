@@ -7,6 +7,18 @@ from ...ops_models import TrustEvent
 
 logger = logging.getLogger("orchestrator.services.storage.trust")
 
+
+class TrustEventAppendOnlyError(RuntimeError):
+    """R18 Change 4 — raised when code attempts to mutate or delete a trust event.
+
+    Trust events are append-only by contract: the audit trail would be
+    meaningless if past events could be rewritten. This exception is the
+    storage-boundary equivalent of a ``BEFORE UPDATE``/``BEFORE DELETE``
+    RAISE(ABORT) SQLite trigger. The plan v2.2 called for SQLite triggers,
+    but the actual persistence layer is GICS, so enforcement moves to the
+    boundary that every write and delete must traverse.
+    """
+
 def _normalize_timestamp(value: Any) -> str:
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc).isoformat()
@@ -30,16 +42,44 @@ class TrustStorage:
     def save_trust_event(self, event: TrustEvent | Dict[str, Any]) -> None:
         if not self.gics:
             return
-            
+
         event_data = event.model_dump() if isinstance(event, TrustEvent) else dict(event)
         timestamp = _normalize_timestamp(event_data.get("timestamp"))
         event_data["timestamp"] = timestamp
-        
+
         try:
             event_key = f"te:{event_data.get('dimension_key')}:{timestamp}"
+            # R18 Change 4 — append-only enforcement at the storage boundary.
+            # Refuse to overwrite an existing trust event. Collisions within
+            # the same microsecond are vanishingly rare but if they occur the
+            # caller must surface a retry, not silently rewrite history.
+            existing = None
+            try:
+                existing = self.gics.get(event_key)
+            except Exception:
+                existing = None
+            if existing:
+                raise TrustEventAppendOnlyError(
+                    f"Refusing to overwrite trust event {event_key} "
+                    f"(append-only contract)"
+                )
             self.gics.put(event_key, event_data)
+        except TrustEventAppendOnlyError:
+            raise
         except Exception as e:
             logger.error("Failed to push trust event to GICS: %s", e)
+
+    def delete_trust_event(self, event_key: str) -> None:
+        """R18 Change 4 — always raises. Trust events are append-only."""
+        raise TrustEventAppendOnlyError(
+            f"delete_trust_event({event_key!r}) forbidden — trust events are append-only"
+        )
+
+    def update_trust_event(self, event_key: str, patch: Dict[str, Any]) -> None:
+        """R18 Change 4 — always raises. Trust events are append-only."""
+        raise TrustEventAppendOnlyError(
+            f"update_trust_event({event_key!r}) forbidden — trust events are append-only"
+        )
 
     def save_trust_events(self, events: List[TrustEvent | Dict[str, Any]]) -> None:
         if not events or not self.gics:

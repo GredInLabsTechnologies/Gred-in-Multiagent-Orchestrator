@@ -24,7 +24,10 @@ def register_dashboard_app(mcp: FastMCP):
         (Claude App, VS Code) can render as an interactive iframe.
         """
         try:
-            # Build a snapshot to embed as initial state
+            # R18 Change 8 — dashboard state is sourced from
+            # GovernanceSnapshot.to_dict() so the rendered payload can never
+            # diverge from the canonical governance model. Any field added
+            # to the snapshot propagates automatically; no parallel schema.
             from tools.gimo_server.mcp_bridge.governance_tools import _mcp_surface
             from tools.gimo_server.services.sagp_gateway import SagpGateway
 

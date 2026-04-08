@@ -547,6 +547,17 @@ def _register_core_routes(app: FastAPI, settings):
             "server": "gimo",
         })
 
+    @app.get("/ops/health/info")
+    async def health_info_route():
+        """R18 Change 10 — auditable build provenance + runtime freshness.
+
+        Exposes git_sha, build_epoch, process_started_at, python_version,
+        pyc_invalidation_mode, and a live module_freshness signal. Used by
+        ``gimo doctor`` to detect stale-bytecode deploys (R18 meta-finding).
+        """
+        from tools.gimo_server.services.build_provenance_service import get_build_info
+        return JSONResponse(get_build_info())
+
     @app.post("/ops/shutdown")
     async def shutdown_route(request: Request):
         """Graceful shutdown — only from localhost.

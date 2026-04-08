@@ -34,6 +34,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Bytecode checked-hash compile (R18 Change 10)
+        run: |
+          python -m compileall -q --invalidation-mode checked-hash tools/gimo_server
+
       - name: Pre-commit (repo policy + format/lint)
         run: |
           pre-commit run --all-files

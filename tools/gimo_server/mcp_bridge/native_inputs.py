@@ -57,6 +57,20 @@ class GenerateTeamConfigInput(BaseModel):
         return self
 
 
+class GicsModelReliabilityInput(BaseModel):
+    """R18 Change 5 — canonical input for ``gimo_gics_model_reliability``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_id: str = Field(..., description="Model identifier, e.g. 'gpt-4o'.")
+
+
+class GicsAnomalyReportInput(BaseModel):
+    """R18 Change 5 — canonical (empty) input for ``gimo_gics_anomaly_report``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class VerifyProofChainInput(BaseModel):
     """Inputs for ``gimo_verify_proof_chain`` (#11 — optional thread_id).
 

@@ -55,6 +55,24 @@ YELLOW = "\033[93m"
 
 # ── Helpers ─────────────────────────────────────────────────────────────
 
+def _build_provenance_env() -> dict:
+    """R18 Change 10 — inject GIMO_BUILD_SHA so the backend reports the
+    exact commit it was booted from via /ops/health/info."""
+    if os.environ.get("GIMO_BUILD_SHA"):
+        return {}
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(ROOT),
+            capture_output=True, text=True, timeout=2,
+        )
+        if out.returncode == 0:
+            return {"GIMO_BUILD_SHA": out.stdout.strip()}
+    except Exception:
+        pass
+    return {}
+
+
 def _enable_win_ansi():
     """Enable ANSI escape codes on Windows 10+ and force UTF-8 stdout."""
     if sys.platform != "win32":
@@ -156,7 +174,7 @@ class ServiceProcess:
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env={**os.environ, "PYTHONUNBUFFERED": "1", "FORCE_COLOR": "1"},
+            env={**os.environ, "PYTHONUNBUFFERED": "1", "FORCE_COLOR": "1", **_build_provenance_env()},
         )
         self.running = True
         self._read_task = asyncio.create_task(self._stream_output())

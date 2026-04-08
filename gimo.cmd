@@ -64,6 +64,13 @@ if "!NEED_BOOTSTRAP!"=="1" (
 :: Clean stale __pycache__ from prior runs
 for /d /r "tools\gimo_server" %%D in (__pycache__) do if exist "%%D" rd /s /q "%%D" >nul 2>&1
 
+:: R18 Change 10 — checked-hash bytecode invalidation + build provenance.
+:: Rebuilds .pyc with PEP 552 hash-based invalidation so a same-second edit
+:: cannot mask stale bytecode (bpo-31772). GIMO_BUILD_SHA is injected so the
+:: running process reports the exact commit it was booted from.
+for /f %%S in ('git rev-parse HEAD 2^>nul') do set "GIMO_BUILD_SHA=%%S"
+"%PYTHON_EXE%" -m compileall -q --invalidation-mode checked-hash tools\gimo_server >nul 2>&1
+
 :: Sync .env.local
 call :sync_env_local
 
@@ -114,6 +121,10 @@ if exist ".env" (echo [OK] .env) else (echo [WARN] .env ausente. Ejecuta: gimo b
 if exist "tools\orchestrator_ui\.env.local" (echo [OK] UI .env.local) else (echo [WARN] UI .env.local ausente)
 
 powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:9325/auth/check' -TimeoutSec 2; Write-Output ('[OK] Backend responde (HTTP ' + $r.StatusCode + ')') } catch { Write-Output '[INFO] Backend no responde en 9325' }"
+
+:: R18 Change 10 — build provenance freshness gate.
+for /f %%S in ('git rev-parse HEAD 2^>nul') do set "DISK_SHA=%%S"
+powershell -NoProfile -Command "try { $r=Invoke-RestMethod -Uri 'http://127.0.0.1:9325/ops/health/info' -TimeoutSec 2; if ($r.git_sha -eq $env:DISK_SHA) { Write-Output ('[OK] Build provenance fresh (git_sha=' + $r.git_sha.Substring(0,8) + ')') } else { Write-Output ('[WARN] Stale deploy: running=' + $r.git_sha.Substring(0,8) + ' disk=' + $env:DISK_SHA.Substring(0,8)) } } catch { Write-Output '[INFO] /ops/health/info no responde' }"
 
 echo.
 if "!FAIL!"=="1" (

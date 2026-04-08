@@ -17,6 +17,15 @@ def _mcp_surface(name: str = "mcp-governance-tool"):
 
 
 def register_governance_tools(mcp: FastMCP):
+    # R18 Change 1 — declare Pydantic-bound tools for the boot-time drift guard.
+    # These tools already expose canonical signatures matching their *Input models
+    # (R17 Cluster D); bind() records the expected model so assert_no_drift()
+    # can verify the live FastMCP schema at the end of the registration path.
+    from .native_inputs import EstimateCostInput, VerifyProofChainInput
+    from . import _register as _drift
+
+    _drift.bind("gimo_estimate_cost", EstimateCostInput)
+    _drift.bind("gimo_verify_proof_chain", VerifyProofChainInput)
 
     @mcp.tool()
     async def gimo_evaluate_action(

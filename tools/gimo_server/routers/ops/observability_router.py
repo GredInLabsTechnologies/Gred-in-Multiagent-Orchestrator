@@ -88,6 +88,19 @@ async def observability_rate_limits(
             "window_seconds": RATE_LIMIT_WINDOW_SECONDS,
             "remaining": max(0, limit - data["count"]),
         })
+    # R18 Change 9 — always enumerate known roles so dashboards never see
+    # an empty list on a quiet window; zero-count placeholders fill gaps.
+    observed_roles = {e["role"] for e in entries}
+    for role, limit in ROLE_RATE_LIMITS.items():
+        if role not in observed_roles:
+            entries.append({
+                "ip": "(none)",
+                "role": role,
+                "count": 0,
+                "limit": limit,
+                "window_seconds": RATE_LIMIT_WINDOW_SECONDS,
+                "remaining": limit,
+            })
     return {"entries": entries, "role_limits": ROLE_RATE_LIMITS}
 
 

@@ -257,6 +257,14 @@ async def _startup_and_run() -> None:
     except Exception as exc:
         logger.error("Failed to register native MCP tools: %s", exc)
 
+    # R18 Change 1 — boot-time Pydantic↔FastMCP schema drift guard.
+    # Runs on the real registration path, after _register_dynamic and
+    # _register_native have populated the live FastMCP tool registry.
+    # Raises ToolSchemaDriftError if any bound tool has drifted; the
+    # bridge refuses to serve clients in that case.
+    from tools.gimo_server.mcp_bridge._register import assert_no_drift
+    assert_no_drift(mcp)
+
     # Resources and prompts
     try:
         from tools.gimo_server.mcp_bridge.resources import register_resources

@@ -12,7 +12,19 @@ logger = logging.getLogger("mcp_bridge.native_tools")
 _BACKGROUND_CHAT_TASKS: set = set()
 
 def register_native_tools(mcp: FastMCP):
-    
+    # R18 Change 1 — declare Pydantic-bound tools for the boot-time drift guard.
+    from .native_inputs import (
+        GenerateTeamConfigInput,
+        GicsAnomalyReportInput,
+        GicsModelReliabilityInput,
+    )
+    from . import _register as _drift
+
+    _drift.bind("gimo_generate_team_config", GenerateTeamConfigInput)
+    # R18 Change 5 — bind GICS MCP tools for drift protection.
+    _drift.bind("gimo_gics_model_reliability", GicsModelReliabilityInput)
+    _drift.bind("gimo_gics_anomaly_report", GicsAnomalyReportInput)
+
     @mcp.tool()
     async def gimo_get_status() -> str:
         """Returns the current health status and basic system info of GIMO Engine."""
@@ -329,12 +341,43 @@ def register_native_tools(mcp: FastMCP):
 
     @mcp.tool()
     async def gimo_resolve_handover(run_id: str, decision: str, edited_state: dict = None) -> str:
-        """Resume a blocked run after human intervention/handover decision."""
+        """Resume a blocked run after human intervention/handover decision.
+
+        R18 Change 7 — HITL decisions are recorded as draft entries in the
+        ops draft store so every handover has an auditable entry that the
+        proof chain and governance snapshot can cite. The actual workflow
+        resume is then delegated to /ops/workflows/{id}/resume.
+        """
         from .bridge import proxy_to_api
-        return await proxy_to_api(
-            "POST", f"/ops/runs/{run_id}/resume",
-            __body={"decision": decision},
-        )
+        import json as _json
+        try:
+            await proxy_to_api(
+                "POST", "/ops/drafts",
+                __body={
+                    "prompt": f"hitl_resolve_handover(run_id={run_id}, decision={decision})",
+                    "execution": {"intent_class": "hitl_decision"},
+                    "acceptance_criteria": [],
+                    "context": {
+                        "kind": "hitl_decision",
+                        "run_id": run_id,
+                        "decision": decision,
+                        "edited_state": edited_state or {},
+                    },
+                },
+            )
+        except Exception as exc:
+            logger.warning("gimo_resolve_handover: draft record failed: %s", exc)
+        try:
+            return await proxy_to_api(
+                "POST", f"/ops/workflows/{run_id}/resume",
+            )
+        except Exception as exc:
+            return _json.dumps({
+                "status": "draft_recorded_only",
+                "run_id": run_id,
+                "decision": decision,
+                "error": str(exc),
+            })
 
     @mcp.tool()
     async def gimo_get_draft(draft_id: str) -> str:

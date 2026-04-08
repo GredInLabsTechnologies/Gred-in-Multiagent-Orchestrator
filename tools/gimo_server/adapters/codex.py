@@ -11,6 +11,28 @@ from .generic_cli import GenericCLISession
 logger = logging.getLogger("orchestrator.adapters.codex")
 
 
+def _strip_markdown_fence(text: str) -> str:
+    """R18 Change 6 — strip ```json ... ``` or ``` ... ``` fences.
+
+    Codex CLI (and GPT models in general) frequently wrap JSON payloads in
+    markdown code fences when verbose formatting is on. The metrics parser
+    needs raw JSON. This helper removes matching opening/closing fences
+    while leaving unfenced text untouched.
+    """
+    text = text.strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if not lines:
+        return text
+    # Drop opening fence (possibly with language tag like ```json).
+    lines = lines[1:]
+    # Drop closing fence if present.
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
 class CodexSession(GenericCLISession):
     """Session for Codex CLI adapter.
 
@@ -30,6 +52,9 @@ class CodexSession(GenericCLISession):
 
         if line.startswith(self.METRICS_PREFIX):
             raw_payload = line[len(self.METRICS_PREFIX):].strip()
+            # R18 Change 6 — tolerate markdown-fenced JSON. Codex CLI may
+            # emit ```json\n{...}\n``` when instructed to pretty-print.
+            raw_payload = _strip_markdown_fence(raw_payload)
             try:
                 metrics = json.loads(raw_payload)
                 if isinstance(metrics, dict):

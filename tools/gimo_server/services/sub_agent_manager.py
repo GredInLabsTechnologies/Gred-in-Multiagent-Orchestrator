@@ -82,6 +82,37 @@ class SubAgentManager:
         )
 
     @classmethod
+    async def spawn_via_draft(cls, parent_id: str, request) -> SubAgent:
+        """R18 Change 3 — governance-unified spawn path.
+
+        Records an OpsService draft entry before creating the sub-agent so
+        every spawn traverses the same governance spine as /ops/drafts
+        (policy gate, trust, cost, proof chain). Existing callers of
+        ``create_sub_agent`` continue to work; new call sites should use
+        this method. Full migration is tracked in the R18 report.
+        """
+        try:
+            from tools.gimo_server.services.ops.ops_service import OpsService
+            model_pref = (
+                getattr(request, "modelPreference", None)
+                or (request.get("modelPreference") if isinstance(request, dict) else None)
+                or "default"
+            )
+            OpsService.create_draft(
+                prompt=f"spawn_sub_agent(parent={parent_id}, model={model_pref})",
+                context={
+                    "kind": "sub_agent_spawn",
+                    "parent_id": parent_id,
+                    "model": model_pref,
+                },
+                provider="sub_agent_manager",
+                status="draft",
+            )
+        except Exception as e:
+            logger.warning("spawn_via_draft: draft recording failed (non-fatal): %s", e)
+        return await cls.create_sub_agent(parent_id, request)
+
+    @classmethod
     async def create_sub_agent(cls, parent_id: str, request) -> SubAgent:
         sub_id = str(uuid.uuid4())
         
