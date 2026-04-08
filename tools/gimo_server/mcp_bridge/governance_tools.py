@@ -236,6 +236,38 @@ def register_governance_tools(mcp: FastMCP):
             return json.dumps({"error": str(e)})
 
     @mcp.tool()
+    async def gimo_trust_circuit_breaker_get(key: str) -> str:
+        """Return the circuit-breaker state for a trust dimension (R20-008).
+
+        Wraps ``TrustEngine.query_dimension(key)`` and surfaces the
+        ``circuit_state`` ("closed" / "half_open" / "open") along with the
+        underlying score. Closes R20-008; also enables future conformance
+        assertions that HTTP and MCP read the same breaker state for the
+        same dimension key.
+
+        Args:
+            key: Dimension key (e.g. ``provider:anthropic``, ``model:gpt-4o``).
+        """
+        try:
+            from tools.gimo_server.services.storage_service import StorageService
+            from tools.gimo_server.services.trust_engine import TrustEngine
+
+            if not str(key or "").strip():
+                return json.dumps({"error": "key is required"})
+            storage = StorageService()
+            engine = TrustEngine(storage.trust)
+            record = engine.query_dimension(str(key).strip())
+            # record is a dict carrying both canonical and legacy fields.
+            return json.dumps({
+                "dimension_key": str(key).strip(),
+                "circuit_state": record.get("circuit_state") or record.get("state") or "closed",
+                "score": float(record.get("score", 0.0) or 0.0),
+            }, indent=2)
+        except Exception as e:
+            logger.error("gimo_trust_circuit_breaker_get failed: %s", e)
+            return json.dumps({"error": str(e)})
+
+    @mcp.tool()
     async def gimo_get_budget_status(scope: str = "global") -> str:
         """Get current budget status and forecast.
 
