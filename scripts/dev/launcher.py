@@ -453,6 +453,14 @@ def _run_detached(skip: set[str]) -> int:
 
     def _spawn(name: str, cfg: dict) -> int:
         cmd = cfg["cmd_win"] if sys.platform == "win32" else cfg["cmd_unix"]
+        # Detached mode forbids uvicorn --reload: the watcher/worker fork
+        # leaves an orphan listener on Windows when the parent shell goes
+        # away (the worker inherits the socket fd but the kernel still
+        # accounts the TCB to the dead PID, leaving 9325 in LISTEN with
+        # no user-space owner until the kernel GCs it). Hot reload makes
+        # no sense in a headless detached launch anyway.
+        if name == "backend":
+            cmd = cmd.replace(" --reload --reload-dir tools/gimo_server", "")
         cwd = cfg.get("cwd", str(ROOT))
         log_path = logs / f"{name}.log"
         # Open in append mode so successive runs preserve history.
