@@ -1,20 +1,14 @@
-"""Server lifecycle commands: up, down, ps, and auto-start helper.
-
-Innovation over SOTA:
-- Port-based killing (not PID-based) — solves orphaned instances, PID recycling
-- Graceful shutdown via HTTP endpoint before force-kill
-- Instance discovery (`gimo ps`) — find ALL GIMO instances on any port
-- psutil-based cross-platform process detection (no shell-out to netstat)
-"""
+﻿"""Server lifecycle commands: up, down, ps, and auto-start helper."""
 
 from __future__ import annotations
 
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
-from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 import typer
@@ -24,75 +18,112 @@ from gimo_cli.bond import gimo_home
 from gimo_cli.config import DEFAULT_API_BASE_URL
 
 
-def _pid_file() -> Path:
-    return gimo_home() / "server.pid"
+def _default_server_location() -> tuple[str, int]:
+    parsed = urlparse(DEFAULT_API_BASE_URL)
+    return parsed.hostname or "127.0.0.1", parsed.port or 9325
 
 
-def _read_pid() -> int | None:
-    """Read the stored PID. Returns None if file missing or invalid."""
-    pf = _pid_file()
-    if not pf.exists():
-        return None
+DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT = _default_server_location()
+
+
+def _server_url(host: str, port: int) -> str:
+    return f"http://{host}:{port}"
+
+
+def _probe_json(url: str, path: str = "/health", timeout: float = 3.0) -> dict[str, object] | None:
     try:
-        pid = int(pf.read_text(encoding="utf-8").strip())
-        if pid <= 0:
-            pf.unlink(missing_ok=True)
+        resp = httpx.get(f"{url}{path}", timeout=timeout)
+        if resp.status_code != 200:
             return None
-        return pid
-    except (ValueError, OSError):
-        pf.unlink(missing_ok=True)
+        data = resp.json()
+    except Exception:
         return None
+    return data if isinstance(data, dict) else {}
 
 
 def server_healthy(url: str, timeout: float = 3.0) -> bool:
     """Check if a GIMO server is responding at the given URL."""
-    try:
-        resp = httpx.get(f"{url}/health", timeout=timeout)
-        return resp.status_code == 200
-    except Exception:
-        return False
+    return _probe_json(url, "/health", timeout=timeout) is not None
+
+
+def _health_details(url: str, timeout: float = 3.0) -> tuple[str | int, str]:
+    data = _probe_json(url, "/health", timeout=timeout) or {}
+    return data.get("pid", "?"), str(data.get("version", "unknown"))
 
 
 def _health_pid(url: str, timeout: float = 3.0) -> int | None:
-    """Best-effort server PID from GET /health payload."""
-    try:
-        resp = httpx.get(f"{url}/health", timeout=timeout)
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        pid = data.get("pid")
-        if isinstance(pid, int) and pid > 0:
-            return pid
-        if isinstance(pid, str) and pid.isdigit():
-            parsed = int(pid)
-            return parsed if parsed > 0 else None
-    except Exception:
+    data = _probe_json(url, "/health", timeout=timeout)
+    if not data:
         return None
+    pid = data.get("pid")
+    if isinstance(pid, int) and pid > 0:
+        return pid
+    if isinstance(pid, str) and pid.isdigit():
+        parsed = int(pid)
+        return parsed if parsed > 0 else None
     return None
 
 
-def _is_gimo_server(url: str, timeout: float = 3.0) -> bool:
-    """Check if the server at URL is specifically a GIMO server (has server marker)."""
-    try:
-        resp = httpx.get(f"{url}/health", timeout=timeout)
-        if resp.status_code != 200:
+def _is_connection_refused(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, ConnectionRefusedError):
+            return True
+        errno = getattr(current, "errno", None)
+        if errno in {61, 111, 10061}:
+            return True
+        text = str(current).lower()
+        if "connection refused" in text or "actively refused" in text:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _wait_for_ready(url: str, proc: subprocess.Popen, timeout_seconds: float = 90.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if _probe_json(url, "/ready", timeout=1.5) is not None:
+            return True
+        if proc.poll() is not None:
             return False
-        data = resp.json()
-        return data.get("server") == "gimo"
-    except Exception:
-        return False
+        time.sleep(0.5)
+    return False
+
+
+def _wait_for_health_refusal(url: str, timeout_seconds: float = 10.0) -> bool:
+    parsed = urlparse(url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 80
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(1.0)
+            code = sock.connect_ex((host, port))
+        if code in {61, 111, 10061}:
+            return True
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.5)
+    return False
+
+
+def _wait_for_server_down(url: str, port: int, timeout_seconds: float = 15.0) -> str | None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if _wait_for_health_refusal(url, timeout_seconds=0.0):
+            return "refused"
+        if _port_is_free(port) and not server_healthy(url, timeout=1.0):
+            return "unreachable"
+        time.sleep(0.5)
+    return None
 
 
 # ---------------------------------------------------------------------------
-# Port-based process discovery (psutil, cross-platform)
+# Port-based process discovery fallback
 # ---------------------------------------------------------------------------
 
 def _find_pids_on_port(port: int) -> list[int]:
-    """Find ALL live PIDs listening on the given port using psutil.
-
-    Cross-platform: works on Windows, Linux, macOS without shelling out.
-    Filters out zombie connections (PID exists in kernel table but process is dead).
-    """
+    """Find live PIDs listening on the given port."""
     try:
         import psutil
     except ImportError:
@@ -100,39 +131,39 @@ def _find_pids_on_port(port: int) -> list[int]:
 
     pids: set[int] = set()
     for conn in psutil.net_connections(kind="tcp"):
-        if conn.status == "LISTEN" and conn.laddr.port == port:
-            if conn.pid:
-                # Verify the process actually exists (filters zombie TCP entries)
-                try:
-                    psutil.Process(conn.pid)
-                    pids.add(conn.pid)
-                except psutil.NoSuchProcess:
-                    pass
+        if conn.status == "LISTEN" and conn.laddr.port == port and conn.pid:
+            try:
+                psutil.Process(conn.pid)
+                pids.add(conn.pid)
+            except psutil.NoSuchProcess:
+                pass
     return sorted(pids)
 
 
 def _find_pids_on_port_fallback(port: int) -> list[int]:
-    """Fallback: find PIDs via netstat (when psutil unavailable)."""
+    """Fallback: find PIDs via netstat/lsof when psutil is unavailable."""
     pids: set[int] = set()
     try:
         if sys.platform == "win32":
             result = subprocess.run(
                 ["netstat", "-ano", "-p", "TCP"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             for line in result.stdout.splitlines():
                 parts = line.split()
-                if len(parts) >= 5 and "LISTENING" in parts:
-                    addr = parts[1]
-                    if addr.endswith(f":{port}"):
-                        try:
-                            pids.add(int(parts[-1]))
-                        except ValueError:
-                            pass
+                if len(parts) >= 5 and "LISTENING" in parts and parts[1].endswith(f":{port}"):
+                    try:
+                        pids.add(int(parts[-1]))
+                    except ValueError:
+                        pass
         else:
             result = subprocess.run(
                 ["lsof", "-ti", f":{port}"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             for line in result.stdout.strip().splitlines():
                 try:
@@ -154,133 +185,77 @@ def _graceful_shutdown(url: str, timeout: float = 3.0) -> bool:
 
 
 def _kill_pid(pid: int) -> bool:
-    """Kill a PID with graceful-first strategy. Returns True if killed/dead.
-
-    Windows strategy:
-    1. SIGBREAK → uvicorn catches it, runs lifespan cleanup, closes sockets
-    2. Wait up to 10s for graceful exit
-    3. taskkill /F only as last resort (may leave zombie sockets)
-
-    Unix strategy:
-    1. SIGTERM → uvicorn runs graceful shutdown
-    2. Wait up to 10s
-    3. SIGKILL as last resort
-    """
+    """Kill a PID with graceful-first strategy."""
     try:
         import psutil
+
         proc = psutil.Process(pid)
     except Exception:
-        return True  # Already dead
+        return True
 
     try:
         if sys.platform == "win32":
-            # Step 1: SIGBREAK for graceful shutdown (uvicorn handles this)
             try:
                 os.kill(pid, signal.SIGBREAK)
             except (OSError, ProcessLookupError):
                 return True
 
-            # Step 2: Wait for graceful exit
             try:
                 proc.wait(timeout=10)
                 return True
             except Exception:
                 pass
 
-            # Step 3: Force kill (last resort — may create zombie sockets)
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
-                capture_output=True, check=False,
+                capture_output=True,
+                check=False,
             )
             return True
-        else:
-            os.kill(pid, signal.SIGTERM)
-            for _ in range(20):
-                time.sleep(0.5)
-                try:
-                    os.kill(pid, 0)
-                except OSError:
-                    return True
-            os.kill(pid, signal.SIGKILL)
-            return True
+
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(20):
+            time.sleep(0.5)
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return True
+        os.kill(pid, signal.SIGKILL)
+        return True
     except (OSError, ProcessLookupError):
         return True
 
 
-
 def _kill_all_on_port(port: int, url: str) -> tuple[int, int]:
-    """Kill ALL processes on a port. Returns (found, killed).
+    """Kill all listeners on a port, preferring graceful HTTP shutdown."""
+    pids = set(_find_pids_on_port(port))
+    runtime_pid = _health_pid(url, timeout=1.5)
+    if runtime_pid:
+        pids.add(runtime_pid)
 
-    Strategy:
-    1. Graceful shutdown via HTTP (server cleans up properly)
-    2. Wait briefly for graceful exit
-    3. Find remaining PIDs on port via psutil
-    4. Force-kill any survivors
-    """
-    found = 0
-    killed = 0
-
-    # Step 1: Graceful shutdown via HTTP (cleanest — server closes sockets properly)
     graceful = _graceful_shutdown(url)
-    if graceful:
-        # Wait for uvicorn to complete lifespan cleanup + socket close
-        for _ in range(15):
-            time.sleep(1)
-            if _port_is_free(port):
-                return (1, 1)
+    if graceful and _wait_for_port_free(port, timeout_seconds=15.0):
+        count = max(len(pids), 1)
+        return count, count
 
-    # Step 2: Find any remaining PIDs on port
-    pids = _find_pids_on_port(port)
-    found = len(pids)
-
-    if not pids and graceful:
-        return (1, 1)
-
-    # Step 3: Kill survivors (graceful-first via SIGBREAK/SIGTERM)
-    for pid in pids:
+    killed = 0
+    for pid in sorted(pids):
         if _kill_pid(pid):
             killed += 1
 
-    # Step 4: Verify port is free
-    time.sleep(1)
-    remaining = _find_pids_on_port(port)
-    for pid in remaining:
-        _kill_pid(pid)
-
-    # Step 5: Fallback by authoritative /health pid for orphaned worker cases.
-    # On Windows + multiprocessing/reload, port scans can report stale/parent
-    # PIDs while the live serving worker remains.
-    runtime_pid = _health_pid(url, timeout=1.5)
-    if runtime_pid:
-        if _kill_pid(runtime_pid):
-            killed += 1
-
-    return (max(found, 1) if graceful else found, killed + (1 if graceful and found == 0 else 0))
+    found = len(pids) or (1 if graceful else 0)
+    return found, killed or (1 if graceful else 0)
 
 
 def _port_is_free(port: int) -> bool:
-    """Check if a port is free (no live process listening).
-
-    On Windows, kernel may retain zombie TCP LISTEN entries after process death.
-    We check if the owning process actually exists — if it's dead, we treat
-    the port as free (the new process can bind with SO_REUSEADDR).
-    """
     return len(_find_pids_on_port(port)) == 0
 
 
-def _wait_for_server_stop(url: str, port: int, timeout_seconds: float = 10.0) -> bool:
-    """Wait until server is consistently down (not just a transient probe miss)."""
-    deadline = time.time() + timeout_seconds
-    consecutive_down = 0
-    while time.time() < deadline:
-        port_busy = bool(_find_pids_on_port(port))
-        healthy = server_healthy(url, timeout=1.0)
-        if not port_busy and not healthy:
-            consecutive_down += 1
-            if consecutive_down >= 3:
-                return True
-        else:
-            consecutive_down = 0
+def _wait_for_port_free(port: int, timeout_seconds: float = 15.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if _port_is_free(port):
+            return True
         time.sleep(0.5)
     return False
 
@@ -289,44 +264,43 @@ def _wait_for_server_stop(url: str, port: int, timeout_seconds: float = 10.0) ->
 # Public API
 # ---------------------------------------------------------------------------
 
-def start_server(host: str = "127.0.0.1", port: int = 9325) -> bool:
+def start_server(host: str = DEFAULT_SERVER_HOST, port: int = DEFAULT_SERVER_PORT) -> bool:
     """Start the GIMO server in the background. Returns True on success."""
-    url = f"http://{host}:{port}"
-
-    # Already running and healthy? (verify it's actually GIMO, not a zombie)
-    if _is_gimo_server(url):
+    url = _server_url(host, port)
+    if server_healthy(url):
         return True
 
-    # Port occupied by a live process — clean up
     if not _port_is_free(port):
         _kill_all_on_port(port, url)
         time.sleep(0.5)
         if not _port_is_free(port):
-            return False  # Can't free the port
-
-    # Clean stale PID file
-    _pid_file().unlink(missing_ok=True)
+            return False
 
     from gimo_cli.config import project_root
-    proj_root = project_root()
 
+    proj_root = project_root()
     env = os.environ.copy()
     env["ORCH_PORT"] = str(port)
 
     uvicorn_cmd = [
-        sys.executable, "-m", "uvicorn", "tools.gimo_server.main:app",
-        "--host", host, "--port", str(port),
-        "--timeout-graceful-shutdown", "10",
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "tools.gimo_server.main:app",
+        "--host",
+        host,
+        "--port",
+        str(port),
+        "--timeout-graceful-shutdown",
+        "10",
     ]
 
-    # Capture logs to ~/.gimo/server.log instead of discarding them
     log_path = gimo_home() / "server.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = open(log_path, "w", encoding="utf-8")
 
     try:
         if sys.platform == "win32":
-            # CREATE_NEW_PROCESS_GROUP: required for SIGBREAK graceful shutdown
-            # CREATE_NO_WINDOW: no console window flashing
             creation_flags = (
                 subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
                 | subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
@@ -352,55 +326,29 @@ def start_server(host: str = "127.0.0.1", port: int = 9325) -> bool:
         log_file.close()
         raise
 
-    _pid_file().write_text(str(proc.pid), encoding="utf-8")
-
-    # Readiness probe: wait for /ready (lifespan complete), not /health (immediate)
-    def _is_ready() -> bool:
-        try:
-            resp = httpx.get(f"{url}/ready", timeout=3.0)
-            return resp.status_code == 200
-        except Exception:
-            return False
-
     with console.status("[bold green]Starting GIMO server...[/bold green]", spinner="dots"):
-        for _ in range(90):
-            time.sleep(1)
-            if _is_ready():
-                log_file.close()
-                return True
-            # Check if process died early
-            try:
-                import psutil
-                psutil.Process(proc.pid)
-            except Exception:
-                break  # Process crashed
+        ready = _wait_for_ready(url, proc, timeout_seconds=90.0)
 
+    if not ready and proc.poll() is None:
+        _kill_pid(proc.pid)
     log_file.close()
-    _pid_file().unlink(missing_ok=True)
-    return False
+    return ready
 
 
 @app.command()
 def up(
-    port: int = typer.Option(9325, "--port", "-p", help="Port to run the server on."),
-    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to."),
+    port: int = typer.Option(DEFAULT_SERVER_PORT, "--port", "-p", help="Port to run the server on."),
+    host: str = typer.Option(DEFAULT_SERVER_HOST, "--host", help="Host to bind to."),
 ) -> None:
     """Start the GIMO server in the background."""
-    url = f"http://{host}:{port}"
+    url = _server_url(host, port)
 
     if server_healthy(url):
-        try:
-            resp = httpx.get(f"{url}/health", timeout=3.0)
-            data = resp.json()
-            pid = data.get("pid", "?")
-            version = data.get("version", "unknown")
-        except Exception:
-            pid, version = "?", "unknown"
-        console.print(f"[green][OK] Server already running (PID {pid}, v{version})[/green]")
-        console.print(f"[dim]  {url}/health[/dim]")
+        pid, version = _health_details(url)
+        console.print(f"[green][OK] Server already running at {url}[/green]")
+        console.print(f"[dim]  PID {pid} | v{version}[/dim]")
         return
 
-    # Port occupied by something else?
     if not _port_is_free(port):
         occupants = _find_pids_on_port(port)
         console.print(f"[yellow][!] Port {port} occupied by PID(s): {occupants}[/yellow]")
@@ -412,108 +360,82 @@ def up(
             raise typer.Exit(1)
 
     console.print(f"[bold]Starting GIMO server on {url}...[/bold]")
-
     if start_server(host, port):
-        try:
-            resp = httpx.get(f"{url}/health", timeout=3.0)
-            data = resp.json()
-            pid = data.get("pid", "?")
-            version = data.get("version", "unknown")
-        except Exception:
-            pid, version = _read_pid() or "?", "unknown"
-        console.print(f"[green][OK] Server started (PID {pid}, v{version})[/green]")
-        console.print(f"[dim]  {url}/health[/dim]")
-    else:
-        console.print("[red][X] Server failed to start within 90 seconds[/red]")
-        console.print("[yellow]Check logs or try: python -m uvicorn tools.gimo_server.main:app[/yellow]")
-        raise typer.Exit(1)
+        pid, version = _health_details(url)
+        console.print(f"[green][OK] Server started at {url}[/green]")
+        console.print(f"[dim]  PID {pid} | v{version} | /ready=200[/dim]")
+        return
+
+    console.print(f"[red][X] Server failed to become ready at {url} within 90 seconds[/red]")
+    console.print(f"[yellow]Check logs: {gimo_home() / 'server.log'}[/yellow]")
+    raise typer.Exit(1)
 
 
 @app.command()
 def down(
-    port: int = typer.Option(9325, "--port", "-p", help="Port of the server to stop."),
-    host: str = typer.Option("127.0.0.1", "--host", help="Host the server is bound to."),
+    port: int = typer.Option(DEFAULT_SERVER_PORT, "--port", "-p", help="Port of the server to stop."),
+    host: str = typer.Option(DEFAULT_SERVER_HOST, "--host", help="Host the server is bound to."),
 ) -> None:
-    """Stop ALL GIMO server instances on the given port."""
-    url = f"http://{host}:{port}"
-
-    # Check if anything is on this port
+    """Stop the GIMO server running on the given host/port."""
+    url = _server_url(host, port)
+    health_before = _probe_json(url, "/health", timeout=1.5)
     pids = _find_pids_on_port(port)
-    is_healthy = server_healthy(url)
 
-    if not pids and not is_healthy:
-        console.print(f"[yellow][!] No server found on port {port}[/yellow]")
-        _pid_file().unlink(missing_ok=True)
+    if not health_before and not pids:
+        console.print(f"[yellow][!] No server found at {url}[/yellow]")
         return
 
+    if health_before:
+        console.print(f"[bold]Stopping GIMO server at {url}...[/bold]")
     if pids:
-        console.print(f"[dim]Found {len(pids)} process(es) on port {port}: {pids}[/dim]")
-    elif is_healthy:
-        console.print(f"[dim]Server responding on {url} (PID not detected via port scan)[/dim]")
+        console.print(f"[dim]Listener PID(s): {pids}[/dim]")
 
-    # Kill everything
     found, killed = _kill_all_on_port(port, url)
-
-    # Clean PID file
-    _pid_file().unlink(missing_ok=True)
-
-    # Verify with stability window to avoid shutdown race false-positives.
-    remaining = _find_pids_on_port(port)
-    runtime_alive = server_healthy(url, timeout=1.5)
-    if runtime_alive:
-        runtime_pid = _health_pid(url, timeout=1.5)
-        if runtime_pid:
-            _kill_pid(runtime_pid)
-            time.sleep(0.5)
-            remaining = _find_pids_on_port(port)
-            runtime_alive = server_healthy(url, timeout=1.5)
-
-    if remaining or runtime_alive or (not _wait_for_server_stop(url, port, timeout_seconds=8.0)):
-        console.print(f"[red][X] {len(remaining)} process(es) still on port {port}: {remaining}[/red]")
-        console.print("[yellow]Try: taskkill /F /PID <pid> (Windows) or kill -9 <pid> (Unix)[/yellow]")
+    down_state = _wait_for_server_down(url, port, timeout_seconds=15.0)
+    if down_state is None:
+        remaining = _find_pids_on_port(port)
+        console.print(f"[red][X] {url}/health did not fall to connection-refused[/red]")
+        console.print(f"[yellow]Remaining listener PID(s): {remaining}[/yellow]")
         raise typer.Exit(1)
 
-    console.print(f"[green][OK] Server stopped (killed {killed} process(es))[/green]")
+    if down_state == "refused":
+        console.print(f"[green][OK] Server stopped and {url}/health now refuses connections[/green]")
+    else:
+        console.print(f"[green][OK] Server stopped and {url}/health is no longer reachable[/green]")
+    console.print(f"[dim]  Found {found} listener(s); terminated {killed}[/dim]")
 
 
 @app.command()
 def ps(
-    scan_range: str = typer.Option("9325", "--ports", "-p", help="Ports to scan (comma-separated or range like 9320-9330)."),
+    scan_range: str = typer.Option(
+        str(DEFAULT_SERVER_PORT),
+        "--ports",
+        "-p",
+        help="Ports to scan (comma-separated or range like 9320-9330).",
+    ),
+    host: str = typer.Option(DEFAULT_SERVER_HOST, "--host", help="Host to probe."),
 ) -> None:
-    """Discover running GIMO server instances."""
+    """Discover running GIMO server instances by probing /health on each port."""
     ports: list[int] = []
     for part in scan_range.split(","):
-        part = part.strip()
-        if "-" in part:
-            start, end = part.split("-", 1)
+        item = part.strip()
+        if not item:
+            continue
+        if "-" in item:
+            start, end = item.split("-", 1)
             ports.extend(range(int(start), int(end) + 1))
         else:
-            ports.append(int(part))
+            ports.append(int(item))
 
     found_any = False
     for port in ports:
-        pids = _find_pids_on_port(port)
-        if not pids:
+        url = _server_url(host, port)
+        data = _probe_json(url, "/health", timeout=1.5)
+        if data is None:
             continue
-
-        url = f"http://127.0.0.1:{port}"
-        healthy = server_healthy(url, timeout=1.5)
-        version = "?"
-        server_pid = "?"
-        if healthy:
-            try:
-                resp = httpx.get(f"{url}/health", timeout=1.5)
-                data = resp.json()
-                version = data.get("version", "?")
-                server_pid = data.get("pid", "?")
-            except Exception:
-                pass
-
-        status = "[green]healthy[/green]" if healthy else "[red]unhealthy[/red]"
-        pid_str = ", ".join(str(p) for p in pids)
-        console.print(
-            f"  Port {port}  |  PIDs: {pid_str}  |  {status}  |  v{version}"
-        )
+        version = data.get("version", "?")
+        server_pid = data.get("pid", "?")
+        console.print(f"  Port {port}  |  PID: {server_pid}  |  [green]healthy[/green]  |  v{version}")
         found_any = True
 
     if not found_any:

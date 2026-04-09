@@ -423,8 +423,8 @@ def doctor() -> None:
     if op_token:
         console.print("[green][OK] Operator token:[/green] resolvable from bootstrap (bond/env/config)")
         console.print("[dim]     Preferred (token never leaves CLI process):[/dim]")
-        console.print(f"[cyan]       python gimo.py status --json[/cyan]")
-        console.print(f"[cyan]       python gimo.py observe metrics[/cyan]")
+        console.print(f"[cyan]       python -m gimo_cli status --json[/cyan]")
+        console.print(f"[cyan]       python -m gimo_cli observe metrics[/cyan]")
         console.print(
             "[dim]     Direct HTTP: set ORCH_OPERATOR_TOKEN in your shell from your[/dim]"
         )
