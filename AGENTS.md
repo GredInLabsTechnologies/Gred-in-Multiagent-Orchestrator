@@ -161,6 +161,19 @@ Operational rule:
     If something is unverified, blocked, ambiguous, or partial, say so
     explicitly.
 
+12. Legacy code is hunted, not archived.
+    Every refactor, feature, and audit must actively scan its blast radius
+    for code that is dead, superseded, duplicated by a canonical path, or
+    marked deprecated. When such code is found AND its removal can be
+    proven safe, delete it in the same change that replaces it — do not
+    leave compatibility shims, "just in case" re-exports, or parallel
+    paths alive for a future cleanup that never comes. When removal cannot
+    be proven safe, annotate the code with `# DEPRECATED: {reason, owner,
+    sunset criterion}` and surface it in the task report, never leave it
+    silent. The accumulation of "harmless" legacy is the single most
+    repeated architectural failure in this repo; every contributor is
+    responsible for not extending the pattern.
+
 ---
 
 ## Required Workflow
@@ -208,6 +221,21 @@ Before deleting or renaming code, verify:
 - references, imports, and call sites
 - tests affected
 - whether the code is actually dead and not merely indirect
+- whether the code is legacy (marked deprecated, superseded by a canonical
+  path, duplicated across surfaces, or a compatibility shim); legacy code
+  that can be proven safe to remove is a mandatory kill candidate
+- whether removal can be proven safe by evidence: zero live imports,
+  zero runtime references, tests still green without it, and a canonical
+  replacement already in place
+
+Legacy hunting protocol (applies to every non-trivial task):
+1. Grep the blast radius for deprecated markers, dual paths, and shims.
+2. For each candidate, prove safe-to-remove with concrete evidence above.
+3. If proven safe, delete in the same change and note the deletion in
+   the task report. Do not defer.
+4. If not proven safe, annotate with
+   `# DEPRECATED: {reason, owner, sunset criterion}` and list it as a
+   follow-up. Unmarked legacy is a finding, not an acceptable state.
 
 ---
 
@@ -503,6 +531,12 @@ Rules:
 - Never describe intended architecture as if it were already implemented.
 - Never use narrative confidence as substitute for proof.
 - Never mark a phase closed solely because the local patch looks right.
+- Never leave deprecated code alive without either deleting it or annotating
+  it with an explicit sunset criterion (reason + owner + condition to remove).
+- Never add a compatibility shim, dual path, or re-export without proving
+  it has a scheduled removal and documenting that removal in the same change.
+- Never assume "someone else will clean it up later." The agent touching
+  the file is the owner of any legacy it encounters in scope.
 
 When in doubt:
 - choose backend authority over client inference
