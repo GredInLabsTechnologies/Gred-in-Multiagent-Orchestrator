@@ -351,23 +351,28 @@ def register_native_tools(mcp: FastMCP):
     async def gimo_propose_structured_plan(task_instructions: str) -> str:
         """Generates a structured multi-step plan with task dependencies and Mermaid graph.
 
-        This is the **canonical plan-review path for MCP operators**. The tool
-        materializes a plan via the backend, then returns a rich structured
-        presentation (tasks, dependencies, Mermaid graph, cost estimate, risk,
-        governance verdict) so the operator can present it to the human for
-        review before execution.
+        **Call this when the user asks for a non-trivial task that requires
+        planning.** Materializes a plan via the backend and returns a rich
+        structured presentation: tasks with dependencies, Mermaid graph,
+        cost estimate, risk band, and governance verdict.
 
-        **Operator protocol (MANDATORY):**
+        **After calling this tool, you MUST present the plan for human approval
+        before executing it.** This is not a suggestion — it is a mandatory
+        protocol. The human must see and confirm the plan before any work begins.
+
+        Protocol:
         1. Call this tool with the task instructions.
-        2. Present the returned plan to the human in the chat — render the
-           Mermaid graph, task table, cost, and risk visually.
-        3. Wait for explicit human confirmation ("yes", "proceed", "go ahead").
-        4. If confirmed: call ``gimo_approve_draft(draft_id, auto_run=True)``.
-        5. If rejected: do NOT approve. Relay the human's feedback.
+        2. Use ``EnterPlanMode`` to write the plan to the plan file. Include:
+           - The Mermaid graph from the ``graph`` field
+           - A task table with id, title, role, dependencies, scope
+           - Cost estimate and risk band
+           - The ``draft_id`` (needed for step 4)
+        3. Call ``ExitPlanMode`` — the user sees the plan and approves or rejects.
+        4. If approved: call ``gimo_approve_draft(draft_id, auto_run=True)``.
+        5. If rejected: relay the user's feedback. Do not approve.
 
-        This is not optional. The human must see the plan before execution
-        starts. If you need to skip this review, use ``gimo_run_task`` instead
-        (the explicit bypass path for unreviewed execution).
+        If the user wants to skip review entirely (e.g. "just do it", "skip
+        planning"), use ``gimo_run_task`` instead — the explicit bypass path.
         """
         import json as _json
         try:
@@ -376,7 +381,7 @@ def register_native_tools(mcp: FastMCP):
             # 1. Materialize plan via canonical backend endpoint
             plan_result = await proxy_to_api(
                 "POST", "/ops/generate-plan",
-                __query={"prompt": task_instructions},
+                __query={"prompt": task_instructions, "operator_class": "cognitive_agent"},
             )
 
             # 2. Parse the draft response

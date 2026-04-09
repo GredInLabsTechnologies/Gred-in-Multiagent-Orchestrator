@@ -218,6 +218,7 @@ async def generate_structured_plan(
     auth: Annotated[AuthContext, Depends(verify_token)],
     _rl: Annotated[None, Depends(check_rate_limit)],
     prompt: Annotated[str, Query(..., min_length=1, max_length=8000)],
+    operator_class: Annotated[str, Query()] = "human_ui",
 ):
     """Generate a structured multi-task plan with Mermaid graph via LLM."""
     import json, re, time
@@ -325,6 +326,7 @@ async def generate_structured_plan(
                 "structured": True,
                 "custom_plan_id": custom_plan.id,
                 "execution_decision": "AUTO_RUN_ELIGIBLE",
+                "operator_class": operator_class,
             },
             provider=resp.get("provider", "local_ollama"),
             status="draft",
