@@ -99,6 +99,7 @@ def _evaluate_draft_intent(context: dict, path_scope: list, body: OpsCreateDraft
         risk_score=risk_score,
         policy_decision=policy_decision.decision,
         policy_status_code=policy_decision.status_code,
+        operator_class=context.get("operator_class", "human_ui"),
     )
     return policy_decision, intent_decision
 
