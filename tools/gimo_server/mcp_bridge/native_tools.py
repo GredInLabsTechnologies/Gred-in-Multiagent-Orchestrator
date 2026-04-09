@@ -349,15 +349,115 @@ def register_native_tools(mcp: FastMCP):
 
     @mcp.tool()
     async def gimo_propose_structured_plan(task_instructions: str) -> str:
-        """Generates a structured multi-step plan with task dependencies and Mermaid graph."""
+        """Generates a structured multi-step plan with task dependencies and Mermaid graph.
+
+        This is the **canonical plan-review path for MCP operators**. The tool
+        materializes a plan via the backend, then returns a rich structured
+        presentation (tasks, dependencies, Mermaid graph, cost estimate, risk,
+        governance verdict) so the operator can present it to the human for
+        review before execution.
+
+        **Operator protocol (MANDATORY):**
+        1. Call this tool with the task instructions.
+        2. Present the returned plan to the human in the chat — render the
+           Mermaid graph, task table, cost, and risk visually.
+        3. Wait for explicit human confirmation ("yes", "proceed", "go ahead").
+        4. If confirmed: call ``gimo_approve_draft(draft_id, auto_run=True)``.
+        5. If rejected: do NOT approve. Relay the human's feedback.
+
+        This is not optional. The human must see the plan before execution
+        starts. If you need to skip this review, use ``gimo_run_task`` instead
+        (the explicit bypass path for unreviewed execution).
+        """
+        import json as _json
         try:
             from .bridge import proxy_to_api
-            result = await proxy_to_api(
-                "POST", "/ops/drafts",
-                __body={"prompt": task_instructions, "provider": "mcp_planner"},
+
+            # 1. Materialize plan via canonical backend endpoint
+            plan_result = await proxy_to_api(
+                "POST", "/ops/generate-plan",
+                __query={"prompt": task_instructions},
             )
-            return result
-        except Exception as e: return f"Error: {e}"
+
+            # 2. Parse the draft response
+            draft_data = {}
+            draft_id = None
+            try:
+                body = plan_result.split("\n", 1)[-1]
+                draft_data = _json.loads(body)
+                draft_id = draft_data.get("id")
+            except (ValueError, IndexError, _json.JSONDecodeError):
+                return _json.dumps({
+                    "error": "plan_materialization_failed",
+                    "detail": str(plan_result)[:500],
+                })
+
+            if not draft_id:
+                return _json.dumps({
+                    "error": "no_draft_id_returned",
+                    "detail": str(plan_result)[:500],
+                })
+
+            # 3. Fetch the full draft content (plan JSON lives here)
+            draft_detail = await proxy_to_api("GET", f"/ops/drafts/{draft_id}")
+            content = None
+            try:
+                detail_body = draft_detail.split("\n", 1)[-1]
+                detail_data = _json.loads(detail_body)
+                content = detail_data.get("content")
+            except (ValueError, IndexError, _json.JSONDecodeError):
+                pass
+
+            # 4. Build the rich presentation
+            presentation: dict = {
+                "draft_id": draft_id,
+                "status": draft_data.get("status", "draft"),
+                "operator_class": draft_data.get("operator_class"),
+                "execution_decision": (draft_data.get("context") or {}).get("execution_decision"),
+                "risk_band": (draft_data.get("context") or {}).get("risk_band"),
+            }
+
+            # Parse plan content for tasks + graph
+            if content:
+                try:
+                    plan = _json.loads(content) if isinstance(content, str) else content
+                except _json.JSONDecodeError:
+                    plan = {}
+
+                presentation["title"] = plan.get("title", task_instructions[:80])
+                presentation["objective"] = plan.get("objective", task_instructions)
+
+                tasks = plan.get("tasks") or []
+                task_summary = []
+                for t in tasks:
+                    task_summary.append({
+                        "id": t.get("id", "?"),
+                        "title": t.get("title", "?"),
+                        "scope": t.get("scope", "?"),
+                        "depends_on": t.get("depends") or t.get("depends_on") or [],
+                        "status": t.get("status", "pending"),
+                        "role": (t.get("agent_assignee") or {}).get("role", "?"),
+                    })
+                presentation["tasks"] = task_summary
+                presentation["task_count"] = len(task_summary)
+
+                # Generate Mermaid graph
+                try:
+                    presentation["graph"] = _generate_mermaid_graph(plan)
+                except Exception:
+                    presentation["graph"] = None
+            else:
+                presentation["title"] = task_instructions[:80]
+                presentation["objective"] = task_instructions
+                presentation["tasks"] = []
+                presentation["task_count"] = 0
+                presentation["graph"] = None
+                presentation["note"] = "Plan content not yet materialized; the draft may still be generating."
+
+            return _json.dumps(presentation, indent=2, default=str)
+
+        except Exception as e:
+            return _json.dumps({"error": "propose_plan_failed", "detail": str(e)})
 
     @mcp.tool()
     async def gimo_create_draft(task_instructions: str, target_agent_id: str = "auto") -> str:
@@ -379,7 +479,17 @@ def register_native_tools(mcp: FastMCP):
 
     @mcp.tool()
     async def gimo_run_task(task_instructions: str, target_agent_id: str = "auto") -> str:
-        """Automatically create, approve, and execute a plan through the full governance chain."""
+        """Automatically create, approve, and execute a plan through the full governance chain.
+
+        **This is the BYPASS path.** It creates a draft, approves it, and starts
+        execution in one step WITHOUT presenting the plan for human review. Use
+        this ONLY when the human has explicitly authorized unreviewed execution
+        (e.g. "just run it", "skip review", "auto-approve").
+
+        For the canonical review path where the human sees and confirms the plan
+        before execution, use ``gimo_propose_structured_plan`` followed by
+        ``gimo_approve_draft`` after human confirmation.
+        """
         try:
             from .bridge import proxy_to_api
             import json
@@ -462,6 +572,12 @@ def register_native_tools(mcp: FastMCP):
     @mcp.tool()
     async def gimo_approve_draft(draft_id: str, auto_run: bool = True) -> str:
         """Approve a draft through the full governance chain (risk gate, intent gate, auto_run gate, audit log).
+
+        **Call this ONLY after the human has reviewed and confirmed the plan.**
+        The canonical flow is: ``gimo_propose_structured_plan`` → human reviews
+        the presented plan in the chat → human says "yes" → operator calls this
+        tool. Do NOT call this without human confirmation unless the human has
+        explicitly granted a session-wide bypass (e.g. "auto-approve everything").
 
         Args:
             draft_id: ID of the draft to approve
