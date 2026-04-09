@@ -82,13 +82,26 @@ exit /b %ERRORLEVEL%
 :: =============================================================
 :cmd_down
 TITLE GIMO Down
-echo [1/3] Parando backend canonico via gimo.py down...
+echo [1/4] Parando backend canonico via gimo.py down...
 call "%PYTHON_EXE%" gimo.py down >nul 2>&1
 
-echo [2/3] Cerrando procesos launcher GIMO...
+echo [2/4] Cascada via Job Object (launcher.pid)...
+:: ZERO-ORPHAN POLICY: the launcher owns a Win32 Job Object with
+:: KILL_ON_JOB_CLOSE. Killing the launcher PID closes the job handle
+:: and the kernel atomically terminates every child (uvicorn worker,
+:: vite, next dev, and any grandchildren) — no orphans possible.
+if exist ".orch_data\runtime\launcher.pid" (
+    set /p LAUNCHER_PID=<".orch_data\runtime\launcher.pid"
+    if defined LAUNCHER_PID (
+        taskkill /F /T /PID !LAUNCHER_PID! >nul 2>&1
+    )
+    del /q ".orch_data\runtime\launcher.pid" >nul 2>&1
+)
+
+echo [3/4] Cerrando procesos launcher GIMO residuales...
 taskkill /F /FI "WINDOWTITLE eq GIMO*" /T >nul 2>&1
 
-echo [3/3] Liberando puertos auxiliares 5173 y 3000...
+echo [4/4] Liberando puertos auxiliares 5173 y 3000...
 "%PYTHON_EXE%" scripts\ops\kill_port.py 5173 3000 >nul 2>&1
 
 echo [OK] GIMO detenido.

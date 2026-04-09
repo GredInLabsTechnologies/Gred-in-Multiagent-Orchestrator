@@ -55,6 +55,152 @@ YELLOW = "\033[93m"
 
 # ── Helpers ─────────────────────────────────────────────────────────────
 
+# ── Win32 Job Object — zero-orphan guarantee ────────────────────────────
+#
+# A Windows Job Object with KILL_ON_JOB_CLOSE binds every assigned process
+# (and every descendant they spawn) to the launcher's lifetime. When the
+# launcher's handle to the job closes for ANY reason — Ctrl-C, kill -9 of
+# the launcher, parent shell teardown, segfault, OOM — the kernel kills
+# every member of the job atomically. There is no way for a child to
+# outlive the launcher and become a zombie / orphan listener.
+#
+# This is the only mechanism on Windows that gives a HARD guarantee. We
+# create the job at module import time so even an early crash inside
+# Launcher.run() still cleans up. The handle is held by a module-level
+# global so the GC cannot collapse it before we want it to.
+_JOB_HANDLE = None  # type: ignore[var-annotated]
+
+
+def _create_job_object():
+    global _JOB_HANDLE
+    if sys.platform != "win32":
+        return None
+    if _JOB_HANDLE is not None:
+        return _JOB_HANDLE
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+        # CreateJobObjectW(NULL, NULL) — anonymous, default security
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        h_job = kernel32.CreateJobObjectW(None, None)
+        if not h_job:
+            raise OSError(f"CreateJobObjectW failed: {ctypes.get_last_error()}")
+
+        # JOBOBJECT_BASIC_LIMIT_INFORMATION + EXTENDED variant.
+        # We only need LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE (0x2000).
+        class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_uint64),
+                ("WriteOperationCount", ctypes.c_uint64),
+                ("OtherOperationCount", ctypes.c_uint64),
+                ("ReadTransferCount", ctypes.c_uint64),
+                ("WriteTransferCount", ctypes.c_uint64),
+                ("OtherTransferCount", ctypes.c_uint64),
+            ]
+
+        class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                ("IoInfo", IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        info.BasicLimitInformation.LimitFlags = 0x00002000  # KILL_ON_JOB_CLOSE
+
+        # JobObjectExtendedLimitInformation = 9
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+        ]
+        ok = kernel32.SetInformationJobObject(
+            h_job, 9, ctypes.byref(info), ctypes.sizeof(info)
+        )
+        if not ok:
+            raise OSError(f"SetInformationJobObject failed: {ctypes.get_last_error()}")
+
+        _JOB_HANDLE = h_job
+        return _JOB_HANDLE
+    except Exception as exc:
+        # Fail loudly — without the Job Object, zero-orphan is not a guarantee.
+        print(f"[launcher] FATAL: cannot create Job Object: {exc}", file=sys.stderr)
+        return None
+
+
+def _assign_to_job(pid: int) -> None:
+    if sys.platform != "win32":
+        return
+    if _JOB_HANDLE is None:
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    PROCESS_SET_QUOTA = 0x0100
+    PROCESS_TERMINATE = 0x0001
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    h_proc = kernel32.OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, False, pid)
+    if not h_proc:
+        raise OSError(f"OpenProcess({pid}) failed: {ctypes.get_last_error()}")
+    try:
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        ok = kernel32.AssignProcessToJobObject(_JOB_HANDLE, h_proc)
+        if not ok:
+            raise OSError(
+                f"AssignProcessToJobObject({pid}) failed: {ctypes.get_last_error()}"
+            )
+    finally:
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle(h_proc)
+
+
+def _preflight_port(port: int) -> tuple[bool, str]:
+    """Return (ok, reason). ok=False if the port is held by a zombie TCB."""
+    if sys.platform != "win32":
+        return True, ""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"$c=Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue;"
+             f"if($c){{$p=Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue;"
+             f"if(-not $p){{Write-Output ('ZOMBIE:'+$c.OwningProcess)}}else{{Write-Output ('OWNED:'+$p.Id+':'+$p.Name)}}}}else{{Write-Output 'FREE'}}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        line = (out.stdout or "").strip().splitlines()[-1] if out.stdout else "FREE"
+        if line == "FREE":
+            return True, ""
+        if line.startswith("ZOMBIE:"):
+            return False, f"port {port} held by orphan TCB (PID {line.split(':',1)[1]} no longer exists). Cannot proceed without leaving more orphans. Wait for kernel GC, change port, or reboot."
+        # OWNED by a real process — kill_port can handle it; not a zombie.
+        return True, ""
+    except Exception:
+        return True, ""
+
+
 def _build_provenance_env() -> dict:
     """R18 Change 10 — inject GIMO_BUILD_SHA so the backend reports the
     exact commit it was booted from via /ops/health/info."""
@@ -168,6 +314,15 @@ class ServiceProcess:
         color = self.config["color"]
         cmd = self.config["cmd_win"] if sys.platform == "win32" else self.config["cmd_unix"]
 
+        # ZERO-ORPHAN POLICY: uvicorn --reload forks a watcher+worker pair.
+        # On Windows the watcher cannot guarantee the worker dies cleanly,
+        # which is the source of the orphan-listener / zombie-TCB class of
+        # bugs that leak port 9325. We do not allow that fork pattern. The
+        # Job Object below catches everything else (Ctrl-C, parent kill,
+        # crash) but cannot save us from a known-leaky child design.
+        if self.name == "backend":
+            cmd = cmd.replace(" --reload --reload-dir tools/gimo_server", "")
+
         _log(self.name, color, f"Starting...")
         self.process = await asyncio.create_subprocess_shell(
             cmd,
@@ -179,6 +334,13 @@ class ServiceProcess:
         self.running = True
         self._read_task = asyncio.create_task(self._stream_output())
         _log(self.name, color, f"PID {self.process.pid}")
+        # Bind this child (and every grandchild it spawns) to the launcher's
+        # Job Object so the kernel guarantees it dies with us. This is the
+        # only Windows-native way to make zero-orphan a hard guarantee.
+        try:
+            _assign_to_job(self.process.pid)
+        except Exception as exc:
+            _sys_log(f"{YELLOW}WARN: failed to assign {self.name} pid={self.process.pid} to Job Object: {exc}{RESET}")
 
     async def _stream_output(self):
         color = self.config["color"]
@@ -383,6 +545,34 @@ class Launcher:
         _enable_win_ansi()
         _print_banner()
 
+        # Zero-orphan guarantee: create the Job Object BEFORE spawning anything.
+        # If creation fails on Windows we abort — running without it would
+        # silently regress to the orphan-listener / zombie-TCB class of bugs.
+        if sys.platform == "win32":
+            if _create_job_object() is None:
+                _sys_log(f"{RED}FATAL: Job Object unavailable; refusing to spawn children to avoid orphans.{RESET}")
+                sys.exit(2)
+            _sys_log(f"{GREEN}Job Object active — children will die with launcher.{RESET}")
+
+        # Pre-flight: refuse to start on top of an orphan TCB.
+        for name, cfg in SERVICES.items():
+            if name in self.skip:
+                continue
+            ok, reason = _preflight_port(cfg["port"])
+            if not ok:
+                _sys_log(f"{RED}FATAL: {reason}{RESET}")
+                sys.exit(3)
+
+        # Persist launcher PID so `gimo down` can authoritatively cascade
+        # the kill (taskkill /F /T <launcher_pid> closes the Job handle and
+        # the kernel collapses every member atomically).
+        try:
+            runtime = ROOT / ".orch_data" / "runtime"
+            runtime.mkdir(parents=True, exist_ok=True)
+            (runtime / "launcher.pid").write_text(str(os.getpid()), encoding="utf-8")
+        except Exception:
+            pass
+
         # Handle Ctrl+C
         if sys.platform != "win32":
             loop = asyncio.get_event_loop()
@@ -414,133 +604,6 @@ class Launcher:
         self._shutdown_event.set()
 
 
-def _run_detached(skip: set[str]) -> int:
-    """Headless / non-interactive launcher.
-
-    The interactive ``Launcher`` above multiplexes child stdout via
-    ``asyncio.subprocess.PIPE``. On Windows this binds the children's
-    pipes to the parent loop's proactor — when the parent shell detaches
-    (Claude Code background mode, CI, ``gimo.cmd up`` from a hook), the
-    pipes are closed under the children, uvicorn loops on
-    ``ValueError: I/O operation on closed pipe``, and never binds 9325.
-
-    Detached mode sidesteps this by:
-      - Using plain ``subprocess.Popen`` with file-backed stdout/stderr
-        (no asyncio loop, no inherited pipes).
-      - On Windows, ``CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`` so
-        the children survive the parent.
-      - Writing PIDs to ``.orch_data/runtime/launcher.pids.json`` for
-        ``gimo down`` to consume.
-      - Polling the health URL and exiting 0 once the backend is up.
-    """
-    import json
-    import subprocess
-    import urllib.request
-    import urllib.error
-
-    runtime = ROOT / ".orch_data" / "runtime"
-    logs = ROOT / ".orch_data" / "logs"
-    runtime.mkdir(parents=True, exist_ok=True)
-    logs.mkdir(parents=True, exist_ok=True)
-
-    pids: dict[str, int] = {}
-    creationflags = 0
-    if sys.platform == "win32":
-        # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
-        creationflags = 0x00000200 | 0x00000008
-
-    env = {**os.environ, "PYTHONUNBUFFERED": "1", **_build_provenance_env()}
-
-    def _spawn(name: str, cfg: dict) -> int:
-        cmd = cfg["cmd_win"] if sys.platform == "win32" else cfg["cmd_unix"]
-        # Detached mode forbids uvicorn --reload: the watcher/worker fork
-        # leaves an orphan listener on Windows when the parent shell goes
-        # away (the worker inherits the socket fd but the kernel still
-        # accounts the TCB to the dead PID, leaving 9325 in LISTEN with
-        # no user-space owner until the kernel GCs it). Hot reload makes
-        # no sense in a headless detached launch anyway.
-        if name == "backend":
-            cmd = cmd.replace(" --reload --reload-dir tools/gimo_server", "")
-        cwd = cfg.get("cwd", str(ROOT))
-        log_path = logs / f"{name}.log"
-        # Open in append mode so successive runs preserve history.
-        fh = open(log_path, "ab", buffering=0)
-        proc = subprocess.Popen(
-            cmd,
-            cwd=cwd,
-            shell=True,
-            stdout=fh,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            env=env,
-            creationflags=creationflags,
-            close_fds=True,
-        )
-        _sys_log(f"{name} detached PID {proc.pid} -> {log_path}")
-        return proc.pid
-
-    # Free stale ports first (synchronous best-effort).
-    for name, cfg in SERVICES.items():
-        if name in skip:
-            continue
-        try:
-            if sys.platform == "win32":
-                subprocess.run(
-                    f'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :{cfg["port"]} ^| findstr LISTENING\') do taskkill /F /PID %a',
-                    shell=True, capture_output=True, timeout=5,
-                )
-            else:
-                subprocess.run(
-                    f"lsof -ti :{cfg['port']} | xargs -r kill -9",
-                    shell=True, capture_output=True, timeout=5,
-                )
-        except Exception:
-            pass
-
-    # Backend first.
-    if "backend" not in skip:
-        pids["backend"] = _spawn("backend", SERVICES["backend"])
-
-    # Health check.
-    health_ok = False
-    if "backend" not in skip:
-        url = SERVICES["backend"]["health_url"]
-        deadline = time.monotonic() + 60.0
-        while time.monotonic() < deadline:
-            try:
-                req = urllib.request.Request(url, method="GET")
-                resp = urllib.request.urlopen(req, timeout=2)
-                if resp.status < 500:
-                    health_ok = True
-                    break
-            except urllib.error.HTTPError as e:
-                if e.code < 500:
-                    health_ok = True
-                    break
-            except Exception:
-                pass
-            time.sleep(0.5)
-        if health_ok:
-            _sys_log(f"{GREEN}Backend ready (detached).{RESET}")
-        else:
-            _sys_log(f"{RED}Backend did not respond on {url} within 60s.{RESET}")
-
-    # Frontend / web.
-    for name in ("frontend", "web"):
-        if name not in skip:
-            pids[name] = _spawn(name, SERVICES[name])
-
-    (runtime / "launcher.pids.json").write_text(
-        json.dumps({"pids": pids, "started_at": time.time()}, indent=2),
-        encoding="utf-8",
-    )
-
-    if "backend" in skip or health_ok:
-        _sys_log(f"{GREEN}Detached launch complete. PIDs: {pids}{RESET}")
-        return 0
-    return 1
-
-
 async def main():
     skip = set()
     if "--no-web" in sys.argv:
@@ -551,15 +614,12 @@ async def main():
         skip.add("frontend")
         skip.add("web")
 
-    # Auto-detect headless context: no TTY on stdin → use detached mode.
-    detached = "--detached" in sys.argv or "--headless" in sys.argv
-    if not detached and not sys.stdin.isatty():
-        detached = True
-
-    if detached:
-        rc = _run_detached(skip)
-        sys.exit(rc)
-
+    # ZERO-ORPHAN POLICY: there is no detached / fire-and-forget mode.
+    # The launcher always runs in the foreground attached to its parent
+    # shell and owns a Win32 Job Object that kills every child the moment
+    # the launcher exits (for ANY reason). Background usage is the parent
+    # shell's responsibility (e.g. `gimo up &`); `gimo down` then kills the
+    # launcher PID and the kernel collapses the entire process tree.
     launcher = Launcher(skip_services=skip)
     await launcher.run()
 
