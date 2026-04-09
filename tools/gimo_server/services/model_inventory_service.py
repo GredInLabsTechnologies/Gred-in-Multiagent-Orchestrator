@@ -176,6 +176,38 @@ class ModelInventoryService:
         cls._cache_ts = time.time()
         logger.info("Model inventory refreshed: %d models across %d providers",
                      len(entries), len(cfg.providers))
+
+        # Enrich capabilities from external benchmarks and seed GICS priors.
+        # Runs in background to avoid blocking inventory refresh.
+        try:
+            from . import benchmark_enrichment_service as bes
+            profiles = await bes.refresh_benchmarks()
+            if profiles:
+                for entry in entries:
+                    profile = bes.lookup_model(entry.model_id, profiles)
+                    if profile:
+                        # Enrich capabilities from benchmark dimensions
+                        if profile.dimensions.get("coding", 0) > 0.6:
+                            entry.capabilities.add("code")
+                        if profile.dimensions.get("reasoning", 0) > 0.6:
+                            entry.capabilities.add("reasoning")
+                        if profile.dimensions.get("math", 0) > 0.6:
+                            entry.capabilities.add("math")
+
+                # Seed GICS priors per provider group
+                try:
+                    from .gics_service import GicsService
+                    gics = GicsService()
+                    by_provider: dict[str, list[str]] = {}
+                    for e in entries:
+                        by_provider.setdefault(e.provider_type, []).append(e.model_id)
+                    for ptype, model_ids in by_provider.items():
+                        await bes.seed_gics_priors(gics, ptype, model_ids, profiles)
+                except Exception:
+                    logger.debug("GICS prior seeding skipped (daemon may be unavailable)")
+        except Exception:
+            logger.debug("Benchmark enrichment skipped", exc_info=True)
+
         return entries
 
     @classmethod
