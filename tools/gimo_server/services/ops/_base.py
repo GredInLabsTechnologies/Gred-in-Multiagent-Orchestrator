@@ -16,6 +16,7 @@ from ...ops_models import OpsApproved, OpsRun
 from ..gics_service import GicsService
 from ..agent_telemetry_service import AgentTelemetryService
 from ..agent_insight_service import AgentInsightService
+from ..run_lifecycle import ACTIVE_RUN_STATUSES, TERMINAL_RUN_STATUSES, is_active_run_status
 
 logger = logging.getLogger("orchestrator.ops")
 
@@ -51,8 +52,8 @@ class OpsServiceBase:
     _DRAFT_GLOB = "d_*.json"
     _APPROVED_GLOB = "a_*.json"
     _RUN_LOG_TAIL = 200
-    _ACTIVE_RUN_STATUSES = {"pending", "running", "awaiting_subagents", "MERGE_LOCKED", "WORKER_CRASHED_RECOVERABLE", "AWAITING_MERGE"}
-    _TERMINAL_RUN_STATUSES = {"done", "error", "cancelled", "ROLLBACK_EXECUTED", "RISK_SCORE_TOO_HIGH", "BASELINE_TAMPER_DETECTED", "PIPELINE_TIMEOUT", "WORKTREE_CORRUPTED"}
+    _ACTIVE_RUN_STATUSES = set(ACTIVE_RUN_STATUSES)
+    _TERMINAL_RUN_STATUSES = set(TERMINAL_RUN_STATUSES)
 
     VALID_TRANSITIONS: Dict[str, set[str]] = {
         # NOTE: keep compatibility with legacy worker paths that may finalize directly from
@@ -82,7 +83,7 @@ class OpsServiceBase:
         "awaiting_subagents": {"running", "error", "cancelled"},
         "MERGE_LOCKED": {"running", "error", "cancelled", "MERGE_CONFLICT"},
         "MERGE_CONFLICT": {"pending", "error", "cancelled"},
-        "HUMAN_APPROVAL_REQUIRED": {"running", "cancelled", "error"},
+        "HUMAN_APPROVAL_REQUIRED": {"pending", "running", "cancelled", "error"},
         "AWAITING_MERGE": {"done", "error", "cancelled", "ROLLBACK_EXECUTED", "WORKER_CRASHED_RECOVERABLE"},
         "WORKER_CRASHED_RECOVERABLE": {"pending", "error", "cancelled"},
     }
@@ -166,4 +167,4 @@ class OpsServiceBase:
 
     @classmethod
     def _is_run_active(cls, run: OpsRun) -> bool:
-        return str(run.status or "") in cls._ACTIVE_RUN_STATUSES
+        return is_active_run_status(run.status)

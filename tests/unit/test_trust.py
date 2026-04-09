@@ -3,6 +3,7 @@ import time
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 from tools.gimo_server.services.trust_engine import CircuitBreakerConfig, TrustEngine, TrustThresholds
+from tools.gimo_server.services.storage.trust_storage import TrustStorage
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server import config
@@ -37,6 +38,25 @@ class StubStorage:
     def get_circuit_breaker_config(self, dimension_key: str): return self._cb_cfg.get(dimension_key)
     def save_trust_events(self, events): self.saved_batches.append(list(events))
 
+
+class StubGics:
+    def __init__(self):
+        self.data = {}
+
+    def get(self, key: str):
+        value = self.data.get(key)
+        return {"fields": dict(value)} if isinstance(value, dict) else None
+
+    def put(self, key: str, value):
+        self.data[key] = dict(value)
+
+    def scan(self, prefix: str = "", include_fields: bool = True):
+        return [
+            {"key": key, "fields": dict(value)}
+            for key, value in self.data.items()
+            if key.startswith(prefix)
+        ]
+
 def _make_events(n: int, dimension: str = "tool|git_diff|m|t") -> list:
     now = datetime.now(timezone.utc)
     return [{"timestamp": now.isoformat(), "dimension_key": dimension, "outcome": "approved" if i % 5 != 0 else "error"} for i in range(n)]
@@ -61,6 +81,27 @@ class TestTrustEngineCore:
         record = engine.query_dimension(dimension)
         assert record["circuit_state"] == "open"
         assert record["policy"] == "blocked"
+
+    def test_dashboard_accepts_trust_storage_backed_by_gics(self):
+        gics = StubGics()
+        storage = TrustStorage(gics_service=gics)
+        storage.save_trust_event(
+            {
+                "dimension_key": "model:codex:gpt-5-codex",
+                "outcome": "approved",
+                "tool": "agentic_chat",
+                "context": "agentic_chat",
+                "model": "gpt-5-codex",
+                "actor": "thread:test",
+                "timestamp": "2026-04-08T00:00:00+00:00",
+            }
+        )
+
+        entries = TrustEngine(storage).dashboard(limit=10)
+
+        assert len(entries) == 1
+        assert entries[0]["dimension"] == "model:codex:gpt-5-codex"
+        assert entries[0]["state"] == "closed"
 
 # ── Performance ──────────────────────────────────────────
 

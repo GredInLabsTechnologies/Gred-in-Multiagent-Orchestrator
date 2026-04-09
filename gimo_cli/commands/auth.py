@@ -12,7 +12,7 @@ import typer
 from rich.panel import Panel
 
 from gimo_cli import app, console
-from gimo_cli.api import api_request, resolve_server_url
+from gimo_cli.api import api_request, resolve_server_url, resolve_token
 from gimo_cli.bond import (
     delete_bond,
     delete_cli_bond,
@@ -411,5 +411,33 @@ def doctor() -> None:
                 console.print(f"[yellow][!] Provider:[/yellow] diagnostics fetch failed ({status_code})")
         except Exception as exc:
             console.print(f"[yellow][!] Provider:[/yellow] check failed: {str(exc)[:60]}")
+
+    # ── HTTP probing hint (R19 Change 5) ──────────────────────────────
+    # Operators occasionally need to hit /ops/* directly (curl, scripts).
+    # The boundary stays fail-closed: no anonymous routes are opened.
+    # We only confirm whether an operator token can be resolved from the
+    # existing bootstrap chain and show how to probe safely WITHOUT
+    # printing the secret on stdout.
+    op_token = resolve_token("operator", config)
+    console.print("\n[bold]HTTP probing[/bold]")
+    if op_token:
+        console.print("[green][OK] Operator token:[/green] resolvable from bootstrap (bond/env/config)")
+        console.print("[dim]     Preferred (token never leaves CLI process):[/dim]")
+        console.print(f"[cyan]       python gimo.py status --json[/cyan]")
+        console.print(f"[cyan]       python gimo.py observe metrics[/cyan]")
+        console.print(
+            "[dim]     Direct HTTP: set ORCH_OPERATOR_TOKEN in your shell from your[/dim]"
+        )
+        console.print(
+            "[dim]     bond/secret store, then call /ops/* with Authorization: Bearer.[/dim]"
+        )
+        console.print(
+            f"[dim]     The /ops/* boundary stays fail-closed; no anonymous routes exist.[/dim]"
+        )
+    else:
+        console.print("[yellow][!] Operator token:[/yellow] not resolvable from bootstrap chain")
+        console.print(
+            f"[yellow][>] Bond first: [cyan]gimo login --web[/cyan] or [cyan]gimo login {server_url}[/cyan][/yellow]"
+        )
 
     console.print(f"\n[dim]Run 'gimo --help' for available commands[/dim]")

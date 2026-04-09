@@ -14,6 +14,7 @@ class RiskGate(ExecutionStage):
     async def execute(self, input: StageInput) -> StageOutput:
         # R17 Cluster A.5: gates always run regardless of `approved_id`.
         # Approval is recorded in the verdict, never used to silently skip.
+        human_approval_granted = bool(input.context.get("human_approval_granted"))
 
         # 1. Get calibrated thresholds for this intent
         intent_audit = input.artifacts.get("intent_audit", {})
@@ -33,8 +34,11 @@ class RiskGate(ExecutionStage):
             status = "fail"
             execution_decision = "RISK_SCORE_TOO_HIGH"
         elif risk_score > thresholds.auto_run_max:
-            status = "halt" # Human review required
-            execution_decision = "HUMAN_APPROVAL_REQUIRED"
+            if human_approval_granted:
+                status = "continue"
+            else:
+                status = "halt" # Human review required
+                execution_decision = "HUMAN_APPROVAL_REQUIRED"
             
         return StageOutput(
             status=status,
@@ -43,6 +47,7 @@ class RiskGate(ExecutionStage):
                 "calibrated_risk_score": risk_score,
                 "execution_decision": execution_decision,
                 "pre_approved": bool(input.context.get("approved_id")),
+                "human_approval_granted": human_approval_granted,
             }
         )
 

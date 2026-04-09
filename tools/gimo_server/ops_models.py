@@ -7,7 +7,7 @@ try:
     from tools.gimo_server.models import (
         OpsTask, OpsPlan, OpsDraft, OpsApproved, OpsRunStatus, OpsRun,
         OpsConfig, ExecutorReport, OpsCreateDraftRequest, OpsUpdateDraftRequest,
-        OpsApproveResponse, OpsCreateRunRequest, ChildRunRequest, RepoEntry, RunEvent,
+        OpsApproveResponse, OpsCreateRunRequest, OpsResumeRunRequest, ChildRunRequest, RepoEntry, RunEvent,
         StatusResponse, UiStatusResponse, VitaminizeResponse,
         SubAgent, SubAgentConfig,
         GimoItemType, GimoItemStatus, GimoThreadStatus, GimoItem, GimoTurn, GimoThread,

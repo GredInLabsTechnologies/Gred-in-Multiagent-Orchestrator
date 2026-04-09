@@ -1,10 +1,12 @@
 """Unit tests for SAGP Gateway — governance verdict correctness, policy gating, cost estimation."""
 
 import pytest
+from unittest.mock import patch
 
 from tools.gimo_server.models.governance import GovernanceSnapshot, GovernanceVerdict
 from tools.gimo_server.models.surface import SurfaceIdentity
 from tools.gimo_server.services.sagp_gateway import SagpGateway
+from tools.gimo_server.security.execution_proof import ExecutionProofChain
 
 
 # ---------------------------------------------------------------------------
@@ -217,3 +219,35 @@ class TestGicsInsight:
         result = SagpGateway.get_gics_insight(prefix="test:", limit=5)
         assert isinstance(result, dict)
         assert "entries" in result or "error" in result
+
+
+class TestProofVerification:
+    def test_verify_proof_chain_empty_reports_absent(self):
+        class _Storage:
+            def list_proofs(self, _thread_id):
+                return []
+
+        with patch("tools.gimo_server.services.storage_service.StorageService", return_value=_Storage()):
+            result = SagpGateway.verify_proof_chain(thread_id="thread-empty")
+
+        assert result["thread_id"] == "thread-empty"
+        assert result["state"] == "absent"
+        assert result["valid"] is False
+        assert result["length"] == 0
+
+    def test_verify_proof_chain_present_includes_subject_and_executor(self):
+        chain = ExecutionProofChain("thread-present")
+        chain.append("write_file", {"path": "a.py"}, {"status": "success"}, mood="executor")
+        records = [proof.to_dict() for proof in chain.to_list()]
+
+        class _Storage:
+            def list_proofs(self, _thread_id):
+                return records
+
+        with patch("tools.gimo_server.services.storage_service.StorageService", return_value=_Storage()):
+            result = SagpGateway.verify_proof_chain(thread_id="thread-present")
+
+        assert result["state"] == "present"
+        assert result["valid"] is True
+        assert result["subject"] == {"type": "thread", "id": "thread-present"}
+        assert result["executor"] == {"type": "tool", "id": "write_file"}

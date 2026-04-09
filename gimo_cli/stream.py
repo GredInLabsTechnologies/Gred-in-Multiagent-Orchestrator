@@ -41,24 +41,29 @@ def stream_events(
     if last_event_id:
         headers["Last-Event-ID"] = last_event_id
     url = f"{base_url}{path}"
+    read_timeout = timeout_seconds if timeout_seconds > 0 else None
     timeout = httpx.Timeout(
         connect=connect_timeout_seconds,
-        read=SSE_IDLE_TIMEOUT_SECONDS if timeout_seconds > 0 else None,
+        read=read_timeout,
         write=connect_timeout_seconds,
         pool=connect_timeout_seconds,
     )
 
     _last_id = ""
+    last_payload_at = time.monotonic()
+    idle_seconds = timeout_seconds if timeout_seconds > 0 else SSE_IDLE_TIMEOUT_SECONDS
     try:
         with httpx.Client(timeout=timeout) as client:
             with client.stream("GET", url, headers=headers) as response:
                 response.raise_for_status()
                 for line in response.iter_lines():
+                    if timeout_seconds > 0 and (time.monotonic() - last_payload_at) >= timeout_seconds:
+                        console.print(f"[yellow]No events received for {idle_seconds}s - stream idle.[/yellow]")
+                        return
                     if not line:
                         continue
                     if line.startswith(":"):
                         continue
-                    # Track SSE event ID for reconnection
                     if line.startswith("id:"):
                         _last_id = line[3:].strip()
                         continue
@@ -67,16 +72,16 @@ def stream_events(
                     raw = line[5:].strip()
                     if not raw:
                         continue
+                    last_payload_at = time.monotonic()
                     try:
                         parsed = json.loads(raw)
-                        # Expose last_event_id on the parsed dict for callers
                         if _last_id and isinstance(parsed, dict):
                             parsed["_last_event_id"] = _last_id
                         yield parsed
                     except json.JSONDecodeError:
                         yield raw
     except httpx.ReadTimeout:
-        console.print(f"[yellow]No events received for {SSE_IDLE_TIMEOUT_SECONDS}s — stream idle.[/yellow]")
+        console.print(f"[yellow]No events received for {idle_seconds}s - stream idle.[/yellow]")
 
 
 def emit_output(payload: Any, *, json_output: bool) -> None:
@@ -134,8 +139,6 @@ def poll_run(
 
         time.sleep(max(poll_interval_seconds, 0.1))
 
-
-# ── Git helpers ───────────────────────────────────────────────────────────────
 
 def git_command(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(

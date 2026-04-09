@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from tools.gimo_server.services.run_lifecycle import ACTIVE_RUN_STATUSES as SHARED_ACTIVE_RUN_STATUSES
+from tools.gimo_server.services.run_lifecycle import TERMINAL_RUN_STATUSES as SHARED_TERMINAL_RUN_STATUSES
 
 try:
     import yaml
@@ -30,17 +32,9 @@ DEFAULT_EXCLUDE_DIRS = [
     ".git", "node_modules", ".venv", "__pycache__", "dist", "build",
 ]
 
-ACTIVE_RUN_STATUSES = frozenset({
-    "pending", "running", "awaiting_subagents", "awaiting_review",
-    "MERGE_LOCKED", "WORKER_CRASHED_RECOVERABLE", "HUMAN_APPROVAL_REQUIRED",
-})
+ACTIVE_RUN_STATUSES = SHARED_ACTIVE_RUN_STATUSES
 
-TERMINAL_RUN_STATUSES = frozenset({
-    "done", "error", "cancelled", "MERGE_CONFLICT",
-    "VALIDATION_FAILED_TESTS", "VALIDATION_FAILED_LINT",
-    "RISK_SCORE_TOO_HIGH", "BASELINE_TAMPER_DETECTED",
-    "PIPELINE_TIMEOUT", "WORKTREE_CORRUPTED", "ROLLBACK_EXECUTED",
-})
+TERMINAL_RUN_STATUSES = SHARED_TERMINAL_RUN_STATUSES
 
 # ── Policies (from cli_policies.py) ───────────────────────────────────────────
 

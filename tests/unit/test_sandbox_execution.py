@@ -3,9 +3,24 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from tools.gimo_server.models import ProviderDiagnosticEntry
 from tools.gimo_server.services.sub_agent_manager import SubAgentManager
 from tools.gimo_server.services.merge_gate_service import MergeGateService
+from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.sandbox_service import SandboxService
+
+
+def _setup_spawn_ops_dirs(tmp_path):
+    OpsService.OPS_DIR = tmp_path / "ops"
+    OpsService.DRAFTS_DIR = OpsService.OPS_DIR / "drafts"
+    OpsService.APPROVED_DIR = OpsService.OPS_DIR / "approved"
+    OpsService.RUNS_DIR = OpsService.OPS_DIR / "runs"
+    OpsService.RUN_EVENTS_DIR = OpsService.OPS_DIR / "run_events"
+    OpsService.RUN_LOGS_DIR = OpsService.OPS_DIR / "run_logs"
+    OpsService.LOCKS_DIR = OpsService.OPS_DIR / "locks"
+    OpsService.CONFIG_FILE = OpsService.OPS_DIR / "config.json"
+    OpsService.LOCK_FILE = OpsService.OPS_DIR / ".ops.lock"
+    OpsService.ensure_dirs()
 
 @pytest.mark.asyncio
 async def test_subagent_no_longer_creates_source_worktree(monkeypatch, tmp_path):
@@ -234,6 +249,124 @@ async def test_subagent_termination_does_not_remove_workspace(monkeypatch, tmp_p
     assert workspace.exists()
     assert SubAgentManager._sub_agents[agent.id].status == "terminated"
     assert persisted, "termination should still persist inventory changes"
+
+
+@pytest.mark.asyncio
+async def test_spawn_via_draft_rejects_unready_provider(monkeypatch, tmp_path):
+    _setup_spawn_ops_dirs(tmp_path)
+    inventory_file = tmp_path / "runtime" / "sub_agents.json"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setattr("tools.gimo_server.services.sub_agent_manager.INVENTORY_FILE", inventory_file)
+    SubAgentManager._sub_agents = {}
+    monkeypatch.setattr(
+        "tools.gimo_server.services.sub_agent_manager.ProviderService.get_config",
+        lambda: SimpleNamespace(
+            active="openai",
+            providers={
+                "openai": SimpleNamespace(
+                    model="gpt-4o",
+                    provider_type="openai",
+                    type="openai",
+                    auth_mode="api_key",
+                )
+            },
+        ),
+    )
+
+    async def _probe(_provider_id):
+        return ProviderDiagnosticEntry(provider_id="openai", reachable=False, auth_status="missing")
+
+    monkeypatch.setattr(
+        "tools.gimo_server.services.providers.provider_diagnostics_service.ProviderDiagnosticsService._probe_one",
+        classmethod(lambda cls, provider_id: _probe(provider_id)),
+    )
+
+    request = {
+        "workspace_path": str(workspace),
+        "constraints": {
+            "task": "Write a file",
+            "role": "worker",
+            "provider": "openai",
+            "model": "gpt-4o",
+            "execution_policy": "workspace_safe",
+        },
+        "resolved_binding": {
+            "provider_id": "openai",
+            "model_id": "gpt-4o",
+            "estimated_cost_usd": 0.01,
+            "reasoning": "explicit",
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="PROVIDER_NOT_READY:openai:unreachable"):
+        await SubAgentManager.spawn_via_draft("mcp", request)
+
+    assert OpsService.list_runs() == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_via_draft_creates_authoritative_run_projection(monkeypatch, tmp_path):
+    _setup_spawn_ops_dirs(tmp_path)
+    inventory_file = tmp_path / "runtime" / "sub_agents.json"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setattr("tools.gimo_server.services.sub_agent_manager.INVENTORY_FILE", inventory_file)
+    SubAgentManager._sub_agents = {}
+    monkeypatch.setattr(
+        "tools.gimo_server.services.sub_agent_manager.ProviderService.get_config",
+        lambda: SimpleNamespace(
+            active="openai",
+            providers={
+                "openai": SimpleNamespace(
+                    model="gpt-4o",
+                    provider_type="openai",
+                    type="openai",
+                    auth_mode="api_key",
+                )
+            },
+        ),
+    )
+
+    async def _probe(_provider_id):
+        return ProviderDiagnosticEntry(provider_id="openai", reachable=True, auth_status="ok", latency_ms=12.0)
+
+    monkeypatch.setattr(
+        "tools.gimo_server.services.providers.provider_diagnostics_service.ProviderDiagnosticsService._probe_one",
+        classmethod(lambda cls, provider_id: _probe(provider_id)),
+    )
+
+    projection = await SubAgentManager.spawn_via_draft(
+        "mcp",
+        {
+            "workspace_path": str(workspace),
+            "constraints": {
+                "task": "Write a file",
+                "role": "worker",
+                "provider": "openai",
+                "model": "gpt-4o",
+                "execution_policy": "workspace_safe",
+                "name": "eng-calc-worker",
+            },
+            "resolved_binding": {
+                "provider_id": "openai",
+                "model_id": "gpt-4o",
+                "estimated_cost_usd": 0.01,
+                "reasoning": "explicit",
+            },
+        },
+    )
+
+    assert projection.authority == "ops_run"
+    assert projection.runId is not None
+    assert projection.draftId is not None
+    assert projection.provider == "openai"
+    assert projection.executionPolicy == "workspace_safe"
+    run = OpsService.get_run(projection.runId)
+    assert run is not None
+    assert run.execution_policy_name == "workspace_safe"
+    assert run.routing_snapshot["delegation"]["role"] == "worker"
+    assert run.routing_snapshot["readiness"]["auth_status"] == "ok"
 
 
 def test_create_run_provisions_workspace_and_copies_validated_task_spec(monkeypatch, tmp_path):

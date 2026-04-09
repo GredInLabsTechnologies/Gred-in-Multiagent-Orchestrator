@@ -47,6 +47,7 @@ class MergeGateService:
     def _validate_policy(cls, run_id: str, context: dict, run: Any) -> bool:
         policy_decision = str(context.get("policy_decision") or "").strip().lower()
         policy_decision_id = str(context.get("policy_decision_id") or run.policy_decision_id or "").strip()
+        human_approval_granted = bool(context.get("human_approval_granted"))
 
         if not policy_decision_id:
             intent_effective = str(context.get("intent_effective") or "").upper()
@@ -69,6 +70,9 @@ class MergeGateService:
             OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg="Policy deny at merge gate")
             return False
         if policy_decision == "review":
+            if human_approval_granted:
+                OpsService.append_log(run_id, level="INFO", msg="MergeGate: persisted handover approval accepted policy review")
+                return True
             OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg="policy review required")
             return False
         if policy_decision != "allow":
@@ -86,14 +90,21 @@ class MergeGateService:
     def _validate_risk(cls, run_id: str, context: dict, run: Any) -> bool:
         risk_score = float(context.get("risk_score") or run.risk_score or 0.0)
         intent_effective = str(context.get("intent_effective") or "")
+        human_approval_granted = bool(context.get("human_approval_granted"))
         
         if risk_score >= 60:
             OpsService.update_run_status(run_id, "RISK_SCORE_TOO_HIGH", msg="risk_gt_60")
             return False
         if 31 <= risk_score < 60:
+            if human_approval_granted:
+                OpsService.append_log(run_id, level="INFO", msg="MergeGate: persisted handover approval accepted medium-risk review")
+                return True
             OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg="risk_between_31_60")
             return False
         if intent_effective in {"SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"}:
+            if human_approval_granted:
+                OpsService.append_log(run_id, level="INFO", msg="MergeGate: persisted handover approval accepted intent review")
+                return True
             OpsService.update_run_status(run_id, "HUMAN_APPROVAL_REQUIRED", msg="intent_requires_human_review")
             return False
         return True
@@ -115,6 +126,8 @@ class MergeGateService:
             
         draft = OpsService.get_draft(approved.draft_id)
         context: Dict[str, Any] = dict((draft.context if draft else {}) or {})
+        if getattr(run, "resume_context", None):
+            context.update(dict(run.resume_context or {}))
         repo_context = dict(context.get("repo_context") or {})
         repo_id = str(run.repo_id or repo_context.get("repo_id") or "default")
         source_ref = str(context.get("source_ref") or "HEAD")

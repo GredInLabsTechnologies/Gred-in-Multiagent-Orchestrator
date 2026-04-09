@@ -15,6 +15,14 @@ def test_execution_proof_chain_round_trip_and_verify():
     assert restored.verify() is True
     assert restored.to_list()[0].proof_id == first.proof_id
     assert restored.to_list()[1].prev_proof_id == second.prev_proof_id
+    assert restored.to_list()[0].subject_id == "thread_1"
+    assert restored.to_list()[1].executor_id == "write_file"
+
+
+def test_execution_proof_chain_empty_is_absent():
+    chain = ExecutionProofChain("thread_absent")
+
+    assert chain.verification_state() == "absent"
 
 
 def test_execution_proof_chain_detects_tampering():

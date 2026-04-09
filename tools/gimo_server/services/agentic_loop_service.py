@@ -15,6 +15,8 @@ from ..engine.moods import MoodProfile, get_mood_profile
 from ..engine.tools.chat_tools_schema import CHAT_TOOLS, filter_tools_by_policy, get_tool_risk_level
 from ..engine.tools.executor import ToolExecutor
 from ..models.agent_routing import RoutingDecisionSummary, WorkflowPhase
+from ..models.economy import CostEvent
+from ..models.policy import TrustEvent
 from ..ops_models import GimoItem, GimoTurn
 from ..providers.base import ProviderAdapter
 from ..security.execution_proof import ExecutionProof, ExecutionProofChain
@@ -561,12 +563,27 @@ class AgenticLoopService:
         args: Dict[str, Any],
         result: Dict[str, Any],
         mood: str,
+        cost: float = 0.0,
+        subject_type: str = "thread",
+        subject_id: str | None = None,
+        executor_type: str = "tool",
+        executor_id: str | None = None,
     ) -> None:
         gics = cls._get_gics()
         if not gics:
             return
         try:
-            proof = chain.append(tool_name=tool_name, args=args, result=result, mood=mood, cost=0.0)
+            proof = chain.append(
+                tool_name=tool_name,
+                args=args,
+                result=result,
+                mood=mood,
+                cost=cost,
+                subject_type=subject_type,
+                subject_id=subject_id or thread_id,
+                executor_type=executor_type,
+                executor_id=executor_id or tool_name,
+            )
             gics.put(f"ops:proof:{thread_id}:{proof.proof_id}", proof.to_dict())
         except Exception:
             logger.debug("Unable to persist execution proof for thread %s", thread_id, exc_info=True)
@@ -575,16 +592,18 @@ class AgenticLoopService:
     def get_thread_proofs(cls, thread_id: str) -> Dict[str, Any]:
         records, scanned_ok = cls._scan_execution_proof_records(thread_id)
         if not scanned_ok:
-            return {"thread_id": thread_id, "verified": False, "proofs": []}
+            return {"thread_id": thread_id, "state": "invalid", "verified": False, "proofs": []}
         if not records:
-            return {"thread_id": thread_id, "verified": True, "proofs": []}
+            return {"thread_id": thread_id, "state": "absent", "verified": False, "proofs": []}
         try:
             chain = ExecutionProofChain.from_records(thread_id, records)
             proofs = [proof.to_dict() for proof in chain.to_list()]
-            return {"thread_id": thread_id, "verified": chain.verify(), "proofs": proofs}
+            state = chain.verification_state()
+            return {"thread_id": thread_id, "state": state, "verified": state == "present", "proofs": proofs}
         except Exception:
             return {
                 "thread_id": thread_id,
+                "state": "invalid",
                 "verified": False,
                 "proofs": cls._best_effort_sort_proof_records(records),
             }
@@ -735,8 +754,10 @@ class AgenticLoopService:
         total_cost = 0.0
         total_budget = float(policy_profile.max_cost_per_turn_usd or 0.0) * max(1, max_turns)
         proof_chain = cls._load_execution_proof_chain(thread_id, recover=True) if thread_id else None
+        initial_proof_count = len(proof_chain.to_list()) if proof_chain else 0
         last_content = ""
         last_tool_call_format = "none"
+        loop_started_at = time.monotonic()
 
         await emit_event(
             "session_start",
@@ -1181,6 +1202,31 @@ class AgenticLoopService:
         total_usage["cost_usd"] = total_cost
         total_usage["cost_estimated"] = bool(total_usage.get("estimated"))
 
+        if thread_id and proof_chain and len(proof_chain.to_list()) == initial_proof_count:
+            cls._persist_execution_proof(
+                thread_id=thread_id,
+                chain=proof_chain,
+                tool_name="agentic_chat",
+                args={
+                    "task_key": str(task_key or "agentic_chat"),
+                    "provider_id": str(provider_id or "unknown"),
+                    "model": str(model or "unknown"),
+                    "tools_executed": len(all_tool_logs),
+                },
+                result={
+                    "status": str(finish_reason or "stop"),
+                    "response": final_response,
+                    "usage": dict(total_usage),
+                    "turns_used": iterations_used,
+                },
+                mood=mood,
+                cost=float(total_cost or 0.0),
+                subject_type="thread",
+                subject_id=thread_id,
+                executor_type="model",
+                executor_id=f"{provider_id or 'unknown'}:{model or 'unknown'}",
+            )
+
         # U4: Single telemetry sink — writes to metrics, audit log, and thread metadata.
         try:
             from .observability import ObservabilityService
@@ -1196,6 +1242,116 @@ class AgenticLoopService:
             )
         except Exception:
             logger.debug("record_llm_usage failed", exc_info=True)
+
+        try:
+            from .observability_service import ObservabilityService as UnifiedObservabilityService
+            from .ops_service import OpsService
+            from .storage_service import StorageService
+
+            cfg = ProviderService.get_config()
+            provider_entry = (cfg.providers.get(provider_id) if cfg else None)
+            provider_type = ProviderService.normalize_provider_type(
+                getattr(provider_entry, "provider_type", None) or getattr(provider_entry, "type", None) or provider_id
+            )
+            auth_mode = str(getattr(provider_entry, "auth_mode", "") or "")
+            trace_id = f"chat_{thread_id or uuid.uuid4().hex}_{uuid.uuid4().hex[:12]}"
+            request_id = f"chatreq_{uuid.uuid4().hex[:12]}"
+            workflow_id = str(thread_id or task_key or "agentic_chat")
+            duration_ms = int(max(time.monotonic() - loop_started_at, 0.0) * 1000)
+            input_tokens = int(total_usage.get("prompt_tokens", 0) or 0)
+            output_tokens = int(total_usage.get("completion_tokens", 0) or 0)
+            total_tokens = int(total_usage.get("total_tokens", 0) or (input_tokens + output_tokens))
+            evidence_status = "completed" if finish_reason not in {"error", "tool_error"} else "failed"
+            trust_outcome = "approved" if evidence_status == "completed" else "error"
+
+            UnifiedObservabilityService.record_workflow_start(workflow_id, trace_id)
+            UnifiedObservabilityService.record_node_span(
+                workflow_id=workflow_id,
+                trace_id=trace_id,
+                step_id="agentic_loop",
+                node_id="agentic_chat",
+                node_type="agentic_chat",
+                status=evidence_status,
+                duration_ms=duration_ms,
+                tokens_used=total_tokens,
+                cost_usd=float(total_cost or 0.0),
+            )
+            UnifiedObservabilityService.record_structured_event(
+                event_type="agentic_chat",
+                status=finish_reason or evidence_status,
+                trace_id=trace_id,
+                request_id=request_id,
+                run_id=workflow_id,
+                actor="orchestrator",
+                stage="agentic_loop",
+                final_model_used=model or "unknown",
+                latency_ms=duration_ms,
+                metadata={
+                    "thread_id": thread_id,
+                    "provider_id": provider_id,
+                    "tools_executed": len(all_tool_logs),
+                },
+            )
+            UnifiedObservabilityService.record_ai_usage(
+                run_id=workflow_id,
+                draft_id="",
+                provider_type=provider_type,
+                auth_mode=auth_mode,
+                model=model or "unknown",
+                tokens_in=input_tokens,
+                tokens_out=output_tokens,
+                cost_usd=float(total_cost or 0.0),
+                status=evidence_status,
+                latency_ms=duration_ms,
+                request_id=request_id,
+                error_code="" if evidence_status == "completed" else str(finish_reason or ""),
+            )
+            UnifiedObservabilityService.record_workflow_end(workflow_id, trace_id, status=evidence_status)
+
+            storage = StorageService()
+            storage.cost.save_cost_event(
+                CostEvent(
+                    id=uuid.uuid4().hex,
+                    workflow_id=workflow_id,
+                    node_id="agentic_chat",
+                    model=model or "unknown",
+                    provider=provider_id or provider_type,
+                    task_type=task_key or "agentic_chat",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    cost_usd=float(total_cost or 0.0),
+                    duration_ms=duration_ms,
+                    agent_preset=str(getattr(thread, "agent_preset", "") or ""),
+                    task_role=str(task_key or "agentic_chat"),
+                    execution_policy_name=str(resolved_execution_policy or ""),
+                )
+            )
+            storage.save_trust_event(
+                TrustEvent(
+                    dimension_key=f"model:{provider_type}:{model or 'unknown'}",
+                    tool="agentic_chat",
+                    context=str(task_key or "agentic_chat"),
+                    model=model or "unknown",
+                    task_type=str(task_key or "agentic_chat"),
+                    outcome=trust_outcome,
+                    actor=f"thread:{thread_id or 'unknown'}",
+                    post_check_passed=evidence_status == "completed",
+                    duration_ms=duration_ms,
+                    tokens_used=total_tokens,
+                    cost_usd=float(total_cost or 0.0),
+                )
+            )
+            OpsService.record_model_outcome(
+                provider_type=provider_type,
+                model_id=model or "unknown",
+                success=evidence_status == "completed",
+                latency_ms=duration_ms,
+                cost_usd=float(total_cost or 0.0),
+                task_type=str(task_key or "agentic_chat"),
+            )
+        except Exception:
+            logger.debug("persistent execution evidence failed", exc_info=True)
 
         # Wire 3: Response Honesty Gate — detect semantic mismatch between
         # tool results and the LLM's text response.  If every tool call failed

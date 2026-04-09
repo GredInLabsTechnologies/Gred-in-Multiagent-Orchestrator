@@ -2,7 +2,7 @@ from .sub_agent import SubAgent as SubAgent, SubAgentConfig as SubAgentConfig
 from .core import (
     OpsTask as OpsTask, OpsPlan as OpsPlan, OpsDraft as OpsDraft, OpsApproved as OpsApproved, OpsRunStatus as OpsRunStatus, OpsRun as OpsRun,
     OpsConfig as OpsConfig, ExecutorReport as ExecutorReport, OpsCreateDraftRequest as OpsCreateDraftRequest, OpsUpdateDraftRequest as OpsUpdateDraftRequest,
-    OpsApproveResponse as OpsApproveResponse, OpsCreateRunRequest as OpsCreateRunRequest, ChildRunRequest as ChildRunRequest, RepoEntry as RepoEntry, RunEvent as RunEvent, RunLogEntry as RunLogEntry,
+    OpsApproveResponse as OpsApproveResponse, OpsCreateRunRequest as OpsCreateRunRequest, OpsResumeRunRequest as OpsResumeRunRequest, ChildRunRequest as ChildRunRequest, RepoEntry as RepoEntry, RunEvent as RunEvent, RunLogEntry as RunLogEntry,
     StatusResponse, UiStatusResponse, VitaminizeResponse,
 )
 from .conversation import (

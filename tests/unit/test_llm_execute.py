@@ -37,6 +37,42 @@ async def test_happy_path(mock_provider, stage):
 
 
 @pytest.mark.asyncio
+@patch("tools.gimo_server.engine.stages.llm_execute.OpsService")
+@patch("tools.gimo_server.engine.stages.llm_execute.StorageService")
+@patch("tools.gimo_server.engine.stages.llm_execute.ObservabilityService")
+@patch("tools.gimo_server.engine.stages.llm_execute.ProviderService")
+async def test_happy_path_records_run_evidence(mock_provider, mock_obs, mock_storage_cls, mock_ops, stage):
+    mock_provider.static_generate = AsyncMock(return_value={
+        "provider": "codex-account",
+        "model": "gpt-5-codex",
+        "content": "print('hello')",
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "tokens_used": 15,
+        "cost_usd": 0.001,
+    })
+    mock_provider.get_config.return_value = MagicMock(
+        providers={
+            "codex-account": MagicMock(provider_type="codex", type="codex", auth_mode="chatgpt")
+        }
+    )
+    mock_storage = MagicMock()
+    mock_storage.cost = MagicMock()
+    mock_storage_cls.return_value = mock_storage
+
+    result = await stage.execute(_make_input())
+
+    assert result.status == "continue"
+    mock_obs.record_workflow_start.assert_called_once()
+    mock_obs.record_node_span.assert_called_once()
+    mock_obs.record_ai_usage.assert_called_once()
+    mock_obs.record_workflow_end.assert_called_once()
+    mock_storage.cost.save_cost_event.assert_called_once()
+    mock_storage.save_trust_event.assert_called_once()
+    mock_ops.record_model_outcome.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_missing_prompt_fails(stage):
     inp = StageInput(run_id="run-llm-002", context={})
     result = await stage.execute(inp)

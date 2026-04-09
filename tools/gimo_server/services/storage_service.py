@@ -107,6 +107,18 @@ class StorageService:
     def get_eval_report(self, run_id: int) -> Optional[Dict[str, Any]]:
         return self.eval.get_eval_report(run_id)
 
+    def list_proofs(self, thread_id: str) -> List[Dict[str, Any]]:
+        if not self.gics:
+            return []
+        try:
+            rows = self.gics.scan(prefix=f"ops:proof:{thread_id}:", include_fields=True)
+        except Exception as exc:
+            logger.error("Failed to list proofs for %s: %s", thread_id, exc)
+            return []
+        proofs = [row.get("fields", {}) for row in rows if isinstance(row.get("fields", {}), dict)]
+        proofs.sort(key=lambda item: (str(item.get("timestamp") or ""), str(item.get("proof_id") or "")))
+        return proofs
+
     def close(self) -> None:
         # GICS lifecycle is managed by GIMO App, so we don't close it here.
         pass

@@ -510,6 +510,29 @@ def test_phase7_merge_gate_policy_review_requires_human(tmp_path):
     assert updated.status == "HUMAN_APPROVAL_REQUIRED"
 
 
+def test_resume_run_route_requeues_same_run(tmp_path, client):
+    _setup_ops_dirs(tmp_path)
+    _, approved = _seed_draft_and_approved(draft_id="d_resume", approved_id="a_resume")
+    run = OpsService.create_run(approved.id)
+    OpsService.update_run_status(run.id, "running", msg="Execution started")
+    OpsService.update_run_status(run.id, "HUMAN_APPROVAL_REQUIRED", msg="Awaiting handover")
+
+    response = client.post(
+        f"/ops/runs/{run.id}/resume",
+        json={"decision": "approve", "edited_state": {"ticket": "R19"}},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == run.id
+    assert payload["status"] == "pending"
+    refreshed = OpsService.get_run(run.id)
+    assert refreshed is not None
+    assert refreshed.last_handover_decision == "approve"
+    assert refreshed.resume_context["human_approval_granted"] is True
+    assert refreshed.resume_context["ticket"] == "R19"
+
+
 def test_phase7_merge_gate_missing_intent_defaults_low_risk_path(tmp_path):
     _setup_ops_dirs(tmp_path)
     draft, approved = _seed_draft_and_approved(draft_id="d11", approved_id="a11")

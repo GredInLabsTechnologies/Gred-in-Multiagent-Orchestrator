@@ -9,7 +9,7 @@ from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.ops_models import (
     ActionDraft,
-    OpsApproved, OpsApproveResponse, OpsRun, OpsCreateRunRequest,
+    OpsApproved, OpsApproveResponse, OpsRun, OpsCreateRunRequest, OpsResumeRunRequest,
     WorkflowExecuteRequest, WorkflowGraph, WorkflowCheckpoint
 )
 from tools.gimo_server.services.ops_service import OpsService
@@ -332,6 +332,39 @@ async def get_run(
     run = OpsService.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
+    return run
+
+
+@router.post(
+    "/runs/{run_id}/resume",
+    response_model=OpsRun,
+    responses={
+        404: {"description": RUN_NOT_FOUND},
+        409: {"description": "Run is not resumable"},
+        422: {"description": "Invalid handover decision"},
+    },
+)
+async def resume_run(
+    request: Request,
+    run_id: str,
+    body: OpsResumeRunRequest,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    OpsService.set_gics(getattr(request.app.state, "gics", None))
+    try:
+        run = OpsService.resume_run(run_id, decision=body.decision, edited_state=body.edited_state)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
+    except RuntimeError as exc:
+        detail = str(exc)
+        if detail.startswith("RUN_NOT_RESUMABLE"):
+            raise HTTPException(status_code=409, detail=detail)
+        if detail.startswith("INVALID_HANDOVER_DECISION"):
+            raise HTTPException(status_code=422, detail=detail)
+        raise HTTPException(status_code=422, detail=detail)
+    audit_log("OPS", f"/ops/runs/{run_id}/resume", body.decision, operation="WRITE", actor=_actor_label(auth))
     return run
 
 

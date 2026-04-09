@@ -5,6 +5,7 @@ import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
+import httpx
 import pytest
 import yaml
 from typer.testing import CliRunner
@@ -211,6 +212,33 @@ def test_audit_aggregates_backend_checks(tmp_path, monkeypatch):
     assert "0 alerts" in result.stdout
     assert "1 dependencies" in result.stdout
     assert "line-2" in result.stdout
+
+
+def test_observe_traces_uses_canonical_trace_id(tmp_path, monkeypatch):
+    _seed_config(tmp_path, monkeypatch)
+    captured: dict[str, object] = {}
+
+    def _fake_api_request(config, method, path, *, params=None):
+        del config
+        captured["method"] = method
+        captured["path"] = path
+        captured["params"] = params
+        return 200, {
+            "items": [{"trace_id": "trace-123", "status": "completed", "duration_ms": 42}],
+            "count": 1,
+        }
+
+    monkeypatch.setattr("gimo_cli.commands.observe.api_request", _fake_api_request)
+
+    result = runner.invoke(gimo_cli.app, ["observe", "traces"], color=False)
+
+    assert result.exit_code == 0
+    assert captured == {
+        "method": "GET",
+        "path": "/ops/observability/traces",
+        "params": {"limit": 10},
+    }
+    assert "trace-123" in result.stdout
 
 
 def test_status_json_emits_machine_readable_payload(tmp_path, monkeypatch):
@@ -504,3 +532,101 @@ def test_watch_json_collects_sse_events(tmp_path, monkeypatch):
     payload = json.loads(result.stdout)
     assert payload[0]["event"] == "run_started"
     assert payload[1]["status"] == "done"
+
+
+def test_stream_events_uses_requested_read_timeout(tmp_path, monkeypatch):
+    config = _seed_config(tmp_path, monkeypatch)
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def raise_for_status(self): return None
+        def iter_lines(self):
+            raise httpx.ReadTimeout("idle")
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            captured["timeout"] = kwargs["timeout"]
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def stream(self, method, url, **kwargs):
+            return _FakeResponse()
+
+    monkeypatch.setattr("gimo_cli.stream.httpx.Client", _FakeClient)
+    monkeypatch.setattr("gimo_cli.stream.resolve_token", lambda _role, _config: None)
+
+    assert list(gimo_cli._stream_events(config, timeout_seconds=5)) == []
+    assert captured["timeout"].read == 5
+
+
+def test_stream_events_treats_keepalive_only_stream_as_idle(tmp_path, monkeypatch):
+    config = _seed_config(tmp_path, monkeypatch)
+    messages: list[str] = []
+    ticks = iter([0.0, 1.0, 2.0, 3.0, 6.1])
+
+    class _FakeResponse:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def raise_for_status(self): return None
+        def iter_lines(self):
+            yield ": keep-alive"
+            yield ": keep-alive"
+            yield ": keep-alive"
+            yield ": keep-alive"
+
+    class _FakeClient:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def stream(self, method, url, **kwargs):
+            return _FakeResponse()
+
+    monkeypatch.setattr("gimo_cli.stream.httpx.Client", _FakeClient)
+    monkeypatch.setattr("gimo_cli.stream.resolve_token", lambda _role, _config: None)
+    monkeypatch.setattr("gimo_cli.stream.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("gimo_cli.stream.console.print", lambda message: messages.append(str(message)))
+
+    assert list(gimo_cli._stream_events(config, timeout_seconds=5)) == []
+    assert messages == ["[yellow]No events received for 5s - stream idle.[/yellow]"]
+
+
+def test_down_uses_health_pid_fallback_when_port_scan_misses_listener(tmp_path, monkeypatch):
+    _seed_config(tmp_path, monkeypatch)
+    killed: list[int] = []
+    health_states = iter([True, True, False])
+
+    monkeypatch.setattr("gimo_cli.commands.server._pid_file", lambda: tmp_path / "server.pid")
+    monkeypatch.setattr("gimo_cli.commands.server._find_pids_on_port", lambda _port: [])
+    monkeypatch.setattr("gimo_cli.commands.server._kill_all_on_port", lambda _port, _url: (0, 0))
+    monkeypatch.setattr("gimo_cli.commands.server.server_healthy", lambda _url, timeout=3.0: next(health_states))
+    monkeypatch.setattr("gimo_cli.commands.server._health_pid", lambda _url, timeout=3.0: 4242)
+    monkeypatch.setattr("gimo_cli.commands.server._kill_pid", lambda pid: killed.append(pid) or True)
+    monkeypatch.setattr("gimo_cli.commands.server._wait_for_server_stop", lambda _url, _port, timeout_seconds=10.0: True)
+    monkeypatch.setattr("gimo_cli.commands.server.time.sleep", lambda _seconds: None)
+
+    result = runner.invoke(gimo_cli.app, ["down"], color=False)
+
+    assert result.exit_code == 0
+    assert killed == [4242]
+    assert "Server stopped" in result.stdout
+
+
+def test_down_fails_if_server_still_healthy_after_health_pid_fallback(tmp_path, monkeypatch):
+    _seed_config(tmp_path, monkeypatch)
+    killed: list[int] = []
+
+    monkeypatch.setattr("gimo_cli.commands.server._pid_file", lambda: tmp_path / "server.pid")
+    monkeypatch.setattr("gimo_cli.commands.server._find_pids_on_port", lambda _port: [])
+    monkeypatch.setattr("gimo_cli.commands.server._kill_all_on_port", lambda _port, _url: (0, 0))
+    monkeypatch.setattr("gimo_cli.commands.server.server_healthy", lambda _url, timeout=3.0: True)
+    monkeypatch.setattr("gimo_cli.commands.server._health_pid", lambda _url, timeout=3.0: 4242)
+    monkeypatch.setattr("gimo_cli.commands.server._kill_pid", lambda pid: killed.append(pid) or True)
+    monkeypatch.setattr("gimo_cli.commands.server._wait_for_server_stop", lambda _url, _port, timeout_seconds=10.0: False)
+    monkeypatch.setattr("gimo_cli.commands.server.time.sleep", lambda _seconds: None)
+
+    result = runner.invoke(gimo_cli.app, ["down"], color=False)
+
+    assert result.exit_code == 1
+    assert killed == [4242]
+    assert "still on port" in result.stdout

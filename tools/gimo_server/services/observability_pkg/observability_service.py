@@ -18,6 +18,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExport
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 
 from ...config import OPS_DATA_DIR
+from ..run_lifecycle import is_active_run_status
 
 
 from opentelemetry.sdk.trace import SpanProcessor
@@ -64,6 +65,8 @@ class UISpanProcessor(SpanProcessor):
         elif kind == "workflow":
             with ObservabilityService._lock:
                 self.ui_metrics["workflows_total"] += 1
+            item["started_at"] = datetime.fromtimestamp(span.start_time / 1e9, tz=timezone.utc).isoformat()
+            item["duration_ms"] = int((span.end_time - span.start_time) / 1e6)
             item["event"] = "end"
 
         self.ui_spans.append(item)
@@ -471,8 +474,6 @@ class ObservabilityService:
     def _compute_run_health_metrics(cls) -> Dict[str, Any]:
         """Best-effort run-health snapshot used for P2 operational SLI/SLO monitoring."""
         now = datetime.now(timezone.utc)
-        active_statuses = {"pending", "running", "awaiting_subagents"}
-
         try:
             from ..ops_service import OpsService
 
@@ -487,7 +488,7 @@ class ObservabilityService:
                 "stuck_run_threshold_seconds": int(cls._stuck_run_threshold_seconds),
             }
 
-        active_runs = [r for r in runs if str(getattr(r, "status", "")) in active_statuses]
+        active_runs = [r for r in runs if is_active_run_status(getattr(r, "status", ""))]
         terminal_runs = [r for r in runs if r not in active_runs]
         stuck_run_ids: List[str] = []
 
@@ -574,16 +575,17 @@ class ObservabilityService:
             trace_obj = traces[t_id]
             trace_obj["spans"].append(span)
             
-            if span["kind"] == "workflow" and span.get("event") != "end":
-                trace_obj["root_span"] = span
-                trace_obj["start_time"] = span["timestamp"]
+            if span["kind"] == "workflow":
+                if trace_obj["root_span"] is None or span.get("event") != "end":
+                    trace_obj["root_span"] = span
                 trace_obj["workflow_id"] = span.get("workflow_id")
-            
+                trace_obj["start_time"] = span.get("started_at", span["timestamp"])
+                if span.get("event") == "end":
+                    trace_obj["status"] = span.get("status", "completed")
+             
             if span["timestamp"] > trace_obj["end_time"]:
                 trace_obj["end_time"] = span["timestamp"]
             
-            if span["kind"] == "workflow" and span.get("event") == "end":
-                 trace_obj["status"] = span.get("status", "completed")
         return traces
 
     @classmethod
@@ -592,14 +594,32 @@ class ObservabilityService:
         for t in traces.values():
             if not t["root_span"] and t["spans"]:
                 t["root_span"] = t["spans"][0]
-            try:
-                start = datetime.fromisoformat(t["start_time"].replace('Z', '+00:00'))
-                end = datetime.fromisoformat(t["end_time"].replace('Z', '+00:00'))
-                t["duration_ms"] = int((end - start).total_seconds() * 1000)
-            except Exception:
-                t["duration_ms"] = 0
+            t["duration_ms"] = cls._resolve_trace_duration_ms(t)
             result.append(t)
         return result
+
+    @classmethod
+    def _resolve_trace_duration_ms(cls, trace_obj: Dict[str, Any]) -> int:
+        root_duration_raw = (trace_obj.get("root_span") or {}).get("duration_ms")
+        root_duration = int(root_duration_raw) if isinstance(root_duration_raw, (int, float)) else 0
+        if root_duration > 0:
+            return root_duration
+
+        node_durations = [
+            int(span.get("duration_ms", 0))
+            for span in trace_obj.get("spans", [])
+            if span.get("kind") == "node" and isinstance(span.get("duration_ms"), (int, float))
+        ]
+        summed_node_duration = sum(d for d in node_durations if d > 0)
+        if summed_node_duration > 0:
+            return summed_node_duration
+
+        try:
+            start = datetime.fromisoformat(str(trace_obj["start_time"]).replace('Z', '+00:00'))
+            end = datetime.fromisoformat(str(trace_obj["end_time"]).replace('Z', '+00:00'))
+            return int((end - start).total_seconds() * 1000)
+        except Exception:
+            return 0
 
     @classmethod
     def list_traces(cls, *, limit: int = 20) -> List[Dict[str, Any]]:
@@ -632,15 +652,19 @@ class ObservabilityService:
         }
         
         for span in raw_spans:
-            if span["kind"] == "workflow" and span.get("event") != "end":
-                trace_obj["root_span"] = span
-                trace_obj["start_time"] = span["timestamp"]
-            if span["kind"] == "workflow" and span.get("event") == "end":
-                trace_obj["status"] = span.get("status", "completed")
-                trace_obj["end_time"] = span["timestamp"]
+            if span["kind"] == "workflow":
+                if trace_obj["root_span"] is None or span.get("event") != "end":
+                    trace_obj["root_span"] = span
+                trace_obj["start_time"] = span.get("started_at", span["timestamp"])
+                trace_obj["workflow_id"] = span.get("workflow_id")
+                if span.get("event") == "end":
+                    trace_obj["status"] = span.get("status", "completed")
+                    trace_obj["end_time"] = span["timestamp"]
 
         if not trace_obj["root_span"] and raw_spans:
              trace_obj["root_span"] = raw_spans[0]
+
+        trace_obj["duration_ms"] = cls._resolve_trace_duration_ms(trace_obj)
 
         return trace_obj
 

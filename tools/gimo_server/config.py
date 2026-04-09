@@ -276,7 +276,7 @@ def _build_settings() -> Settings:
     _migrate_to_unified_credentials()
 
     base_dir = _get_base_dir()
-    repo_root_dir = Path(os.environ.get("ORCH_REPO_ROOT", str(base_dir.parent))).resolve()
+    repo_root_dir = Path(os.environ.get("ORCH_REPO_ROOT", str(base_dir))).resolve()
     repo_registry_path = Path(
         os.environ.get(
             "ORCH_REPO_REGISTRY",

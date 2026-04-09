@@ -7,7 +7,7 @@ from io import StringIO
 import pytest
 from rich.console import Console
 
-from gimo_cli.render import TableSpec, render_response
+from gimo_cli.render import TRACES, TableSpec, render_response
 
 
 @pytest.fixture(autouse=True)
@@ -100,3 +100,12 @@ def test_render_summary_line(_patch_console):
     render_response({"by_model": [{"model": "gpt-4", "cost": "1.5"}], "total_savings": 3.14}, spec)
     output = _patch_console.getvalue()
     assert "3.14" in output
+
+
+def test_render_traces_uses_trace_id_column(_patch_console):
+    render_response(
+        {"items": [{"trace_id": "trace-123", "status": "completed", "duration_ms": 42}], "count": 1},
+        TRACES,
+    )
+    output = _patch_console.getvalue()
+    assert "trace-123" in output

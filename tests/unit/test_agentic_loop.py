@@ -376,6 +376,47 @@ async def test_run_loop_persists_execution_proofs(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_run_loop_persists_completion_proof_without_tool_calls(tmp_path: Path):
+    gics = _FakeGics()
+    adapter = AsyncMock()
+    adapter.chat_with_tools = AsyncMock(
+        return_value={
+            "content": "done",
+            "tool_calls": [],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "finish_reason": "stop",
+        }
+    )
+
+    with patch.object(AgenticLoopService, "_get_gics", return_value=gics):
+        result = await AgenticLoopService._run_loop(
+            adapter=adapter,
+            provider_id="test-provider",
+            model="test-model",
+            workspace_root=str(tmp_path),
+            token="system",
+            mood="neutral",
+            mood_profile=get_mood_profile("neutral"),
+            messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}],
+            max_turns=1,
+            temperature=0.0,
+            tools=[],
+            task_key="agentic_chat",
+            thread_id="thread_no_tools",
+            persist_conversation=False,
+            allow_hitl=False,
+        )
+
+    assert result.response == "done"
+    proof_keys = [key for key in gics.records if key.startswith("ops:proof:thread_no_tools:")]
+    assert len(proof_keys) == 1
+    proof = gics.records[proof_keys[0]]
+    assert proof["tool_name"] == "agentic_chat"
+    assert proof["executor_type"] == "model"
+    assert proof["executor_id"] == "test-provider:test-model"
+
+
+@pytest.mark.asyncio
 async def test_run_loop_recovers_from_corrupt_proof_history_and_still_persists_new_proofs(tmp_path: Path):
     gics = _FakeGics(
         {

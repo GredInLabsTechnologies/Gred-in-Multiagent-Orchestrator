@@ -2,8 +2,8 @@
 setlocal EnableDelayedExpansion
 
 :: =====================================================================
-::  GIMO CLI — Unified Launcher
-::  Usage:  gimo [up|down|restart|doctor|bootstrap|mcp|help]
+::  GIMO CLI - Unified Launcher
+::  Usage: gimo [up|down|doctor|bootstrap|mcp|help]
 :: =====================================================================
 
 set "ROOT_DIR=%~dp0"
@@ -40,11 +40,10 @@ if /I "%CMD%"=="help"      goto :cmd_help
 if /I "%CMD%"=="-h"        goto :cmd_help
 if /I "%CMD%"=="--help"    goto :cmd_help
 
-echo [ERROR] Comando desconocido: %CMD%
-goto :cmd_help
+goto :cmd_cli
 
 :: =============================================================
-::  UP — Interactive launcher with multiplexed logs
+::  UP - Interactive launcher with multiplexed logs
 :: =============================================================
 :cmd_up
 TITLE GIMO
@@ -64,10 +63,10 @@ if "!NEED_BOOTSTRAP!"=="1" (
 :: Clean stale __pycache__ from prior runs
 for /d /r "tools\gimo_server" %%D in (__pycache__) do if exist "%%D" rd /s /q "%%D" >nul 2>&1
 
-:: R18 Change 10 — checked-hash bytecode invalidation + build provenance.
-:: Rebuilds .pyc with PEP 552 hash-based invalidation so a same-second edit
-:: cannot mask stale bytecode (bpo-31772). GIMO_BUILD_SHA is injected so the
-:: running process reports the exact commit it was booted from.
+:: R18 Change 10 - checked-hash bytecode invalidation + build provenance.
+:: Rebuild .pyc with PEP 552 hash-based invalidation so a same-second edit
+:: cannot mask stale bytecode. GIMO_BUILD_SHA is injected so the running
+:: process reports the exact commit it was booted from.
 for /f %%S in ('git rev-parse HEAD 2^>nul') do set "GIMO_BUILD_SHA=%%S"
 "%PYTHON_EXE%" -m compileall -q --invalidation-mode checked-hash tools\gimo_server >nul 2>&1
 
@@ -79,21 +78,24 @@ call :sync_env_local
 exit /b %ERRORLEVEL%
 
 :: =============================================================
-::  DOWN — Kill all GIMO processes and free ports
+::  DOWN - Kill all GIMO processes and free ports
 :: =============================================================
 :cmd_down
 TITLE GIMO Down
-echo [1/2] Cerrando procesos GIMO...
+echo [1/3] Parando backend canonico via gimo.py down...
+call "%PYTHON_EXE%" gimo.py down >nul 2>&1
+
+echo [2/3] Cerrando procesos launcher GIMO...
 taskkill /F /FI "WINDOWTITLE eq GIMO*" /T >nul 2>&1
 
-echo [2/2] Liberando puertos 9325, 5173, 3000...
-"%PYTHON_EXE%" scripts\ops\kill_port.py 9325 5173 3000 >nul 2>&1
+echo [3/3] Liberando puertos auxiliares 5173 y 3000...
+"%PYTHON_EXE%" scripts\ops\kill_port.py 5173 3000 >nul 2>&1
 
 echo [OK] GIMO detenido.
 exit /b 0
 
 :: =============================================================
-::  DOCTOR — Check prerequisites and health
+::  DOCTOR - Check prerequisites and health
 :: =============================================================
 :cmd_doctor
 TITLE GIMO Doctor
@@ -122,7 +124,7 @@ if exist "tools\orchestrator_ui\.env.local" (echo [OK] UI .env.local) else (echo
 
 powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:9325/auth/check' -TimeoutSec 2; Write-Output ('[OK] Backend responde (HTTP ' + $r.StatusCode + ')') } catch { Write-Output '[INFO] Backend no responde en 9325' }"
 
-:: R18 Change 10 — build provenance freshness gate.
+:: R18 Change 10 - build provenance freshness gate.
 for /f %%S in ('git rev-parse HEAD 2^>nul') do set "DISK_SHA=%%S"
 powershell -NoProfile -Command "try { $r=Invoke-RestMethod -Uri 'http://127.0.0.1:9325/ops/health/info' -TimeoutSec 2; if ($r.git_sha -eq $env:DISK_SHA) { Write-Output ('[OK] Build provenance fresh (git_sha=' + $r.git_sha.Substring(0,8) + ')') } else { Write-Output ('[WARN] Stale deploy: running=' + $r.git_sha.Substring(0,8) + ' disk=' + $env:DISK_SHA.Substring(0,8)) } } catch { Write-Output '[INFO] /ops/health/info no responde' }"
 
@@ -222,23 +224,31 @@ echo [OK] Bootstrap completado. Ejecuta: gimo
 exit /b 0
 
 :: =============================================================
-::  MCP — Standalone MCP server
+::  MCP - Standalone MCP server
 :: =============================================================
 :cmd_mcp
 TITLE GIMO MCP Server
 set "PYTHONUNBUFFERED=1"
 echo =======================================================
-echo   GIMO MCP Server ^(SSE^) — http://localhost:8000/mcp/sse
+echo   GIMO MCP Server ^(SSE^) - http://localhost:8000/mcp/sse
 echo =======================================================
 "%PYTHON_EXE%" -m uvicorn tools.gimo_server.main:create_app --factory --host 0.0.0.0 --port 8000
 exit /b %ERRORLEVEL%
 
 :: =============================================================
-::  CLAUDE — Launch Claude Code CLI
+::  CLAUDE - Launch Claude Code CLI
 :: =============================================================
 :cmd_claude
 TITLE GIMO Claude
 powershell -ExecutionPolicy Bypass -Command "claude !EXTRA_ARGS!"
+exit /b %ERRORLEVEL%
+
+:: =============================================================
+::  CLI - Delegate non-launcher commands to the Python CLI
+:: =============================================================
+:cmd_cli
+TITLE GIMO CLI
+call "%PYTHON_EXE%" gimo.py %CMD% !EXTRA_ARGS!
 exit /b %ERRORLEVEL%
 
 :: =============================================================
@@ -248,7 +258,7 @@ exit /b %ERRORLEVEL%
 echo.
 echo   GIMO CLI
 echo.
-echo   Usage:  gimo [command] [options]
+echo   Usage: gimo [command] [options]
 echo.
 echo   Commands:
 echo     up, start      Lanza todo ^(interactive, logs unificados^)
@@ -256,6 +266,7 @@ echo     down, stop     Para todos los servicios
 echo     doctor         Verifica prerequisitos
 echo     bootstrap      Setup completo del entorno
 echo     mcp            MCP server standalone ^(puerto 8000^)
+echo     ^<otros^>        Delegado a python gimo.py ...
 echo     help           Muestra esta ayuda
 echo.
 echo   Options for 'up':
@@ -263,6 +274,7 @@ echo     --no-web       No lanzar apps/web
 echo     --no-frontend  No lanzar la UI
 echo     --backend-only Solo backend
 echo.
+"%PYTHON_EXE%" gimo.py --help
 exit /b 0
 
 :: =============================================================

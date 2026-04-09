@@ -28,6 +28,10 @@ def _proof_chain_payload(
     cost_usd: float,
     timestamp: float,
     prev_chain_hash: str,
+    subject_type: str,
+    subject_id: str,
+    executor_type: str,
+    executor_id: str,
 ) -> str:
     return _canonical_json(
         {
@@ -41,6 +45,10 @@ def _proof_chain_payload(
             "cost_usd": float(cost_usd),
             "timestamp": float(timestamp),
             "prev_chain_hash": prev_chain_hash,
+            "subject_type": subject_type,
+            "subject_id": subject_id,
+            "executor_type": executor_type,
+            "executor_id": executor_id,
         }
     )
 
@@ -57,6 +65,10 @@ class ExecutionProof:
     cost_usd: float
     timestamp: float
     chain_hash: str
+    subject_type: str = "thread"
+    subject_id: str = ""
+    executor_type: str = "tool"
+    executor_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -106,7 +118,19 @@ class ExecutionProofChain:
 
         return cls(thread_id=thread_id, proofs=ordered)
 
-    def append(self, tool_name: str, args: Any, result: Any, mood: str, cost: float = 0.0) -> ExecutionProof:
+    def append(
+        self,
+        tool_name: str,
+        args: Any,
+        result: Any,
+        mood: str,
+        cost: float = 0.0,
+        *,
+        subject_type: str = "thread",
+        subject_id: str | None = None,
+        executor_type: str = "tool",
+        executor_id: str | None = None,
+    ) -> ExecutionProof:
         prev = self._proofs[-1] if self._proofs else None
         input_hash = _sha256_text(_canonical_json(args))
         output_hash = _sha256_text(_canonical_json(result))
@@ -127,6 +151,10 @@ class ExecutionProofChain:
                 cost_usd=normalized_cost,
                 timestamp=timestamp,
                 prev_chain_hash=prev_chain_hash,
+                subject_type=str(subject_type or "thread"),
+                subject_id=str(subject_id or self.thread_id),
+                executor_type=str(executor_type or "tool"),
+                executor_id=str(executor_id or tool_name),
             )
         )
         proof = ExecutionProof(
@@ -140,6 +168,10 @@ class ExecutionProofChain:
             cost_usd=normalized_cost,
             timestamp=timestamp,
             chain_hash=chain_hash,
+            subject_type=str(subject_type or "thread"),
+            subject_id=str(subject_id or self.thread_id),
+            executor_type=str(executor_type or "tool"),
+            executor_id=str(executor_id or tool_name),
         )
         self._proofs.append(proof)
         return proof
@@ -165,12 +197,21 @@ class ExecutionProofChain:
                     cost_usd=proof.cost_usd,
                     timestamp=proof.timestamp,
                     prev_chain_hash=prev_chain_hash,
+                    subject_type=str(proof.subject_type or "thread"),
+                    subject_id=str(proof.subject_id or proof.thread_id),
+                    executor_type=str(proof.executor_type or "tool"),
+                    executor_id=str(proof.executor_id or proof.tool_name),
                 )
             )
             if proof.chain_hash != expected_chain:
                 return False
             prev = proof
         return True
+
+    def verification_state(self) -> str:
+        if not self._proofs:
+            return "absent"
+        return "present" if self.verify() else "invalid"
 
     def to_list(self) -> List[ExecutionProof]:
         return list(self._proofs)

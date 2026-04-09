@@ -193,3 +193,23 @@ class TrustStorage:
 
     def query_dimension(self, dimension_key: str) -> Optional[Dict[str, Any]]:
         return self.get_trust_record(dimension_key)
+
+    def get_circuit_breaker_config(self, dimension_key: str) -> Optional[Dict[str, Any]]:
+        if not self.gics:
+            return None
+
+        try:
+            result = self.gics.get(f"cb:{dimension_key}")
+            fields = result.get("fields", {}) if isinstance(result, dict) else {}
+            if fields:
+                return {
+                    "dimension_key": dimension_key,
+                    "window": int(fields.get("window", 0)),
+                    "failure_threshold": int(fields.get("failure_threshold", 0)),
+                    "recovery_probes": int(fields.get("recovery_probes", 0)),
+                    "cooldown_seconds": int(fields.get("cooldown_seconds", 0)),
+                }
+        except Exception as e:
+            logger.error("Failed to get circuit breaker config from GICS for %s: %s", dimension_key, e)
+
+        return None

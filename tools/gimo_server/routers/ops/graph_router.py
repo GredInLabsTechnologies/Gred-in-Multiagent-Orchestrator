@@ -7,6 +7,7 @@ from ...security import check_rate_limit
 from ...security.auth import AuthContext
 from ...services.ops_service import OpsService
 from ...services.plan_graph_builder import build_graph_from_ops_plan
+from ...services.run_lifecycle import is_active_run_status
 from ..ops.common import require_read, _WORKFLOW_ENGINES
 
 router = APIRouter(prefix="/ops/graph", tags=["graph"])
@@ -26,7 +27,7 @@ def _get_graph_for_custom_plan():
 
 def _get_graph_for_active_runs():
     runs = OpsService.list_runs()
-    active_runs = [r for r in runs if r.status in ("pending", "running", "awaiting_subagents", "awaiting_review")]
+    active_runs = [r for r in runs if is_active_run_status(getattr(r, "status", ""))]
     if active_runs:
         return build_graph_from_ops_plan(active_runs[0])
     return None

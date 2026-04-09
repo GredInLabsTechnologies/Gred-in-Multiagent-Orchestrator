@@ -54,8 +54,69 @@ def test_observability_service_records_metrics_and_traces():
     # so we get 1 aggregated trace object containing multiple spans
     assert len(traces) >= 1
     trace_obj = traces[0]
+    assert trace_obj["trace_id"]
+    assert trace_obj["duration_ms"] >= 0
     assert len(trace_obj["spans"]) >= 2  # at least 2 node spans recorded
     assert any(s["kind"] == "node" for s in trace_obj["spans"])
+
+
+def test_list_traces_prefers_root_workflow_duration():
+    raw_spans = [
+        {
+            "kind": "node",
+            "trace_id": "trace-root",
+            "timestamp": "2026-04-08T10:00:05+00:00",
+            "status": "completed",
+            "duration_ms": 5000,
+        },
+        {
+            "kind": "workflow",
+            "trace_id": "trace-root",
+            "workflow_id": "wf-root",
+            "timestamp": "2026-04-08T10:00:20+00:00",
+            "started_at": "2026-04-08T10:00:00+00:00",
+            "status": "completed",
+            "duration_ms": 20000,
+            "event": "end",
+        },
+    ]
+
+    grouped = ObservabilityService._group_spans(raw_spans)
+    trace_obj = ObservabilityService._finalize_traces(grouped)[0]
+
+    assert trace_obj["trace_id"] == "trace-root"
+    assert trace_obj["workflow_id"] == "wf-root"
+    assert trace_obj["start_time"] == "2026-04-08T10:00:00+00:00"
+    assert trace_obj["duration_ms"] == 20000
+    assert trace_obj["status"] == "completed"
+
+
+def test_list_traces_falls_back_to_node_duration_when_workflow_duration_is_zero():
+    raw_spans = [
+        {
+            "kind": "node",
+            "trace_id": "trace-node-fallback",
+            "timestamp": "2026-04-08T10:00:05+00:00",
+            "status": "completed",
+            "duration_ms": 95090,
+        },
+        {
+            "kind": "workflow",
+            "trace_id": "trace-node-fallback",
+            "workflow_id": "wf-node-fallback",
+            "timestamp": "2026-04-08T10:00:06+00:00",
+            "started_at": "2026-04-08T10:00:00+00:00",
+            "status": "completed",
+            "duration_ms": 0,
+            "event": "end",
+        },
+    ]
+
+    grouped = ObservabilityService._group_spans(raw_spans)
+    trace_obj = ObservabilityService._finalize_traces(grouped)[0]
+
+    assert trace_obj["root_span"]["kind"] == "workflow"
+    assert trace_obj["duration_ms"] == 95090
 @pytest.mark.asyncio
 async def test_provider_service_returns_metrics():
     # Mock adapter response

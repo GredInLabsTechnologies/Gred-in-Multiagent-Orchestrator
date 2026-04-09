@@ -53,6 +53,24 @@ def server_healthy(url: str, timeout: float = 3.0) -> bool:
         return False
 
 
+def _health_pid(url: str, timeout: float = 3.0) -> int | None:
+    """Best-effort server PID from GET /health payload."""
+    try:
+        resp = httpx.get(f"{url}/health", timeout=timeout)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        pid = data.get("pid")
+        if isinstance(pid, int) and pid > 0:
+            return pid
+        if isinstance(pid, str) and pid.isdigit():
+            parsed = int(pid)
+            return parsed if parsed > 0 else None
+    except Exception:
+        return None
+    return None
+
+
 def _is_gimo_server(url: str, timeout: float = 3.0) -> bool:
     """Check if the server at URL is specifically a GIMO server (has server marker)."""
     try:
@@ -229,6 +247,14 @@ def _kill_all_on_port(port: int, url: str) -> tuple[int, int]:
     for pid in remaining:
         _kill_pid(pid)
 
+    # Step 5: Fallback by authoritative /health pid for orphaned worker cases.
+    # On Windows + multiprocessing/reload, port scans can report stale/parent
+    # PIDs while the live serving worker remains.
+    runtime_pid = _health_pid(url, timeout=1.5)
+    if runtime_pid:
+        if _kill_pid(runtime_pid):
+            killed += 1
+
     return (max(found, 1) if graceful else found, killed + (1 if graceful and found == 0 else 0))
 
 
@@ -240,6 +266,23 @@ def _port_is_free(port: int) -> bool:
     the port as free (the new process can bind with SO_REUSEADDR).
     """
     return len(_find_pids_on_port(port)) == 0
+
+
+def _wait_for_server_stop(url: str, port: int, timeout_seconds: float = 10.0) -> bool:
+    """Wait until server is consistently down (not just a transient probe miss)."""
+    deadline = time.time() + timeout_seconds
+    consecutive_down = 0
+    while time.time() < deadline:
+        port_busy = bool(_find_pids_on_port(port))
+        healthy = server_healthy(url, timeout=1.0)
+        if not port_busy and not healthy:
+            consecutive_down += 1
+            if consecutive_down >= 3:
+                return True
+        else:
+            consecutive_down = 0
+        time.sleep(0.5)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -414,10 +457,18 @@ def down(
     # Clean PID file
     _pid_file().unlink(missing_ok=True)
 
-    # Verify
-    time.sleep(0.5)
+    # Verify with stability window to avoid shutdown race false-positives.
     remaining = _find_pids_on_port(port)
-    if remaining:
+    runtime_alive = server_healthy(url, timeout=1.5)
+    if runtime_alive:
+        runtime_pid = _health_pid(url, timeout=1.5)
+        if runtime_pid:
+            _kill_pid(runtime_pid)
+            time.sleep(0.5)
+            remaining = _find_pids_on_port(port)
+            runtime_alive = server_healthy(url, timeout=1.5)
+
+    if remaining or runtime_alive or (not _wait_for_server_stop(url, port, timeout_seconds=8.0)):
         console.print(f"[red][X] {len(remaining)} process(es) still on port {port}: {remaining}[/red]")
         console.print("[yellow]Try: taskkill /F /PID <pid> (Windows) or kill -9 <pid> (Unix)[/yellow]")
         raise typer.Exit(1)

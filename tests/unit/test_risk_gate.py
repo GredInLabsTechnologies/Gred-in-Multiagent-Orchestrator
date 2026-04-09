@@ -40,6 +40,18 @@ async def test_medium_risk_halts(gate):
 
 
 @pytest.mark.asyncio
+async def test_medium_risk_continues_after_human_approval(gate):
+    inp = _make_input(risk_score=45.0)
+    inp.context["human_approval_granted"] = True
+
+    result = await gate.execute(inp)
+
+    assert result.status == "continue"
+    assert result.artifacts["execution_decision"] == "AUTO_RUN_ELIGIBLE"
+    assert result.artifacts["human_approval_granted"] is True
+
+
+@pytest.mark.asyncio
 async def test_high_risk_fails(gate):
     """Risk above review_max (60) should fail."""
     result = await gate.execute(_make_input(risk_score=75.0))

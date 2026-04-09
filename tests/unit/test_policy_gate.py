@@ -86,6 +86,20 @@ async def test_policy_review_halts(mock_policy_svc, mock_intent_svc, gate, base_
 @pytest.mark.asyncio
 @patch("tools.gimo_server.engine.stages.policy_gate.IntentClassificationService")
 @patch("tools.gimo_server.engine.stages.policy_gate.RuntimePolicyService")
+async def test_policy_review_continues_after_human_approval(mock_policy_svc, mock_intent_svc, gate, base_input):
+    base_input.context["human_approval_granted"] = True
+    mock_policy_svc.evaluate_draft_policy.return_value = FakePolicyDecision(decision="review")
+    mock_intent_svc.evaluate.return_value = FakeIntentAudit(execution_decision="AUTO_RUN_ELIGIBLE")
+
+    result = await gate.execute(base_input)
+    assert result.status == "continue"
+    assert result.artifacts["execution_decision"] == "AUTO_RUN_ELIGIBLE"
+    assert result.artifacts["human_approval_granted"] is True
+
+
+@pytest.mark.asyncio
+@patch("tools.gimo_server.engine.stages.policy_gate.IntentClassificationService")
+@patch("tools.gimo_server.engine.stages.policy_gate.RuntimePolicyService")
 async def test_intent_forbidden_scope_fails(mock_policy_svc, mock_intent_svc, gate, base_input):
     mock_policy_svc.evaluate_draft_policy.return_value = FakePolicyDecision(decision="allow")
     mock_intent_svc.evaluate.return_value = FakeIntentAudit(

@@ -98,7 +98,7 @@ ANALYTICS = TableSpec(
 
 TRACES = TableSpec(
     title="Traces",
-    columns=["id", "status", "duration_ms"],
+    columns=["trace_id", "status", "duration_ms"],
     unwrap="items",
     empty_msg="No traces recorded yet.",
 )

@@ -12,13 +12,13 @@ from .git_service import GitService
 from .notice_policy_service import NoticePolicyService
 from .ops_service import OpsService
 from .provider_service_impl import ProviderService
+from .run_lifecycle import is_active_run_status, is_terminal_run_status
 from .storage_service import StorageService
 
 logger = logging.getLogger("orchestrator.services.operator_status")
 
 
 class OperatorStatusService:
-    _TERMINAL_RUN_STATUSES = {"done", "error", "cancelled"}
 
     @classmethod
     def _repo_root(cls, workspace_override: str | None = None) -> Path:
@@ -74,8 +74,10 @@ class OperatorStatusService:
     @classmethod
     def _active_run_snapshot(cls) -> tuple[str | None, str | None, str | None]:
         for run in OpsService.list_runs():
+            if is_terminal_run_status(run.status):
+                continue
             status = str(run.status or "")
-            if status in cls._TERMINAL_RUN_STATUSES:
+            if not is_active_run_status(status):
                 continue
             return run.id, status, getattr(run, "stage", None)
         return None, None, None

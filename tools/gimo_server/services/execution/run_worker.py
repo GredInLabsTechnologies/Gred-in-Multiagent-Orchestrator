@@ -26,6 +26,7 @@ from ..critic_service import CriticService
 from ..quality_service import QualityService
 from ..app_session_service import AppSessionService
 from ..repo_recon_service import RepoReconService
+from ..run_lifecycle import is_active_run_status
 
 logger = logging.getLogger("orchestrator.run_worker")
 
@@ -185,10 +186,7 @@ class RunWorker:
 
     def _is_still_active(self, run_id: str) -> bool:
         run = OpsService.get_run(run_id)
-        return run is not None and run.status in (
-            "pending", "running", "awaiting_subagents", "awaiting_review",
-            "HUMAN_APPROVAL_REQUIRED",
-        )
+        return run is not None and is_active_run_status(run.status)
 
     # --- LEGACY PATHS REMOVED (OBSOLETE) ---
     @staticmethod
