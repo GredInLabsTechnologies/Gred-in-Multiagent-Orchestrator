@@ -20,6 +20,8 @@ router = APIRouter(prefix="/threads", tags=["conversation"])
 class ChatMessageBody(BaseModel):
     """Body for POST endpoints that accept user content."""
     content: str
+    provider: str | None = None
+    model: str | None = None
 
 
 def _merge_plan_context(thread: GimoThread, plan_data: dict) -> dict:
@@ -201,6 +203,8 @@ async def chat_message(
             user_message=body.content,
             workspace_root=thread.workspace_root,
             token=token,
+            provider=body.provider,
+            model=body.model,
         )
     except ThreadExecutionBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

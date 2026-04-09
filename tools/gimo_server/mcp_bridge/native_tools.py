@@ -492,12 +492,21 @@ def register_native_tools(mcp: FastMCP):
             from .bridge import proxy_to_api
             # R21: MCP-originated drafts are cognitive_agent so policy gating
             # whitelists them at fallback_to_most_restrictive_human_review.
+            draft_context: dict = {"operator_class": "cognitive_agent", "surface_type": "mcp"}
+            draft_provider = "mcp"
+            if target_agent_id and target_agent_id != "auto" and target_agent_id.startswith("ollama_"):
+                ollama_model = target_agent_id[len("ollama_"):].replace("_", ":", 1)
+                draft_context["provider"] = "ollama-local"
+                draft_context["model"] = ollama_model
+                draft_provider = "ollama-local"
+            elif target_agent_id and target_agent_id != "auto":
+                draft_context["selected_provider"] = target_agent_id
             result = await proxy_to_api(
                 "POST", "/ops/drafts",
                 __body={
                     "prompt": task_instructions,
-                    "provider": "mcp",
-                    "context": {"operator_class": "cognitive_agent", "surface_type": "mcp"},
+                    "provider": draft_provider,
+                    "context": draft_context,
                 },
             )
             return result
@@ -531,12 +540,29 @@ def register_native_tools(mcp: FastMCP):
             # 1. Create draft via HTTP (no LLM — instant)
             # R21: MCP-originated drafts are cognitive_agent so policy gating
             # whitelists them at fallback_to_most_restrictive_human_review.
+            #
+            # When target_agent_id is an Ollama agent (e.g. "ollama_qwen2.5-coder_3b"),
+            # decompose it into provider + model so the routing pipeline honours
+            # the caller's selection instead of falling back to the active provider.
+            draft_context: dict = {"operator_class": "cognitive_agent", "surface_type": "mcp"}
+            draft_provider = "mcp_auto"
+            if target_agent_id and target_agent_id != "auto" and target_agent_id.startswith("ollama_"):
+                # Convention: agent_id = "ollama_{model.replace(':', '_')}"
+                ollama_model = target_agent_id[len("ollama_"):].replace("_", ":", 1)
+                # "provider" must match the key in provider.json ("ollama-local"),
+                # NOT the provider_type ("ollama_local"). The resolver does
+                # cfg.providers.get(effective_provider) with this exact string.
+                draft_context["provider"] = "ollama-local"
+                draft_context["model"] = ollama_model
+                draft_provider = "ollama-local"
+            elif target_agent_id and target_agent_id != "auto":
+                draft_context["selected_provider"] = target_agent_id
             draft_result = await proxy_to_api(
                 "POST", "/ops/drafts",
                 __body={
                     "prompt": task_instructions,
-                    "provider": "mcp_auto",
-                    "context": {"operator_class": "cognitive_agent", "surface_type": "mcp"},
+                    "provider": draft_provider,
+                    "context": draft_context,
                 },
             )
             # Extract draft ID from proxy response (format: "✅ Success (201):\n{json}")
@@ -698,13 +724,23 @@ def register_native_tools(mcp: FastMCP):
             import os
             from tools.gimo_server.services.agent_broker_service import AgentBrokerService, BrokerTaskDescriptor
             ws = workspace_path or os.environ.get("ORCH_REPO_ROOT", ".")
+            # Resolve Ollama agent IDs to provider config keys.
+            # Agent IDs follow "ollama_{model.replace(':', '_')}" convention
+            # but AgentBrokerService needs the provider.json key ("ollama-local").
+            resolved_provider = provider
+            resolved_model = model
+            if provider and provider.startswith("ollama_"):
+                resolved_model = provider[len("ollama_"):].replace("_", ":", 1)
+                resolved_provider = "ollama-local"
+            elif provider == "ollama":
+                resolved_provider = "ollama-local"
             result = await AgentBrokerService.spawn_governed_agent(
                 BrokerTaskDescriptor(
                     name=name,
                     task=task,
                     role=role,
-                    preferred_provider=provider,
-                    preferred_model=model,
+                    preferred_provider=resolved_provider,
+                    preferred_model=resolved_model,
                     execution_policy=execution_policy,
                     workspace_path=ws,
                     parent_id="mcp",
@@ -762,7 +798,7 @@ def register_native_tools(mcp: FastMCP):
             return f"Search error: {e}"
 
     @mcp.tool()
-    async def gimo_chat(message: str, thread_id: str = "", workspace_root: str = "") -> str:
+    async def gimo_chat(message: str, thread_id: str = "", workspace_root: str = "", provider: str = "", model: str = "") -> str:
         """Send a message to GIMO's agentic chat (fire-and-return).
 
         Because the agentic loop can take minutes (multi-turn LLM + tool execution)
@@ -771,6 +807,11 @@ def register_native_tools(mcp: FastMCP):
         with the thread_id. Callers must poll the thread to retrieve results.
 
         Creates a new thread if thread_id is empty.
+
+        Provider/model routing:
+          - Leave empty to use the default orchestrator provider.
+          - Pass an Ollama agent ID (e.g. "ollama_qwen2.5-coder_3b") as provider
+            to route to a local model.
 
         Polling contract:
           - GET /ops/threads/{thread_id} returns the full thread including all turns.
@@ -837,12 +878,26 @@ def register_native_tools(mcp: FastMCP):
                 except Exception:
                     pass
 
+            # Resolve Ollama agent IDs for routing
+            resolved_provider = provider
+            resolved_model = model
+            if provider and provider.startswith("ollama_"):
+                resolved_model = provider[len("ollama_"):].replace("_", ":", 1)
+                resolved_provider = "ollama-local"
+            elif provider == "ollama":
+                resolved_provider = "ollama-local"
+
             async def _background_chat():
                 try:
                     async with httpx.AsyncClient(timeout=300.0) as bg_client:
+                        chat_body: dict = {"content": message}
+                        if resolved_provider:
+                            chat_body["provider"] = resolved_provider
+                        if resolved_model:
+                            chat_body["model"] = resolved_model
                         chat_resp = await bg_client.post(
                             f"{BACKEND_URL}/ops/threads/{captured_thread_id}/chat",
-                            json={"content": message},
+                            json=chat_body,
                             headers=captured_headers,
                         )
                         if chat_resp.status_code >= 400:

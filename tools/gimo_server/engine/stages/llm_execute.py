@@ -135,7 +135,12 @@ class LlmExecute(ExecutionStage):
         if not prompt:
             return StageOutput(status="fail", artifacts={"error": "Missing prompt in context"}, error="Missing prompt in context")
 
-        gen_context = input.context.get("gen_context", {})
+        gen_context = dict(input.context.get("gen_context", {}) or {})
+        # Propagate provider/model routing from the run context into gen_context
+        # so _resolve_effective_provider_and_model honours target_agent selection.
+        for _routing_key in ("provider", "model", "selected_provider", "selected_model"):
+            if _routing_key not in gen_context and _routing_key in input.context:
+                gen_context[_routing_key] = input.context[_routing_key]
         multi_pass = input.context.get("ace_multi_pass", False)
         raw_passes = int(input.context.get("ace_max_passes", 3)) if multi_pass else 1
         max_passes = min(raw_passes, _ACE_MAX_PASSES_CEILING)

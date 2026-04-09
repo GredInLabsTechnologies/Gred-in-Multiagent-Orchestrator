@@ -15,7 +15,6 @@ from ..providers.catalog_ollama_helpers import (
 )
 from ._base import (
     ProviderCatalogBase,
-    _OLLAMA_RECOMMENDED,
     _mock_mode_enabled,
     _fallback_models_for,
 )

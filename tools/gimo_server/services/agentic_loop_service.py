@@ -1407,8 +1407,13 @@ class AgenticLoopService:
         workspace_root: str,
         token: str = "system",
         session_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> AgenticResult:
-        adapter, provider_id, model, canonical_type = _resolve_orchestrator_adapter()
+        if provider and provider not in ("", "auto"):
+            adapter, provider_id, model, canonical_type = _resolve_bound_adapter(provider, model or "auto", True)
+        else:
+            adapter, provider_id, model, canonical_type = _resolve_orchestrator_adapter()
         thread = ConversationService.get_thread(thread_id)
         if not thread:
             raise RuntimeError(f"Thread {thread_id} not found")
@@ -1482,6 +1487,8 @@ class AgenticLoopService:
         workspace_root: str,
         token: str = "system",
         session_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> AgenticResult:
         reservation = cls.reserve_thread_execution(thread_id)
         owner_id = str(reservation.get("owner_id") or "")
@@ -1493,6 +1500,8 @@ class AgenticLoopService:
                 workspace_root=workspace_root,
                 token=token,
                 session_id=session_id,
+                provider=provider,
+                model=model,
             )
         finally:
             try:

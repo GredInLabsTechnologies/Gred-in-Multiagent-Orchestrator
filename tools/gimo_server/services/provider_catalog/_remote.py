@@ -19,10 +19,13 @@ from ..providers.metadata import OPENAI_COMPAT_CATALOG_TYPES
 from ...security import audit_log
 from ._base import (
     ProviderCatalogBase,
-    _OLLAMA_RECOMMENDED,
     _DEFAULT_PROVIDER_MODELS,
     _mock_mode_enabled,
     _fallback_models_for,
+)
+from ._openrouter_discovery import (
+    get_ollama_recommended as _get_dynamic_ollama_recommended,
+    FALLBACK_RECOMMENDED as _OLLAMA_FALLBACK,
 )
 from ._cli_account import _fetch_claude_cli_models
 
@@ -101,11 +104,17 @@ class RemoteFetchMixin:
             return cls._handle_mock_mode_catalog(canonical)
 
         if canonical == "ollama_local":
+            # Dynamic discovery via OpenRouter (free, no API key).
+            # Falls back to a static list if OpenRouter is unreachable.
+            try:
+                recommended = await _get_dynamic_ollama_recommended()
+            except Exception:
+                recommended = list(_OLLAMA_FALLBACK)
             return [
                 cls._normalize_model(
                     model_id=m["id"], label=m.get("label"),
                     downloadable=True, quality_tier=m.get("quality_tier"),
-                ) for m in _OLLAMA_RECOMMENDED
+                ) for m in recommended
             ], warnings
 
         # Claude account mode: try dynamic discovery via `claude api get /v1/models`.
@@ -150,7 +159,7 @@ class RemoteFetchMixin:
                 cls._normalize_model(
                     model_id=m["id"], label=m.get("label"),
                     downloadable=True, quality_tier=m.get("quality_tier"),
-                ) for m in _OLLAMA_RECOMMENDED
+                ) for m in _OLLAMA_FALLBACK
             ], ["Mock mode enabled: returning deterministic catalog without network."]
         mock_models = _fallback_models_for(canonical)
         if mock_models:
@@ -244,7 +253,17 @@ class RemoteFetchMixin:
         available_ids = {m.id for m in available}
         available = [m.model_copy(update={"installed": m.id in installed_ids}) for m in available]
 
-        rec_raw = _OLLAMA_RECOMMENDED if canonical == "ollama_local" else []
+        # For Ollama, the recommended list IS the available list (both come from
+        # OpenRouter discovery).  Reuse instead of fetching twice to avoid
+        # cold-start race conditions where the first fetch fails/returns empty.
+        if canonical == "ollama_local":
+            rec_raw = [
+                {"id": m.id, "label": m.label, "quality_tier": m.quality_tier,
+                 "context_window": m.context_window}
+                for m in available
+            ]
+        else:
+            rec_raw = []
         recommended = [
             cls._normalize_model(
                 model_id=r["id"],
