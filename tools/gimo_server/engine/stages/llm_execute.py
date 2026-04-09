@@ -172,7 +172,12 @@ class LlmExecute(ExecutionStage):
                         f"Please revise your output addressing the above issues."
                     )
                     try:
-                        from ...services.ops_service import OpsService
+                        # Module-level OpsService import is reused; do NOT
+                        # re-import here — a local `from ... import` would
+                        # rebind OpsService as a local for the entire
+                        # function and cause the post-loop routing_snapshot
+                        # block to UnboundLocalError when multi_pass=False
+                        # short-circuits before this line ever runs.
                         OpsService.append_log(
                             input.run_id, level="INFO",
                             msg=f"[LlmExecute] Multi-pass {pass_num}/{max_passes}: critic severity={verdict.severity}, retrying"

@@ -414,6 +414,125 @@ class Launcher:
         self._shutdown_event.set()
 
 
+def _run_detached(skip: set[str]) -> int:
+    """Headless / non-interactive launcher.
+
+    The interactive ``Launcher`` above multiplexes child stdout via
+    ``asyncio.subprocess.PIPE``. On Windows this binds the children's
+    pipes to the parent loop's proactor — when the parent shell detaches
+    (Claude Code background mode, CI, ``gimo.cmd up`` from a hook), the
+    pipes are closed under the children, uvicorn loops on
+    ``ValueError: I/O operation on closed pipe``, and never binds 9325.
+
+    Detached mode sidesteps this by:
+      - Using plain ``subprocess.Popen`` with file-backed stdout/stderr
+        (no asyncio loop, no inherited pipes).
+      - On Windows, ``CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`` so
+        the children survive the parent.
+      - Writing PIDs to ``.orch_data/runtime/launcher.pids.json`` for
+        ``gimo down`` to consume.
+      - Polling the health URL and exiting 0 once the backend is up.
+    """
+    import json
+    import subprocess
+    import urllib.request
+    import urllib.error
+
+    runtime = ROOT / ".orch_data" / "runtime"
+    logs = ROOT / ".orch_data" / "logs"
+    runtime.mkdir(parents=True, exist_ok=True)
+    logs.mkdir(parents=True, exist_ok=True)
+
+    pids: dict[str, int] = {}
+    creationflags = 0
+    if sys.platform == "win32":
+        # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+        creationflags = 0x00000200 | 0x00000008
+
+    env = {**os.environ, "PYTHONUNBUFFERED": "1", **_build_provenance_env()}
+
+    def _spawn(name: str, cfg: dict) -> int:
+        cmd = cfg["cmd_win"] if sys.platform == "win32" else cfg["cmd_unix"]
+        cwd = cfg.get("cwd", str(ROOT))
+        log_path = logs / f"{name}.log"
+        # Open in append mode so successive runs preserve history.
+        fh = open(log_path, "ab", buffering=0)
+        proc = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            shell=True,
+            stdout=fh,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            env=env,
+            creationflags=creationflags,
+            close_fds=True,
+        )
+        _sys_log(f"{name} detached PID {proc.pid} -> {log_path}")
+        return proc.pid
+
+    # Free stale ports first (synchronous best-effort).
+    for name, cfg in SERVICES.items():
+        if name in skip:
+            continue
+        try:
+            if sys.platform == "win32":
+                subprocess.run(
+                    f'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :{cfg["port"]} ^| findstr LISTENING\') do taskkill /F /PID %a',
+                    shell=True, capture_output=True, timeout=5,
+                )
+            else:
+                subprocess.run(
+                    f"lsof -ti :{cfg['port']} | xargs -r kill -9",
+                    shell=True, capture_output=True, timeout=5,
+                )
+        except Exception:
+            pass
+
+    # Backend first.
+    if "backend" not in skip:
+        pids["backend"] = _spawn("backend", SERVICES["backend"])
+
+    # Health check.
+    health_ok = False
+    if "backend" not in skip:
+        url = SERVICES["backend"]["health_url"]
+        deadline = time.monotonic() + 60.0
+        while time.monotonic() < deadline:
+            try:
+                req = urllib.request.Request(url, method="GET")
+                resp = urllib.request.urlopen(req, timeout=2)
+                if resp.status < 500:
+                    health_ok = True
+                    break
+            except urllib.error.HTTPError as e:
+                if e.code < 500:
+                    health_ok = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.5)
+        if health_ok:
+            _sys_log(f"{GREEN}Backend ready (detached).{RESET}")
+        else:
+            _sys_log(f"{RED}Backend did not respond on {url} within 60s.{RESET}")
+
+    # Frontend / web.
+    for name in ("frontend", "web"):
+        if name not in skip:
+            pids[name] = _spawn(name, SERVICES[name])
+
+    (runtime / "launcher.pids.json").write_text(
+        json.dumps({"pids": pids, "started_at": time.time()}, indent=2),
+        encoding="utf-8",
+    )
+
+    if "backend" in skip or health_ok:
+        _sys_log(f"{GREEN}Detached launch complete. PIDs: {pids}{RESET}")
+        return 0
+    return 1
+
+
 async def main():
     skip = set()
     if "--no-web" in sys.argv:
@@ -423,6 +542,15 @@ async def main():
     if "--backend-only" in sys.argv:
         skip.add("frontend")
         skip.add("web")
+
+    # Auto-detect headless context: no TTY on stdin → use detached mode.
+    detached = "--detached" in sys.argv or "--headless" in sys.argv
+    if not detached and not sys.stdin.isatty():
+        detached = True
+
+    if detached:
+        rc = _run_detached(skip)
+        sys.exit(rc)
 
     launcher = Launcher(skip_services=skip)
     await launcher.run()
