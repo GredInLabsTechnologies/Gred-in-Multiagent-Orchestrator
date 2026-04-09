@@ -351,28 +351,36 @@ def register_native_tools(mcp: FastMCP):
     async def gimo_propose_structured_plan(task_instructions: str) -> str:
         """Generates a structured multi-step plan with task dependencies and Mermaid graph.
 
-        **Call this when the user asks for a non-trivial task that requires
-        planning.** Materializes a plan via the backend and returns a rich
-        structured presentation: tasks with dependencies, Mermaid graph,
-        cost estimate, risk band, and governance verdict.
+        This is the **canonical plan-review path for MCP operators**. The tool
+        materializes a plan via the backend, then returns a rich structured
+        presentation (tasks, dependencies, Mermaid graph, cost estimate, risk,
+        governance verdict) so the operator can present it to the human for
+        review before execution.
 
-        **After calling this tool, you MUST present the plan for human approval
-        before executing it.** This is not a suggestion — it is a mandatory
-        protocol. The human must see and confirm the plan before any work begins.
-
-        Protocol:
+        **Operator protocol (MANDATORY):**
         1. Call this tool with the task instructions.
-        2. Use ``EnterPlanMode`` to write the plan to the plan file. Include:
-           - The Mermaid graph from the ``graph`` field
-           - A task table with id, title, role, dependencies, scope
-           - Cost estimate and risk band
-           - The ``draft_id`` (needed for step 4)
-        3. Call ``ExitPlanMode`` — the user sees the plan and approves or rejects.
-        4. If approved: call ``gimo_approve_draft(draft_id, auto_run=True)``.
-        5. If rejected: relay the user's feedback. Do not approve.
+        2. Present the returned plan to the human for review. Render the
+           Mermaid graph, task table, cost, and risk visually.
+        3. Wait for explicit human confirmation ("yes", "proceed", "go ahead").
+        4. If confirmed: call ``gimo_approve_draft(draft_id, auto_run=True)``.
+        5. If rejected: do NOT approve. Relay the human's feedback.
 
-        If the user wants to skip review entirely (e.g. "just do it", "skip
-        planning"), use ``gimo_run_task`` instead — the explicit bypass path.
+        This is not optional. The human must see the plan before execution
+        starts. If you need to skip this review, use ``gimo_run_task`` instead
+        (the explicit bypass path for unreviewed execution).
+
+        **Notes for specific operators:**
+
+        - **Claude Code**: use ``EnterPlanMode`` to write the plan (Mermaid
+          graph, task table, cost, risk, ``draft_id``) and ``ExitPlanMode``
+          for infrastructure-enforced human approval. This is the strongest
+          confirmation path available.
+        - **Codex**: present the plan in your commentary output with the
+          Mermaid graph rendered. Wait for the user's explicit confirmation
+          in the next turn before calling ``gimo_approve_draft``.
+        - **Other agents**: display the plan visually (render the Mermaid
+          graph and task table in whatever UI your client supports) and
+          wait for explicit human confirmation before proceeding.
         """
         import json as _json
         try:
@@ -459,6 +467,19 @@ def register_native_tools(mcp: FastMCP):
                 presentation["graph"] = None
                 presentation["note"] = "Plan content not yet materialized; the draft may still be generating."
 
+            # Operator hints: runtime guidance for any MCP client
+            presentation["operator_hints"] = {
+                "review_required": True,
+                "approval_action": "gimo_approve_draft",
+                "approval_args": {"draft_id": draft_id, "auto_run": True},
+                "bypass_action": "gimo_run_task",
+                "plan_summary": (
+                    f"{presentation.get('task_count', 0)} tasks"
+                    f", risk: {presentation.get('risk_band') or 'unknown'}"
+                    f", status: {presentation.get('execution_decision') or 'pending'}"
+                ),
+            }
+
             return _json.dumps(presentation, indent=2, default=str)
 
         except Exception as e:
@@ -494,6 +515,15 @@ def register_native_tools(mcp: FastMCP):
         For the canonical review path where the human sees and confirms the plan
         before execution, use ``gimo_propose_structured_plan`` followed by
         ``gimo_approve_draft`` after human confirmation.
+
+        **Notes for specific operators:**
+
+        - **Claude Code**: do NOT use ``EnterPlanMode`` with this path -- the
+          whole point of ``gimo_run_task`` is to skip the review step. If the
+          user said "just do it", honor that and call this tool directly.
+        - **Codex / other agents**: same principle -- this tool is for when
+          the human explicitly waived the review step. Do not add your own
+          confirmation layer on top of an explicit bypass.
         """
         try:
             from .bridge import proxy_to_api
@@ -579,10 +609,20 @@ def register_native_tools(mcp: FastMCP):
         """Approve a draft through the full governance chain (risk gate, intent gate, auto_run gate, audit log).
 
         **Call this ONLY after the human has reviewed and confirmed the plan.**
-        The canonical flow is: ``gimo_propose_structured_plan`` → human reviews
-        the presented plan in the chat → human says "yes" → operator calls this
+        The canonical flow is: ``gimo_propose_structured_plan`` -> human reviews
+        the presented plan in the chat -> human says "yes" -> operator calls this
         tool. Do NOT call this without human confirmation unless the human has
         explicitly granted a session-wide bypass (e.g. "auto-approve everything").
+
+        **Notes for specific operators:**
+
+        - **Claude Code**: if you used ``EnterPlanMode``/``ExitPlanMode`` for
+          the plan review, the human's approval through that UI counts as
+          confirmation. Proceed to call this tool.
+        - **Codex**: the human's explicit textual confirmation in the
+          conversation (e.g. "yes", "approved", "go") is the trigger.
+        - **Other agents**: any explicit affirmative signal from the human
+          in your native interaction channel counts as confirmation.
 
         Args:
             draft_id: ID of the draft to approve
