@@ -119,3 +119,16 @@ next-env.d.ts
 
 # ── Scratch / accidental files ───────────────────────────────
 tmp_*.py
+
+# ── Runtime state / ephemeral artifacts ──────────────────────
+.gimo/plans/
+.claude/worktrees/
+status.out
+status.err
+
+# ── calc_lab: live agent workspace (only README is tracked) ──
+calc_lab/*
+!calc_lab/README.md
+
+# ── gimo_prueba: nested git repo (decide later: submodule vs absorb) ──
+gimo_prueba/
