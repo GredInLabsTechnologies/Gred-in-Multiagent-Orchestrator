@@ -304,9 +304,15 @@ def register_native_tools(mcp: FastMCP):
         """Creates an Ops Draft based on task instructions with Mermaid planning."""
         try:
             from .bridge import proxy_to_api
+            # R21: MCP-originated drafts are cognitive_agent so policy gating
+            # whitelists them at fallback_to_most_restrictive_human_review.
             result = await proxy_to_api(
                 "POST", "/ops/drafts",
-                __body={"prompt": task_instructions, "provider": "mcp"},
+                __body={
+                    "prompt": task_instructions,
+                    "provider": "mcp",
+                    "context": {"operator_class": "cognitive_agent", "surface_type": "mcp"},
+                },
             )
             return result
         except Exception as e: return str(e)
