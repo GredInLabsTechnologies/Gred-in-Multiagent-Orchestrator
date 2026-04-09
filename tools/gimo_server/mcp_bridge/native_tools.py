@@ -324,9 +324,15 @@ def register_native_tools(mcp: FastMCP):
             from .bridge import proxy_to_api
             import json
             # 1. Create draft via HTTP (no LLM — instant)
+            # R21: MCP-originated drafts are cognitive_agent so policy gating
+            # whitelists them at fallback_to_most_restrictive_human_review.
             draft_result = await proxy_to_api(
                 "POST", "/ops/drafts",
-                __body={"prompt": task_instructions, "provider": "mcp_auto"},
+                __body={
+                    "prompt": task_instructions,
+                    "provider": "mcp_auto",
+                    "context": {"operator_class": "cognitive_agent", "surface_type": "mcp"},
+                },
             )
             # Extract draft ID from proxy response (format: "✅ Success (201):\n{json}")
             draft_id = None
