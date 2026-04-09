@@ -28,30 +28,22 @@ def register_native_tools(mcp: FastMCP):
 
     @mcp.tool()
     async def gimo_get_status() -> str:
-        """Returns the current health status and basic system info of GIMO Engine."""
+        """Returns the canonical GIMO operator status snapshot.
+
+        Thin wrapper over OperatorStatusService.get_status_snapshot() — the
+        single source of truth for backend/provider/thread/budget/permissions
+        state. Does NOT invent state, does NOT probe sockets, does NOT synthesize
+        "RUNNING"/"STOPPED" strings. Returns the same dict that /ops/operator/status
+        serves, as JSON.
+        """
         try:
-            from tools.gimo_server.services.providers.catalog_service import ProviderCatalogService
-            ollama_ok = await ProviderCatalogService._ollama_health()
-            
-            # Check backend port
-            import socket
-            backend_running = False
-            try:
-                with socket.create_connection(("127.0.0.1", 9325), timeout=0.5):
-                    backend_running = True
-            except:
-                pass
-                
-            status = "RUNNING" if (ollama_ok or backend_running) else "STOPPED"
-            details = []
-            details.append(f"Engine: {status}")
-            details.append(f"Ollama: {'CONNECTED' if ollama_ok else 'OFFLINE'}")
-            details.append(f"Backend-API: {'UP' if backend_running else 'DOWN'}")
-            
-            return "\\n".join(details)
+            import json
+            from tools.gimo_server.services.operator_status_service import OperatorStatusService
+            snapshot = OperatorStatusService.get_status_snapshot()
+            return json.dumps(snapshot, indent=2, default=str)
         except Exception as e:
-            logger.error(f"gimo_get_status failed: {e}")
-            return f"Error checking GIMO status: {e}"
+            logger.error("gimo_get_status failed: %s", e, exc_info=True)
+            return json.dumps({"error": "status_snapshot_failed", "detail": str(e)})
 
     @mcp.tool()
     async def gimo_wake_ollama() -> str:
@@ -64,88 +56,179 @@ def register_native_tools(mcp: FastMCP):
 
     @mcp.tool()
     def gimo_start_engine() -> str:
+        """Start the GIMO backend if not already running. Idempotent.
+
+        **Bootstrap tool for MCP-only operators.** Clients that have no
+        access to a terminal/CLI on the host (e.g., Claude Desktop, Claude
+        App, ChatGPT App Actions using the stdio MCP bridge as subprocess)
+        reach GIMO through this bridge process, which runs locally on the
+        host and has filesystem access. When the user's only surface is
+        MCP, this is the single legitimate bootstrap path to the backend.
+
+        Thin trampoline over the canonical launcher at
+        ``gimo_cli.commands.server.start_server``. Does NOT fork its own
+        uvicorn, does NOT mint ORCH_TOKEN, does NOT touch .env, does NOT
+        spawn vite. All lifecycle authority lives in the canonical
+        launcher (honest lifecycle, R21 cleanup/launcher-honest).
+
+        If you have a terminal on the host, prefer ``gimo up`` from the
+        shell — it is the same code path.
+
+        Returns:
+            JSON status with url, pid, version, and a flag indicating
+            whether the server was already running or newly started.
         """
-        Starts the GIMO backend (uvicorn on port 9325) and frontend (vite on port 5173).
-        LOCAL_ONLY. Do not expose to external networks.
+        import json
+        try:
+            from gimo_cli.commands.server import (
+                DEFAULT_SERVER_HOST,
+                DEFAULT_SERVER_PORT,
+                _health_details,
+                _server_url,
+                server_healthy,
+                start_server,
+            )
+
+            host, port = DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
+            url = _server_url(host, port)
+
+            if server_healthy(url):
+                pid, version = _health_details(url)
+                return json.dumps(
+                    {
+                        "status": "already_running",
+                        "url": url,
+                        "pid": pid,
+                        "version": version,
+                    },
+                    default=str,
+                )
+
+            # Delegate to canonical launcher (single source of truth).
+            ok = start_server(host, port)
+            if not ok:
+                return json.dumps(
+                    {
+                        "status": "failed",
+                        "url": url,
+                        "detail": "start_server() returned False; check server logs.",
+                    }
+                )
+
+            pid, version = _health_details(url)
+            return json.dumps(
+                {
+                    "status": "started",
+                    "url": url,
+                    "pid": pid,
+                    "version": version,
+                },
+                default=str,
+            )
+        except Exception as exc:
+            logger.error("gimo_start_engine failed: %s", exc, exc_info=True)
+            return json.dumps({"error": "start_engine_failed", "detail": str(exc)})
+
+    @mcp.tool()
+    def gimo_stop_engine() -> str:
+        """Stop the GIMO backend gracefully. Idempotent.
+
+        **Symmetric counterpart to gimo_start_engine.** For MCP-only
+        operators (Claude Desktop, Claude App, ChatGPT App Actions via
+        stdio bridge), this is the legitimate shutdown path when no
+        terminal/CLI is available on the host.
+
+        Thin trampoline over the canonical shutdown logic at
+        ``gimo_cli.commands.server`` (which calls POST /ops/shutdown with
+        PID-kill fallback and verifies the server is actually down). Does
+        NOT fork its own kill path, does NOT touch PID files, does NOT
+        mutate ``server._active_run_worker``. All lifecycle authority
+        lives in the canonical launcher.
+
+        If you have a terminal on the host, prefer ``gimo down`` from the
+        shell — it is the same code path.
+
+        Returns:
+            JSON status with url and a flag indicating whether the
+            server was already stopped or newly terminated.
         """
-        import socket, subprocess, sys, secrets
-        from pathlib import Path
+        import json
+        try:
+            from gimo_cli.commands.server import (
+                DEFAULT_SERVER_HOST,
+                DEFAULT_SERVER_PORT,
+                _find_pids_on_port,
+                _kill_all_on_port,
+                _server_url,
+                _wait_for_server_down,
+                server_healthy,
+            )
 
-        def _is_port_open(port: int) -> bool:
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=1):
-                    return True
-            except OSError:
-                return False
+            host, port = DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT
+            url = _server_url(host, port)
 
-        root = Path(__file__).resolve().parents[3]
-        report = []
-
-        python_exe = sys.executable
-        for p in [".venv", "venv", "env"]:
-            candidate = root / p / "Scripts" / "python.exe"
-            if candidate.exists():
-                python_exe = str(candidate)
-                break
-                
-        env_file = root / ".env"
-        env_content = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
-            
-        token = None
-        for line in env_content.splitlines():
-            if line.startswith("ORCH_TOKEN="):
-                token = line.split("=", 1)[1]
-        
-        if not token:
-            token = secrets.token_hex(32)
-            with open(env_file, "a", encoding="utf-8") as f:
-                f.write(f"\\nORCH_PORT=9325\\nORCH_TOKEN={token}\\n")
-            ui_env = root / "tools" / "orchestrator_ui" / ".env.local"
-            ui_env.parent.mkdir(parents=True, exist_ok=True)
-            with open(ui_env, "w", encoding="utf-8") as f:
-                f.write(f"VITE_ORCH_TOKEN={token}\\n")
-
-        if _is_port_open(9325):
-            report.append("✅ Backend: already running on 127.0.0.1:9325")
-        else:
-            try:
-                subprocess.Popen(
-                    [python_exe, "-m", "uvicorn", "tools.gimo_server.main:app", "--host", "127.0.0.1", "--port", "9325", "--log-level", "info"],
-                    cwd=str(root), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+            health_before = server_healthy(url, timeout=1.5)
+            pids_before = _find_pids_on_port(port)
+            if not health_before and not pids_before:
+                return json.dumps(
+                    {
+                        "status": "already_stopped",
+                        "url": url,
+                    }
                 )
-                report.append("🚀 Backend: spawned uvicorn on 127.0.0.1:9325")
-            except Exception as e:
-                report.append(f"❌ Backend: failed to start — {e}")
 
-        frontend_dir = root / "tools" / "orchestrator_ui"
-        if _is_port_open(5173):
-            report.append("✅ Frontend: already running on 127.0.0.1:5173")
-        elif not frontend_dir.exists():
-            report.append(f"⚠ Frontend: directory not found at {frontend_dir}")
-        else:
-            try:
-                subprocess.Popen(
-                    ["npm", "run", "dev", "--", "--host", "127.0.0.1"],
-                    cwd=str(frontend_dir), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, shell=True,  # nosec B602
+            found, killed = _kill_all_on_port(port, url)
+            down_state = _wait_for_server_down(url, port, timeout_seconds=15.0)
+            if down_state is None:
+                remaining = _find_pids_on_port(port)
+                return json.dumps(
+                    {
+                        "status": "failed",
+                        "url": url,
+                        "detail": "server did not fall to unreachable within 15s",
+                        "remaining_pids": remaining,
+                    }
                 )
-                report.append("🚀 Frontend: spawned vite on 127.0.0.1:5173")
-            except Exception as e:
-                report.append(f"❌ Frontend: failed to start — {e}")
 
-        report.append("\\nOpen: http://127.0.0.1:5173 (allow ~5s for processes to boot)")
-        return "\\n".join(report)
+            return json.dumps(
+                {
+                    "status": "stopped",
+                    "url": url,
+                    "down_state": down_state,
+                    "listeners_found": found,
+                    "listeners_killed": killed,
+                }
+            )
+        except Exception as exc:
+            logger.error("gimo_stop_engine failed: %s", exc, exc_info=True)
+            return json.dumps({"error": "stop_engine_failed", "detail": str(exc)})
 
     @mcp.tool()
     def gimo_get_server_info() -> str:
-        """Returns diagnostics for MCP bridge and staleness."""
-        import hashlib, importlib
-        from pathlib import Path
+        """Return diagnostics for the MCP bridge process itself and module staleness.
+
+        Read-only introspection of the bridge process: uptime, sys.executable,
+        whether a RunWorker instance is attached, and mtime/hash of key modules
+        on disk versus their import cache. Useful for developers who need to
+        diagnose "why doesn't my change appear?" over MCP when no terminal is
+        available on the host.
+
+        This tool does NOT replace gimo_get_status (canonical operator/backend
+        snapshot). It is complementary: gimo_get_status answers "what does GIMO
+        know?", gimo_get_server_info answers "what code is the bridge process
+        actually running?".
+
+        Has no canonical backend replacement — the backend cannot inspect its
+        own Python import cache from outside its process boundary.
+        """
+        import hashlib
+        import importlib
         from datetime import datetime, timezone
+        from pathlib import Path
 
         uptime_s = int(time.time() - _server_start_time)
         started_at = datetime.fromtimestamp(_server_start_time, tz=timezone.utc).isoformat()
-        
-        # We need to reach into server.py to check worker
+
         from tools.gimo_server.mcp_bridge import server
         worker_running = getattr(server, "_active_run_worker", None) is not None
 
@@ -175,47 +258,75 @@ def register_native_tools(mcp: FastMCP):
                     disk_hash = hashlib.md5(p.read_bytes(), usedforsecurity=False).hexdigest()[:8]  # nosec B324
                     mod_mtime = getattr(mod, "_cached_mtime", None)
                     stale = "⚠ STALE" if (mod_mtime and mod_mtime != disk_mtime) else "✅ current"
-                    lines.append(f"  {mod_name.split('.')[-1]}: {p}\\n    mtime={int(disk_mtime)} hash={disk_hash} [{stale}]")
+                    lines.append(f"  {mod_name.split('.')[-1]}: {p}\n    mtime={int(disk_mtime)} hash={disk_hash} [{stale}]")
             except Exception as e:
                 lines.append(f"  {mod_name.split('.')[-1]}: error → {e}")
 
-        return "\\n".join(lines)
+        return "\n".join(lines)
 
-    @mcp.tool()
-    async def gimo_reload_worker() -> str:
-        """Hot-reloads the RunWorker module without restarting the MCP server process."""
-        import importlib
-        from tools.gimo_server.mcp_bridge import server
-        
-        steps = []
-        current_worker = getattr(server, "_active_run_worker", None)
-        if current_worker is not None:
+    # ── gimo_reload_worker — dev-mode only ───────────────────────────────────
+    # Hot-reload of the RunWorker module without bouncing the bridge/backend
+    # process. Kept behind GIMO_DEV_MODE env gate because:
+    #   1) importlib.reload has known state-corruption risks in the presence
+    #      of module-level globals and concurrent in-flight work.
+    #   2) Forcing a reload from a remote MCP client is effectively a
+    #      privileged dev affordance, not an operator concern.
+    # When the gate is off, the canonical safe path for operators is the
+    # sequence gimo_stop_engine → gimo_start_engine (full bounce).
+    import os as _os_dev_gate
+    if _os_dev_gate.environ.get("GIMO_DEV_MODE", "").strip().lower() in ("1", "true", "yes", "on"):
+        @mcp.tool()
+        async def gimo_reload_worker() -> str:
+            """Hot-reload the RunWorker module without restarting the MCP bridge process.
+
+            **Dev-only.** Registered only when GIMO_DEV_MODE is truthy. Has no
+            canonical bounce-equivalent replacement — gimo_stop_engine + gimo_start_engine
+            is a full process bounce with different semantics (clears ALL module
+            state, not just the worker). Hot-reload preserves the bridge process
+            and the rest of the in-memory state, which is why devs want it.
+
+            Risks (why it's gated):
+            - importlib.reload does NOT re-execute dependency modules; a change
+              in a module that run_worker imports will NOT appear.
+            - If another request holds the old RunWorker instance, race conditions
+              are possible.
+            - Module-level globals in run_worker may become inconsistent.
+
+            When in doubt, use gimo_stop_engine → gimo_start_engine for a clean
+            bounce.
+            """
+            import importlib
+            from tools.gimo_server.mcp_bridge import server
+
+            steps = []
+            current_worker = getattr(server, "_active_run_worker", None)
+            if current_worker is not None:
+                try:
+                    await current_worker.stop()
+                    steps.append("✅ Old RunWorker stopped")
+                except Exception as e:
+                    steps.append(f"⚠ Could not stop old worker cleanly: {e}")
+                server._active_run_worker = None
+
             try:
-                await current_worker.stop()
-                steps.append("✅ Old RunWorker stopped")
+                mod_name = "tools.gimo_server.services.run_worker"
+                if mod_name in sys.modules:
+                    importlib.reload(sys.modules[mod_name])
+                    steps.append(f"✅ Module '{mod_name}' reloaded from disk")
+                else:
+                    importlib.import_module(mod_name)
             except Exception as e:
-                steps.append(f"⚠ Could not stop old worker cleanly: {e}")
-            server._active_run_worker = None
+                return f"❌ Module reload failed: {e}"
 
-        try:
-            mod_name = "tools.gimo_server.services.run_worker"
-            if mod_name in sys.modules:
-                importlib.reload(sys.modules[mod_name])
-                steps.append(f"✅ Module '{mod_name}' reloaded from disk")
-            else:
-                importlib.import_module(mod_name)
-        except Exception as e:
-            return f"❌ Module reload failed: {e}"
+            try:
+                from tools.gimo_server.services.run_worker import RunWorker
+                server._active_run_worker = RunWorker()
+                await server._active_run_worker.start()
+                steps.append("✅ New RunWorker instantiated and started")
+            except Exception as e:
+                return f"❌ Failed to start new worker: {e}"
 
-        try:
-            from tools.gimo_server.services.run_worker import RunWorker
-            server._active_run_worker = RunWorker()
-            await server._active_run_worker.start()
-            steps.append("✅ New RunWorker instantiated and started")
-        except Exception as e:
-            return f"❌ Failed to start new worker: {e}"
-
-        return "\\n".join(steps) + "\\n🚀 GIMO RunWorker hot-reloaded successfully."
+            return "\n".join(steps) + "\n🚀 GIMO RunWorker hot-reloaded successfully."
 
     def _generate_mermaid_graph(plan_data: Any) -> str:
         try:
@@ -235,57 +346,6 @@ def register_native_tools(mcp: FastMCP):
             return "\\n".join(lines)
         except Exception as e:
             return f"Error graph: {e}"
-
-    async def _generate_plan_for_task(task_instructions: str):
-        from tools.gimo_server.services.providers.service import ProviderService
-        from tools.gimo_server.ops_models import OpsPlan
-        from tools.gimo_server.models.contract import extract_valid_roles
-        import json, time, re
-
-        # Extract valid roles from schema (SINGLE SOURCE OF TRUTH)
-        valid_roles = extract_valid_roles()
-        roles_str = " | ".join(f'"{role}"' for role in valid_roles)
-
-        # Get active model from provider config
-        cfg = ProviderService.get_config()
-        model_id = "qwen2.5-coder:3b"  # Default fallback
-        if cfg and cfg.active and cfg.active in cfg.providers:
-            model_id = cfg.providers[cfg.active].model
-
-        sys_prompt = (
-            "You are a senior systems architect. Generate a JSON execution plan.\n"
-            "RULES:\n"
-            f"- agent_assignee.role MUST be exactly one of: {roles_str}\n"
-            f"- agent_assignee.model MUST be: \"{model_id}\"\n"
-            "- Each task needs: id, title, scope, description, agent_assignee\n"
-            "- agent_assignee needs: role, goal, backstory, model, system_prompt, instructions\n"
-            "- Output ONLY valid JSON, no markdown, no explanations\n\n"
-            f"Task: {task_instructions}\n\n"
-            'JSON schema:\n'
-            '{"id":"plan_...","title":"...","workspace":"...","created":"...","objective":"...",'
-            '"tasks":[{"id":"t_orch","title":"[ORCH] ...","scope":"bridge","depends":[],"status":"pending",'
-            f'"description":"...","agent_assignee":{{"role":"{valid_roles[0]}","goal":"...","backstory":"...",'
-            f'"model":"{model_id}","system_prompt":"...","instructions":["..."]}},'
-            '{"id":"t_worker_1","title":"[WORKER] ...","scope":"file_write","depends":["t_orch"],'
-        )
-        try:
-            response = await ProviderService.static_generate(prompt=sys_prompt, context={"task_type": "disruptive_planning"})
-            raw = response.get("content", "").strip()
-            # Strip markdown fences
-            raw = re.sub(r"```(?:json)?\s*\n?", "", raw).strip()
-            if raw.endswith("```"):
-                raw = raw[:-3].strip()
-            # Find first { to last }
-            start = raw.find("{")
-            end = raw.rfind("}")
-            if start >= 0 and end > start:
-                raw = raw[start:end + 1]
-            parsed = json.loads(raw)
-            return OpsPlan.model_validate(parsed)
-        except Exception as exc:
-            logger.error("Plan generation failed: %s", exc, exc_info=True)
-            from datetime import datetime
-            return OpsPlan(id=f"plan_{int(time.time())}", title="[FALLBACK] Plan", workspace="", created=datetime.now().isoformat(), objective=task_instructions, tasks=[], constraints=[])
 
     @mcp.tool()
     async def gimo_propose_structured_plan(task_instructions: str) -> str:

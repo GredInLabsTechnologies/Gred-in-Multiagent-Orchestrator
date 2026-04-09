@@ -224,18 +224,41 @@ Before deleting or renaming code, verify:
 - whether the code is legacy (marked deprecated, superseded by a canonical
   path, duplicated across surfaces, or a compatibility shim); legacy code
   that can be proven safe to remove is a mandatory kill candidate
+- whether an explicit canonical replacement exists in the repo that covers
+  the same functionality — not a different functionality with an overlapping
+  name, and not a replacement with different semantics (e.g. bounce is not
+  a replacement for hot-reload; the JSON shape of an HTTP response is not
+  a replacement for a Python dataclass the server uses internally). The
+  replacement must be demonstrably equivalent or strictly superior on
+  governance, policy, traceability, or parity grounds.
 - whether removal can be proven safe by evidence: zero live imports,
-  zero runtime references, tests still green without it, and a canonical
-  replacement already in place
+  zero runtime references, tests still green without it, and the canonical
+  replacement above is already in place and reachable from every surface
+  that used to reach the removed code
+
+**"Zero callers" is NOT evidence of deprecation.** It is a signal to
+investigate whether the code was intentionally deprecated (canonical
+replacement exists and is already wired up) OR accidentally disconnected
+by an unfinished refactor (no replacement exists, or the replacement does
+not cover the same functionality). In the second case, the correct action
+is to **reconnect** the code — expose it via the correct tool, endpoint,
+or import path — not to delete it. Deletion without an identified canonical
+replacement is forbidden even when no tests fail and no callers complain.
 
 Legacy hunting protocol (applies to every non-trivial task):
 1. Grep the blast radius for deprecated markers, dual paths, and shims.
-2. For each candidate, prove safe-to-remove with concrete evidence above.
-3. If proven safe, delete in the same change and note the deletion in
-   the task report. Do not defer.
-4. If not proven safe, annotate with
-   `# DEPRECATED: {reason, owner, sunset criterion}` and list it as a
-   follow-up. Unmarked legacy is a finding, not an acceptable state.
+2. For each candidate, prove safe-to-remove with concrete evidence above,
+   including the explicit identification of the canonical replacement.
+3. If proven safe, delete in the same change and note the deletion AND the
+   canonical replacement in the task report. Do not defer.
+4. If no canonical replacement can be identified, the code is not legacy —
+   it is disconnected. Reconnect it through the correct surface instead
+   of deleting.
+5. If the code is clearly superseded but removal is not safe in this change
+   (e.g. requires coordinated cross-surface migration), annotate with
+   `# DEPRECATED: {reason, owner, canonical replacement path, sunset criterion}`
+   and list it as a follow-up. Unmarked legacy is a finding, not an
+   acceptable state.
 
 ---
 
