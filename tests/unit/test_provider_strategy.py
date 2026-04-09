@@ -2,7 +2,7 @@ import pytest
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 
 # ── Phase 6 Provider Strategy ─────────────────────────────
 

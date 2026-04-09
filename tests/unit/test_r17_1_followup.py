@@ -119,7 +119,7 @@ async def test_auth_probe_routes_codex_account_with_custom_id():
     not fall through to the API-key fallback and report 'missing'."""
     cfg = _config_with("codex-main", "codex", "account")
     with patch(
-        "tools.gimo_server.services.provider_service.ProviderService.get_config",
+        "tools.gimo_server.services.providers.service.ProviderService.get_config",
         return_value=cfg,
     ), patch(
         "tools.gimo_server.services.codex_auth_service.CodexAuthService.get_auth_status",
@@ -138,7 +138,7 @@ async def test_auth_probe_routes_claude_account_with_custom_id():
     """claude-prod (custom claude account-mode ID) MUST hit ClaudeAuthService."""
     cfg = _config_with("claude-prod", "claude", "account")
     with patch(
-        "tools.gimo_server.services.provider_service.ProviderService.get_config",
+        "tools.gimo_server.services.providers.service.ProviderService.get_config",
         return_value=cfg,
     ), patch(
         "tools.gimo_server.services.claude_auth_service.ClaudeAuthService.get_auth_status",
@@ -202,7 +202,7 @@ async def test_auth_probe_legacy_id_fallback_when_no_entry():
     routes 'codex-account' to CodexAuthService for backwards compat."""
     empty_cfg = ProviderConfig(active="x", providers={})
     with patch(
-        "tools.gimo_server.services.provider_service.ProviderService.get_config",
+        "tools.gimo_server.services.providers.service.ProviderService.get_config",
         return_value=empty_cfg,
     ), patch(
         "tools.gimo_server.services.codex_auth_service.CodexAuthService.get_auth_status",

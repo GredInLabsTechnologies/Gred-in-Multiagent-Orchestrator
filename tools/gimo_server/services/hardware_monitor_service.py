@@ -155,7 +155,7 @@ def _detect_npu() -> dict:
 
 def _get_installed_providers() -> list[str]:
     try:
-        from .provider_service import ProviderService
+        from .providers.service import ProviderService
         cfg = ProviderService.get_public_config()
         if cfg and cfg.providers:
             return list(cfg.providers.keys())

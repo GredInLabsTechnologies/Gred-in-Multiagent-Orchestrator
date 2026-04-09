@@ -281,7 +281,7 @@ async def lifespan(app: FastAPI):
         (settings.ops_data_dir / "runs").mkdir(parents=True, exist_ok=True)
         (settings.ops_data_dir / "threads").mkdir(parents=True, exist_ok=True)
         # provider.json template
-        from tools.gimo_server.services.provider_service import ProviderService
+        from tools.gimo_server.services.providers.service import ProviderService
 
         ProviderService.ensure_default_config()
 

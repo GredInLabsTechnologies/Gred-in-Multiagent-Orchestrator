@@ -148,7 +148,7 @@ class NodeExecutorMixin:
         # Check if MCP tool
         mcp_server = tool_entry.metadata.get("mcp_server")
         if mcp_server:
-            from tools.gimo_server.services.provider_service import ProviderService
+            from tools.gimo_server.services.providers.service import ProviderService
             from tools.gimo_server.adapters.mcp_client import McpClient
             ops_config = ProviderService.get_config()
             if not ops_config or mcp_server not in ops_config.mcp_servers:

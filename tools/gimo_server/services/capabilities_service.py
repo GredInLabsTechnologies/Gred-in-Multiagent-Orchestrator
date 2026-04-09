@@ -61,7 +61,7 @@ class CapabilitiesService:
         # Uses same resolution as OperatorStatusService: canonical roles first, legacy fallback
         active_model, active_provider = None, None
         try:
-            from .provider_service_impl import ProviderService
+            from .providers.service_impl import ProviderService
             cfg = ProviderService.get_config()
             if cfg:
                 binding = cfg.primary_orchestrator_binding() if hasattr(cfg, "primary_orchestrator_binding") else None

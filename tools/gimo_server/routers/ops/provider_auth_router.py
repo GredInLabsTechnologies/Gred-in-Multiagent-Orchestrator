@@ -3,10 +3,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.codex_auth_service import CodexAuthService
 from tools.gimo_server.services.claude_auth_service import ClaudeAuthService
-from tools.gimo_server.services.provider_account_service import ProviderAccountService
+from tools.gimo_server.services.providers.account_service import ProviderAccountService
 from tools.gimo_server.services.providers.provider_diagnostics_service import (
     ProviderDiagnosticsService,
 )

@@ -4,9 +4,9 @@ import logging
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 from tools.gimo_server.models import SubAgent, SubAgentConfig
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.config import get_settings
-from tools.gimo_server.services.provider_catalog_service import ProviderCatalogService
+from tools.gimo_server.services.providers.catalog_service import ProviderCatalogService
 
 logger = logging.getLogger("orchestrator.sub_agent_manager")
 

@@ -2,7 +2,7 @@ import pytest
 
 from tools.gimo_server.ops_models import ProviderValidateRequest
 from tools.gimo_server.providers.openai_compat import OpenAICompatAdapter
-from tools.gimo_server.services.provider_catalog_service import ProviderCatalogService
+from tools.gimo_server.services.providers.catalog_service import ProviderCatalogService
 
 
 @pytest.mark.asyncio

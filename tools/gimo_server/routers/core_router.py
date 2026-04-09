@@ -11,7 +11,7 @@ from tools.gimo_server.security import check_rate_limit
 from tools.gimo_server.security.access_control import require_read_only_access
 from tools.gimo_server.security.auth import AuthContext, SESSION_COOKIE_NAME, session_store
 from tools.gimo_server.services.ops_service import OpsService
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.version import __version__
 
 router = APIRouter(tags=["core"])

@@ -147,7 +147,7 @@ class ModelRouterService:
 
     @classmethod
     def _inventory_entry_for_binding(cls, binding: ProviderRoleBinding) -> ModelEntry:
-        from .provider_service import ProviderService
+        from .providers.service import ProviderService
 
         for entry in ModelInventoryService.get_available_models():
             if entry.provider_id == binding.provider_id and entry.model_id == binding.model:
@@ -259,8 +259,8 @@ class ModelRouterService:
         requested_provider: str | None = None,
         requested_model: str | None = None,
     ) -> ModelSelectionDecision:
-        from .provider_service import ProviderService
-        from .provider_topology_service import ProviderTopologyService
+        from .providers.service import ProviderService
+        from .providers.topology_service import ProviderTopologyService
 
         constrained_candidates = ProviderTopologyService.constrain_bindings(
             list(candidates or []),
@@ -574,7 +574,7 @@ class ModelRouterService:
 
     def _fallback_decision(self, reason_parts: list, hw_state: str) -> ModelSelectionDecision:
         """Fallback when no inventory models found — use active provider's model."""
-        from .provider_service import ProviderService
+        from .providers.service import ProviderService
         cfg = ProviderService.get_config()
         if cfg and cfg.active and cfg.active in cfg.providers:
             entry = cfg.providers[cfg.active]

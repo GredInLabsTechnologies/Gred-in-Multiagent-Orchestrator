@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from .provider_service import ProviderService
+from .providers.service import ProviderService
 
 
 class CriticVerdict(BaseModel):

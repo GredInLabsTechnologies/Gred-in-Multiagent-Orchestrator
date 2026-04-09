@@ -5,7 +5,7 @@ from tools.gimo_server.config import REPO_ROOT_DIR
 
 def test_operator_status_snapshot_unico_backend_authored(monkeypatch):
     from tools.gimo_server.services.git_service import GitService
-    from tools.gimo_server.services.provider_service_impl import ProviderService
+    from tools.gimo_server.services.providers.service_impl import ProviderService
     from tools.gimo_server.services.conversation_service import ConversationService
     from tools.gimo_server.models import ProviderRolesConfig, ProviderRoleBinding, ProviderConfig, GimoThread, GimoTurn
     
@@ -62,7 +62,7 @@ def test_operator_status_snapshot_unico_backend_authored(monkeypatch):
 
 def test_operator_status_snapshot_ignores_conflicting_legacy_provider_fields(monkeypatch):
     from tools.gimo_server.services.git_service import GitService
-    from tools.gimo_server.services.provider_service_impl import ProviderService
+    from tools.gimo_server.services.providers.service_impl import ProviderService
     from tools.gimo_server.services.conversation_service import ConversationService
     from tools.gimo_server.models import ProviderRolesConfig, ProviderRoleBinding, ProviderConfig
 

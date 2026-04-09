@@ -63,7 +63,7 @@ def ollama_provider_config(tmp_path: Path):
     config_file = tmp_path / "provider.json"
     config_file.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
-    from tools.gimo_server.services.provider_service_impl import ProviderService
+    from tools.gimo_server.services.providers.service_impl import ProviderService
 
     original = ProviderService.CONFIG_FILE
     ProviderService.CONFIG_FILE = config_file
@@ -90,7 +90,7 @@ def real_workspace(tmp_path: Path):
 @pytest.mark.timeout(120)
 def test_ollama_generates_code(ollama_available, ollama_provider_config):
     """ProviderService.static_generate() returns real code from Ollama."""
-    from tools.gimo_server.services.provider_service_impl import ProviderService
+    from tools.gimo_server.services.providers.service_impl import ProviderService
 
     prompt = (
         "Write a Python function called 'add' that takes two numbers a and b "
@@ -122,7 +122,7 @@ def test_file_task_pipeline_writes_real_code(
 ):
     """Full pipeline: LLM generates code → file is written to disk."""
     from tools.gimo_server.engine.tools.executor import ToolExecutor
-    from tools.gimo_server.services.provider_service_impl import ProviderService
+    from tools.gimo_server.services.providers.service_impl import ProviderService
 
     prompt = (
         "Write a short Python script that prints 'Hello, GIMO!'. "
@@ -169,7 +169,7 @@ def test_file_task_pipeline_writes_real_code(
 @pytest.mark.timeout(120)
 def test_generated_code_is_syntactically_valid(ollama_available, ollama_provider_config):
     """LLM-generated class code parses with ast.parse()."""
-    from tools.gimo_server.services.provider_service_impl import ProviderService
+    from tools.gimo_server.services.providers.service_impl import ProviderService
 
     prompt = (
         "Write a Python class called Calculator with methods: add, subtract, multiply, divide. "

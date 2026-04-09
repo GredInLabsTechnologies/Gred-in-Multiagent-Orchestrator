@@ -8,7 +8,7 @@ from tools.gimo_server.ops_models import ProviderConfig, ProviderEntry, Provider
 from tools.gimo_server.services.constraint_compiler_service import ConstraintCompilerService
 from tools.gimo_server.services.profile_binding_service import ProfileBindingService
 from tools.gimo_server.services.profile_router_service import ProfileRouterService
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.runtime_policy_service import RuntimePolicyService
 from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
 

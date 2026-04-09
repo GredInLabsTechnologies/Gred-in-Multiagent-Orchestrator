@@ -30,7 +30,7 @@ def register_native_tools(mcp: FastMCP):
     async def gimo_get_status() -> str:
         """Returns the current health status and basic system info of GIMO Engine."""
         try:
-            from tools.gimo_server.services.provider_catalog_service import ProviderCatalogService
+            from tools.gimo_server.services.providers.catalog_service import ProviderCatalogService
             ollama_ok = await ProviderCatalogService._ollama_health()
             
             # Check backend port
@@ -56,7 +56,7 @@ def register_native_tools(mcp: FastMCP):
     @mcp.tool()
     async def gimo_wake_ollama() -> str:
         """Attempts to start the local Ollama service if it is offline."""
-        from tools.gimo_server.services.provider_catalog_service import ProviderCatalogService
+        from tools.gimo_server.services.providers.catalog_service import ProviderCatalogService
         success = await ProviderCatalogService.ensure_ollama_ready()
         if success:
             return "Ollama service is now ONLINE and ready."
@@ -152,7 +152,7 @@ def register_native_tools(mcp: FastMCP):
         module_keys = [
             "tools.gimo_server.services.run_worker",
             "tools.gimo_server.mcp_bridge.server",
-            "tools.gimo_server.services.provider_service",
+            "tools.gimo_server.services.providers.service",
         ]
 
         lines = [
@@ -237,7 +237,7 @@ def register_native_tools(mcp: FastMCP):
             return f"Error graph: {e}"
 
     async def _generate_plan_for_task(task_instructions: str):
-        from tools.gimo_server.services.provider_service import ProviderService
+        from tools.gimo_server.services.providers.service import ProviderService
         from tools.gimo_server.ops_models import OpsPlan
         from tools.gimo_server.models.contract import extract_valid_roles
         import json, time, re

@@ -3,7 +3,7 @@ import logging
 import re
 
 from tools.gimo_server.ops_models import StrictContract, RepoContext
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 
 logger = logging.getLogger("orchestrator.services.router_pm")
 

@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional
 import logging
 
 from ...ops_models import CascadeConfig, CascadeResult, QualityRating
-from ..provider_service import ProviderService
+from ..providers.service import ProviderService
 from ..quality_service import QualityService
 from ..model_router_service import ModelRouterService
 from ..model_inventory_service import ModelInventoryService

@@ -4,7 +4,7 @@ from pathlib import PurePosixPath
 from typing import Dict, Any, List, Optional
 from tools.gimo_server.services.app_session_service import AppSessionService
 from tools.gimo_server.services.model_router_service import ModelRouterService
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 
 logger = logging.getLogger("orchestrator.services.draft_validation")
 

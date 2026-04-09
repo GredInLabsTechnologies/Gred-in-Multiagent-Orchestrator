@@ -13,9 +13,9 @@ from ...ops_models import (
     ProviderValidateRequest,
     ProviderValidateResponse,
 )
-from ..provider_service import ProviderService
-from ..provider_auth_service import ProviderAuthService
-from ..provider_metadata import OPENAI_COMPAT_CATALOG_TYPES
+from ..providers.service import ProviderService
+from ..providers.auth_service import ProviderAuthService
+from ..providers.metadata import OPENAI_COMPAT_CATALOG_TYPES
 from ...security import audit_log
 from ._base import (
     ProviderCatalogBase,

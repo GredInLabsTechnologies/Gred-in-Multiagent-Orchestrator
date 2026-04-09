@@ -5,7 +5,7 @@ from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.ops_models import ProviderConfig, OpsConfig, ProviderSelectionRequest
 from tools.gimo_server.services.ops_service import OpsService
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 from .common import _require_role, _actor_label
 
 router = APIRouter()

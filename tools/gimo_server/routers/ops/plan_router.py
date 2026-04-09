@@ -11,7 +11,7 @@ from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.ops_models import OpsDraft, OpsPlan, OpsCreateDraftRequest, OpsUpdateDraftRequest
 from tools.gimo_server.services.cognitive import CognitiveService
 from tools.gimo_server.services.ops_service import OpsService
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.runtime_policy_service import RuntimePolicyService
 from tools.gimo_server.services.intent_classification_service import IntentClassificationService
 from tools.gimo_server.services.custom_plan_service import CustomPlanService

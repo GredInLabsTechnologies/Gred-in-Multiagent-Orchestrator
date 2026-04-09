@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 from tools.gimo_server.services.observability_service import ObservabilityService
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 
 
 # Override the autouse conftest fixture so this test uses the real OTel SDK
@@ -128,7 +128,7 @@ async def test_provider_service_returns_metrics():
         }
     }
 
-    with patch("tools.gimo_server.services.provider_service.ProviderService._build_adapter") as mock_build:
+    with patch("tools.gimo_server.services.providers.service.ProviderService._build_adapter") as mock_build:
         adapter = AsyncMock()
         adapter.generate.return_value = mock_response
         adapter.model = "claude-3-5-sonnet-20241022"
@@ -149,7 +149,7 @@ async def test_provider_service_returns_metrics():
             economy=SimpleNamespace(cache_enabled=False, cache_ttl_hours=24)
         )
 
-        with patch("tools.gimo_server.services.provider_service.ProviderService.get_config", return_value=mock_cfg), \
+        with patch("tools.gimo_server.services.providers.service.ProviderService.get_config", return_value=mock_cfg), \
              patch("tools.gimo_server.services.ops_service.OpsService.get_config", return_value=mock_ops_cfg):
             result = await ProviderService.static_generate("test prompt", {})
 
@@ -168,7 +168,7 @@ async def test_provider_service_handles_missing_usage_gracefully():
         "content": "Hello world"
     }
 
-    with patch("tools.gimo_server.services.provider_service.ProviderService._build_adapter") as mock_build:
+    with patch("tools.gimo_server.services.providers.service.ProviderService._build_adapter") as mock_build:
         adapter = AsyncMock()
         adapter.generate.return_value = mock_response
         adapter.model = "local"
@@ -188,7 +188,7 @@ async def test_provider_service_handles_missing_usage_gracefully():
             economy=SimpleNamespace(cache_enabled=False, cache_ttl_hours=24)
         )
 
-        with patch("tools.gimo_server.services.provider_service.ProviderService.get_config", return_value=mock_cfg), \
+        with patch("tools.gimo_server.services.providers.service.ProviderService.get_config", return_value=mock_cfg), \
              patch("tools.gimo_server.services.ops_service.OpsService.get_config", return_value=mock_ops_cfg):
             result = await ProviderService.static_generate("test prompt", {})
 

@@ -5,8 +5,8 @@ from typing import Any, Dict
 
 from ..models.agent_routing import TaskConstraints, TaskDescriptor
 from .intent_classification_service import IntentClassificationService
-from .provider_service import ProviderService
-from .provider_topology_service import ProviderTopologyService
+from .providers.service import ProviderService
+from .providers.topology_service import ProviderTopologyService
 from .runtime_policy_service import RuntimePolicyService
 from .workspace_policy_service import WorkspacePolicyService
 

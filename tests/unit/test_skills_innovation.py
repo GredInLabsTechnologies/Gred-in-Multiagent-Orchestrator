@@ -251,7 +251,7 @@ class TestAutoGeneration:
                 "edges": [{"id": "e-orch-w1", "source": "orch", "target": "w1"}],
             })
         }
-        with patch("tools.gimo_server.services.provider_service_impl.ProviderService.static_generate", new_callable=AsyncMock, return_value=mock_response):
+        with patch("tools.gimo_server.services.providers.service_impl.ProviderService.static_generate", new_callable=AsyncMock, return_value=mock_response):
             req = SkillAutoGenRequest(prompt="Analyze code quality in a repo")
             skill = await SkillsService.generate_skill_from_prompt(req)
             assert skill.name == "Code Analyzer"
@@ -272,7 +272,7 @@ class TestAutoGeneration:
             "edges": [],
         })
         mock_response = {"content": f"```json\n{raw_json}\n```"}
-        with patch("tools.gimo_server.services.provider_service_impl.ProviderService.static_generate", new_callable=AsyncMock, return_value=mock_response):
+        with patch("tools.gimo_server.services.providers.service_impl.ProviderService.static_generate", new_callable=AsyncMock, return_value=mock_response):
             req = SkillAutoGenRequest(prompt="A simple test skill")
             skill = await SkillsService.generate_skill_from_prompt(req)
             assert skill.name == "Fenced Skill"
@@ -290,7 +290,7 @@ class TestAutoGeneration:
                 "edges": [],
             })
         }
-        with patch("tools.gimo_server.services.provider_service_impl.ProviderService.static_generate", new_callable=AsyncMock, return_value=mock_response):
+        with patch("tools.gimo_server.services.providers.service_impl.ProviderService.static_generate", new_callable=AsyncMock, return_value=mock_response):
             req = SkillAutoGenRequest(prompt="Skill with forensic mood", mood="forensic")
             skill = await SkillsService.generate_skill_from_prompt(req)
             assert skill.mood == "forensic"

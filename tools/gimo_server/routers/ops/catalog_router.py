@@ -10,8 +10,8 @@ from tools.gimo_server.ops_models import (
     ProviderValidateRequest,
     ProviderValidateResponse,
 )
-from tools.gimo_server.services.provider_service import ProviderService
-from tools.gimo_server.services.provider_catalog_service import ProviderCatalogService
+from tools.gimo_server.services.providers.service import ProviderService
+from tools.gimo_server.services.providers.catalog_service import ProviderCatalogService
 from .common import _require_role, _actor_label
 
 router = APIRouter()

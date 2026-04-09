@@ -344,7 +344,7 @@ def test_draft_validation_uses_backend_worker_model_for_chatgpt_app_workers(test
     app.dependency_overrides[verify_token] = _auth("operator")
 
     monkeypatch.setattr(
-        "tools.gimo_server.services.provider_service_impl.ProviderService.get_config",
+        "tools.gimo_server.services.providers.service_impl.ProviderService.get_config",
         lambda: ProviderConfig(
             active="orch-main",
             providers={

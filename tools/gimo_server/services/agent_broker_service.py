@@ -58,7 +58,7 @@ class AgentBrokerService:
         CostService for budget checking.
         """
         from ..services.economy.cost_service import CostService
-        from ..services.provider_service import ProviderService
+        from ..services.providers.service import ProviderService
 
         config = ProviderService.get_config()
         explicit_provider = task.preferred_provider != "auto"

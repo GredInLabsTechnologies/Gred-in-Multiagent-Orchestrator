@@ -5,8 +5,8 @@ import shutil
 
 from tools.gimo_server.ops_models import ProviderConfig, ProviderEntry, ProviderRoleBinding, ProviderRolesConfig
 from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
-from tools.gimo_server.services.provider_service_impl import ProviderService
-from tools.gimo_server.services.provider_topology_service import ProviderTopologyService
+from tools.gimo_server.services.providers.service_impl import ProviderService
+from tools.gimo_server.services.providers.topology_service import ProviderTopologyService
 
 
 def _norm(raw: str | None) -> str:
@@ -28,7 +28,7 @@ def test_inject_cli_account_providers_adds_missing_entries_when_clis_exist(monke
     }
 
     monkeypatch.setattr(
-        "tools.gimo_server.services.provider_topology_service.shutil.which",
+        "tools.gimo_server.services.providers.topology_service.shutil.which",
         lambda binary: f"/mock/{binary}" if binary in {"codex", "claude"} else None,
     )
 
@@ -55,7 +55,7 @@ def test_inject_cli_account_providers_no_duplicate_when_custom_account_exists(mo
     }
 
     monkeypatch.setattr(
-        "tools.gimo_server.services.provider_topology_service.shutil.which",
+        "tools.gimo_server.services.providers.topology_service.shutil.which",
         lambda binary: f"/mock/{binary}" if binary in {"codex", "claude"} else None,
     )
 

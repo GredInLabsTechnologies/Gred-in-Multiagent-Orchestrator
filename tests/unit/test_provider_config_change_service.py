@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from tools.gimo_server.ops_models import ProviderConfig, ProviderEntry
-from tools.gimo_server.services.provider_config_change_service import ProviderConfigChangeService
+from tools.gimo_server.services.providers.config_change_service import ProviderConfigChangeService
 
 
 def _norm(raw: str | None) -> str:

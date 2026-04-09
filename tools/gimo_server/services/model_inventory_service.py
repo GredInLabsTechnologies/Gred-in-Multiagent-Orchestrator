@@ -103,8 +103,8 @@ class ModelInventoryService:
 
     @classmethod
     async def refresh_inventory(cls) -> list[ModelEntry]:
-        from .provider_service import ProviderService
-        from .provider_catalog_service import ProviderCatalogService
+        from .providers.service import ProviderService
+        from .providers.catalog_service import ProviderCatalogService
         from .cost_service import CostService
 
         cfg = ProviderService.get_config()
@@ -189,7 +189,7 @@ class ModelInventoryService:
     @classmethod
     def _build_minimal_inventory(cls) -> list[ModelEntry]:
         """Sync fallback: build inventory from provider config only (no async catalog)."""
-        from .provider_service import ProviderService
+        from .providers.service import ProviderService
         from .cost_service import CostService
 
         cfg = ProviderService.get_config()

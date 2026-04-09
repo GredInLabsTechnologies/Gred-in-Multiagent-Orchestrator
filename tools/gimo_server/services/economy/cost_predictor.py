@@ -52,7 +52,7 @@ class CostPredictor:
             model = node.config.get("model")
 
             if not model:
-                from ..provider_service import ProviderService
+                from ..providers.service import ProviderService
                 provider_cfg = ProviderService.get_config()
                 if provider_cfg and provider_cfg.active in provider_cfg.providers:
                     model = provider_cfg.providers[provider_cfg.active].model

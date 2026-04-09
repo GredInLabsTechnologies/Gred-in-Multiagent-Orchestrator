@@ -24,7 +24,7 @@ class ProviderDiagnosticsService:
 
     @classmethod
     async def report(cls) -> ProviderDiagnosticReport:
-        from tools.gimo_server.services.provider_service import ProviderService
+        from tools.gimo_server.services.providers.service import ProviderService
 
         cfg = ProviderService.get_config()
         if not cfg:
@@ -44,7 +44,7 @@ class ProviderDiagnosticsService:
 
     @classmethod
     async def _probe_one(cls, provider_id: str) -> ProviderDiagnosticEntry:
-        from tools.gimo_server.services.provider_service import ProviderService
+        from tools.gimo_server.services.providers.service import ProviderService
 
         started = time.perf_counter()
         reachable = False
@@ -85,7 +85,7 @@ class ProviderDiagnosticsService:
         """
         from tools.gimo_server.services.codex_auth_service import CodexAuthService
         from tools.gimo_server.services.claude_auth_service import ClaudeAuthService
-        from tools.gimo_server.services.provider_service import ProviderService
+        from tools.gimo_server.services.providers.service import ProviderService
         from tools.gimo_server.services.providers.secret_store import get_secret
 
         cfg = ProviderService.get_config()

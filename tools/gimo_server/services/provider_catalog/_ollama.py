@@ -8,7 +8,7 @@ from ...ops_models import (
     ProviderValidateRequest,
     ProviderValidateResponse,
 )
-from ..provider_catalog_ollama_helpers import (
+from ..providers.catalog_ollama_helpers import (
     ensure_ollama_ready as _ensure_ollama_ready_helper,
     ollama_health as _ollama_health_helper,
     ollama_list_installed as _ollama_list_installed_helper,

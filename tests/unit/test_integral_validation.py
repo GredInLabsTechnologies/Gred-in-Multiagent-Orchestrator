@@ -14,7 +14,7 @@ from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.merge_gate_service import MergeGateService
 from tools.gimo_server.services.model_router_service import ModelRouterService
 from tools.gimo_server.services.ops_service import OpsService
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.repo_override_service import RepoOverrideService
 from tools.gimo_server.services.runtime_policy_service import RuntimePolicyService
 

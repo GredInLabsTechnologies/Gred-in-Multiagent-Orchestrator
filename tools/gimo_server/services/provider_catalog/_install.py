@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Tuple
 from ...ops_models import (
     ProviderModelInstallResponse,
 )
-from ..provider_service import ProviderService
+from ..providers.service import ProviderService
 from ...security import audit_log
 from ._base import ProviderCatalogBase
 

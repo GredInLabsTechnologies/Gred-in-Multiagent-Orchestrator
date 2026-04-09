@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.ops_models import ToolEntry
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.tool_registry_service import ToolRegistryService
 from .common import _require_role, _actor_label
 

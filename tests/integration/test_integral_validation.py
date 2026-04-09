@@ -6,7 +6,7 @@ import pytest
 from tools.gimo_server.main import app
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.repo_override_service import RepoOverrideService
 
 

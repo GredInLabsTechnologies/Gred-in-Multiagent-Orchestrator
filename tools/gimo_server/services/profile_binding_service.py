@@ -6,8 +6,8 @@ from ..models.agent_routing import TaskConstraints
 from ..models.agent_routing import TaskDescriptor
 from ..models.plan import PlanNodeBinding
 from .model_router_service import ModelRouterService
-from .provider_service_impl import ProviderService
-from .provider_topology_service import ProviderTopologyService
+from .providers.service_impl import ProviderService
+from .providers.topology_service import ProviderTopologyService
 
 
 @dataclass(frozen=True)

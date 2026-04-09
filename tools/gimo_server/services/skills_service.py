@@ -565,7 +565,7 @@ class SkillsService:
     @classmethod
     async def generate_skill_from_prompt(cls, req: SkillAutoGenRequest) -> SkillDefinition:
         """Generate a complete skill (nodes, edges, config) from a natural language prompt."""
-        from .provider_service import ProviderService
+        from .providers.service import ProviderService
 
         mood_instruction = MOOD_PROMPTS.get(req.mood, "")
         mood_suffix = f"\nAgent mood for all workers: {req.mood}. {mood_instruction}" if mood_instruction else ""

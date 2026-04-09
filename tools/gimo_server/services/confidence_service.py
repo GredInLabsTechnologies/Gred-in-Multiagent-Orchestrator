@@ -66,7 +66,7 @@ class ConfidenceService:
         [NEW] Proactive self-evaluation using LLM to detect ambiguity and risk.
         Evaluates the task before execution.
         """
-        from .provider_service import ProviderService
+        from .providers.service import ProviderService
 
         prompt = f"""
         Analyze the following task and context to determine if you have enough information to execute it successfully.

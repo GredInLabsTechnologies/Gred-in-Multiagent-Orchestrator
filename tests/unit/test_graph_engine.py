@@ -728,7 +728,7 @@ async def test_project_confidence_calls_llm_correctly():
     trust_engine = MagicMock()
     service = ConfidenceService(trust_engine=trust_engine)
     mock_data = {"confidence": 0.65, "analysis": "clear but auth missing", "questions": ["Q1"], "risk_level": "medium"}
-    with patch("tools.gimo_server.services.provider_service.ProviderService.static_generate", new_callable=AsyncMock) as mock_gen:
+    with patch("tools.gimo_server.services.providers.service.ProviderService.static_generate", new_callable=AsyncMock) as mock_gen:
         mock_gen.return_value = {"content": json.dumps(mock_data), "tokens_used": 100, "cost_usd": 0.001}
         result = await service.project_confidence("Analyze", {})
         assert abs(result["score"] - 0.65) < 0.01
@@ -737,7 +737,7 @@ async def test_project_confidence_calls_llm_correctly():
 async def test_project_confidence_handles_failed_llm_gracefully():
     trust_engine = MagicMock()
     service = ConfidenceService(trust_engine=trust_engine)
-    with patch("tools.gimo_server.services.provider_service.ProviderService.static_generate", side_effect=Exception("LLM Down")):
+    with patch("tools.gimo_server.services.providers.service.ProviderService.static_generate", side_effect=Exception("LLM Down")):
         result = await service.project_confidence("Task", {})
         assert abs(result["score"] - 0.5) < 0.01
 

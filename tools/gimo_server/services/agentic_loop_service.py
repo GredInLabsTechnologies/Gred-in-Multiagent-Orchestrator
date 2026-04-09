@@ -25,9 +25,9 @@ from .conversation_service import ConversationService
 from .cost_service import CostService
 from .execution_policy_service import ExecutionPolicyService
 from .notification_service import NotificationService
-from .provider_auth_service import ProviderAuthService
-from .provider_service_adapter_registry import build_provider_adapter
-from .provider_service_impl import ProviderService
+from .providers.auth_service import ProviderAuthService
+from .providers.adapter_registry import build_provider_adapter
+from .providers.service_impl import ProviderService
 from .constraint_compiler_service import ConstraintCompilerService
 from .task_descriptor_service import TaskDescriptorService
 from .workspace.workspace_contract import WorkspaceContract

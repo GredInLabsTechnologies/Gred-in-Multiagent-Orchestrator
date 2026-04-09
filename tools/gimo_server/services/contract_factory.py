@@ -22,7 +22,7 @@ from tools.gimo_server.models.contract import (
     extract_valid_roles,
 )
 from tools.gimo_server.security.auth import AuthContext
-from tools.gimo_server.services.provider_service import ProviderService
+from tools.gimo_server.services.providers.service import ProviderService
 
 logger = logging.getLogger("orchestrator.contract_factory")
 

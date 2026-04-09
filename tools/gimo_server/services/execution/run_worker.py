@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from ...ops_models import ExecutorReport
 from ..ops_service import OpsService
-from ..provider_service import ProviderService
+from ..providers.service import ProviderService
 from ..notification_service import NotificationService
 from ..critic_service import CriticService
 from ..quality_service import QualityService

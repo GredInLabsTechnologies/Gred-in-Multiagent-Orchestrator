@@ -17,7 +17,7 @@ import psutil
 from typing import Any, Dict, NamedTuple
 
 from .hardware_monitor_service import HardwareMonitorService
-from .provider_catalog_service import ProviderCatalogService
+from .providers.catalog_service import ProviderCatalogService
 from .ops_service import OpsService
 
 

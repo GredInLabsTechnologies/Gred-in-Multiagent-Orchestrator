@@ -139,7 +139,7 @@ class TestConnectorResolveVersionWindows:
 
         monkeypatch.setattr(asyncio, "create_subprocess_shell", fake_shell)
 
-        from tools.gimo_server.services.provider_connector_service import ProviderConnectorService
+        from tools.gimo_server.services.providers.connector_service import ProviderConnectorService
         version = await ProviderConnectorService._resolve_cli_version("codex")
 
         assert version is not None

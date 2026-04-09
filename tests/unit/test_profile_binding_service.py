@@ -9,7 +9,7 @@ from tools.gimo_server.services.model_inventory_service import ModelEntry, Model
 from tools.gimo_server.services.model_router_service import ModelRouterService, RoutingDecision
 from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.profile_binding_service import ProfileBindingService
-from tools.gimo_server.services.provider_service_impl import ProviderService
+from tools.gimo_server.services.providers.service_impl import ProviderService
 from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
 
 

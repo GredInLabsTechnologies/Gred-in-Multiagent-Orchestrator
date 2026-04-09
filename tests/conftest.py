@@ -173,7 +173,7 @@ def _mock_lifespan_network():
     Instead of replacing high-level methods (which breaks tests that call them
     directly), we stub the low-level HTTP functions they use.
     """
-    from tools.gimo_server.services.provider_catalog_service import ProviderCatalogService
+    from tools.gimo_server.services.providers.catalog_service import ProviderCatalogService
     from tools.gimo_server.services.preset_telemetry_service import PresetTelemetryService
 
     async def _fake_ollama_health():

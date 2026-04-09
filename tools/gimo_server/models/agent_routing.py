@@ -94,7 +94,7 @@ class ModelBinding(BaseModel):
         """Validate provider is known or 'auto'."""
         if v != "auto":
             # Lazy import to avoid circular dependency
-            from ..services.provider_service_impl import ProviderService
+            from ..services.providers.service_impl import ProviderService
             cfg = ProviderService.get_config()
             if cfg and v not in cfg.providers:
                 import logging

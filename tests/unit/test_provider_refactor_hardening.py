@@ -8,14 +8,14 @@ import pytest
 from tools.gimo_server.ops_models import ProviderEntry
 from tools.gimo_server.providers.cli_account import CliAccountAdapter
 from tools.gimo_server.providers.openai_compat import OpenAICompatAdapter
-from tools.gimo_server.services.provider_connector_service import ProviderConnectorService
-from tools.gimo_server.services.provider_metadata import (
+from tools.gimo_server.services.providers.connector_service import ProviderConnectorService
+from tools.gimo_server.services.providers.metadata import (
     DEFAULT_BASE_URLS,
     OPENAI_COMPAT_ADAPTER_TYPES,
     OPENAI_COMPAT_CATALOG_TYPES,
     REMOTE_MODELS_BASE_URLS,
 )
-from tools.gimo_server.services.provider_service_adapter_registry import build_provider_adapter
+from tools.gimo_server.services.providers.adapter_registry import build_provider_adapter
 
 
 def test_build_provider_adapter_uses_cli_account_for_codex_account_mode() -> None:
