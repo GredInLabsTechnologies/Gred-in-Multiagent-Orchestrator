@@ -45,10 +45,19 @@ _MAX_RETRIES = 3
 _RETRY_BACKOFF = 2.0  # seconds, multiplied by attempt number
 
 # ── Local cache paths ─────────────────────────────────────────────────────
+# SEED_FILE: ships with GIMO, lives inside the package data/ dir.
+# Always available, never expires — the factory default for fresh installs.
+# RUNTIME_CACHE: written to OPS_DATA_DIR (user-writable) on refresh.
+# Preferred when fresh; falls back to SEED_FILE when absent or stale.
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-_LMARENA_CACHE = _DATA_DIR / "lmarena_benchmarks.json"
-_OPENLLM_CACHE = _DATA_DIR / "openllm_benchmarks.json"
-_ENRICHED_CACHE = _DATA_DIR / "model_capabilities.json"
+_SEED_FILE = _DATA_DIR / "model_capabilities.json"
+
+try:
+    from ..config import OPS_DATA_DIR as _OPS_DIR
+    _RUNTIME_CACHE = Path(_OPS_DIR) / "model_capabilities_cache.json"
+except Exception:
+    _RUNTIME_CACHE = _DATA_DIR / "model_capabilities_cache.json"
+
 _CACHE_MAX_AGE_SECONDS = 86400 * 7  # 7 days
 
 # ── GIMO capability dimensions (normalized names) ─────────────────────────
@@ -331,32 +340,46 @@ def _merge_profiles(
 
 
 def _save_cache(profiles: Dict[str, ModelBenchmarks]) -> None:
-    """Persist enriched profiles to disk."""
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    """Persist enriched profiles to runtime cache (user-writable dir)."""
+    _RUNTIME_CACHE.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "fetched_at": time.time(),
         "models": {k: v.to_dict() for k, v in profiles.items()},
     }
-    _ENRICHED_CACHE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    logger.info("Saved %d enriched model profiles to %s", len(profiles), _ENRICHED_CACHE.name)
+    _RUNTIME_CACHE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    logger.info("Saved %d enriched model profiles to %s", len(profiles), _RUNTIME_CACHE.name)
 
 
 def _load_cache() -> Optional[Dict[str, ModelBenchmarks]]:
-    """Load cached profiles if fresh enough."""
-    if not _ENRICHED_CACHE.exists():
-        return None
-    try:
-        raw = json.loads(_ENRICHED_CACHE.read_text(encoding="utf-8"))
-        age = time.time() - raw.get("fetched_at", 0)
-        if age > _CACHE_MAX_AGE_SECONDS:
-            logger.info("Benchmark cache expired (%.0f hours old)", age / 3600)
-            return None
-        models = {k: ModelBenchmarks.from_dict(v) for k, v in raw.get("models", {}).items()}
-        logger.info("Loaded %d cached benchmark profiles (%.0f hours old)", len(models), age / 3600)
-        return models
-    except Exception:
-        logger.warning("Failed to load benchmark cache", exc_info=True)
-        return None
+    """Load cached profiles if fresh enough.
+
+    Checks runtime cache first (user-writable, has freshness TTL).
+    Falls back to seed file (ships with GIMO, never expires).
+    """
+    # 1) Runtime cache — fresh, from a recent online refresh
+    if _RUNTIME_CACHE.exists():
+        try:
+            raw = json.loads(_RUNTIME_CACHE.read_text(encoding="utf-8"))
+            age = time.time() - raw.get("fetched_at", 0)
+            if age <= _CACHE_MAX_AGE_SECONDS:
+                models = {k: ModelBenchmarks.from_dict(v) for k, v in raw.get("models", {}).items()}
+                logger.info("Loaded %d benchmark profiles from runtime cache (%.0f hours old)", len(models), age / 3600)
+                return models
+            logger.info("Runtime benchmark cache expired (%.0f hours old)", age / 3600)
+        except Exception:
+            logger.warning("Failed to load runtime benchmark cache", exc_info=True)
+
+    # 2) Seed file — ships with GIMO, never expires, always available
+    if _SEED_FILE.exists():
+        try:
+            raw = json.loads(_SEED_FILE.read_text(encoding="utf-8"))
+            models = {k: ModelBenchmarks.from_dict(v) for k, v in raw.get("models", {}).items()}
+            logger.info("Loaded %d benchmark profiles from seed file (packaged with GIMO)", len(models))
+            return models
+        except Exception:
+            logger.warning("Failed to load seed benchmark file", exc_info=True)
+
+    return None
 
 
 # ── Public API ────────────────────────────────────────────────────────────
@@ -402,14 +425,20 @@ async def refresh_benchmarks(*, force: bool = False) -> Dict[str, ModelBenchmark
 
 
 def _load_stale_cache() -> Optional[Dict[str, ModelBenchmarks]]:
-    """Load cache regardless of age — better stale data than none."""
-    if not _ENRICHED_CACHE.exists():
-        return None
-    try:
-        raw = json.loads(_ENRICHED_CACHE.read_text(encoding="utf-8"))
-        return {k: ModelBenchmarks.from_dict(v) for k, v in raw.get("models", {}).items()}
-    except Exception:
-        return None
+    """Load cache regardless of age — better stale data than none.
+
+    Tries runtime cache first, then seed file.
+    """
+    for path in (_RUNTIME_CACHE, _SEED_FILE):
+        if path.exists():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                models = {k: ModelBenchmarks.from_dict(v) for k, v in raw.get("models", {}).items()}
+                if models:
+                    return models
+            except Exception:
+                continue
+    return None
 
 
 def lookup_model(
