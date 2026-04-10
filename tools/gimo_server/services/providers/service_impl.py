@@ -393,18 +393,7 @@ class ProviderService:
         if current_model in installed_ids:
             return current_model
 
-        ranked_ids = list(installed_ids)
-        preferred_tokens = ["coder", "code"]
-
-        def _score(model_id: str) -> tuple[int, int, str]:
-            lower = model_id.lower()
-            family_score = 0
-            if any(token in lower for token in preferred_tokens):
-                family_score += 1
-            return (-family_score, len(lower), lower)
-
-        ranked_ids.sort(key=_score)
-        return ranked_ids[0]
+        return installed_ids[0]
 
     @classmethod
     async def select_provider(
