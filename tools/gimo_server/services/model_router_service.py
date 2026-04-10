@@ -350,8 +350,6 @@ class ModelRouterService:
     # Keep for backwards compat with CascadeService and tests
     _TIERS = _LEGACY_TIERS
 
-    PHASE6_PRIMARY_MODEL = "qwen3-coder:480b-cloud"
-    PHASE6_FALLBACK_MODEL = "qwen3:8b"
     _PHASE6_FALLBACK_ALLOWED = {
         "429",
         "session_limit",
@@ -644,6 +642,11 @@ class ModelRouterService:
         return None
 
     @classmethod
+    def _phase6_config(cls):
+        from .ops_service import OpsService
+        return OpsService.get_config().phase6
+
+    @classmethod
     def classify_phase6_failure_reason(cls, exc: Exception) -> str:
         httpx_err = cls._classify_httpx_error(exc)
         if httpx_err:
@@ -672,6 +675,9 @@ class ModelRouterService:
     def resolve_phase6_strategy(
         cls,
         *,
+        primary_model: str,
+        fallback_model: str,
+        forced_local_intents: List[str],
         intent_effective: str,
         path_scope: List[str],
         primary_failure_reason: str = "",
@@ -688,7 +694,7 @@ class ModelRouterService:
             for p in normalized_scope
         )
 
-        forced_local = intent_effective in {"SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"} or sensitive_scope
+        forced_local = intent_effective in set(forced_local_intents) or sensitive_scope
         reason = str(primary_failure_reason or "")
 
         if forced_local:
@@ -696,9 +702,9 @@ class ModelRouterService:
             return Phase6StrategyDecision(
                 strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
                 strategy_reason="forced_local_only",
-                model_attempted=cls.PHASE6_FALLBACK_MODEL,
+                model_attempted=fallback_model,
                 failure_reason="",
-                final_model_used=cls.PHASE6_FALLBACK_MODEL,
+                final_model_used=fallback_model,
                 fallback_used=False,
                 final_status="PRIMARY_MODEL_SUCCESS",
             )
@@ -708,9 +714,9 @@ class ModelRouterService:
             return Phase6StrategyDecision(
                 strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
                 strategy_reason="cloud_primary_selected",
-                model_attempted=cls.PHASE6_PRIMARY_MODEL,
+                model_attempted=primary_model,
                 failure_reason="",
-                final_model_used=cls.PHASE6_PRIMARY_MODEL,
+                final_model_used=primary_model,
                 fallback_used=False,
                 final_status="PRIMARY_MODEL_SUCCESS",
             )
@@ -720,9 +726,9 @@ class ModelRouterService:
             return Phase6StrategyDecision(
                 strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
                 strategy_reason="fallback_forbidden",
-                model_attempted=cls.PHASE6_PRIMARY_MODEL,
+                model_attempted=primary_model,
                 failure_reason=reason,
-                final_model_used=cls.PHASE6_PRIMARY_MODEL,
+                final_model_used=primary_model,
                 fallback_used=False,
                 final_status="PRIMARY_MODEL_SUCCESS",
             )
@@ -732,9 +738,9 @@ class ModelRouterService:
             return Phase6StrategyDecision(
                 strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
                 strategy_reason="cloud_to_local_fallback",
-                model_attempted=cls.PHASE6_PRIMARY_MODEL,
+                model_attempted=primary_model,
                 failure_reason=reason,
-                final_model_used=cls.PHASE6_FALLBACK_MODEL,
+                final_model_used=fallback_model,
                 fallback_used=True,
                 final_status="FALLBACK_MODEL_USED",
             )
@@ -743,9 +749,9 @@ class ModelRouterService:
         return Phase6StrategyDecision(
             strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
             strategy_reason="fallback_not_allowed_unknown_reason",
-            model_attempted=cls.PHASE6_PRIMARY_MODEL,
+            model_attempted=primary_model,
             failure_reason=reason,
-            final_model_used=cls.PHASE6_PRIMARY_MODEL,
+            final_model_used=primary_model,
             fallback_used=False,
             final_status="PRIMARY_MODEL_SUCCESS",
         )

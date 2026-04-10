@@ -799,8 +799,8 @@ class ProviderService:
         safe_context: Dict[str, Any],
         decision: Any,
         started_at: float,
+        primary_model: str,
     ) -> tuple[Optional[Dict[str, Any]], Optional[Exception], str]:
-        primary_model = ModelRouterService.PHASE6_PRIMARY_MODEL
         max_primary_attempts = 2
         backoff_seconds = 0.25
         last_error: Optional[Exception] = None
@@ -855,21 +855,27 @@ class ProviderService:
     ) -> Dict[str, Any]:
         """Phase-6 deterministic cloud/local strategy resolver execution.
 
-        Rules:
-        - Primary: qwen3-coder:480b-cloud
-        - Fallback: qwen3:8b (local)
-        - Fallback only on: 429, session/weekly limits, timeout, network error, 5xx
-        - No fallback on: 400, policy/schema/merge-gate errors
-        - SECURITY_CHANGE / CORE_RUNTIME_CHANGE / sensitive scope => local-only
+        Models are read from OpsConfig.phase6 (primary_model / fallback_model).
+        Forced-local intents come from OpsConfig.auto_run_excluded_intents.
+        Fallback only on: 429, session/weekly limits, timeout, network error, 5xx.
+        No fallback on: 400, policy/schema/merge-gate errors.
         """
+        from ..ops_service import OpsService
+
+        ops_cfg = OpsService.get_config()
+        phase6_cfg = ops_cfg.phase6
+        _resolve = ModelRouterService.resolve_phase6_strategy
+        _common_kwargs = dict(
+            primary_model=phase6_cfg.primary_model,
+            fallback_model=phase6_cfg.fallback_model,
+            forced_local_intents=ops_cfg.auto_run_excluded_intents,
+            intent_effective=str(intent_effective or ""),
+            path_scope=list(path_scope or []),
+        )
 
         safe_context = dict(context or {})
         started_at = time.perf_counter()
-        decision = ModelRouterService.resolve_phase6_strategy(
-            intent_effective=str(intent_effective or ""),
-            path_scope=list(path_scope or []),
-            primary_failure_reason="",
-        )
+        decision = _resolve(**_common_kwargs, primary_failure_reason="")
 
         if decision.strategy_reason == "forced_local_only":
             local_result = await cls.static_generate(
@@ -897,18 +903,13 @@ class ProviderService:
             return local_result
 
         primary_result, last_error, last_reason = await cls._execute_phase6_primary(
-            prompt, safe_context, decision, started_at
+            prompt, safe_context, decision, started_at,
+            primary_model=phase6_cfg.primary_model,
         )
         if primary_result:
             return primary_result
 
-        fallback_model = ModelRouterService.PHASE6_FALLBACK_MODEL
-
-        resolved = ModelRouterService.resolve_phase6_strategy(
-            intent_effective=str(intent_effective or ""),
-            path_scope=list(path_scope or []),
-            primary_failure_reason=last_reason,
-        )
+        resolved = _resolve(**_common_kwargs, primary_failure_reason=last_reason)
 
         if not resolved.fallback_used:
             raise RuntimeError(f"PHASE6_NO_FALLBACK:{last_reason}") from last_error
@@ -916,7 +917,7 @@ class ProviderService:
         try:
             fallback_result = await cls.static_generate(
                 prompt,
-                {**safe_context, "model": fallback_model},
+                {**safe_context, "model": phase6_cfg.fallback_model},
             )
         except Exception as fallback_exc:
             raise RuntimeError(f"PHASE6_FALLBACK_FAILED:{last_reason}") from fallback_exc
