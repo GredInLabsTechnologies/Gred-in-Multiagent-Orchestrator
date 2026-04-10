@@ -7,7 +7,7 @@ from tools.gimo_server.main import app
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.providers.service import ProviderService
-from tools.gimo_server.services.repo_override_service import RepoOverrideService
+from tools.gimo_server.services.workspace.repo_override_service import RepoOverrideService
 
 
 pytestmark = pytest.mark.integration

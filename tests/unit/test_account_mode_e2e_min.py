@@ -118,7 +118,7 @@ def test_static_generate_uses_cli_account_adapter_for_codex(monkeypatch):
     monkeypatch.setattr(ProviderService, "get_config", lambda: cfg)
     monkeypatch.setattr(CliAccountAdapter, "generate", _fake_generate)
 
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
     monkeypatch.setattr(
         OpsService,
         "get_config",

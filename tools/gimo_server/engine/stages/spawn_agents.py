@@ -39,7 +39,7 @@ class SpawnAgentsStage:
     name = "spawn_agents"
 
     async def execute(self, input: StageInput) -> StageOutput:
-        from ...services.ops_service import OpsService
+        from ...services.ops import OpsService
         from ...services.child_run_service import ChildRunService
 
         run = OpsService.get_run(input.run_id)
@@ -183,7 +183,7 @@ async def _emit_escalation(run_id: str, reason: str, context: Dict[str, Any]) ->
     Also records the failure in GICS so it can learn to avoid this pattern.
     """
     from ...services.hitl_gate_service import HitlGateService
-    from ...services.ops_service import OpsService
+    from ...services.ops import OpsService
 
     run = OpsService.get_run(run_id)
     task_type = (context.get("task_type") or context.get("role") or "general")
@@ -192,7 +192,7 @@ async def _emit_escalation(run_id: str, reason: str, context: Dict[str, Any]) ->
 
     # Record failure in GICS so it learns this model/task_type combination is problematic
     try:
-        from ...services.ops_service import OpsService
+        from ...services.ops import OpsService
         OpsService.record_model_outcome(
             provider_type=provider_type,
             model_id=model_id,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
-from tools.gimo_server.services.observability_service import ObservabilityService
+from tools.gimo_server.services.observability_pkg.observability_service import ObservabilityService
 from tools.gimo_server.services.providers.service import ProviderService
 
 

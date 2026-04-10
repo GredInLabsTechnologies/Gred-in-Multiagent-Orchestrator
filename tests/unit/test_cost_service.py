@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from tools.gimo_server.services.cost_service import CostService
+from tools.gimo_server.services.economy.cost_service import CostService
 
 
 # ---------------------------------------------------------------------------

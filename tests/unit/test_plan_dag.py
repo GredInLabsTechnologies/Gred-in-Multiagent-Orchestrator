@@ -13,7 +13,7 @@ from tools.gimo_server.services.custom_plan_service import (
     PlanExecutionBusyError,
     PlanNode,
 )
-from tools.gimo_server.services.sandbox_service import SandboxHandle, SandboxService
+from tools.gimo_server.services.execution.sandbox_service import SandboxHandle, SandboxService
 
 
 @pytest.mark.asyncio

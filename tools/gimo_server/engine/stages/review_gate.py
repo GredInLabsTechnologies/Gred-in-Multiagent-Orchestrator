@@ -22,7 +22,7 @@ class ReviewGate:
     name = "review_gate"
 
     async def execute(self, input: StageInput) -> StageOutput:
-        from ...services.ops_service import OpsService
+        from ...services.ops import OpsService
         from ...services.hitl_gate_service import HitlGateService
 
         run = OpsService.get_run(input.run_id)

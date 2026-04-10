@@ -10,7 +10,7 @@ from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.ops_models import OpsDraft, OpsPlan, OpsCreateDraftRequest, OpsUpdateDraftRequest
 from tools.gimo_server.services.cognitive import CognitiveService
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.runtime_policy_service import RuntimePolicyService
 from tools.gimo_server.services.intent_classification_service import IntentClassificationService
@@ -198,7 +198,7 @@ async def run_slice0_pipeline(
     """Ejecuta el Pipeline estilo LangGraph E2E (Slice 0/Anexo A)."""
     _require_role(auth, "operator")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
-    from tools.gimo_server.services.engine_service import EngineService
+    from tools.gimo_server.services.execution.engine_service import EngineService
     try:
         # Create a draft first if needed, or assume a run is created
         draft = OpsService.create_draft(prompt, context={"repo_path": repo_path, "intent_effective": "SLICE0"})

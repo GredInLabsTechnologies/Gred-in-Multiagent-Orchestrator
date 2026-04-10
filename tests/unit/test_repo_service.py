@@ -5,7 +5,7 @@ import hashlib
 import pytest
 
 from tools.gimo_server.models import RepoEntry
-from tools.gimo_server.services.repo_service import RepoService
+from tools.gimo_server.services.workspace.repo_service import RepoService
 
 
 @pytest.fixture

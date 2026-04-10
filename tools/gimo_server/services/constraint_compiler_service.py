@@ -8,7 +8,7 @@ from .intent_classification_service import IntentClassificationService
 from .providers.service import ProviderService
 from .providers.topology_service import ProviderTopologyService
 from .runtime_policy_service import RuntimePolicyService
-from .workspace_policy_service import WorkspacePolicyService
+from .workspace.workspace_policy_service import WorkspacePolicyService
 
 logger = logging.getLogger("orchestrator.services.constraint_compiler")
 

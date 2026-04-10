@@ -36,7 +36,7 @@ def _build_plan() -> CustomPlan:
 
 def test_get_plan_economy_snapshot_ok(monkeypatch):
     from tools.gimo_server.services.custom_plan_service import CustomPlanService
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
     from tools.gimo_server.services.storage_service import StorageService
 
     plan = _build_plan()
@@ -76,7 +76,7 @@ def test_get_plan_economy_snapshot_ok(monkeypatch):
 
 def test_update_plan_autonomy_updates_selected_nodes(monkeypatch):
     from tools.gimo_server.services.custom_plan_service import CustomPlanService
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
     from tools.gimo_server.services.storage_service import StorageService
 
     plan = _build_plan()

@@ -24,7 +24,7 @@ from .config_change_service import ProviderConfigChangeService
 from .topology_service import ProviderTopologyService
 from ..llm_cache import NormalizedLLMCache
 from ..model_router_service import ModelRouterService
-from ..observability_service import ObservabilityService
+from ..observability_pkg.observability_service import ObservabilityService
 
 logger = logging.getLogger("orchestrator.ops.provider")
 
@@ -569,7 +569,7 @@ class ProviderService:
             return provider_id, model_id
 
         def _rel(ptype: str, model: str) -> tuple[float, bool]:
-            from ..ops_service import OpsService
+            from ..ops import OpsService
 
             data = OpsService.get_model_reliability(provider_type=ptype, model_id=model) or {}
             score = float(data.get("score", 0.5) or 0.5)
@@ -699,7 +699,7 @@ class ProviderService:
     def _record_outcome_safe(
         cls, provider_type: str, model_id: str, success: bool, start_ts: float, cost_usd: float, task_type: str
     ) -> None:
-        from ..ops_service import OpsService
+        from ..ops import OpsService
         try:
             OpsService.record_model_outcome(
                 provider_type=provider_type, model_id=model_id, success=success,
@@ -711,8 +711,8 @@ class ProviderService:
     @classmethod
     async def static_generate(cls, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Static version of generate for legacy/class-level calls."""
-        from ..cost_service import CostService
-        from ..ops_service import OpsService
+        from ..economy.cost_service import CostService
+        from ..ops import OpsService
         
         cfg = cls.get_config()
         if not cfg:
@@ -860,7 +860,7 @@ class ProviderService:
         Fallback only on: 429, session/weekly limits, timeout, network error, 5xx.
         No fallback on: 400, policy/schema/merge-gate errors.
         """
-        from ..ops_service import OpsService
+        from ..ops import OpsService
 
         ops_cfg = OpsService.get_config()
         phase6_cfg = ops_cfg.phase6

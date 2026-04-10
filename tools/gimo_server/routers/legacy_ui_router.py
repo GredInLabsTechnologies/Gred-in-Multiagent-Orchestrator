@@ -26,7 +26,7 @@ from tools.gimo_server.security import (
 from tools.gimo_server.security.access_control import require_read_only_access
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.file_service import FileService
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
 from tools.gimo_server.version import __version__
@@ -320,7 +320,7 @@ def compare_costs(
     model_b: Annotated[str, Query(..., min_length=1)],
     auth: Annotated[AuthContext, Depends(verify_token)],
 ):
-    from tools.gimo_server.services.cost_service import CostService
+    from tools.gimo_server.services.economy.cost_service import CostService
     try:
         return CostService.get_impact_comparison(model_a, model_b)
     except Exception as exc:

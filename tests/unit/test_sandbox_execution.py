@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from tools.gimo_server.models import ProviderDiagnosticEntry
 from tools.gimo_server.services.sub_agent_manager import SubAgentManager
 from tools.gimo_server.services.merge_gate_service import MergeGateService
-from tools.gimo_server.services.ops_service import OpsService
-from tools.gimo_server.services.sandbox_service import SandboxService
+from tools.gimo_server.services.ops import OpsService
+from tools.gimo_server.services.execution.sandbox_service import SandboxService
 
 
 def _setup_spawn_ops_dirs(tmp_path):
@@ -371,7 +371,7 @@ async def test_spawn_via_draft_creates_authoritative_run_projection(monkeypatch,
 
 def test_create_run_provisions_workspace_and_copies_validated_task_spec(monkeypatch, tmp_path):
     from tools.gimo_server.models.core import OpsApproved, OpsDraft
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
 
     OpsService.OPS_DIR = tmp_path
     OpsService.DRAFTS_DIR = tmp_path / "drafts"
@@ -423,7 +423,7 @@ def test_create_run_provisions_workspace_and_copies_validated_task_spec(monkeypa
 
 def test_create_run_can_target_source_repo_for_sovereign_surface(monkeypatch, tmp_path):
     from tools.gimo_server.models.core import OpsApproved, OpsDraft
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
 
     OpsService.OPS_DIR = tmp_path
     OpsService.DRAFTS_DIR = tmp_path / "drafts"
@@ -478,7 +478,7 @@ def test_create_run_can_target_source_repo_for_sovereign_surface(monkeypatch, tm
 
 def test_create_run_uses_app_bound_snapshot_for_chatgpt_surface(monkeypatch, tmp_path):
     from tools.gimo_server.models.core import OpsApproved, OpsDraft
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
 
     OpsService.OPS_DIR = tmp_path
     OpsService.DRAFTS_DIR = tmp_path / "drafts"
@@ -547,7 +547,7 @@ def test_create_run_uses_app_bound_snapshot_for_chatgpt_surface(monkeypatch, tmp
 
 def test_create_run_for_chatgpt_surface_fails_closed_without_bound_snapshot(monkeypatch, tmp_path):
     from tools.gimo_server.models.core import OpsApproved, OpsDraft
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
 
     OpsService.OPS_DIR = tmp_path
     OpsService.DRAFTS_DIR = tmp_path / "drafts"

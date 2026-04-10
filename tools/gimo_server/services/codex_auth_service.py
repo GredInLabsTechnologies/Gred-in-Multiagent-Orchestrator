@@ -15,38 +15,13 @@ import sys
 import threading
 from typing import Any, Dict
 
+from ._subprocess_util import popen_compat as _popen, run_cli as _run
+
 logger = logging.getLogger("orchestrator.services.codex_auth")
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _URL_RE = re.compile(r"https?://\S+")
 _CODE_RE = re.compile(r"\b([A-Z0-9]{3,6}-[A-Z0-9]{3,6})\b")
-
-
-def _popen(args: list[str], **kwargs) -> subprocess.Popen:
-    """Spawn a subprocess; use shell=True on Windows for .cmd shim compat."""
-    if sys.platform == "win32":
-        return subprocess.Popen(" ".join(args), shell=True, **kwargs)  # nosec B602
-    return subprocess.Popen(args, **kwargs)
-
-
-def _run(args: list[str], timeout: float = 8) -> tuple[int, str]:
-    """Run a command synchronously and return (returncode, combined_output)."""
-    try:
-        proc = _popen(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
-        out, _ = proc.communicate(timeout=timeout)
-        return proc.returncode, (out or b"").decode("utf-8", errors="replace").strip()
-    except subprocess.TimeoutExpired as exc:
-        try:
-            exc.process.kill()
-        except Exception:
-            pass
-        raise
-    except Exception:
-        raise
 
 
 def _device_flow_sync(binary: str) -> Dict[str, Any]:

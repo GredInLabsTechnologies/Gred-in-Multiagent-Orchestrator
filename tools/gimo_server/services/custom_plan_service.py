@@ -26,7 +26,7 @@ from .constraint_compiler_service import ConstraintCompilerService
 from .git_service import GitService
 from .profile_binding_service import ProfileBindingService
 from .profile_router_service import ProfileRouterService
-from .sandbox_service import SandboxHandle, SandboxService
+from .execution.sandbox_service import SandboxHandle, SandboxService
 from .task_descriptor_service import TaskDescriptorService
 from .task_fingerprint_service import TaskFingerprintService
 
@@ -197,7 +197,7 @@ class CustomPlanService:
     @staticmethod
     def _get_ops_service():
         try:
-            from .ops_service import OpsService
+            from .ops import OpsService
 
             return OpsService
         except Exception:
@@ -601,7 +601,7 @@ class CustomPlanService:
     ) -> Optional[CustomPlan]:
         """Execute a plan layer by layer, respecting dependencies."""
         from ..services.notification_service import NotificationService
-        from ..services.ops_service import OpsService
+        from ..services.ops import OpsService
 
         plan = cls.get_plan(plan_id)
         if not plan:
@@ -872,7 +872,7 @@ class CustomPlanService:
         try:
             from ..services.agentic_loop_service import AgenticLoopService
             from ..services.storage_service import StorageService
-            from ..services.ops_service import OpsService
+            from ..services.ops import OpsService
             storage_service_cls = StorageService
             ops_service_cls = OpsService
 

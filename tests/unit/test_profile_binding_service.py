@@ -7,7 +7,7 @@ import pytest
 from tools.gimo_server.ops_models import ProviderConfig, ProviderEntry, ProviderRoleBinding, ProviderRolesConfig, TaskConstraints
 from tools.gimo_server.services.model_inventory_service import ModelEntry, ModelInventoryService
 from tools.gimo_server.services.model_router_service import ModelRouterService, RoutingDecision
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.profile_binding_service import ProfileBindingService
 from tools.gimo_server.services.providers.service_impl import ProviderService
 from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService

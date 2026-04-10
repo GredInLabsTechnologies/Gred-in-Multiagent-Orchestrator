@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from tools.gimo_server.main import app
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.ops_models import PolicyDecision
 
 
@@ -91,7 +91,7 @@ def e2e_env(ops_dir):
     from tools.gimo_server.routers.ops import run_router
     from tools.gimo_server.services import provider_service_impl
     from tools.gimo_server.services import runtime_policy_service as rps_mod
-    from tools.gimo_server.services import run_worker as rw_mod
+    from tools.gimo_server.services.execution import run_worker as rw_mod
     from tools.gimo_server.resilience import SupervisedTask
 
     # 1. Redirigir OPS a directorio temporal

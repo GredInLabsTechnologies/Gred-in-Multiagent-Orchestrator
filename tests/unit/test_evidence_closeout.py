@@ -4,7 +4,7 @@ import os
 import json
 from pathlib import Path
 from tools.gimo_server.services.draft_validation_service import DraftValidationService
-from tools.gimo_server.services.run_worker import RunWorker
+from tools.gimo_server.services.execution.run_worker import RunWorker
 from tools.gimo_server.models.core import OpsApproved
 from unittest.mock import MagicMock, patch
 

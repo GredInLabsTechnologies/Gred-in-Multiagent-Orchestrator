@@ -6,7 +6,7 @@ import pytest
 
 from tools.gimo_server.models.core import OpsRun, PurgeReceipt
 from tools.gimo_server.services.lifecycle_errors import LifecycleProofError, PurgeExecutionError
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.purge_service import PurgeService
 
 

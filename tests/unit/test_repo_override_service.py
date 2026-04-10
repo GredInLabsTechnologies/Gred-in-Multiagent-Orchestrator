@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
-from tools.gimo_server.services.repo_override_service import RepoOverrideService
+from tools.gimo_server.services.workspace.repo_override_service import RepoOverrideService
 
 
 def _z(dt: datetime) -> str:

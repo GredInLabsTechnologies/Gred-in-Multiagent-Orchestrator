@@ -12,7 +12,7 @@ from tools.gimo_server.config import get_settings
 from tools.gimo_server.main import app
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.resilience import SupervisedTask
 
 

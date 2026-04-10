@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from tools.gimo_server.services.merge_gate_service import MergeGateService
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 
 @pytest.mark.asyncio
 async def test_merge_gate_stops_at_awaiting_merge():

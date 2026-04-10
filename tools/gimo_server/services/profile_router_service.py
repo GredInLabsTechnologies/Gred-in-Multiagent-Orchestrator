@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..models.agent_routing import RoutingDecision, RoutingDecisionSummary, TaskConstraints, TaskDescriptor, ModelBinding
 from .agent_catalog_service import AgentCatalogService, PRESET_CATALOG
-from .execution_policy_service import LEGACY_MOOD_TO_POLICY
+from .execution.execution_policy_service import LEGACY_MOOD_TO_POLICY
 
 
 class ProfileRouterService:
@@ -35,7 +35,7 @@ class ProfileRouterService:
 
         P9: Filtra presets con failure_streak ≥ 5 (auto-downgrade).
         """
-        from .anomaly_detection_service import AnomalyDetectionService
+        from .observability_pkg.anomaly_detection_service import AnomalyDetectionService
 
         # Get downgrade list
         downgraded = AnomalyDetectionService.get_downgrade_list()

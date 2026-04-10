@@ -1,4 +1,4 @@
-from tools.gimo_server.services.workspace_policy_service import WorkspacePolicyService
+from tools.gimo_server.services.workspace.workspace_policy_service import WorkspacePolicyService
 
 
 def test_chatgpt_apps_are_limited_to_ephemeral():

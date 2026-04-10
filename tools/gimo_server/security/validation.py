@@ -8,7 +8,7 @@ from typing import Any, Optional
 from fastapi import HTTPException
 
 from tools.gimo_server.config import ALLOWLIST_PATH, ALLOWLIST_TTL_SECONDS, REPO_REGISTRY_PATH
-from tools.gimo_server.services.repo_override_service import RepoOverrideService
+from tools.gimo_server.services.workspace.repo_override_service import RepoOverrideService
 
 from .common import load_json_db
 

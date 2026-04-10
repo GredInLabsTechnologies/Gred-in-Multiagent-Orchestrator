@@ -11,7 +11,7 @@ from tools.gimo_server.ops_models import (
     WorkflowNode, 
     WorkflowState
 )
-from tools.gimo_server.services.graph_engine import GraphEngine
+from tools.gimo_server.services.graph import GraphEngine
 from tools.gimo_server.services.confidence_service import ConfidenceService
 from tools.gimo_server.ops_models import ToolEntry
 import hashlib

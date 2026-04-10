@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from .storage_service import StorageService
 
 from ..ops_models import ProviderRoleBinding, WorkflowNode
-from .cost_service import CostService
+from .economy.cost_service import CostService
 from .model_inventory_service import ModelInventoryService, ModelEntry, _infer_tier
 from .hardware_monitor_service import HardwareMonitorService
 
@@ -222,7 +222,7 @@ class ModelRouterService:
     @classmethod
     def _gics_success_adjustment(cls, task_type: str, entry: ModelEntry) -> tuple[float, list[str]]:
         from .capability_profile_service import CapabilityProfileService
-        from .ops_service import OpsService
+        from .ops import OpsService
 
         reasons: list[str] = []
         adjustment = 0.0
@@ -456,7 +456,7 @@ class ModelRouterService:
         Never returns an empty list — always preserves at least the original set.
         """
         try:
-            from .ops_service import OpsService
+            from .ops import OpsService
             gics = getattr(OpsService, "_gics", None)
             if not gics:
                 return candidates
@@ -499,7 +499,7 @@ class ModelRouterService:
                 pass  # Fall back to minimal sync inventory
 
     async def choose_model(self, node: WorkflowNode, _state: Dict[str, Any]) -> ModelSelectionDecision:
-        from .ops_service import OpsService
+        from .ops import OpsService
         config = OpsService.get_config()
 
         await self._ensure_inventory_loaded()
@@ -643,7 +643,7 @@ class ModelRouterService:
 
     @classmethod
     def _phase6_config(cls):
-        from .ops_service import OpsService
+        from .ops import OpsService
         return OpsService.get_config().phase6
 
     @classmethod

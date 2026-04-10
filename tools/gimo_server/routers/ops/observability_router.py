@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
-from tools.gimo_server.services.observability_service import ObservabilityService
+from tools.gimo_server.services.observability_pkg.observability_service import ObservabilityService
 from tools.gimo_server.services.notification_service import NotificationService
 from .common import _require_role, _actor_label
 
@@ -147,7 +147,7 @@ async def observability_duration_stats(
     """
     _require_role(auth, "operator")
     from tools.gimo_server.services.timeout.duration_telemetry_service import DurationTelemetryService
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
 
     # Inject GICS
     DurationTelemetryService.set_gics(getattr(request.app.state, "gics", None))

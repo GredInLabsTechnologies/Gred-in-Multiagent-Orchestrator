@@ -28,11 +28,11 @@ from tools.gimo_server.models.agent_routing import TaskDescriptor, RoutingDecisi
 from tools.gimo_server.services.constraint_compiler_service import ConstraintCompilerService
 from tools.gimo_server.services.model_router_service import ModelRouterService
 from tools.gimo_server.services.profile_router_service import ProfileRouterService
-from tools.gimo_server.services.observability_service import ObservabilityService
+from tools.gimo_server.services.observability_pkg.observability_service import ObservabilityService
 from tools.gimo_server.services.storage_service import StorageService
 from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.confidence_service import ConfidenceService
-from tools.gimo_server.services.cascade_service import CascadeService
+from tools.gimo_server.services.economy.cascade_service import CascadeService
 
 from .budget_guard import BudgetGuardMixin
 from .contract_validator import ContractValidatorMixin
@@ -275,7 +275,7 @@ class GraphEngine(
         return await self._call_execute_node(node)
 
     async def _run_llm_call_with_cascade(self, node: WorkflowNode) -> Any:
-        from tools.gimo_server.services.ops_service import OpsService
+        from tools.gimo_server.services.ops import OpsService
         config = OpsService.get_config()
 
         economy = config.economy
@@ -435,7 +435,7 @@ class GraphEngine(
 
         if self.storage and hasattr(self.storage, "cost") and (tokens_used > 0 or cost_usd > 0):
              try:
-                 from tools.gimo_server.services.cost_service import CostService
+                 from tools.gimo_server.services.economy.cost_service import CostService
                  provider = CostService.get_provider(model_used)
 
                  event = CostEvent(

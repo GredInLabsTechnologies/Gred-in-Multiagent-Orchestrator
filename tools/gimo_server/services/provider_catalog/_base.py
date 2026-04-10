@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import time
 from typing import Any, Dict, List, Tuple
 
@@ -15,7 +14,8 @@ from ...ops_models import (
 )
 from ..providers.service import ProviderService
 from ..providers.auth_service import ProviderAuthService
-from ..ops_service import OpsService
+from ..ops import OpsService
+from .._subprocess_util import popen_compat
 from ..providers.catalog_ollama_helpers import (
     ensure_ollama_ready as _ensure_ollama_ready_helper,
     ollama_health as _ollama_health_helper,
@@ -220,12 +220,11 @@ def _mock_mode_enabled(payload: ProviderValidateRequest | None = None) -> bool:
 
 
 def _run_sync(args: list[str], timeout: float = 10.0) -> tuple[int, str]:
-    """Run a CLI command synchronously; uses shell=True on Windows for .cmd shim compat."""
+    """Run a CLI command synchronously with nested-session guard removed."""
     try:
-        cmd = " ".join(args) if sys.platform == "win32" else args
         clean_env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE")}
-        proc = subprocess.Popen(
-            cmd, shell=(sys.platform == "win32"),  # nosec B602
+        proc = popen_compat(
+            args,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             env=clean_env,  # remove nested-session guard so claude/codex CLIs work
         )

@@ -8,7 +8,7 @@ from ...ops_models import (
     NormalizedModelInfo,
     ProviderValidateRequest,
 )
-from ..ops_service import OpsService
+from ..ops import OpsService
 from ..providers.metadata import OPENAI_COMPAT_CATALOG_TYPES, REMOTE_MODELS_BASE_URLS
 from ._base import (
     ProviderCatalogBase,

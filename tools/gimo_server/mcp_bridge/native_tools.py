@@ -233,7 +233,7 @@ def register_native_tools(mcp: FastMCP):
         worker_running = getattr(server, "_active_run_worker", None) is not None
 
         module_keys = [
-            "tools.gimo_server.services.run_worker",
+            "tools.gimo_server.services.execution.run_worker",
             "tools.gimo_server.mcp_bridge.server",
             "tools.gimo_server.services.providers.service",
         ]
@@ -309,7 +309,7 @@ def register_native_tools(mcp: FastMCP):
                 server._active_run_worker = None
 
             try:
-                mod_name = "tools.gimo_server.services.run_worker"
+                mod_name = "tools.gimo_server.services.execution.run_worker"
                 if mod_name in sys.modules:
                     importlib.reload(sys.modules[mod_name])
                     steps.append(f"✅ Module '{mod_name}' reloaded from disk")
@@ -319,7 +319,7 @@ def register_native_tools(mcp: FastMCP):
                 return f"❌ Module reload failed: {e}"
 
             try:
-                from tools.gimo_server.services.run_worker import RunWorker
+                from tools.gimo_server.services.execution.run_worker import RunWorker
                 server._active_run_worker = RunWorker()
                 await server._active_run_worker.start()
                 steps.append("✅ New RunWorker instantiated and started")

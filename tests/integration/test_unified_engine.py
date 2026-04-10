@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.gimo_server.engine.contracts import StageOutput
-from tools.gimo_server.services.engine_service import EngineService
+from tools.gimo_server.services.execution.engine_service import EngineService
 
 import tools.gimo_server.engine as engine_pkg
 import tools.gimo_server.engine.stages as stages_pkg
@@ -55,7 +55,7 @@ async def test_execute_run_infers_multi_agent_composition_for_parent_flows() -> 
         "tools.gimo_server.services.ops_service.OpsService.append_log",
         return_value=fake_run,
     ), patch(
-        "tools.gimo_server.services.engine_service.EngineService.run_composition",
+        "tools.gimo_server.services.execution.engine_service.EngineService.run_composition",
         new_callable=AsyncMock,
     ) as mock_run_composition:
         mock_run_composition.return_value = []

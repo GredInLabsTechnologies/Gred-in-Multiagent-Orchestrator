@@ -5,8 +5,8 @@ import os
 from unittest.mock import MagicMock, patch
 from tools.gimo_server.models.core import OpsRun, OpsApproved
 from tools.gimo_server.schemas.draft_validation import ValidatedTaskSpec
-from tools.gimo_server.services.run_worker import RunWorker
-from tools.gimo_server.services.ops.ops_service import OpsService
+from tools.gimo_server.services.execution.run_worker import RunWorker
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.app_session_service import AppSessionService
 from tools.gimo_server.services.providers.service_impl import ProviderService
 from tools.gimo_server.engine.tools.executor import ToolExecutor, ToolExecutionResult
@@ -77,7 +77,7 @@ async def test_worker_context_is_scoped_by_task_spec(mock_ops_service, tmp_path)
 
     worker = RunWorker()
 
-    with patch("tools.gimo_server.services.engine_service.EngineService.execute_run") as mock_exec:
+    with patch("tools.gimo_server.services.execution.engine_service.EngineService.execute_run") as mock_exec:
         mock_exec.return_value = asyncio.Future()
         mock_exec.return_value.set_result({"status": "completed"})
 
@@ -285,7 +285,7 @@ async def test_allowed_paths_survives_engine_context_merge(mock_ops_service, tmp
     mock_ops_service._persist_run(run)
 
     worker = RunWorker()
-    with patch("tools.gimo_server.services.engine_service.EngineService.execute_run") as mock_exec:
+    with patch("tools.gimo_server.services.execution.engine_service.EngineService.execute_run") as mock_exec:
         await worker._execute_run(run.id)
 
         final_run = mock_ops_service.get_run(run.id)

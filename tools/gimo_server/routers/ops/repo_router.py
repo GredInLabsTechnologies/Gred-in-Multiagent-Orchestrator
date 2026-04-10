@@ -15,8 +15,8 @@ from ...security import (
     save_repo_registry,
 )
 from ...security.auth import AuthContext
-from ...services.repo_service import RepoService
-from ...services.repo_override_service import RepoOverrideService
+from ...services.workspace.repo_service import RepoService
+from ...services.workspace.repo_override_service import RepoOverrideService
 from ..ops.common import require_admin, require_read, require_operator
 
 router = APIRouter(prefix="/ops/repos", tags=["repos"])
