@@ -261,7 +261,7 @@ class EngineService:
     async def execute_run(cls, run_id: str, composition: Optional[str] = None):
         """Unified execution for any run."""
         import time
-        from ..ops_service import OpsService
+        from ..ops import OpsService
         from ..timeout.duration_telemetry_service import DurationTelemetryService
 
         # GAEP Phase 1: Start timing

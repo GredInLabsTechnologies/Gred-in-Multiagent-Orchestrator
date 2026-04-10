@@ -202,7 +202,7 @@ class ContextAnalysisService:
         Returns:
             Lista de secuencias detectadas
         """
-        from .workspace_context_service import WorkspaceContextService
+        from .workspace.workspace_context_service import WorkspaceContextService
 
         # Get events desde workspace context
         events = WorkspaceContextService._retrieve_events_from_gics(

@@ -12,14 +12,14 @@ from tools.gimo_server.ops_models import (
     OpsApproved, OpsApproveResponse, OpsRun, OpsCreateRunRequest, OpsResumeRunRequest,
     WorkflowExecuteRequest, WorkflowGraph, WorkflowCheckpoint
 )
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.hitl_gate_service import HitlGateService
 from tools.gimo_server.services.storage_service import StorageService
-from tools.gimo_server.services.graph_engine import GraphEngine
-from tools.gimo_server.services.observability_service import ObservabilityService
+from tools.gimo_server.services.graph import GraphEngine
+from tools.gimo_server.services.observability_pkg.observability_service import ObservabilityService
 from tools.gimo_server.services.confidence_service import ConfidenceService
 from tools.gimo_server.services.trust_engine import TrustEngine
-from tools.gimo_server.services.engine_service import EngineService
+from tools.gimo_server.services.execution.engine_service import EngineService
 from tools.gimo_server.engine.journal import RunJournal
 from tools.gimo_server.resilience import SupervisedTask
 

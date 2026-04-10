@@ -52,18 +52,18 @@ class OpenAICompatibleSession(AgentSession):
 
         # F7.1: Derive execution_policy from routing_summary or legacy role_profile
         if routing_summary:
-            from ..services.execution_policy_service import ExecutionPolicyService
+            from ..services.execution.execution_policy_service import ExecutionPolicyService
             self._execution_policy = ExecutionPolicyService.get_policy(routing_summary.execution_policy)
             self._role_profile = routing_summary.mood  # For legacy compatibility
         elif role_profile:
             # Backward compatibility: derive from role_profile
-            from ..services.execution_policy_service import ExecutionPolicyService
+            from ..services.execution.execution_policy_service import ExecutionPolicyService
             policy_name = ExecutionPolicyService.policy_name_from_legacy_mood(role_profile)
             self._execution_policy = ExecutionPolicyService.get_policy(policy_name)
             self._role_profile = role_profile
         else:
             # Default fallback
-            from ..services.execution_policy_service import ExecutionPolicyService
+            from ..services.execution.execution_policy_service import ExecutionPolicyService
             self._execution_policy = ExecutionPolicyService.get_policy("workspace_safe")
             self._role_profile = "executor"
 

@@ -18,7 +18,7 @@ from typing import Any, Dict, NamedTuple
 
 from .hardware_monitor_service import HardwareMonitorService
 from .providers.catalog_service import ProviderCatalogService
-from .ops_service import OpsService
+from .ops import OpsService
 
 
 # ── Scoring tables (0-100 per component) ─────────────────────────────────────

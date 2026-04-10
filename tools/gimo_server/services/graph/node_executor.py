@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from tools.gimo_server.services.tool_registry_service import ToolRegistryService
 from tools.gimo_server.services.hitl_gate_service import HitlGateService
-from tools.gimo_server.services.execution_policy_service import ExecutionPolicyService
+from tools.gimo_server.services.execution.execution_policy_service import ExecutionPolicyService
 from tools.gimo_server.services.constraint_compiler_service import ConstraintCompilerService
 from tools.gimo_server.services.profile_router_service import ProfileRouterService
 from tools.gimo_server.models.agent_routing import TaskDescriptor

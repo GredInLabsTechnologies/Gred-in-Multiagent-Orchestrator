@@ -20,7 +20,7 @@ from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services import skills_service, notification_service, custom_plan_service
 from tools.gimo_server.services.merge_gate_service import MergeGateService
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 
 
 def _override_auth() -> AuthContext:

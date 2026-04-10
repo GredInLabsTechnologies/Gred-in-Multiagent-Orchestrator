@@ -22,8 +22,8 @@ from ..providers.base import ProviderAdapter
 from ..security.execution_proof import ExecutionProof, ExecutionProofChain
 from .agent_catalog_service import AgentCatalogService
 from .conversation_service import ConversationService
-from .cost_service import CostService
-from .execution_policy_service import ExecutionPolicyService
+from .economy.cost_service import CostService
+from .execution.execution_policy_service import ExecutionPolicyService
 from .notification_service import NotificationService
 from .providers.auth_service import ProviderAuthService
 from .providers.adapter_registry import build_provider_adapter
@@ -251,7 +251,7 @@ class AgenticLoopService:
     @staticmethod
     def _get_ops_service():
         try:
-            from .ops_service import OpsService
+            from .ops import OpsService
 
             return OpsService
         except Exception:
@@ -396,7 +396,7 @@ class AgenticLoopService:
     @staticmethod
     def _get_gics():
         try:
-            from .ops_service import OpsService
+            from .ops import OpsService
 
             return getattr(OpsService, "_gics", None)
         except Exception:
@@ -1650,25 +1650,9 @@ class AgenticLoopService:
                 executor_id=f"{provider_id or 'unknown'}:{model or 'unknown'}",
             )
 
-        # U4: Single telemetry sink — writes to metrics, audit log, and thread metadata.
         try:
-            from .observability import ObservabilityService
-            ObservabilityService.record_llm_usage(
-                thread_id=thread_id,
-                model=model or "unknown",
-                prompt_tokens=total_usage.get("prompt_tokens", 0),
-                completion_tokens=total_usage.get("completion_tokens", 0),
-                cost_usd=total_cost,
-                tools_executed=len(all_tool_logs),
-                tool_call_format=last_tool_call_format or "none",
-                estimated=bool(total_usage.get("estimated")),
-            )
-        except Exception:
-            logger.debug("record_llm_usage failed", exc_info=True)
-
-        try:
-            from .observability_service import ObservabilityService as UnifiedObservabilityService
-            from .ops_service import OpsService
+            from .observability_pkg.observability_service import ObservabilityService as UnifiedObservabilityService
+            from .ops import OpsService
             from .storage_service import StorageService
 
             cfg = ProviderService.get_config()
@@ -1730,6 +1714,26 @@ class AgenticLoopService:
                 error_code="" if evidence_status == "completed" else str(finish_reason or ""),
             )
             UnifiedObservabilityService.record_workflow_end(workflow_id, trace_id, status=evidence_status)
+
+            # Thread-level usage accumulation (per-conversation tracking)
+            if thread_id:
+                try:
+                    from .conversation_service import ConversationService
+                    _total = input_tokens + output_tokens
+
+                    def _update_thread_usage(t):
+                        prev = t.metadata.get("usage") if isinstance(t.metadata.get("usage"), dict) else {}
+                        t.metadata["usage"] = {
+                            "prompt_tokens": prev.get("prompt_tokens", 0) + input_tokens,
+                            "completion_tokens": prev.get("completion_tokens", 0) + output_tokens,
+                            "cost_usd": prev.get("cost_usd", 0.0) + float(total_cost or 0.0),
+                            "total_tokens": prev.get("total_tokens", 0) + _total,
+                        }
+                        return True
+
+                    ConversationService.mutate_thread(thread_id, _update_thread_usage)
+                except Exception:
+                    logger.debug("thread usage update failed", exc_info=True)
 
             storage = StorageService()
             storage.cost.save_cost_event(

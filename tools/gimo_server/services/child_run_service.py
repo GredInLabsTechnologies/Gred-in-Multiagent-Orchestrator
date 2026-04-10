@@ -5,7 +5,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ..ops_models import OpsRun
-from .ops_service import OpsService
+from .ops import OpsService
 
 logger = logging.getLogger("orchestrator.services.child_run")
 

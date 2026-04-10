@@ -10,7 +10,7 @@ import logging
 from typing import ClassVar, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .run_worker import RunWorker
+    from .execution.run_worker import RunWorker
     from .hardware_monitor_service import HardwareMonitorService
     from .resource_governor import ResourceGovernor
 

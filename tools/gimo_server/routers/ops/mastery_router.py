@@ -14,7 +14,7 @@ from ...ops_models import (
     PlanAutonomyUpdateRequest,
 )
 from ...services.model_router_service import ModelRouterService
-from ...services.budget_forecast_service import BudgetForecastService
+from ...services.economy.budget_forecast_service import BudgetForecastService
 
 
 # F8.3: User feedback model
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/mastery", tags=["ops", "mastery"])
 @router.get("/config/economy", response_model=UserEconomyConfig)
 async def get_economy_config(auth: Annotated[AuthContext, Depends(verify_token)]):
     """Get current economy configuration."""
-    from ...services.ops_service import OpsService
+    from ...services.ops import OpsService
     config = OpsService.get_config()
     return config.economy
 
@@ -39,7 +39,7 @@ async def update_economy_config(
     auth: Annotated[AuthContext, Depends(verify_token)]
 ):
     """Update economy configuration."""
-    from ...services.ops_service import OpsService
+    from ...services.ops import OpsService
     
     # Get current config
     current_ops_config = OpsService.get_config()
@@ -62,7 +62,7 @@ async def get_plan_economy_snapshot(
     """Return economy snapshot for a specific custom plan."""
     from ...services.storage_service import StorageService
     from ...services.custom_plan_service import CustomPlanService
-    from ...services.ops_service import OpsService
+    from ...services.ops import OpsService
 
     plan = CustomPlanService.get_plan(plan_id)
     if not plan:
@@ -86,7 +86,7 @@ async def update_plan_autonomy(
 ):
     """Update autonomy level globally and optionally annotate selected node configs."""
     from ...services.custom_plan_service import CustomPlanService
-    from ...services.ops_service import OpsService
+    from ...services.ops import OpsService
     from ...services.storage_service import StorageService
 
     plan = CustomPlanService.get_plan(plan_id)
@@ -143,7 +143,7 @@ async def get_hardware_status(auth: Annotated[AuthContext, Depends(verify_token)
 async def get_mastery_status(auth: Annotated[AuthContext, Depends(verify_token)]):
     """Returns general token mastery metrics with real data."""
     import logging
-    from ...services.ops_service import OpsService
+    from ...services.ops import OpsService
     from ...services.storage_service import StorageService
     from ...services.hardware_monitor_service import HardwareMonitorService
 
@@ -258,8 +258,8 @@ async def predict_workflow_cost(
     auth: Annotated[AuthContext, Depends(verify_token)]
 ):
     """Predicts cost for a proposed workflow."""
-    from ...services.ops_service import OpsService
-    from ...services.cost_predictor import CostPredictor
+    from ...services.ops import OpsService
+    from ...services.economy.cost_predictor import CostPredictor
     from ...ops_models import WorkflowNode
 
     nodes_data = request.get("nodes", [])
@@ -305,7 +305,7 @@ async def get_mastery_analytics(
 async def get_budget_forecast(auth: Annotated[AuthContext, Depends(verify_token)]):
     """Returns budget forecast global + per-provider."""
     import logging
-    from ...services.ops_service import OpsService
+    from ...services.ops import OpsService
     from ...services.storage_service import StorageService
 
     logger = logging.getLogger("orchestrator.mastery")
@@ -464,7 +464,7 @@ async def get_anomalies(auth: Annotated[AuthContext, Depends(verify_token)]) -> 
             "count": int
         }
     """
-    from ...services.anomaly_detection_service import AnomalyDetectionService
+    from ...services.observability_pkg.anomaly_detection_service import AnomalyDetectionService
 
     anomalies = AnomalyDetectionService.detect_anomalies()
 
@@ -495,7 +495,7 @@ async def get_baseline(
         }
         O 404 si no hay baseline confiable
     """
-    from ...services.anomaly_detection_service import AnomalyDetectionService
+    from ...services.observability_pkg.anomaly_detection_service import AnomalyDetectionService
 
     baseline = AnomalyDetectionService.compute_baseline(task_semantic, preset_name)
 
@@ -519,7 +519,7 @@ async def get_downgraded_presets(auth: Annotated[AuthContext, Depends(verify_tok
             "threshold": int  # failure_streak threshold
         }
     """
-    from ...services.anomaly_detection_service import AnomalyDetectionService
+    from ...services.observability_pkg.anomaly_detection_service import AnomalyDetectionService
 
     downgraded = AnomalyDetectionService.get_downgrade_list()
 

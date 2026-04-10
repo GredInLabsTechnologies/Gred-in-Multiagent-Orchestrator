@@ -42,7 +42,7 @@ class TestRunWorkerLifecycle:
 
     @pytest.mark.asyncio
     async def test_start_creates_task_and_sets_running(self):
-        from tools.gimo_server.services.run_worker import RunWorker
+        from tools.gimo_server.services.execution.run_worker import RunWorker
 
         worker = RunWorker()
         assert worker._running is False
@@ -58,7 +58,7 @@ class TestRunWorkerLifecycle:
 
     @pytest.mark.asyncio
     async def test_stop_cancels_task_and_clears_running(self):
-        from tools.gimo_server.services.run_worker import RunWorker
+        from tools.gimo_server.services.execution.run_worker import RunWorker
 
         worker = RunWorker()
         await worker.start()
@@ -69,7 +69,7 @@ class TestRunWorkerLifecycle:
 
     @pytest.mark.asyncio
     async def test_notify_sets_wake_event(self):
-        from tools.gimo_server.services.run_worker import RunWorker
+        from tools.gimo_server.services.execution.run_worker import RunWorker
 
         worker = RunWorker()
         assert not worker._wake_event.is_set()
@@ -85,7 +85,7 @@ class TestIsStillActive:
     """Tests for _is_still_active status classification."""
 
     def _build_worker(self):
-        from tools.gimo_server.services.run_worker import RunWorker
+        from tools.gimo_server.services.execution.run_worker import RunWorker
         return RunWorker()
 
     @patch("tools.gimo_server.services.execution.run_worker.OpsService")
@@ -117,7 +117,7 @@ class TestExtractTargetPath:
     """Tests for RunWorker._extract_target_path (OBSOLETE — always returns None)."""
 
     def test_obsolete_always_returns_none(self):
-        from tools.gimo_server.services.run_worker import RunWorker
+        from tools.gimo_server.services.execution.run_worker import RunWorker
         assert RunWorker._extract_target_path("TARGET_FILE: src/main.py") is None
         assert RunWorker._extract_target_path("modify C:/Users/dev/project/app.py") is None
         assert RunWorker._extract_target_path("just a plain sentence") is None
@@ -133,7 +133,7 @@ class TestTick:
     @pytest.mark.asyncio
     @patch("tools.gimo_server.services.execution.run_worker.OpsService")
     async def test_tick_dispatches_pending_runs(self, mock_ops):
-        from tools.gimo_server.services.run_worker import RunWorker
+        from tools.gimo_server.services.execution.run_worker import RunWorker
 
         mock_ops.get_config.return_value = _make_config(max_concurrent=3)
         mock_ops.list_pending_runs.return_value = [_make_run("r1"), _make_run("r2")]
@@ -154,7 +154,7 @@ class TestTick:
     @pytest.mark.asyncio
     @patch("tools.gimo_server.services.execution.run_worker.OpsService")
     async def test_tick_respects_max_concurrent(self, mock_ops):
-        from tools.gimo_server.services.run_worker import RunWorker
+        from tools.gimo_server.services.execution.run_worker import RunWorker
 
         mock_ops.get_config.return_value = _make_config(max_concurrent=1)
         mock_ops.list_pending_runs.return_value = [_make_run("r1"), _make_run("r2")]
@@ -180,8 +180,8 @@ class TestExecuteRun:
 
     @pytest.mark.asyncio
     async def test_execute_run_rejects_missing_task_spec(self):
-        from tools.gimo_server.services.run_worker import RunWorker
-        from tools.gimo_server.services.ops_service import OpsService
+        from tools.gimo_server.services.execution.run_worker import RunWorker
+        from tools.gimo_server.services.ops import OpsService
 
         worker = RunWorker()
         worker._running_ids.add("r1")
@@ -196,8 +196,8 @@ class TestExecuteRun:
 
     @pytest.mark.asyncio
     async def test_execute_run_silently_returns_on_missing_run(self):
-        from tools.gimo_server.services.run_worker import RunWorker
-        from tools.gimo_server.services.ops_service import OpsService
+        from tools.gimo_server.services.execution.run_worker import RunWorker
+        from tools.gimo_server.services.ops import OpsService
 
         worker = RunWorker()
         worker._running_ids.add("r1")
@@ -213,7 +213,7 @@ class TestExecuteRun:
 @pytest.mark.asyncio
 @patch("tools.gimo_server.services.execution.run_worker.OpsService")
 async def test_critic_gate_skips_mature_high_quality_outputs(mock_ops):
-    from tools.gimo_server.services.run_worker import RunWorker
+    from tools.gimo_server.services.execution.run_worker import RunWorker
 
     class FakeGics:
         def __init__(self):
@@ -229,7 +229,7 @@ async def test_critic_gate_skips_mature_high_quality_outputs(mock_ops):
 
     worker = RunWorker()
 
-    with patch("tools.gimo_server.services.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
+    with patch("tools.gimo_server.services.execution.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
         approved, output, raw = await worker._critic_with_retry(
             run_id="r1",
             output_text="Concrete execution summary with no errors.",
@@ -258,7 +258,7 @@ async def test_critic_gate_skips_mature_high_quality_outputs(mock_ops):
 @pytest.mark.asyncio
 @patch("tools.gimo_server.services.execution.run_worker.OpsService")
 async def test_critic_gate_uses_final_model_used_for_initial_skip_lookup(mock_ops):
-    from tools.gimo_server.services.run_worker import RunWorker
+    from tools.gimo_server.services.execution.run_worker import RunWorker
 
     class FakeGics:
         def __init__(self):
@@ -279,7 +279,7 @@ async def test_critic_gate_uses_final_model_used_for_initial_skip_lookup(mock_op
 
     worker = RunWorker()
 
-    with patch("tools.gimo_server.services.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
+    with patch("tools.gimo_server.services.execution.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
         approved, output, raw = await worker._critic_with_retry(
             run_id="r1",
             output_text="Concrete execution summary with no errors.",
@@ -304,7 +304,7 @@ async def test_critic_gate_uses_final_model_used_for_initial_skip_lookup(mock_op
 @pytest.mark.asyncio
 @patch("tools.gimo_server.services.execution.run_worker.OpsService")
 async def test_critic_gate_preserves_legacy_avg_output_tokens_history(mock_ops):
-    from tools.gimo_server.services.run_worker import RunWorker
+    from tools.gimo_server.services.execution.run_worker import RunWorker
 
     class FakeGics:
         def __init__(self):
@@ -330,7 +330,7 @@ async def test_critic_gate_preserves_legacy_avg_output_tokens_history(mock_ops):
 
     worker = RunWorker()
 
-    with patch("tools.gimo_server.services.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
+    with patch("tools.gimo_server.services.execution.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
         approved, output, raw = await worker._critic_with_retry(
             run_id="r1",
             output_text="Concrete execution summary with no errors.",

@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from tools.gimo_server.ops_models import OpsRun
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 
 
 def _configure_ops_dirs(monkeypatch, tmp_path):

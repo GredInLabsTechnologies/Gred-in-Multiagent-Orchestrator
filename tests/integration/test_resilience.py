@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 from tools.gimo_server.main import app
 from tools.gimo_server.ops_models import WorkflowNode, WorkflowGraph
-from tools.gimo_server.services.graph_engine import GraphEngine
+from tools.gimo_server.services.graph import GraphEngine
 from tools.gimo_server import config
 
 pytestmark = pytest.mark.integration

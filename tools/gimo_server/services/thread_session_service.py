@@ -2,7 +2,7 @@ import logging
 from typing import Any, Dict, Optional
 from ..ops_models import GimoThread
 from .conversation_service import ConversationService
-from .workspace_policy_service import WorkspacePolicyService
+from .workspace.workspace_policy_service import WorkspacePolicyService
 
 logger = logging.getLogger("orchestrator.services.thread_session")
 
@@ -39,7 +39,7 @@ class ThreadSessionService:
                     surface=surface,
                 )
             if "execution_policy" in config_data:
-                from .execution_policy_service import ExecutionPolicyService
+                from .execution.execution_policy_service import ExecutionPolicyService
                 raw_policy = str(config_data["execution_policy"]).strip()
                 # Validate that the policy name exists before accepting it
                 canonical = ExecutionPolicyService.canonical_policy_name(raw_policy)

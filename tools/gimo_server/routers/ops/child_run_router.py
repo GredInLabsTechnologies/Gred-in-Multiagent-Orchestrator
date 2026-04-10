@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, HTTPException, Query
 from ...models.core import ChildRunRequest
 from ...services.child_run_service import ChildRunService
-from ...services.ops_service import OpsService
+from ...services.ops import OpsService
 
 router = APIRouter(prefix="/child-runs", tags=["child-runs"])
 

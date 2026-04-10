@@ -12,7 +12,7 @@ from ...security import check_rate_limit, get_active_repo_dir, get_allowed_paths
 from ...security.validation import get_workspace_from_request
 from ...security.auth import AuthContext
 from ...services.file_service import FileService
-from ...services.repo_service import RepoService
+from ...services.workspace.repo_service import RepoService
 from ..ops.common import require_read
 
 router = APIRouter(prefix="/ops/files", tags=["files"])

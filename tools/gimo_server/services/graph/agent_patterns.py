@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from tools.gimo_server.services.observability_service import ObservabilityService
+from tools.gimo_server.services.observability_pkg.observability_service import ObservabilityService
 
 if TYPE_CHECKING:
     from tools.gimo_server.ops_models import WorkflowNode

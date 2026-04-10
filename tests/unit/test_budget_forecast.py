@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tools.gimo_server.services.budget_forecast_service import BudgetForecastService
+from tools.gimo_server.services.economy.budget_forecast_service import BudgetForecastService
 from tools.gimo_server.models.economy import (
     BudgetForecast,
     UserEconomyConfig,

@@ -57,7 +57,7 @@ class BudgetGuardMixin:
 
         # Global Budget Check
         try:
-            from tools.gimo_server.services.ops_service import OpsService
+            from tools.gimo_server.services.ops import OpsService
             config = OpsService.get_config()
             if config.economy and config.economy.global_budget_usd is not None:
                 if self.storage and hasattr(self.storage, "cost"):

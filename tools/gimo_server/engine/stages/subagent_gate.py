@@ -11,7 +11,7 @@ class SubagentGate:
     name = "subagent_gate"
 
     async def execute(self, input: StageInput) -> StageOutput:
-        from ...services.ops_service import OpsService
+        from ...services.ops import OpsService
         run = OpsService.get_run(input.run_id)
         if not run:
             return StageOutput(status="fail", error="Run not found")

@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from tools.gimo_server.services.agentic_loop_service import AgenticLoopService
 from tools.gimo_server.models.agent_routing import RoutingDecisionSummary
-from tools.gimo_server.services.execution_policy_service import ExecutionPolicyService
+from tools.gimo_server.services.execution.execution_policy_service import ExecutionPolicyService
 
 
 @pytest.mark.asyncio

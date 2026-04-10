@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Any, Dict, List, Tuple
 
-from .ops_service import OpsService
+from .ops import OpsService
 from .task_descriptor_service import TaskDescriptorService
 
 logger = logging.getLogger("orchestrator.plan_graph_builder")
