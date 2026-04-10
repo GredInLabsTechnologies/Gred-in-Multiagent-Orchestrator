@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`services/trust.py` TrustService deleted** — dead prototype created alongside `TrustEngine` in the same commit (2026-03-31). Never imported, never tested. `TrustEngine` (`trust_engine.py`) is the canonical implementation with 7+ active consumers, full 3-state circuit breaker, per-dimension GICS config, and audit logging.
 
 ### Changed
+- **Dual observability consolidated** — deleted `services/observability.py` (159-line MVP) that caused double JSONL writes and double metric counting alongside the canonical OTel-based `observability_pkg/observability_service.py`. Thread metadata accumulation (`ConversationService.mutate_thread`) moved inline to the agentic loop's unified telemetry block. Zero functional loss; 5 dead methods removed (`record_agent_action`, `get_agent_insights`, `record_span`, `record_structured_event`, `record_usage`).
 - **Phase 6 strategy externalized** — `PHASE6_PRIMARY_MODEL` / `PHASE6_FALLBACK_MODEL` class constants removed from `ModelRouterService`. Primary and fallback models now read from `OpsConfig.phase6` (Pydantic config with JSON persistence). Forced-local intents reuse `OpsConfig.auto_run_excluded_intents` instead of a duplicated hardcoded set.
 - **Name-based model routing removed** — `_infer_capabilities`, `_TIER_PATTERNS`, `_CAP_PATTERNS`, `_infer_weakness`, `_build_prior_scores`, and `prefer_family` deleted across 12 files. GICS + benchmark enrichment is the single routing source of truth.
 
