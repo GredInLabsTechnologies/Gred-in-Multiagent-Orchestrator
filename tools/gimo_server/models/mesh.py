@@ -128,6 +128,7 @@ class HeartbeatPayload(BaseModel):
     operational_state: OperationalState = OperationalState.idle
     device_class: str = "desktop"
     soc_model: str = ""
+    soc_vendor: str = ""
     max_model_params_b: float = 0.0
     model_loaded: str = ""
     health_score: float = 100.0

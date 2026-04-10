@@ -25,6 +25,15 @@ class ThermalPhase(str, Enum):
     lockout = "lockout"
 
 
+# Severity ordering for monotonic escalation
+_PHASE_SEVERITY = {
+    ThermalPhase.normal: 0,
+    ThermalPhase.warning: 1,
+    ThermalPhase.throttle: 2,
+    ThermalPhase.lockout: 3,
+}
+
+
 @dataclass
 class ThermalSnapshot:
     cpu_temp_c: float = -1.0
@@ -127,7 +136,7 @@ class ThermalGuard:
         # Phase can only go UP, never down (monotonic within evaluation)
         if self._phase == ThermalPhase.lockout:
             snapshot.phase = ThermalPhase.lockout
-        elif snapshot.phase.value > self._phase.value:
+        elif _PHASE_SEVERITY[snapshot.phase] > _PHASE_SEVERITY[self._phase]:
             pass  # Allow escalation
         else:
             snapshot.phase = self._phase

@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from filelock import FileLock
 
 from ...config import OPS_DATA_DIR
-from ...models.mesh import ConnectionState, DeviceMode, EnrollmentToken, MeshDeviceInfo
+from ...models.mesh import DeviceMode, EnrollmentToken, MeshDeviceInfo
 from .registry import MeshRegistry
 
 logger = logging.getLogger("orchestrator.mesh.enrollment")
@@ -93,23 +94,24 @@ class EnrollmentService:
         Validates token, marks as used, enrolls device in pending_approval.
         Anti-replay: token can only be used once.
         """
-        token = self._load_token(token_str)
-        if token is None:
-            raise ValueError("Invalid enrollment token")
-
-        if token.used:
-            raise ValueError("Enrollment token already used (anti-replay)")
-
-        if _utcnow() > token.expires_at:
-            raise ValueError("Enrollment token expired")
-
-        # Check device not already enrolled
-        existing = self._registry.get_device(device_id)
-        if existing is not None:
-            raise ValueError(f"Device {device_id} already enrolled")
-
-        # Mark token as used
         with self._lock():
+            # All validation inside lock to prevent TOCTOU race
+            token = self._load_token(token_str)
+            if token is None:
+                raise ValueError("Invalid enrollment token")
+
+            if token.used:
+                raise ValueError("Enrollment token already used (anti-replay)")
+
+            if _utcnow() > token.expires_at:
+                raise ValueError("Enrollment token expired")
+
+            # Check device not already enrolled
+            existing = self._registry.get_device(device_id)
+            if existing is not None:
+                raise ValueError(f"Device {device_id} already enrolled")
+
+            # Mark token as used
             token.used = True
             token.device_id = device_id
             self._save_token(token)
@@ -128,7 +130,6 @@ class EnrollmentService:
 
     def _token_path(self, token_str: str) -> Path:
         # Hash token for filename to avoid path injection
-        import hashlib
         h = hashlib.sha256(token_str.encode()).hexdigest()[:16]
         return _TOKENS_DIR / f"enroll_{h}.json"
 

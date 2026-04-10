@@ -194,6 +194,7 @@ class MeshRegistry:
         device.operational_state = payload.operational_state
         device.device_class = payload.device_class
         device.soc_model = payload.soc_model
+        device.soc_vendor = payload.soc_vendor
         device.max_model_params_b = payload.max_model_params_b
         device.model_loaded = payload.model_loaded
         device.health_score = payload.health_score

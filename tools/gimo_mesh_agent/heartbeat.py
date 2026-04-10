@@ -57,9 +57,7 @@ class HeartbeatClient:
         logger.info("Heartbeat stopped")
 
     def _build_payload(self) -> Dict[str, Any]:
-        from tools.gimo_server.services.hardware_monitor_service import HardwareMonitorService
-        hw = HardwareMonitorService.get_instance()
-        snap = hw.get_snapshot()
+        metrics = self._collect_metrics()
 
         # Determine operational state
         op_state = "idle"
@@ -73,22 +71,47 @@ class HeartbeatClient:
             "device_mode": self._device_mode,
             "connection_state": "connected",
             "operational_state": op_state,
-            "device_class": snap.device_class,
-            "soc_model": snap.soc_model,
-            "max_model_params_b": snap.max_model_params_b,
+            "device_class": metrics.get("device_class", "desktop"),
+            "soc_model": metrics.get("soc_model", ""),
+            "max_model_params_b": metrics.get("max_model_params_b", 0.0),
             "model_loaded": self._model_loaded if not self._thermal.is_locked_out else "",
             "health_score": 100.0,
-            "cpu_percent": snap.cpu_percent,
-            "ram_percent": snap.ram_percent,
-            "cpu_temp_c": snap.cpu_temp_c,
-            "gpu_temp_c": snap.gpu_temp_c,
-            "battery_percent": snap.battery_percent,
-            "battery_charging": snap.battery_charging,
-            "battery_temp_c": snap.battery_temp_c,
+            "cpu_percent": metrics.get("cpu_percent", 0.0),
+            "ram_percent": metrics.get("ram_percent", 0.0),
+            "cpu_temp_c": metrics.get("cpu_temp_c", -1.0),
+            "gpu_temp_c": metrics.get("gpu_temp_c", -1.0),
+            "battery_percent": metrics.get("battery_percent", -1.0),
+            "battery_charging": metrics.get("battery_charging", False),
+            "battery_temp_c": metrics.get("battery_temp_c", -1.0),
             "thermal_throttled": self._thermal.phase in (ThermalPhase.throttle, ThermalPhase.lockout),
             "thermal_locked_out": self._thermal.is_locked_out,
             "active_task_id": self._active_task_id if not self._thermal.is_locked_out else "",
         }
+
+    @staticmethod
+    def _collect_metrics() -> Dict[str, Any]:
+        """Collect hardware metrics using psutil (no server dependency)."""
+        metrics: Dict[str, Any] = {"device_class": "desktop"}
+        try:
+            import psutil
+            metrics["cpu_percent"] = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory()
+            metrics["ram_percent"] = mem.percent
+            temps = psutil.sensors_temperatures() if hasattr(psutil, "sensors_temperatures") else {}
+            for name, entries in temps.items():
+                if entries:
+                    t = entries[0].current
+                    if "cpu" in name.lower() or "core" in name.lower():
+                        metrics["cpu_temp_c"] = t
+                    elif "gpu" in name.lower():
+                        metrics["gpu_temp_c"] = t
+            bat = psutil.sensors_battery() if hasattr(psutil, "sensors_battery") else None
+            if bat:
+                metrics["battery_percent"] = bat.percent
+                metrics["battery_charging"] = bat.power_plugged or False
+        except ImportError:
+            pass
+        return metrics
 
     async def _send_heartbeat(self) -> bool:
         payload = self._build_payload()

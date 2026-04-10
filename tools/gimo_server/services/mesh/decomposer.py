@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import json
 import logging
-import re
 from typing import Any, Dict, List
 
 from ...models.mesh import TaskFingerprint
@@ -108,8 +108,6 @@ class PlanDecomposer:
     def _estimate_context(self, step: Dict[str, Any]) -> int:
         context = step.get("context", {})
         if isinstance(context, dict):
-            # Rough estimate: serialize context to gauge size
-            import json
             try:
                 size = len(json.dumps(context, default=str))
                 return size // 1024
