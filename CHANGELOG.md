@@ -5,6 +5,15 @@ All notable changes to GIMO will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+- **`cli_constants.py` deleted** — orphaned since the `gimo_cli/` package decomposition (2026-04-01). All constants already lived in `gimo_cli/config.py` with corrected values (timeouts 180s vs stale 15s/30s, `ACTIVE_RUN_STATUSES` delegated to `run_lifecycle.py` including `AWAITING_MERGE`). Zero imports remained.
+
+### Changed
+- **Phase 6 strategy externalized** — `PHASE6_PRIMARY_MODEL` / `PHASE6_FALLBACK_MODEL` class constants removed from `ModelRouterService`. Primary and fallback models now read from `OpsConfig.phase6` (Pydantic config with JSON persistence). Forced-local intents reuse `OpsConfig.auto_run_excluded_intents` instead of a duplicated hardcoded set.
+- **Name-based model routing removed** — `_infer_capabilities`, `_TIER_PATTERNS`, `_CAP_PATTERNS`, `_infer_weakness`, `_build_prior_scores`, and `prefer_family` deleted across 12 files. GICS + benchmark enrichment is the single routing source of truth.
+
 ## [0.9.2-serverbond] - 2026-03-30
 
 ### Added
