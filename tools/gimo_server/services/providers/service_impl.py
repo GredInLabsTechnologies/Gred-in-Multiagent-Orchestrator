@@ -354,6 +354,90 @@ class ProviderService:
         return normalized_cfg
 
     @classmethod
+    def upsert_provider_entry(
+        cls,
+        *,
+        provider_id: str,
+        provider_type: str | None = None,
+        display_name: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        auth_mode: str | None = None,
+        auth_ref: str | None = None,
+        model: str | None = None,
+        activate: bool = False,
+    ) -> ProviderConfig:
+        cfg = cls.get_config()
+        if not cfg:
+            raise ValueError("Provider config missing")
+
+        provider_id = str(provider_id or "").strip()
+        if not provider_id:
+            raise ValueError("provider_id is required")
+
+        existing = cfg.providers.get(provider_id)
+        raw_type = str(
+            provider_type
+            or (existing.provider_type if existing else None)
+            or (existing.type if existing else None)
+            or ""
+        ).strip()
+        if not raw_type:
+            raise ValueError("provider_type is required to create a new provider")
+
+        canonical_type = cls.normalize_provider_type(raw_type)
+        resolved_model = str(
+            model
+            or (existing.model_id if existing else None)
+            or (existing.model if existing else None)
+            or "gpt-4o-mini"
+        ).strip()
+        if not resolved_model:
+            raise ValueError("model is required")
+
+        resolved_base_url = (
+            base_url if base_url is not None else (existing.base_url if existing else None)
+        )
+        if canonical_type == "ollama_local" and not resolved_base_url:
+            resolved_base_url = "http://localhost:11434/v1"
+
+        if api_key:
+            ok, warning = ProviderAuthService.validate_api_key_format(canonical_type, api_key)
+            if not ok:
+                raise ValueError(f"Invalid API key: {warning}")
+            if warning:
+                logger.warning(warning)
+
+        entry = ProviderEntry(
+            type=raw_type,
+            provider_type=canonical_type,
+            display_name=(display_name if display_name is not None else (existing.display_name if existing else None)) or provider_id,
+            base_url=resolved_base_url,
+            api_key=api_key if api_key is not None else (existing.api_key if existing else None),
+            auth_mode=auth_mode if auth_mode is not None else (existing.auth_mode if existing else None),
+            auth_ref=auth_ref if auth_ref is not None else (existing.auth_ref if existing else None),
+            model=resolved_model,
+            model_id=resolved_model,
+            capabilities=cls.capabilities_for(canonical_type),
+        )
+        entry = ProviderAuthService.sanitize_entry_for_storage(provider_id, entry)
+        cfg.providers[provider_id] = entry
+
+        if activate:
+            cfg.active = provider_id
+            cfg.provider_type = canonical_type
+            cfg.model_id = resolved_model
+            cfg.auth_mode = entry.auth_mode
+            cfg.auth_ref = entry.auth_ref
+            workers = list(cfg.roles.workers) if cfg.roles else []
+            cfg.roles = ProviderRolesConfig(
+                orchestrator=ProviderRoleBinding(provider_id=provider_id, model=resolved_model),
+                workers=workers,
+            )
+
+        return cls.set_config(cfg)
+
+    @classmethod
     async def _resolve_runtime_model(
         cls,
         provider_id: str,
@@ -431,37 +515,18 @@ class ProviderService:
             requested_model=model,
             prefer_family=prefer_family,
         )
-        updates: dict = {"model": resolved_model, "model_id": resolved_model}
-        if api_key:
-            from .auth_service import ProviderAuthService
-            existing_entry = cfg.providers[provider_id]
-            ok, warning = ProviderAuthService.validate_api_key_format(
-                existing_entry.provider_type or existing_entry.type or "", api_key,
-            )
-            if not ok:
-                raise ValueError(f"Invalid API key: {warning}")
-            if warning:
-                import logging
-                logging.getLogger("orchestrator.providers").warning(warning)
-            updates["api_key"] = api_key
-        entry = cfg.providers[provider_id].model_copy(update=updates)
-
-        if api_key:
-            from .auth_service import ProviderAuthService
-            entry = ProviderAuthService.sanitize_entry_for_storage(provider_id, entry)
-
-        cfg.providers[provider_id] = entry
-        cfg.active = provider_id
-        cfg.provider_type = cls.normalize_provider_type(entry.provider_type or entry.type)
-        cfg.model_id = resolved_model
-        cfg.auth_mode = entry.auth_mode
-        cfg.auth_ref = entry.auth_ref
-        workers = list(cfg.roles.workers) if cfg.roles else []
-        cfg.roles = ProviderRolesConfig(
-            orchestrator=ProviderRoleBinding(provider_id=provider_id, model=resolved_model),
-            workers=workers,
+        existing_entry = cfg.providers[provider_id]
+        return cls.upsert_provider_entry(
+            provider_id=provider_id,
+            provider_type=existing_entry.provider_type or existing_entry.type,
+            display_name=existing_entry.display_name,
+            base_url=existing_entry.base_url,
+            api_key=api_key,
+            auth_mode=existing_entry.auth_mode,
+            auth_ref=existing_entry.auth_ref,
+            model=resolved_model,
+            activate=True,
         )
-        return cls.set_config(cfg)
 
     @classmethod
     def record_validation(

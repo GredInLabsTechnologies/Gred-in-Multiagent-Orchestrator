@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from tools.gimo_server.security import audit_log
+
+logger = logging.getLogger(__name__)
+
+_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
 
 
 
@@ -41,10 +47,24 @@ class TrustEngine:
         self.thresholds = thresholds or TrustThresholds()
         self.circuit_breaker = circuit_breaker or CircuitBreakerConfig()
 
+    @property
+    def debug_mode(self) -> bool:
+        """DEBUG=true bypasses trust scoring — dev failures don't trip breakers."""
+        return _DEBUG_MODE
+
     def query_dimension(self, dimension_key: str, *, events_limit: int = 5000) -> Dict[str, Any]:
         events = self.storage.list_trust_events(limit=events_limit)
         record_map = self._build_records(events)
         record = record_map.get(dimension_key, self._empty_record(dimension_key))
+        if self.debug_mode:
+            # Show real data but never block, never persist
+            record["debug_mode"] = True
+            if record["policy"] == "blocked":
+                record["policy"] = "require_review"
+            record["circuit_state"] = "closed"
+            record["circuit_opened_at"] = None
+            logger.debug("[TrustEngine] DEBUG MODE — %s: score=%.2f (debug_mode)", dimension_key, record["score"])
+            return record
         self.trust_store.save_dimension(dimension_key, record)
         return record
 
@@ -53,6 +73,20 @@ class TrustEngine:
         records = list(self._build_records(events).values())
         records.sort(key=lambda r: (r["score"], r["approvals"]), reverse=True)
         top = records[:limit]
+        if self.debug_mode:
+            # Show real data + debug_mode flag, but don't persist and don't block
+            entries = []
+            for record in top:
+                record["debug_mode"] = True
+                if record["policy"] == "blocked":
+                    record["policy"] = "require_review"
+                record["circuit_state"] = "closed"
+                record["circuit_opened_at"] = None
+                entry = self._to_dashboard_entry(record)
+                entry["debug_mode"] = True
+                entries.append(entry)
+            logger.debug("[TrustEngine] DEBUG MODE — dashboard: %d entries (not persisted)", len(entries))
+            return entries
         for record in top:
             self.storage.upsert_trust_record(record)
         # R17 Cluster E.1: emit canonical TrustDashboardEntry rows. Renderer

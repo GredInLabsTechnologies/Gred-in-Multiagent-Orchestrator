@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import List, Optional
 
 from ...ops_models import BudgetForecast, UserEconomyConfig
@@ -8,14 +9,25 @@ from ..storage_service import StorageService
 
 logger = logging.getLogger("orchestrator.ops.budget")
 
+_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
+
+
 class BudgetForecastService:
     """Service to predict budget exhaustion and provide alerts."""
 
     def __init__(self, storage: StorageService):
         self.storage = storage
 
+    @property
+    def debug_mode(self) -> bool:
+        return _DEBUG_MODE
+
     def forecast(self, economy_config: UserEconomyConfig) -> List[BudgetForecast]:
-        """Generates budget forecasts based on recent spend and user configuration."""
+        """Generates budget forecasts based on recent spend and user configuration.
+
+        In debug mode, returns real forecasts with ``debug_mode=True`` but
+        alert_level is capped at 'warning' — never 'critical' or 'exceeded'.
+        """
         forecasts = []
 
         # 1. Global Budget Forecast

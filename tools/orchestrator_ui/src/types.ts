@@ -232,6 +232,7 @@ export interface DelegationRequest {
 export type ProviderType =
     | 'ollama'
     | 'groq'
+    | 'cloudflare-workers-ai'
     | 'openrouter'
     | 'codex'
     | 'custom'

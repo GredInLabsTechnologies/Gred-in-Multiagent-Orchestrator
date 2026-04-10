@@ -126,6 +126,17 @@ class RemoteFetchMixin:
                     return live, warnings
             return _fallback_models_for(canonical), warnings
 
+        if canonical == "cloudflare-workers-ai":
+            auth = payload or ProviderValidateRequest()
+            remote = await cls._fetch_cloudflare_workers_ai_models(auth)
+            if remote:
+                return remote, warnings
+            warnings.append(
+                "Cloudflare Workers AI needs a base_url like https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1 "
+                "and an API token with Workers AI permissions. Showing curated defaults."
+            )
+            return _fallback_models_for(canonical), warnings
+
         if canonical in {"replicate", "anthropic", "google", "mistral", "cohere"}:
             warnings.append("This provider may not expose a universal /models endpoint. Showing curated defaults.")
             return _fallback_models_for(canonical), warnings
@@ -192,6 +203,42 @@ class RemoteFetchMixin:
 
         if canonical == "ollama_local":
             response = await cls._validate_ollama_local(canonical)
+            return cls._record_and_return_validation(canonical, response)
+
+        if canonical == "cloudflare-workers-ai":
+            account_id = cls._cloudflare_account_id(payload.base_url or "")
+            if not account_id:
+                response = ProviderValidateResponse(
+                    valid=False,
+                    health="down",
+                    warnings=["Cloudflare Workers AI requires an account-scoped OpenAI-compatible base_url."],
+                    error_actionable="Set base_url to https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1.",
+                )
+                return cls._record_and_return_validation(canonical, response)
+            if not payload.api_key and not payload.account:
+                response = ProviderValidateResponse(
+                    valid=False,
+                    health="down",
+                    warnings=["Missing Cloudflare API token."],
+                    error_actionable="Provide an API token with Workers AI permissions for this provider.",
+                )
+                return cls._record_and_return_validation(canonical, response)
+
+            remote = await cls._fetch_cloudflare_workers_ai_models(payload)
+            if remote:
+                response = ProviderValidateResponse(
+                    valid=True,
+                    health="ok",
+                    effective_model=remote[0].id,
+                    warnings=[],
+                )
+            else:
+                response = ProviderValidateResponse(
+                    valid=False,
+                    health="degraded",
+                    warnings=["Workers AI catalog lookup failed for the supplied account/token/base_url."],
+                    error_actionable="Verify the account_id embedded in base_url and ensure the token has Workers AI - Read and Workers AI - Edit permissions.",
+                )
             return cls._record_and_return_validation(canonical, response)
 
         # Codex/Claude account mode is CLI-native. Do not rely on remote /models.

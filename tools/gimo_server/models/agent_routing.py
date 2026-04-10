@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Literal, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -65,6 +66,24 @@ class TaskConstraints(BaseModel):
     intent_effective: str = ""
     budget_mode: str = "standard"
     compiler_notes: List[str] = Field(default_factory=list)
+
+
+@dataclass
+class TrustAuthorityResult:
+    """Result of apply_trust_authority — carries trust metadata alongside the unchanged policy.
+
+    The policy is NEVER modified by trust signals.  GICS anomaly data is
+    advisory: it populates the metadata fields so surfaces can display
+    warnings and recommendations, but execution authority is preserved.
+    """
+    policy: str
+    requires_approval: bool = False
+    trust_warning: str | None = None
+    reliability_score: float | None = None
+    anomaly_detected: bool = False
+    recommended_alternative: Dict[str, Any] | None = None
+    model_profile_summary: Dict[str, Any] | None = None
+    debug_bypass: bool = False
 
 
 class ResolvedAgentProfile(BaseModel):

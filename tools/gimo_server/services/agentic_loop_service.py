@@ -424,7 +424,9 @@ class AgenticLoopService:
             samples = int(fields.get("samples", 0) or 0)
             avg_output = float(fields.get("avg_output_tokens", 0) or 0)
             if samples >= 5 and avg_output > 0:
-                return max(1, int(avg_output * 1.3))
+                # Floor at 256 to prevent vicious cycle: truncated output
+                # → low avg_output_tokens → low predicted max → more truncation.
+                return max(256, int(avg_output * 1.3))
         except Exception:
             logger.debug("Unable to predict max_tokens for task=%s model=%s", task_key, model, exc_info=True)
         return None
@@ -471,6 +473,312 @@ class AgenticLoopService:
         except Exception:
             return 0.0
 
+    # -- Context budget management ------------------------------------------
+    # The agentic loop adapts to each provider's token capacity.  Instead of
+    # hardcoding limits, agents self-report their capacity into a shared
+    # registry file.  When the loop doesn't know a model's limit it falls
+    # back to model_pricing.json, then to conservative heuristics.
+
+    _CONTEXT_REGISTRY_FILENAME = "model_context_registry.json"
+    _context_registry_cache: Dict[str, int] | None = None
+    _context_registry_mtime: float = 0.0
+
+    # Fallback context budget when no data is available.
+    _DEFAULT_CONTEXT_BUDGET = 128000
+
+    @classmethod
+    def _get_context_registry_path(cls) -> Path:
+        from ..config import get_settings
+        return get_settings().ops_data_dir / cls._CONTEXT_REGISTRY_FILENAME
+
+    @classmethod
+    def _load_context_registry(cls) -> Dict[str, int]:
+        """Load the model context registry from disk (cached by mtime)."""
+        path = cls._get_context_registry_path()
+        try:
+            mtime = path.stat().st_mtime
+        except (OSError, FileNotFoundError):
+            return {}
+        if cls._context_registry_cache is not None and mtime == cls._context_registry_mtime:
+            return cls._context_registry_cache
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            registry = {k: int(v) for k, v in raw.items() if isinstance(v, (int, float)) and v > 0}
+            cls._context_registry_cache = registry
+            cls._context_registry_mtime = mtime
+            return registry
+        except Exception:
+            logger.debug("Failed to load context registry from %s", path, exc_info=True)
+            return {}
+
+    @classmethod
+    def register_model_context_limit(cls, provider_id: str, model: str, max_tokens: int) -> None:
+        """Write a model's discovered token limit to the shared registry.
+
+        This is the mechanism agents use to self-report their capacity.
+        The agentic loop reads this on each run via _get_context_budget().
+        """
+        if max_tokens <= 0:
+            return
+        path = cls._get_context_registry_path()
+        registry = cls._load_context_registry()
+        key = f"{provider_id}:{model}"
+        registry[key] = max_tokens
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(registry, indent=2, ensure_ascii=False), encoding="utf-8")
+            cls._context_registry_cache = registry
+            cls._context_registry_mtime = path.stat().st_mtime
+            logger.info("Registered context limit: %s = %d tokens", key, max_tokens)
+        except Exception:
+            logger.warning("Failed to write context registry to %s", path, exc_info=True)
+
+    @classmethod
+    def _get_context_budget(cls, model: str, provider_id: str) -> int:
+        """Return the effective token budget for a single LLM request.
+
+        Priority:
+        1. Agent-reported limits in model_context_registry.json
+        2. context_window from model_pricing.json
+        3. Heuristic by model size tag (1b/3b/7b)
+        4. Conservative default (128K)
+        """
+        # 1. Check agent-reported registry
+        registry = cls._load_context_registry()
+        key = f"{provider_id}:{model}"
+        if key in registry:
+            return registry[key]
+        # Also try model-only key (provider-agnostic)
+        if model in registry:
+            return registry[model]
+
+        # 2. Try model_pricing.json
+        try:
+            pricing = CostService.get_pricing(model)
+            cw = int(pricing.get("context_window", 0) or 0)
+            if cw > 0:
+                return cw
+        except Exception:
+            pass
+
+        # 3. Heuristic for small models
+        m = model.lower()
+        if any(tag in m for tag in ("1b", "0.5b", "0.6b")):
+            return 2048
+        if any(tag in m for tag in ("3b", "1.5b")):
+            return 4096
+        if any(tag in m for tag in ("7b", "8b")):
+            return 8192
+
+        return cls._DEFAULT_CONTEXT_BUDGET
+
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        """Fast token estimation: ~4 chars per token for English/code."""
+        return max(1, len(text) // 4)
+
+    @classmethod
+    def _estimate_messages_tokens(cls, messages: List[Dict[str, Any]]) -> int:
+        """Estimate total tokens across all messages."""
+        total = 0
+        for msg in messages:
+            content = msg.get("content") or ""
+            if isinstance(content, str):
+                total += cls._estimate_tokens(content)
+            # Tool calls in assistant messages
+            for tc in msg.get("tool_calls", []):
+                func = tc.get("function", {})
+                total += cls._estimate_tokens(func.get("name", ""))
+                total += cls._estimate_tokens(func.get("arguments", ""))
+        return total
+
+    @classmethod
+    def _trim_messages_to_budget(
+        cls,
+        messages: List[Dict[str, Any]],
+        budget: int,
+        tools_tokens: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Trim message history to fit within token budget.
+
+        Strategy (preserves correctness of tool-call/tool-result pairs):
+        1. Always keep system prompt (messages[0]) and the last user message.
+        2. Compress tool result contents that exceed 500 chars.
+        3. If still over budget, drop oldest conversation turns (keeping
+           the system prompt and last 2 user/assistant exchanges).
+
+        Returns a new list — does not mutate the original.
+        """
+        import copy
+
+        # Reserve tokens for tools schema + output headroom
+        available = budget - tools_tokens - 512  # 512 for output headroom
+        if available <= 0:
+            available = max(budget // 2, 1024)
+
+        est = cls._estimate_messages_tokens(messages)
+        if est <= available:
+            return messages
+
+        # Pass 1: Compress large tool results
+        trimmed = copy.deepcopy(messages)
+        for msg in trimmed:
+            if msg.get("role") == "tool":
+                content = msg.get("content", "")
+                if isinstance(content, str) and len(content) > 500:
+                    # Keep first 200 chars + last 100 chars
+                    msg["content"] = content[:200] + "\n...(truncated)...\n" + content[-100:]
+
+        est = cls._estimate_messages_tokens(trimmed)
+        if est <= available:
+            return trimmed
+
+        # Pass 2: Compress assistant text content
+        for msg in trimmed:
+            if msg.get("role") == "assistant":
+                content = msg.get("content") or ""
+                if isinstance(content, str) and len(content) > 300:
+                    msg["content"] = content[:200] + "...(truncated)"
+
+        est = cls._estimate_messages_tokens(trimmed)
+        if est <= available:
+            return trimmed
+
+        # Pass 3: Sliding window — keep system + last N exchanges
+        # Find the system prompt and last user message
+        system_msg = trimmed[0] if trimmed and trimmed[0].get("role") == "system" else None
+        result: List[Dict[str, Any]] = []
+        if system_msg:
+            # Compress system prompt too if budget is very tight
+            sys_content = system_msg.get("content", "")
+            if isinstance(sys_content, str) and cls._estimate_tokens(sys_content) > available // 3:
+                system_msg = {**system_msg, "content": sys_content[:600] + "\n...(workspace info truncated)"}
+            result.append(system_msg)
+
+        # Walk backwards to collect recent turns that fit
+        remaining = trimmed[1:] if system_msg else trimmed
+        # Collect from the end
+        tail: List[Dict[str, Any]] = []
+        tail_tokens = cls._estimate_messages_tokens(result)
+        for msg in reversed(remaining):
+            msg_tokens = cls._estimate_messages_tokens([msg])
+            if tail_tokens + msg_tokens > available:
+                break
+            tail.insert(0, msg)
+            tail_tokens += msg_tokens
+
+        # Ensure we have at least the last user message
+        if not tail and remaining:
+            tail = [remaining[-1]]
+
+        result.extend(tail)
+        return result
+
+    @classmethod
+    def _build_context_budget_hint(
+        cls,
+        *,
+        provider_id: str,
+        model: str,
+        context_budget: int,
+        messages_tokens: int,
+        tools_tokens: int,
+        iteration: int,
+        error: str,
+    ) -> Dict[str, Any]:
+        """Build a diagnostic flag for agents that don't understand the loop.
+
+        This hint is attached to AgenticResult.usage["context_budget_hint"]
+        and emitted as a 'context_budget_exhausted' event.  It teaches the
+        consuming agent how to investigate and self-register its capacity.
+        """
+        registry_path = str(cls._get_context_registry_path())
+        return {
+            "flag": "context_too_small",
+            "provider_id": provider_id,
+            "model": model,
+            "context_budget_tokens": context_budget,
+            "messages_tokens_estimated": messages_tokens,
+            "tools_schema_tokens_estimated": tools_tokens,
+            "failed_at_iteration": iteration,
+            "error_summary": error[:300],
+            "diagnosis": (
+                f"The agentic loop failed because provider '{provider_id}' "
+                f"(model '{model}') could not handle the payload.  The loop "
+                f"used a budget of {context_budget} tokens but it was not "
+                f"enough after {iteration + 1} iteration(s)."
+            ),
+            "action_required": {
+                "step_1_investigate": (
+                    f"Find the real token limit for model '{model}' on "
+                    f"provider '{provider_id}'.  Check the provider's API "
+                    f"docs, or look at the error headers (e.g. Groq returns "
+                    f"x-ratelimit-limit-tokens, Ollama returns num_ctx in "
+                    f"/api/show).  If the provider has a free-tier cap that "
+                    f"is lower than the model's native context window, use "
+                    f"that lower number."
+                ),
+                "step_2_register": (
+                    f"Write the discovered limit into the context registry "
+                    f"so the agentic loop adapts automatically on future runs.  "
+                    f"File: {registry_path}  "
+                    f"Format: JSON object mapping 'provider_id:model' to token "
+                    f"limit (integer).  Example:\n"
+                    f'{{"groq:qwen/qwen3-32b": 6000, "ollama-local:qwen2.5-coder:3b": 4096}}\n'
+                    f"Or call register_model_context_limit(provider_id, model, max_tokens) "
+                    f"via the Python API."
+                ),
+                "step_3_retry": (
+                    "Once registered, re-run the same task.  The loop will "
+                    "read the registry, detect the limit, and automatically "
+                    "trim messages, compress tool results, and compact tool "
+                    "schemas to fit within the budget."
+                ),
+            },
+            "how_the_loop_adapts": (
+                "When context_budget <= 8192 tokens the loop activates "
+                "constrained mode: (1) tool schemas are compacted (truncate "
+                "descriptions, drop non-essential tools), (2) before each LLM "
+                "call messages are trimmed via sliding window (compress tool "
+                "results >500 chars, compress assistant text, keep only recent "
+                "turns), (3) tool result output is capped at 1200 chars, "
+                "(4) on 413 errors it retries once with halved budget."
+            ),
+            "registry_path": registry_path,
+        }
+
+    @staticmethod
+    def _compact_tools_if_needed(tools: List[Dict[str, Any]], max_schema_chars: int = 4000) -> List[Dict[str, Any]]:
+        """Compact tool schemas for providers with strict payload limits (Groq, Cloudflare).
+
+        Strategy:
+        1. If total schema <= max_schema_chars: return as-is
+        2. First pass: truncate long descriptions
+        3. If still too large: drop non-essential tools (keep read/write/list/search_replace)
+        """
+        import copy
+        schema_size = sum(len(json.dumps(t)) for t in tools)
+        if schema_size <= max_schema_chars:
+            return tools
+        # Pass 1: truncate descriptions
+        compacted = copy.deepcopy(tools)
+        for t in compacted:
+            func = t.get("function", {})
+            desc = func.get("description", "")
+            if len(desc) > 60:
+                func["description"] = desc[:57] + "..."
+            for _pname, pval in func.get("parameters", {}).get("properties", {}).items():
+                pd = pval.get("description", "")
+                if len(pd) > 40:
+                    pval["description"] = pd[:37] + "..."
+        new_size = sum(len(json.dumps(t)) for t in compacted)
+        if new_size <= max_schema_chars:
+            return compacted
+        # Pass 2: keep only essential tools
+        essential = {"read_file", "write_file", "list_files", "search_replace", "search_text", "shell_exec"}
+        compacted = [t for t in compacted if t.get("function", {}).get("name") in essential]
+        return compacted
+
     @staticmethod
     def _parse_tool_arguments(raw_args: Any) -> Dict[str, Any]:
         try:
@@ -482,13 +790,16 @@ class AgenticLoopService:
             return {}
 
     @staticmethod
-    def _build_tool_result_content(message: str, data: Dict[str, Any]) -> str:
+    def _build_tool_result_content(message: str, data: Dict[str, Any], *, max_chars: int = 8000) -> str:
         if not data:
-            return message
+            return message[:max_chars] if len(message) > max_chars else message
         data_str = json.dumps(data, ensure_ascii=False)
-        if len(data_str) > 8000:
-            data_str = data_str[:8000] + "... (truncated)"
-        return f"{message}\n{data_str}"
+        if len(data_str) > max_chars:
+            data_str = data_str[:max_chars] + "... (truncated)"
+        result = f"{message}\n{data_str}"
+        if len(result) > max_chars:
+            return result[:max_chars] + "... (truncated)"
+        return result
 
     @classmethod
     def _scan_execution_proof_records(cls, thread_id: str) -> tuple[List[Dict[str, Any]], bool]:
@@ -757,6 +1068,18 @@ class AgenticLoopService:
         initial_proof_count = len(proof_chain.to_list()) if proof_chain else 0
         last_content = ""
         last_tool_call_format = "none"
+        # -- Context budget: adapt to provider token limits --
+        context_budget = cls._get_context_budget(model, provider_id)
+        is_constrained = context_budget <= 8192
+        # Compact tool schemas for providers with strict payload limits (e.g. Groq 413).
+        tool_schema_budget = min(4000, context_budget * 2) if is_constrained else 8000
+        tools = cls._compact_tools_if_needed(tools, max_schema_chars=tool_schema_budget)
+        tools_tokens_est = sum(cls._estimate_tokens(json.dumps(t)) for t in tools)
+        if is_constrained:
+            logger.info(
+                "Constrained provider detected: %s (budget=%d tokens, tools=%d tokens)",
+                provider_id, context_budget, tools_tokens_est,
+            )
         loop_started_at = time.monotonic()
 
         await emit_event(
@@ -781,6 +1104,11 @@ class AgenticLoopService:
             })
 
             predicted_max_tokens = cls._predict_max_tokens(task_key, model)
+
+            # Trim messages to fit provider's context budget before each call
+            if is_constrained:
+                messages = cls._trim_messages_to_budget(messages, context_budget, tools_tokens_est)
+
             try:
                 llm_result = await adapter.chat_with_tools(
                     messages=messages,
@@ -789,15 +1117,92 @@ class AgenticLoopService:
                     max_tokens=predicted_max_tokens,
                 )
             except Exception as exc:
-                logger.error("LLM call failed on iteration %s: %s", iteration, exc)
-                final_response = f"Error communicating with LLM: {exc}"
-                finish_reason = "error"
-                await emit_event("error", {"message": final_response})
-                break
+                exc_str = str(exc).lower()
+                is_payload_error = (
+                    "413" in exc_str
+                    or "payload too large" in exc_str
+                    or "request too large" in exc_str
+                    or "maximum context length" in exc_str
+                    or "token limit" in exc_str
+                )
+                if is_payload_error and len(messages) > 2:
+                    # Auto-discover: the provider rejected our payload, so
+                    # the real limit is lower than what we assumed.  Estimate
+                    # the actual limit from what we tried to send and register
+                    # it so future runs adapt immediately.
+                    estimated_real_limit = max(
+                        1024,
+                        cls._estimate_messages_tokens(messages) + tools_tokens_est - 512,
+                    )
+                    # Be conservative: assume the limit is 80% of what we sent
+                    discovered_limit = int(estimated_real_limit * 0.8)
+                    if discovered_limit < context_budget:
+                        logger.info(
+                            "Auto-registering discovered limit for %s:%s = %d tokens "
+                            "(was %d, payload rejected)",
+                            provider_id, model, discovered_limit, context_budget,
+                        )
+                        cls.register_model_context_limit(provider_id, model, discovered_limit)
+                        context_budget = discovered_limit
+                        is_constrained = context_budget <= 8192
+
+                    logger.warning(
+                        "Payload too large on iteration %s — force-trimming context (budget=%d)",
+                        iteration, context_budget,
+                    )
+                    # Emergency trim: halve the budget and retry once
+                    messages = cls._trim_messages_to_budget(
+                        messages, context_budget // 2, tools_tokens_est,
+                    )
+                    try:
+                        llm_result = await adapter.chat_with_tools(
+                            messages=messages,
+                            tools=tools,
+                            temperature=temperature,
+                            max_tokens=predicted_max_tokens,
+                        )
+                    except Exception as retry_exc:
+                        logger.error("LLM retry failed on iteration %s: %s", iteration, retry_exc)
+                        final_response = f"Error communicating with LLM (after context trim): {retry_exc}"
+                        finish_reason = "context_too_small"
+                        _hint = cls._build_context_budget_hint(
+                            provider_id=provider_id, model=model,
+                            context_budget=context_budget,
+                            messages_tokens=cls._estimate_messages_tokens(messages),
+                            tools_tokens=tools_tokens_est,
+                            iteration=iteration, error=str(retry_exc),
+                        )
+                        total_usage["context_budget_hint"] = _hint
+                        await emit_event("context_budget_exhausted", _hint)
+                        break
+                else:
+                    logger.error("LLM call failed on iteration %s: %s", iteration, exc)
+                    final_response = f"Error communicating with LLM: {exc}"
+                    finish_reason = "error"
+                    await emit_event("error", {"message": final_response})
+                    break
 
             usage = llm_result.get("usage", {}) or {}
             for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
                 total_usage[key] += int(usage.get(key, 0) or 0)
+
+            # Auto-learn context limit from provider response metadata.
+            # Some providers (Groq, OpenRouter) include rate-limit headers
+            # that reveal the real per-request token cap.  If the reported
+            # limit is smaller than our current budget, register it.
+            _reported_limit = int(usage.get("x_ratelimit_limit_tokens", 0) or 0)
+            if not _reported_limit:
+                # Also check total_tokens_limit (some providers use this)
+                _reported_limit = int(usage.get("total_tokens_limit", 0) or 0)
+            if _reported_limit > 0 and _reported_limit < context_budget:
+                logger.info(
+                    "Provider %s reported token limit %d (was %d) — registering",
+                    provider_id, _reported_limit, context_budget,
+                )
+                cls.register_model_context_limit(provider_id, model, _reported_limit)
+                context_budget = _reported_limit
+                is_constrained = context_budget <= 8192
+
             # Propagate estimation flag: any estimated turn taints the whole loop's totals
             if usage.get("estimated"):
                 total_usage["estimated"] = True
@@ -825,13 +1230,30 @@ class AgenticLoopService:
                 await emit_event("text_delta", {"content": content})
 
             if not content and not tool_calls and finish_reason == "stop":
-                final_response = "[Hollow completion: LLM returned empty content and no tool calls]"
-                finish_reason = "error"
-                await emit_event("hollow_completion_error", {
-                    "thread_id": thread_id,
-                    "turn": iteration,
-                    "model": model,
-                })
+                if is_constrained:
+                    finish_reason = "context_too_small"
+                    final_response = (
+                        f"[Hollow completion] Provider '{provider_id}' (model '{model}') "
+                        f"returned empty output — likely context budget ({context_budget} tokens) "
+                        f"is too small for this task."
+                    )
+                    _hint = cls._build_context_budget_hint(
+                        provider_id=provider_id, model=model,
+                        context_budget=context_budget,
+                        messages_tokens=cls._estimate_messages_tokens(messages),
+                        tools_tokens=tools_tokens_est,
+                        iteration=iteration, error="hollow_completion",
+                    )
+                    total_usage["context_budget_hint"] = _hint
+                    await emit_event("context_budget_exhausted", _hint)
+                else:
+                    final_response = "[Hollow completion: LLM returned empty content and no tool calls]"
+                    finish_reason = "error"
+                    await emit_event("hollow_completion_error", {
+                        "thread_id": thread_id,
+                        "turn": iteration,
+                        "model": model,
+                    })
                 break
 
             if not tool_calls:
@@ -1141,7 +1563,8 @@ class AgenticLoopService:
                     break
 
 
-                tool_result_content = cls._build_tool_result_content(result_message, result_data)
+                _tool_result_max = 1200 if is_constrained else 8000
+                tool_result_content = cls._build_tool_result_content(result_message, result_data, max_chars=_tool_result_max)
                 messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": tool_result_content})
 
                 if persist_conversation and thread_id and orch_turn:
@@ -1420,13 +1843,25 @@ class AgenticLoopService:
 
         mood, mood_profile, task_role, workflow_phase, execution_policy = cls._resolve_thread_runtime_context(thread)
 
-        # Wire 2: Dynamic trust-gated authority — GICS + TrustEngine constrain policy
-        execution_policy, _trust_hitl = ConstraintCompilerService.apply_trust_authority(
+        # Wire 2: Dynamic trust-gated authority — GICS + TrustEngine annotate policy
+        _thread_meta = thread.metadata if isinstance(thread.metadata, dict) else {}
+        trust_result = ConstraintCompilerService.apply_trust_authority(
             execution_policy,
             model_id=model,
             provider_type=canonical_type,
             workspace_root=workspace_root,
+            task_type=str(_thread_meta.get("task_type") or "agentic_chat"),
+            task_semantic=str(_thread_meta.get("task_semantic") or "implementation"),
         )
+        execution_policy = trust_result.policy
+        if trust_result.trust_warning:
+            thread.metadata = {**(thread.metadata or {}),
+                "trust_warning": trust_result.trust_warning,
+                "trust_anomaly": trust_result.anomaly_detected,
+                "trust_score": trust_result.reliability_score,
+                "trust_recommendation": trust_result.recommended_alternative,
+            }
+            ConversationService.save_thread(thread)
 
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
         if not user_turn:
@@ -1475,7 +1910,7 @@ class AgenticLoopService:
             thread=thread,
             persist_conversation=True,
             allow_hitl=True,
-            force_hitl=_trust_hitl,
+            force_hitl=trust_result.requires_approval,
             session_id=session_id,
         )
 
@@ -1531,13 +1966,25 @@ class AgenticLoopService:
 
         mood, mood_profile, task_role, workflow_phase, execution_policy = cls._resolve_thread_runtime_context(thread)
 
-        # Wire 2: Dynamic trust-gated authority — GICS + TrustEngine constrain policy
-        execution_policy, _trust_hitl = ConstraintCompilerService.apply_trust_authority(
+        # Wire 2: Dynamic trust-gated authority — GICS + TrustEngine annotate policy
+        _thread_meta = thread.metadata if isinstance(thread.metadata, dict) else {}
+        trust_result = ConstraintCompilerService.apply_trust_authority(
             execution_policy,
             model_id=model,
             provider_type=canonical_type,
             workspace_root=workspace_root,
+            task_type=str(_thread_meta.get("task_type") or "agentic_chat"),
+            task_semantic=str(_thread_meta.get("task_semantic") or "implementation"),
         )
+        execution_policy = trust_result.policy
+        if trust_result.trust_warning:
+            thread.metadata = {**(thread.metadata or {}),
+                "trust_warning": trust_result.trust_warning,
+                "trust_anomaly": trust_result.anomaly_detected,
+                "trust_score": trust_result.reliability_score,
+                "trust_recommendation": trust_result.recommended_alternative,
+            }
+            ConversationService.save_thread(thread)
 
         user_turn = ConversationService.add_turn(thread_id, agent_id="user")
         if not user_turn:
@@ -1596,7 +2043,7 @@ class AgenticLoopService:
                     emit=emit,
                     persist_conversation=True,
                     allow_hitl=True,
-                    force_hitl=_trust_hitl,
+                    force_hitl=trust_result.requires_approval,
                     session_id=session_id,
                 )
             except Exception as exc:
@@ -1716,12 +2163,15 @@ class AgenticLoopService:
             adapter, provider_id, model, canonical_type = _resolve_orchestrator_adapter()
 
             # Wire 2: Dynamic trust-gated authority
-            execution_policy, _trust_hitl = ConstraintCompilerService.apply_trust_authority(
+            trust_result = ConstraintCompilerService.apply_trust_authority(
                 execution_policy,
                 model_id=model,
                 provider_type=canonical_type,
                 workspace_root=workspace_root,
+                task_type=str((thread.metadata or {}).get("task_type") or "agentic_chat"),
+                task_semantic=str((thread.metadata or {}).get("task_semantic") or "implementation"),
             )
+            execution_policy = trust_result.policy
 
             system_prompt = cls._build_system_prompt(
                 workspace_root,
@@ -1754,7 +2204,7 @@ class AgenticLoopService:
                 emit=emit,
                 persist_conversation=True,
                 allow_hitl=True,
-                force_hitl=_trust_hitl,
+                force_hitl=trust_result.requires_approval,
                 session_id=session_id,
             )
         finally:

@@ -93,6 +93,9 @@ class OpenAICompatAdapter(ProviderAdapter):
             "model": context.get("model") or self.model,
             "messages": messages,
             "temperature": 0.2,
+            # Ensure reasonable output length; Ollama defaults can be very low
+            # for small models.  Callers may override via context["max_tokens"].
+            "max_tokens": int(context.get("max_tokens") or 4096),
         }
 
         client = self._get_client()
@@ -155,8 +158,9 @@ class OpenAICompatAdapter(ProviderAdapter):
             "messages": messages,
             "temperature": temperature,
         }
-        if max_tokens is not None:
-            payload["max_tokens"] = int(max_tokens)
+        # Default to 4096 if caller didn't specify — Ollama and some
+        # providers use very low defaults for small models otherwise.
+        payload["max_tokens"] = int(max_tokens) if max_tokens is not None else 4096
 
         # Add tools if provided
         if tools:
@@ -179,10 +183,29 @@ class OpenAICompatAdapter(ProviderAdapter):
 
         usage = data.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
 
+        # Capture provider rate-limit headers so the agentic loop can
+        # auto-discover the real per-request token cap.
+        # Groq: x-ratelimit-limit-tokens, OpenRouter: x-ratelimit-limit-tokens
+        _rl_tokens = resp.headers.get("x-ratelimit-limit-tokens")
+        if _rl_tokens:
+            try:
+                usage["x_ratelimit_limit_tokens"] = int(_rl_tokens)
+            except (ValueError, TypeError):
+                pass
+
         try:
             choice = data["choices"][0]
             message = choice["message"]
-            content = message.get("content")
+            raw_content = message.get("content")
+            if isinstance(raw_content, list):
+                content = "\n".join(
+                    part.get("text", "") if isinstance(part, dict) else str(part)
+                    for part in raw_content
+                )
+            elif isinstance(raw_content, dict):
+                content = raw_content.get("text", str(raw_content))
+            else:
+                content = raw_content
             tool_calls = message.get("tool_calls", [])
             finish_reason = choice.get("finish_reason", "stop")
         except (KeyError, IndexError) as e:

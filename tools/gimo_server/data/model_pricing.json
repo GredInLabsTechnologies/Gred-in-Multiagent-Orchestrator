@@ -166,5 +166,23 @@
         "output": 0.0,
         "context_window": 8192,
         "quality_tier": 1
+    },
+    "qwen3-32b": {
+        "input": 0.0,
+        "output": 0.0,
+        "context_window": 32768,
+        "quality_tier": 3
+    },
+    "qwen2.5-coder-3b": {
+        "input": 0.0,
+        "output": 0.0,
+        "context_window": 4096,
+        "quality_tier": 1
+    },
+    "llama3.2-3b": {
+        "input": 0.0,
+        "output": 0.0,
+        "context_window": 8192,
+        "quality_tier": 1
     }
 }

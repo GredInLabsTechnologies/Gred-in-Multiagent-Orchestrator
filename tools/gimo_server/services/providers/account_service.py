@@ -101,10 +101,16 @@ class ProviderAccountService:
             os.environ[env_name] = account_token
             auth_ref = f"env:{env_name}"
 
-        updated_entry = entry.model_copy(update={"auth_mode": "account", "auth_ref": auth_ref})
-        cfg.providers[provider_id] = updated_entry
-        cfg.active = provider_id
-        ProviderService.set_config(cfg)
+        ProviderService.upsert_provider_entry(
+            provider_id=provider_id,
+            provider_type=entry.provider_type or entry.type,
+            display_name=entry.display_name,
+            base_url=entry.base_url,
+            auth_mode="account",
+            auth_ref=auth_ref,
+            model=entry.model_id or entry.model,
+            activate=False,
+        )
 
         payload = cls._load_flows()
         for _fid, flow in (payload.get("flows") or {}).items():

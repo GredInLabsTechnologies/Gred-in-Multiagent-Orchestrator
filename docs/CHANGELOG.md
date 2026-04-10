@@ -4,6 +4,20 @@ Todos los cambios notables de GIMO se documentan aquí.
 
 ## [Unreleased]
 - UI Masterplan fases 1.5-5 (graph rewrite, chat, overlays, polish)
+- **feat**: terreno preparado para providers remotos `groq` y `cloudflare-workers-ai` en backend, CLI y UI
+- **feat**: `gimo providers add` registra providers sin activarlos y `gimo providers login --api-key` ya no cambia el provider activo
+- **feat**: **Context Budget System** — el agentic loop se adapta automáticamente a providers con límites de tokens bajos (Groq free 6K, Cloudflare 4K, Ollama small models)
+  - Auto-descubrimiento por headers (`x-ratelimit-limit-tokens`) y recovery de 413
+  - Model Context Registry (`.orch_data/ops/model_context_registry.json`) — agentes auto-reportan su capacidad
+  - Constrained mode: tool compaction, message trimming (sliding window), tool result cap
+  - REST: `GET/PUT /ops/models/context-limits`
+  - MCP: `gimo_register_model_context_limit`, `gimo_get_model_context_limits`
+  - Flag `context_too_small` con hint diagnóstico para agentes que no conocen el loop
+  - Modelos grandes (Claude, GPT-4o, Gemini) no se ven afectados (`is_constrained = budget <= 8192`)
+- **fix**: Cloudflare Workers AI devuelve `content` como dict/list — normalizado en `openai_compat.py`
+- **fix**: `openai_compat.py` captura `x-ratelimit-limit-tokens` de headers para auto-discovery
+- **docs**: `docs/CONTEXT_BUDGET_SYSTEM.md` — arquitectura completa del sistema de presupuesto de contexto
+- **docs**: runbook operativo para alta, credenciales y uso agentic de Groq + Cloudflare Workers AI
 
 ## [0.12.0] — 2026-03-04
 - **feat**: Unificación monorepo — `apps/web/` (GIMO Web) fusionado via git subtree

@@ -17,6 +17,7 @@ try:
         ProviderRolesConfig, NormalizedModelInfo, ProviderModelsCatalogResponse,
         McpServerConfig, ProviderConfig,
         ProviderValidateRequest, ProviderValidateResponse, ProviderSelectionRequest,
+        ProviderUpsertRequest, ProviderCredentialUpdateRequest,
         ProviderModelInstallRequest, ProviderModelInstallResponse,
         ToolEntry, CliDependencyStatus, CliDependencyInfo, CliDependencyInstallRequest, CliDependencyInstallResponse,
         ProviderDiagnosticEntry, ProviderDiagnosticReport,

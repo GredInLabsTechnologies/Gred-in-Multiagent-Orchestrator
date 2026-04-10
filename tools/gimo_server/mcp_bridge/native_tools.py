@@ -889,7 +889,7 @@ def register_native_tools(mcp: FastMCP):
 
             async def _background_chat():
                 try:
-                    async with httpx.AsyncClient(timeout=300.0) as bg_client:
+                    async with httpx.AsyncClient(timeout=360.0) as bg_client:
                         chat_body: dict = {"content": message}
                         if resolved_provider:
                             chat_body["provider"] = resolved_provider
@@ -1143,5 +1143,65 @@ def register_native_tools(mcp: FastMCP):
             return json.dumps(result, indent=2, default=str)
         except Exception as e:
             return f"Error: {e}"
+
+    # -- Model Context Registry (self-reporting token limits) ---------------
+
+    @mcp.tool()
+    async def gimo_register_model_context_limit(
+        provider_id: str,
+        model: str,
+        max_tokens: int,
+    ) -> str:
+        """Register the token limit for a provider+model pair.
+
+        When an agent discovers its model's real token capacity (from API
+        docs, error headers, or experimentation), it should call this tool
+        so the agentic loop can adapt automatically on future runs.
+
+        The loop uses the registry to trim messages, compact tool schemas,
+        and cap tool result sizes for constrained providers.
+
+        Args:
+            provider_id: Provider identifier (e.g. "groq", "ollama-local")
+            model: Model identifier (e.g. "qwen/qwen3-32b", "llama3.2:3b")
+            max_tokens: Maximum tokens per request for this provider+model
+        """
+        try:
+            from tools.gimo_server.services.agentic_loop_service import AgenticLoopService
+            AgenticLoopService.register_model_context_limit(provider_id, model, max_tokens)
+            registry = AgenticLoopService._load_context_registry()
+            return json.dumps({
+                "status": "registered",
+                "key": f"{provider_id}:{model}",
+                "max_tokens": max_tokens,
+                "registry_size": len(registry),
+            }, indent=2)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    @mcp.tool()
+    async def gimo_get_model_context_limits() -> str:
+        """Get the full model context registry.
+
+        Returns all registered provider:model → max_tokens mappings.
+        The agentic loop reads this registry to detect constrained
+        providers and adapt its behavior (message trimming, tool
+        compaction, result size caps).
+        """
+        try:
+            from tools.gimo_server.services.agentic_loop_service import AgenticLoopService
+            registry = AgenticLoopService._load_context_registry()
+            return json.dumps({
+                "items": registry,
+                "count": len(registry),
+                "how_it_works": (
+                    "The agentic loop checks this registry before each LLM call. "
+                    "If a model's budget is <= 8192 tokens, constrained mode activates: "
+                    "tool schemas are compacted, messages are trimmed via sliding window, "
+                    "and tool results are capped at 1200 chars."
+                ),
+            }, indent=2)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
 
     logger.info("Registered Native Tools")

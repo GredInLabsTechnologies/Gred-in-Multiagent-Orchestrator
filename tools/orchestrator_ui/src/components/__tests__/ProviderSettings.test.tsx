@@ -182,7 +182,20 @@ describe('ProviderSettings', () => {
             expect(mocks.loadCatalogMock).toHaveBeenCalledWith('codex');
         });
 
-        expect(screen.getByRole('button', { name: 'Autenticar en OpenAI' })).toBeTruthy();
+        expect(screen.getByRole('button', { name: /Autenticar con OpenAI/i })).toBeTruthy();
+    });
+
+    it('muestra la guía de endpoint al seleccionar Cloudflare Workers AI', async () => {
+        render(<ProviderSettings />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'OpenAI' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Cloudflare Workers AI' }));
+
+        await waitFor(() => {
+            expect(mocks.loadCatalogMock).toHaveBeenCalledWith('cloudflare-workers-ai');
+        });
+
+        expect(screen.getAllByText(/https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/<ACCOUNT_ID>\/ai\/v1/i).length).toBeGreaterThan(0);
     });
 
     it('muestra metadata del modelo al abrir dropdown de modelos', async () => {

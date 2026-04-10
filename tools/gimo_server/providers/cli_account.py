@@ -133,10 +133,12 @@ class CliAccountAdapter(ProviderAdapter):
             # claude -p "<prompt>"  (print/non-interactive mode)
             return [self.binary, "-p", str(prompt)]
         else:
+            # --skip-git-repo-check: avoid "not inside a trusted directory"
+            # errors when the server's cwd differs from the user workspace.
             if stdin_mode:
-                return [self.binary, "exec", "-", "--json"]
+                return [self.binary, "exec", "-", "--json", "--skip-git-repo-check"]
             # codex exec "<prompt>" --json  (JSONL output)
-            return [self.binary, "exec", str(prompt), "--json"]
+            return [self.binary, "exec", str(prompt), "--json", "--skip-git-repo-check"]
 
     def _build_env(self) -> dict:
         """Build environment for subprocess, clearing nested-session guards."""
@@ -157,25 +159,54 @@ class CliAccountAdapter(ProviderAdapter):
 
         env = self._build_env()
 
-        # On Windows, command-line length is limited (~8191 chars via CreateProcess).
-        # For large prompts (e.g., multi-turn chat with tool results),
-        # write prompt to a temp file and pipe it via stdin.
-        use_stdin = sys.platform == "win32"
+        # On Windows, command-line length is limited (~8191 chars via CreateProcess,
+        # ~8191 for cmd.exe).  For short prompts use argument mode; for long
+        # prompts write to a temp file and pipe via shell so Codex receives EOF
+        # correctly (Python subprocess stdin pipes hang on Windows with Codex CLI).
+        _WIN_ARG_LIMIT = 8000
+        if sys.platform == "win32" and len(prompt.encode("utf-8")) > _WIN_ARG_LIMIT:
+            use_stdin = True
+        else:
+            use_stdin = False
         cmd = self._build_cmd(prompt if not use_stdin else "", stdin_mode=use_stdin)
         logger.info("[cli-account] running: %s (stdin=%s, prompt_len=%d)", cmd[0], use_stdin, len(prompt))
 
         if sys.platform == "win32":
             import subprocess as _subprocess
-            prompt_bytes = prompt.encode("utf-8") if use_stdin else None
-            completed = await asyncio.to_thread(
-                _subprocess.run,
-                " ".join(cmd),  # string form for shell
-                capture_output=True,
-                env=env,
-                timeout=300,
-                input=prompt_bytes,
-                shell=True,  # required for npm .cmd shims  # nosec B602
-            )
+            if use_stdin:
+                # Write prompt to temp file and pipe via shell to guarantee EOF.
+                import tempfile
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".txt", delete=False, encoding="utf-8"
+                ) as tmp:
+                    tmp.write(prompt)
+                    tmp_path = tmp.name
+                try:
+                    shell_cmd = f'type "{tmp_path}" | {" ".join(cmd)}'
+                    completed = await asyncio.to_thread(
+                        _subprocess.run,
+                        shell_cmd,
+                        capture_output=True,
+                        env=env,
+                        timeout=300,
+                        shell=True,  # nosec B602
+                    )
+                finally:
+                    import os as _os
+                    try:
+                        _os.unlink(tmp_path)
+                    except OSError:
+                        pass
+            else:
+                # Short prompt — pass as argument (no stdin hang risk).
+                completed = await asyncio.to_thread(
+                    _subprocess.run,
+                    " ".join(cmd),  # string form for shell
+                    capture_output=True,
+                    env=env,
+                    timeout=300,
+                    shell=True,  # required for npm .cmd shims  # nosec B602
+                )
             stdout = completed.stdout or b""
             stderr = completed.stderr or b""
             returncode = completed.returncode
@@ -264,8 +295,15 @@ class CliAccountAdapter(ProviderAdapter):
         # Parse tool calls from response
         remaining_text, tool_calls = _parse_tool_calls_from_text(raw_content)
 
-        # If no tool_calls found and tools are available, retry with hint
-        max_retries = 2
+        # If no tool_calls found and WRITE tools are available, retry with hint.
+        # Skip retry when the effective policy is propose_only (only read tools) —
+        # the LLM correctly responds with text, retrying just wastes time.
+        _READONLY_TOOLS = {"read_file", "list_files", "search_text", "ask_user", "propose_plan", "request_context", "web_search"}
+        has_write_tools = any(
+            (t.get("function", {}).get("name") or t.get("name", "")) not in _READONLY_TOOLS
+            for t in (tools or [])
+        )
+        max_retries = 2 if has_write_tools else 0
         retry_count = 0
 
         while not tool_calls and tools and retry_count < max_retries:

@@ -78,7 +78,7 @@ mcp.add_provider(provider)
 - Naming: `gimo_` + segmentos del path (ej: `/ops/drafts` → `gimo_drafts`)
 - Incluye 3 aliases ergonómicos: `plan_create`, `plan_execute`, `cost_estimate`
 
-### 2. Native Tools (22) — Lógica de puente
+### 2. Native Tools (24) — Lógica de puente
 
 Tools con lógica específica del bridge que no son simple proxy HTTP:
 
@@ -106,8 +106,16 @@ Tools con lógica específica del bridge que no son simple proxy HTTP:
 | `gimo_get_server_info` | Introspección del proceso bridge |
 | `gimo_gics_anomaly_report` | Reporte de anomalías GICS |
 | `gimo_gics_model_reliability` | Fiabilidad de modelo según GICS |
+| `gimo_register_model_context_limit` | Registrar límite de tokens de un modelo (auto-reporte) |
+| `gimo_get_model_context_limits` | Leer el registry completo de límites |
 
-> `gimo_reload_worker` solo aparece si `GIMO_DEV_MODE=1` (tool #23, dev-only).
+> `gimo_reload_worker` solo aparece si `GIMO_DEV_MODE=1` (tool #25, dev-only).
+
+#### Context Budget System
+
+Los dos últimos tools (`gimo_register_model_context_limit` / `gimo_get_model_context_limits`) forman parte del **Context Budget System** — documentado en detalle en [`docs/CONTEXT_BUDGET_SYSTEM.md`](CONTEXT_BUDGET_SYSTEM.md).
+
+Resumen: el agentic loop se adapta automáticamente a providers con límites de tokens bajos.  Los agentes descubren su propia capacidad y la registran en `.orch_data/ops/model_context_registry.json`.  El loop también auto-descubre límites via headers HTTP (`x-ratelimit-limit-tokens`) y recovery de errores 413.
 
 ### 3. Governance Tools (8) — SAGP
 
@@ -154,11 +162,16 @@ Cuando un cliente MCP pide a GIMO que use un modelo local:
 1. Cliente invoca gimo_chat(message="...", provider="ollama", model="qwen2.5-coder:7b")
 2. Bridge → POST /ops/threads/{id}/chat con provider/model params
 3. conversation_router → AgenticLoopService.run(provider="ollama", model="qwen2.5-coder:7b")
-4. AgenticLoopService → openai_compat.chat_with_tools(base_url="http://localhost:11434/v1")
-5. Ollama sirve el modelo localmente, responde con tool calls
-6. AgenticLoopService ejecuta tools y continúa el loop
-7. Bridge devuelve polling instruction (fire-and-return pattern)
+4. _get_context_budget() → lee registry → detecta 8192 tokens → is_constrained=True
+5. _compact_tools_if_needed() → reduce tools de 12 a 6, trunca descripciones
+6. AgenticLoopService → openai_compat.chat_with_tools(base_url="http://localhost:11434/v1")
+7. openai_compat captura x-ratelimit-limit-tokens si existe → auto-registra en registry
+8. Ollama responde → _trim_messages_to_budget() antes de cada turno siguiente
+9. AgenticLoopService ejecuta tools y continúa el loop
+10. Bridge devuelve polling instruction (fire-and-return pattern)
 ```
+
+> **Nota**: El paso 4-5 solo aplica si el modelo tiene un budget ≤ 8192 tokens (constrained mode). Modelos con ventanas grandes siguen el flujo sin restricciones. Ver [`CONTEXT_BUDGET_SYSTEM.md`](CONTEXT_BUDGET_SYSTEM.md).
 
 ### Descubrimiento dinámico de modelos
 
@@ -222,6 +235,67 @@ Endpoint: GET /ops/models/benchmarks
 | `native_inputs.py` | Pydantic input models para drift guard |
 | `_register.py` | `bind()` + `assert_no_drift()` |
 | `mcp_app_dashboard.py` | Dashboard HTML embebido |
+
+## Norma visual de grafos — Identidad GIMO
+
+**Obligatorio para todo agente operador MCP que presente planes al usuario.**
+
+El estilo visual de los grafos de plan replica exactamente el **Graph Engine** del
+frontend web (`GraphCanvas.tsx` + `ComposerNode.tsx` + `plan_graph_builder.py`).
+Es identidad de marca — no es opcional.
+
+### Reglas
+
+1. **Dirección: izquierda → derecha (LR).** Siempre. Sin excepción.
+2. **Orquestador a la izquierda**, workers a la derecha.
+3. **Spacing**: 450px horizontal entre orquestador y workers, 140px vertical entre workers.
+4. **Colores por rol** (cuando el renderizador lo soporte):
+   - Orchestrator: cyan `#22d3ee`
+   - Worker: blue `#60a5fa`
+   - Reviewer: orange `#fb923c`
+   - Researcher: purple `#c084fc`
+   - Tool: emerald `#34d399`
+   - Human gate: amber `#fbbf24`
+5. **Edges**: blue `#0a84ff` para dependencias, green `#32d74b` para orchestrator→worker.
+6. **Handles**: entrada por la izquierda, salida por la derecha.
+7. **Nodos**: etiquetas cortas (max 3 palabras). Detalles van en leyenda aparte.
+8. **Status**: `pending` (reloj), `running` (play), `done` (check), `error` (alert).
+
+### Formato Mermaid para agentes texto (Claude Code, Codex, etc.)
+
+Cuando el renderizador no soporta React Flow, usar Mermaid con `graph LR`
+y nodos mínimos. Si LR se comprime demasiado, usar `graph TD` con la misma
+semántica (orquestador arriba, workers abajo), pero **documentar que la
+dirección canónica es LR**.
+
+```
+graph LR
+    ORC[Orquestador] --> W1[Worker 1]
+    ORC --> W2[Worker 2]
+    W1 --> OUT[Entrega]
+    W2 --> OUT
+```
+
+Si los workers tienen dependencias secuenciales entre sí:
+
+```
+graph LR
+    ORC[Orquestador] --> A[W paralelo]
+    ORC --> B1[W seq 1]
+    B1 --> B2[W seq 2]
+    B2 --> B3[W seq 3]
+    A --> OUT[Entrega]
+    B3 --> OUT
+```
+
+### Referencia de implementación
+
+| Archivo | Rol |
+|---------|-----|
+| `plan_graph_builder.py` | Posicionamiento backend (x=0 orq, x=450 workers, y=140*i) |
+| `ComposerNode.tsx` | Render visual, colores por rol, status icons |
+| `GraphCanvas.tsx` | React Flow config, zoom, pan, minimap |
+| `AnimatedEdge.tsx` | Edges animados, colores de dependencia |
 
 ## Wiring
 

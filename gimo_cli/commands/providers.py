@@ -16,6 +16,35 @@ providers_app = typer.Typer(name="providers", help="Manage LLM providers and con
 app.add_typer(providers_app, name="providers")
 
 
+def _resolve_existing_provider_id(config: dict, candidate: str) -> str:
+    status_code, payload = api_request(config, "GET", "/ops/provider")
+    if status_code != 200 or not isinstance(payload, dict):
+        return candidate
+    providers = payload.get("providers")
+    if not isinstance(providers, dict):
+        return candidate
+    if candidate in providers:
+        return candidate
+    main_candidate = f"{candidate}-main"
+    if main_candidate in providers:
+        return main_candidate
+    for pid, entry in providers.items():
+        if not isinstance(entry, dict):
+            continue
+        entry_type = str(entry.get("provider_type") or entry.get("type") or "").strip().lower()
+        if entry_type == candidate:
+            return str(pid)
+    return candidate
+
+
+def _default_model_for_provider_type(provider_type: str) -> str:
+    defaults = {
+        "groq": "qwen/qwen3-32b",
+        "cloudflare-workers-ai": "@cf/qwen/qwen2.5-coder-32b-instruct",
+    }
+    return defaults.get(provider_type, "gpt-4o-mini")
+
+
 @providers_app.command("list")
 def providers_list(
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
@@ -141,6 +170,49 @@ def providers_activate(
     providers_set(provider_id, model, api_key=None, json_output=json_output)
 
 
+@providers_app.command("add")
+def providers_add(
+    provider_id: str = typer.Argument(..., help="Provider ID to register without activating it."),
+    provider_type: str = typer.Option(..., "--type", help="Canonical provider type, e.g. groq or cloudflare-workers-ai."),
+    model: str = typer.Option(None, "--model", "-m", help="Default model for this provider entry."),
+    base_url: str = typer.Option(None, "--base-url", help="Optional base URL override."),
+    api_key: str = typer.Option(None, "--api-key", help="Optional API key to store encrypted on the server."),
+    display_name: str = typer.Option(None, "--display-name", help="Optional display name."),
+    activate: bool = typer.Option(False, "--activate", help="Also set this provider as active."),
+) -> None:
+    """Register or update a provider entry without changing the active provider by default."""
+    config = load_config()
+    canonical_type = provider_type.strip().lower()
+    payload_data = {
+        "provider_id": provider_id.strip(),
+        "provider_type": canonical_type,
+        "display_name": display_name,
+        "base_url": base_url,
+        "api_key": api_key,
+        "model": model or _default_model_for_provider_type(canonical_type),
+        "activate": activate,
+    }
+
+    with console.status(f"[bold green]Registering provider {provider_id}..."):
+        status_code, payload = api_request(
+            config, "POST", "/ops/provider/upsert",
+            json_body=payload_data, role="admin",
+        )
+
+    if status_code != 200:
+        error_msg = payload if isinstance(payload, str) else payload.get("detail", str(payload))
+        console.print(f"[red][X] Failed to register provider ({status_code}): {error_msg}[/red]")
+        raise typer.Exit(1)
+
+    active = payload.get("active", "unknown") if isinstance(payload, dict) else "unknown"
+    console.print(f"[green][OK] Provider '{provider_id}' registered[/green]")
+    if activate:
+        console.print(f"[cyan]Active provider: {active}[/cyan]")
+    else:
+        console.print(f"[dim]Active provider unchanged: {active}[/dim]")
+    console.print("[dim]Verify with:[/dim] [cyan]gimo providers list[/cyan]")
+
+
 @providers_app.command("test")
 def providers_test(
     provider_id: str = typer.Argument(..., help="Provider ID to test."),
@@ -220,8 +292,9 @@ def providers_models(
 
 @providers_app.command("login")
 def providers_login(
-    provider_id: str = typer.Argument("", help="Provider to authenticate (codex/claude). Auto-detects active if omitted."),
+    provider_id: str = typer.Argument("", help="Provider to authenticate. Auto-detects active if omitted."),
     api_key: str = typer.Option(None, "--api-key", "-k", help="Authenticate with an API key instead of device flow."),
+    base_url: str = typer.Option(None, "--base-url", help="Optional base URL to store alongside the credentials."),
 ) -> None:
     """Authenticate with an LLM provider.
 
@@ -229,9 +302,13 @@ def providers_login(
       1. Device flow (browser): gimo providers login claude
       2. API key:               gimo providers login claude --api-key sk-ant-...
 
+    API key mode stores credentials without changing the active provider.
+
     Also reads from environment variables if --api-key is not provided:
       ANTHROPIC_API_KEY (for claude/anthropic providers)
       OPENAI_API_KEY   (for codex/openai providers)
+      GROQ_API_KEY     (for groq providers)
+      CLOUDFLARE_API_TOKEN (for cloudflare-workers-ai providers)
 
     Example:
       gimo providers login codex --api-key sk-...
@@ -261,6 +338,12 @@ def providers_login(
             "codex": "OPENAI_API_KEY",
             "codex-account": "OPENAI_API_KEY",
             "openai": "OPENAI_API_KEY",
+            "groq": "GROQ_API_KEY",
+            "groq-main": "GROQ_API_KEY",
+            "cloudflare": "CLOUDFLARE_API_TOKEN",
+            "workers-ai": "CLOUDFLARE_API_TOKEN",
+            "cloudflare-workers-ai": "CLOUDFLARE_API_TOKEN",
+            "cloudflare-workers-ai-main": "CLOUDFLARE_API_TOKEN",
         }
         env_var = env_map.get(provider_id)
         if env_var:
@@ -276,24 +359,26 @@ def providers_login(
             "anthropic": "claude-account",
             "openai": "openai",
         }
-        resolved_id = alias_map.get(provider_id, provider_id)
+        resolved_id = _resolve_existing_provider_id(config, alias_map.get(provider_id, provider_id))
 
-        # Use providers set --api-key flow (stores encrypted on server)
-        console.print(f"[bold]Authenticating {resolved_id} with API key...[/bold]")
-        payload_data = {"provider_id": resolved_id, "api_key": resolved_key}
+        console.print(f"[bold]Storing API key for {resolved_id}...[/bold]")
+        payload_data = {"api_key": resolved_key}
+        if base_url:
+            payload_data["base_url"] = base_url
         status_code, data = api_request(
-            config, "POST", "/ops/provider/select",
+            config, "POST", f"/ops/connectors/{resolved_id}/credentials",
             json_body=payload_data, role="operator",
         )
         if status_code == 200:
-            model_id = data.get("model_id", "") if isinstance(data, dict) else ""
-            console.print(f"[green][OK] {provider_id} authenticated and set as active provider[/green]")
-            if model_id:
-                console.print(f"[cyan]Model: {model_id}[/cyan]")
-            console.print("[dim]Verify with:[/dim] [cyan]gimo providers auth-status[/cyan]")
+            active = data.get("active", "unknown") if isinstance(data, dict) else "unknown"
+            console.print(f"[green][OK] API key stored for {resolved_id}[/green]")
+            console.print(f"[dim]Active provider unchanged: {active}[/dim]")
+            console.print(f"[dim]Activate later with:[/dim] [cyan]gimo providers set {resolved_id}[/cyan]")
+            console.print(f"[dim]Verify with:[/dim] [cyan]gimo providers test {resolved_id}[/cyan]")
         else:
             error_msg = data.get("detail", str(data)) if isinstance(data, dict) else str(data)
             console.print(f"[red][X] Failed to authenticate ({status_code}): {error_msg}[/red]")
+            console.print(f"[yellow]Tip: register it first with [cyan]gimo providers add {resolved_id} --type <provider-type>[/cyan][/yellow]")
             raise typer.Exit(1)
         return
 

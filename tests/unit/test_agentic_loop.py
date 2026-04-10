@@ -287,7 +287,7 @@ async def test_run_loop_uses_predictive_max_tokens(tmp_path: Path):
         )
 
     assert result.response == "done"
-    assert adapter.chat_with_tools.await_args.kwargs["max_tokens"] == 13
+    assert adapter.chat_with_tools.await_args.kwargs["max_tokens"] == 256
 
 
 @pytest.mark.asyncio
@@ -634,6 +634,7 @@ class TestFailClosedPolicyEnforcement:
     @pytest.mark.asyncio
     async def test_run_stream_reserved_raises_on_unknown_policy(self, tmp_path: Path):
         """_run_stream_reserved must raise RuntimeError for unknown policy names."""
+        from tools.gimo_server.models.agent_routing import TrustAuthorityResult
         from tools.gimo_server.services.constraint_compiler_service import ConstraintCompilerService
 
         thread = GimoThread(
@@ -655,7 +656,7 @@ class TestFailClosedPolicyEnforcement:
             patch.object(ConversationService, "add_turn", return_value=MagicMock(id="t1")),
             patch.object(ConversationService, "append_item"),
             patch.object(AgenticLoopService, "_resolve_thread_runtime_context", return_value=fake_context),
-            patch.object(ConstraintCompilerService, "apply_trust_authority", return_value=("NONEXISTENT_POLICY", False)),
+            patch.object(ConstraintCompilerService, "apply_trust_authority", return_value=TrustAuthorityResult(policy="NONEXISTENT_POLICY")),
         ):
             with pytest.raises(RuntimeError, match="Unknown execution policy"):
                 async for _ in AgenticLoopService._run_stream_reserved(

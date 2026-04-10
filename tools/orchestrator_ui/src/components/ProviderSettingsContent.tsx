@@ -46,6 +46,7 @@ const PROVIDER_LABELS: Record<string, string> = {
     tgi: 'Text Generation Inference (TGI)',
     ollama_local: 'Ollama (Local)',
     groq: 'Groq',
+    'cloudflare-workers-ai': 'Cloudflare Workers AI',
     openrouter: 'OpenRouter',
     custom_openai_compatible: 'OpenAI Compatible',
 };
@@ -54,7 +55,7 @@ const KNOWN_PROVIDER_TYPES = [
     'openai', 'anthropic', 'google', 'mistral', 'cohere', 'deepseek', 'qwen', 'moonshot',
     'zai', 'minimax', 'baidu', 'tencent', 'bytedance', 'iflytek', '01-ai', 'codex', 'claude',
     'together', 'fireworks', 'replicate', 'huggingface', 'azure-openai', 'aws-bedrock',
-    'vertex-ai', 'ollama', 'vllm', 'llama-cpp', 'tgi', 'ollama_local', 'groq', 'openrouter',
+    'vertex-ai', 'ollama', 'vllm', 'llama-cpp', 'tgi', 'ollama_local', 'groq', 'cloudflare-workers-ai', 'openrouter',
     'custom_openai_compatible',
 ];
 
@@ -208,7 +209,7 @@ export const ProviderSettings: React.FC = () => {
         if (!providerType) return;
         loadCatalog(providerType).catch(() => addToast('No se pudo cargar el catálogo de modelos', 'error'));
         if (!providerId) setProviderId(`${providerType}-main`);
-        if (providerType === 'custom_openai_compatible') {
+        if (providerType === 'custom_openai_compatible' || providerType === 'cloudflare-workers-ai') {
             setShowAdvanced(true);
         } else {
             setShowAdvanced(false);
@@ -621,6 +622,13 @@ export const ProviderSettings: React.FC = () => {
                             <div className="space-y-2">
                                 <label className="block text-sm font-medium text-text-primary">Autenticación</label>
                                 {renderAuthSection()}
+                                {providerType === 'cloudflare-workers-ai' && (
+                                    <div className="rounded-lg border border-border-primary bg-surface-1 px-3 py-2 text-[11px] text-text-secondary">
+                                        Cloudflare Workers AI usa el endpoint OpenAI-compatible con <code>account_id</code> embebido en la URL.
+                                        Configura la Base URL como <code>https://api.cloudflare.com/client/v4/accounts/&lt;ACCOUNT_ID&gt;/ai/v1</code>
+                                        y usa un token con <code>Workers AI - Read</code> y <code>Workers AI - Edit</code>.
+                                    </div>
+                                )}
                                 {authMode === 'api_key' && <div className="text-[11px] text-text-secondary px-1">La clave se enviará de forma segura al orquestador.</div>}
                             </div>
 
@@ -669,6 +677,11 @@ export const ProviderSettings: React.FC = () => {
                                         <div>
                                             <label htmlFor="baseUrlInput" className="block text-xs text-text-secondary mb-1">Base URL Personalizada</label>
                                             <Input id="baseUrlInput" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://.../v1" className="bg-surface-1 border-border-primary text-text-primary text-sm rounded" />
+                                            {providerType === 'cloudflare-workers-ai' && (
+                                                <div className="mt-1 text-[10px] text-text-secondary">
+                                                    Ejemplo: <code>https://api.cloudflare.com/client/v4/accounts/&lt;ACCOUNT_ID&gt;/ai/v1</code>
+                                                </div>
+                                            )}
                                         </div>
                                         <div>
                                             <label htmlFor="orgInput" className="block text-xs text-text-secondary mb-1">Organization ID</label>

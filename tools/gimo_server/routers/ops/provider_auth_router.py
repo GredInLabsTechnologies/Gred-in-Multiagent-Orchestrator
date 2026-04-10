@@ -10,7 +10,7 @@ from tools.gimo_server.services.providers.account_service import ProviderAccount
 from tools.gimo_server.services.providers.provider_diagnostics_service import (
     ProviderDiagnosticsService,
 )
-from tools.gimo_server.models import ProviderDiagnosticReport
+from tools.gimo_server.models import ProviderCredentialUpdateRequest, ProviderDiagnosticReport
 from .common import _require_role, _actor_label
 
 router = APIRouter()
@@ -167,6 +167,34 @@ async def provider_auth_status(
     if not data.get("authenticated"):
         data = _enrich_with_vault_key(provider, data)
     return data
+
+
+@router.post("/connectors/{provider_id}/credentials")
+async def provider_store_credentials(
+    provider_id: str,
+    body: ProviderCredentialUpdateRequest,
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "operator")
+    try:
+        cfg = ProviderService.upsert_provider_entry(
+            provider_id=provider_id,
+            api_key=body.api_key,
+            base_url=body.base_url,
+            activate=False,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_log(
+        "OPS",
+        f"/ops/connectors/{provider_id}/credentials",
+        "credentials_stored",
+        operation="WRITE",
+        actor=_actor_label(auth),
+    )
+    return {"provider_id": provider_id, "status": "stored", "active": cfg.active}
 
 
 @router.post("/connectors/claude/logout")

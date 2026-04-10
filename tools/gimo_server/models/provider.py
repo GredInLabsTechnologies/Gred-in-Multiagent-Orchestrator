@@ -8,6 +8,7 @@ ProviderType = Literal[
     "moonshot", "zai", "minimax", "baidu", "tencent", "bytedance", "iflytek",
     "01-ai", "codex", "claude", "groq", "openrouter", "together", "fireworks",
     "replicate", "huggingface", "azure-openai", "aws-bedrock", "vertex-ai",
+    "cloudflare-workers-ai",
     "custom_openai_compatible",
 ]
 
@@ -154,6 +155,23 @@ class ProviderSelectionRequest(BaseModel):
     model: Optional[str] = None
     prefer_family: Optional[str] = None
     api_key: Optional[str] = None
+
+
+class ProviderUpsertRequest(BaseModel):
+    provider_id: str
+    provider_type: Optional[str] = None
+    display_name: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    auth_mode: Optional[str] = None
+    auth_ref: Optional[str] = None
+    model: Optional[str] = None
+    activate: bool = False
+
+
+class ProviderCredentialUpdateRequest(BaseModel):
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
 
 
 class ProviderModelInstallRequest(BaseModel):

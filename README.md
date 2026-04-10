@@ -103,6 +103,7 @@ El surface oficial para ChatGPT Apps sigue siendo `/mcp/app`.
 - [Instalaci&oacute;n y Configuraci&oacute;n](docs/SETUP.md)
 - [Referencia API](docs/API.md)
 - [Seguridad](docs/SECURITY.md)
+- [Runbook: Groq + Cloudflare Workers AI](docs/runbooks/groq-cloudflare-workers-ai.md)
 - [Changelog](docs/CHANGELOG.md)
 
 ## Tests

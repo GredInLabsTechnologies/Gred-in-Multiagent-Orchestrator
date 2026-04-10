@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import hashlib
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Tuple
 
@@ -15,6 +16,11 @@ from .model_inventory_service import ModelInventoryService, ModelEntry, _infer_c
 from .hardware_monitor_service import HardwareMonitorService
 
 logger = logging.getLogger("orchestrator.model_router")
+
+# Debug mode scaffold — kept active (routing always runs), but when
+# DEBUG=true the router logs extra detail and tags decisions with
+# debug_mode=True so callers can distinguish dev vs prod routing.
+_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
 
 
 # Task-type → required capability + minimum quality tier
@@ -70,6 +76,10 @@ class Phase6StrategyDecision:
 
 class ModelRouterService:
     """Agnostic model router that uses only the user's configured providers."""
+
+    # Debug mode: routing remains active but decisions are tagged with
+    # debug_mode=True for downstream consumers.  Activate via DEBUG=true.
+    debug_mode: bool = _DEBUG_MODE
 
     @classmethod
     def normalize_task_type(cls, task_type: Optional[str]) -> str:

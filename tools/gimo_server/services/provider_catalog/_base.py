@@ -116,13 +116,19 @@ _DEFAULT_PROVIDER_MODELS: Dict[str, List[Dict[str, str]]] = {
         {"id": "qwen-max",                     "label": "Qwen Max"},
     ],
     "groq": [
-        # Generous free tier: ~30 RPM, 6K TPM per model; ultra-fast inference
-        {"id": "llama-3.3-70b-versatile",        "label": "Llama 3.3 70B (free)"},
-        {"id": "llama-3.1-70b-versatile",        "label": "Llama 3.1 70B (free)"},
-        {"id": "llama-3.1-8b-instant",           "label": "Llama 3.1 8B Instant (free, fast)"},
-        {"id": "deepseek-r1-distill-llama-70b",  "label": "DeepSeek R1 Distill 70B (free)"},
-        {"id": "mixtral-8x7b-32768",             "label": "Mixtral 8x7B (free)"},
-        {"id": "gemma2-9b-it",                   "label": "Gemma 2 9B (free)"},
+        # Groq keeps an OpenAI-compatible API and tool-use support; bias toward coding/agentic models.
+        {"id": "qwen/qwen3-32b",        "label": "Qwen 3 32B"},
+        {"id": "openai/gpt-oss-120b",   "label": "GPT-OSS 120B"},
+        {"id": "openai/gpt-oss-20b",    "label": "GPT-OSS 20B"},
+        {"id": "moonshotai/kimi-k2-instruct-0905", "label": "Kimi K2 Instruct 0905"},
+    ],
+    "cloudflare-workers-ai": [
+        # Workers AI catalog is account-scoped; these are the highest-signal coding/agentic defaults.
+        {"id": "@cf/qwen/qwen3-30b-a3b-fp8",          "label": "Qwen 3 30B A3B FP8"},
+        {"id": "@cf/qwen/qwen2.5-coder-32b-instruct", "label": "Qwen 2.5 Coder 32B"},
+        {"id": "@cf/openai/gpt-oss-120b",             "label": "GPT-OSS 120B"},
+        {"id": "@cf/openai/gpt-oss-20b",              "label": "GPT-OSS 20B"},
+        {"id": "@cf/moonshotai/kimi-k2.5",            "label": "Kimi K2.5"},
     ],
     "openrouter": [
         # Free `:free` routing — no API cost; best free coding models for agentic use
@@ -257,6 +263,7 @@ class ProviderCatalogBase:
         "claude": 300,
         "anthropic": 300,
         "groq": 300,
+        "cloudflare-workers-ai": 300,
         "openrouter": 300,
         "custom_openai_compatible": 120,
     }

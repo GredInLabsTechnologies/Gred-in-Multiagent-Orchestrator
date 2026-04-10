@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict
 
-from ..models.agent_routing import TaskConstraints, TaskDescriptor
+from ..models.agent_routing import TaskConstraints, TaskDescriptor, TrustAuthorityResult
 from .intent_classification_service import IntentClassificationService
 from .providers.service import ProviderService
 from .providers.topology_service import ProviderTopologyService
@@ -11,6 +12,8 @@ from .runtime_policy_service import RuntimePolicyService
 from .workspace_policy_service import WorkspacePolicyService
 
 logger = logging.getLogger("orchestrator.services.constraint_compiler")
+
+_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
 
 
 class ConstraintCompilerService:
@@ -190,6 +193,83 @@ class ConstraintCompilerService:
         gics_home = os.path.join(os.path.expanduser("~"), ".gics")
         return os.path.exists(os.path.join(gics_home, "gics.sock"))
 
+    # Mapping from task_semantic → benchmark dimension for fallback recommendations
+    _SEMANTIC_TO_DIMENSION: Dict[str, str] = {
+        "implementation": "coding",
+        "planning": "reasoning",
+        "research": "general_knowledge",
+        "security": "expert_knowledge",
+        "review": "reasoning",
+        "approval": "instruction_following",
+    }
+
+    @classmethod
+    def _build_recommendation(
+        cls,
+        *,
+        task_type: str | None,
+        task_semantic: str | None,
+    ) -> dict | None:
+        """Find the best alternative model for a task type.
+
+        Tries operational history first (CapabilityProfileService), falls back
+        to static benchmark dimensions (BenchmarkEnrichmentService).
+        """
+        # Layer 1: Operational history — real success data per model × task_type
+        if task_type:
+            try:
+                from .capability_profile_service import CapabilityProfileService
+                rec = CapabilityProfileService.recommend_model_for_task(
+                    task_type=task_type, min_samples=2,
+                )
+                if rec:
+                    rec["source"] = "operational_history"
+                    return rec
+            except Exception:
+                pass
+
+        # Layer 2: Benchmark data — static capability scores by dimension
+        dimension = cls._SEMANTIC_TO_DIMENSION.get(task_semantic or "implementation", "coding")
+        try:
+            from .benchmark_enrichment_service import get_best_model_for_task, refresh_benchmarks
+            import asyncio
+            # Use cached profiles (don't await refresh in sync context)
+            from .benchmark_enrichment_service import _load_runtime_cache, _load_seed_file
+            profiles = _load_runtime_cache() or _load_seed_file() or {}
+            if profiles:
+                best = get_best_model_for_task(dimension, profiles)
+                if best:
+                    return {"model_id": best, "source": "benchmark", "dimension": dimension}
+        except Exception:
+            pass
+
+        return None
+
+    @classmethod
+    def _build_profile_summary(cls, *, provider_type: str, model_id: str) -> dict | None:
+        """Build a compact strengths/weaknesses summary from CapabilityProfileService."""
+        try:
+            from .capability_profile_service import CapabilityProfileService
+            profile = CapabilityProfileService.get_full_profile(
+                provider_type=provider_type, model_id=model_id,
+            )
+            if not profile.strengths and not profile.weaknesses:
+                return None
+            return {
+                "strengths": [
+                    {"task_type": s.task_type, "success_rate": round(s.success_rate, 2), "samples": s.samples}
+                    for s in profile.strengths[:3]
+                ],
+                "weaknesses": [
+                    {"task_type": w.task_type, "success_rate": round(w.success_rate, 2), "samples": w.samples}
+                    for w in profile.weaknesses[:3]
+                ],
+                "total_samples": profile.total_samples,
+                "overall_success_rate": round(profile.overall_success_rate, 2),
+            }
+        except Exception:
+            return None
+
     @classmethod
     def apply_trust_authority(
         cls,
@@ -198,15 +278,33 @@ class ConstraintCompilerService:
         model_id: str | None = None,
         provider_type: str | None = None,
         workspace_root: str | None = None,
-    ) -> tuple[str, bool]:
-        """Dynamically constrain execution policy based on trust and reliability signals.
+        task_type: str | None = None,
+        task_semantic: str | None = None,
+    ) -> TrustAuthorityResult:
+        """Evaluate trust and reliability signals — annotate, never block.
 
-        Returns (effective_policy, requires_human_approval).
-        Fail-open: if signals unavailable, returns policy unchanged.
+        Returns TrustAuthorityResult with the ORIGINAL policy unchanged.
+        GICS anomaly signals become advisory metadata (warning, score,
+        recommendation), not policy overrides.  Only explicit user-configured
+        limits should hard-block.
+
+        Fail-open: if signals unavailable, returns policy with no metadata.
         """
-        requires_approval = False
+        if _DEBUG_MODE:
+            logger.warning(
+                "Trust authority: DEBUG mode — bypassing GICS/trust checks for %s/%s",
+                provider_type, model_id,
+            )
+            return TrustAuthorityResult(policy=execution_policy, debug_bypass=True)
 
-        # Check GICS model reliability — anomalous model loses write authority
+        requires_approval = False
+        trust_warning = None
+        reliability_score = None
+        anomaly_detected = False
+        recommended_alternative = None
+        model_profile_summary = None
+
+        # Check GICS model reliability — anomaly becomes metadata, not a block
         if model_id and provider_type and cls._is_gics_daemon_available():
             try:
                 from .gics_service import GicsService
@@ -214,12 +312,27 @@ class ConstraintCompilerService:
                 reliability = gics.get_model_reliability(
                     provider_type=provider_type, model_id=model_id,
                 )
-                if reliability and reliability.get("anomaly"):
-                    logger.info(
-                        "Trust authority: model %s/%s anomaly detected, clamping to propose_only",
-                        provider_type, model_id,
-                    )
-                    return "propose_only", False
+                if reliability:
+                    reliability_score = float(reliability.get("score", 0.5) or 0.5)
+                    if reliability.get("anomaly"):
+                        anomaly_detected = True
+                        failure_streak = int(reliability.get("failure_streak", 0) or 0)
+                        trust_warning = (
+                            f"Model {provider_type}/{model_id} has anomaly detected "
+                            f"(failure_streak={failure_streak}, score={reliability_score:.2f}). "
+                            f"Consider using an alternative model for this task."
+                        )
+                        logger.info(
+                            "Trust authority: model %s/%s anomaly — annotating with metadata (policy unchanged: %s)",
+                            provider_type, model_id, execution_policy,
+                        )
+                        # Enrich with recommendation and profile
+                        recommended_alternative = cls._build_recommendation(
+                            task_type=task_type, task_semantic=task_semantic,
+                        )
+                        model_profile_summary = cls._build_profile_summary(
+                            provider_type=provider_type, model_id=model_id,
+                        )
             except Exception:
                 pass  # Fail-open
 
@@ -232,21 +345,25 @@ class ConstraintCompilerService:
                 engine = TrustEngine(storage.trust)
                 trust_record = engine.query_dimension(f"workspace:{workspace_root}")
                 trust_policy = trust_record.get("policy")
-                # No policy key = no trust data yet → fail-open (auto_approve)
                 if trust_policy is None:
                     pass  # New workspace, no data — full authority
                 elif trust_policy == "blocked":
-                    logger.info(
-                        "Trust authority: workspace %s blocked, clamping to propose_only",
-                        workspace_root,
-                    )
-                    return "propose_only", False
+                    trust_warning = (trust_warning or "") + f" Workspace {workspace_root} is blocked by TrustEngine."
+                    logger.info("Trust authority: workspace %s blocked — annotating (policy unchanged)", workspace_root)
                 elif trust_policy == "require_review":
                     requires_approval = True
             except Exception:
                 pass  # Fail-open
 
-        return execution_policy, requires_approval
+        return TrustAuthorityResult(
+            policy=execution_policy,
+            requires_approval=requires_approval,
+            trust_warning=trust_warning,
+            reliability_score=reliability_score,
+            anomaly_detected=anomaly_detected,
+            recommended_alternative=recommended_alternative,
+            model_profile_summary=model_profile_summary,
+        )
 
     @classmethod
     def compile_for_descriptor(

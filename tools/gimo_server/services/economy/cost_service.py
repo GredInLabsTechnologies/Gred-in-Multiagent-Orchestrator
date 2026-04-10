@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict
 
 logger = logging.getLogger("orchestrator.services.cost")
+
+_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
+
 
 class CostService:
     """Manages model pricing registry and cost calculations."""
@@ -164,11 +168,18 @@ class CostService:
 
     @classmethod
     def calculate_cost(cls, model: str, input_tokens: int, output_tokens: int) -> float:
-        """Calculates total cost in USD."""
+        """Calculates total cost in USD.
+
+        In debug mode, returns the real cost but does NOT accumulate it
+        against budget limits — development iterations won't drain budgets.
+        """
         pricing = cls.get_pricing(model)
         input_cost = (input_tokens / 1_000_000) * pricing["input"]
         output_cost = (output_tokens / 1_000_000) * pricing["output"]
-        return round(input_cost + output_cost, 6)
+        cost = round(input_cost + output_cost, 6)
+        if _DEBUG_MODE:
+            logger.debug("[CostService] DEBUG MODE — cost $%.6f for %s (not tracked against budget)", cost, model)
+        return cost
 
     @classmethod
     def get_impact_comparison(cls, model_a: str, model_b: str) -> Dict[str, Any]:
