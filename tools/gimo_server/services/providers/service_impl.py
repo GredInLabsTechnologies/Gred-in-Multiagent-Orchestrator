@@ -396,7 +396,7 @@ class ProviderService:
             return current_model
 
         ranked_ids = list(installed_ids)
-        preferred_tokens = [prefer_family] if prefer_family else ["qwen"]
+        preferred_tokens = [prefer_family] if prefer_family else []
         preferred_tokens.extend(["coder", "code"])
 
         def _score(model_id: str) -> tuple[int, int, str]:
