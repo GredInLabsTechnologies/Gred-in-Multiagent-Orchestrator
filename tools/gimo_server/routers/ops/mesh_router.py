@@ -233,3 +233,86 @@ async def eligible_devices(
     _require_role(auth, "operator")
     registry = _get_registry(request)
     return registry.get_eligible_devices(_get_mesh_enabled(request))
+
+
+# ── Enrollment tokens ────────────────────────────────────────
+
+def _get_enrollment(request: Request):
+    from tools.gimo_server.services.mesh.enrollment import EnrollmentService
+    registry = _get_registry(request)
+    return EnrollmentService(registry)
+
+
+class ClaimRequest(BaseModel):
+    token: str
+    device_id: str
+    name: str = ""
+    device_mode: DeviceMode = DeviceMode.inference
+    device_class: str = "desktop"
+
+
+@router.post("/enrollment/token")
+async def create_enrollment_token(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+    ttl_minutes: Annotated[int, Query(ge=1, le=1440)] = 15,
+):
+    _require_role(auth, "admin")
+    if not _get_mesh_enabled(request):
+        raise HTTPException(403, detail="Mesh is disabled")
+    svc = _get_enrollment(request)
+    token = svc.create_token(ttl_minutes=ttl_minutes)
+    audit_log("OPS", "/ops/mesh/enrollment/token", "created", operation="WRITE", actor=_actor_label(auth))
+    return {"token": token.token, "expires_at": token.expires_at.isoformat()}
+
+
+@router.get("/enrollment/tokens")
+async def list_enrollment_tokens(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "admin")
+    svc = _get_enrollment(request)
+    return [t.model_dump(mode="json") for t in svc.list_tokens()]
+
+
+@router.post("/enrollment/claim")
+async def claim_enrollment(
+    request: Request,
+    body: ClaimRequest,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+) -> MeshDeviceInfo:
+    _require_role(auth, "operator")
+    if not _get_mesh_enabled(request):
+        raise HTTPException(403, detail="Mesh is disabled")
+    svc = _get_enrollment(request)
+    try:
+        device = svc.claim(
+            token_str=body.token,
+            device_id=body.device_id,
+            name=body.name,
+            device_mode=body.device_mode,
+            device_class=body.device_class,
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+    audit_log("OPS", "/ops/mesh/enrollment/claim", body.device_id, operation="WRITE", actor=_actor_label(auth))
+    return device
+
+
+@router.delete("/enrollment/token/{token_str}")
+async def revoke_enrollment_token(
+    token_str: str,
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    _require_role(auth, "admin")
+    svc = _get_enrollment(request)
+    if not svc.revoke_token(token_str):
+        raise HTTPException(404, detail="Token not found")
+    audit_log("OPS", "/ops/mesh/enrollment/token", "revoked", operation="DELETE", actor=_actor_label(auth))
+    return {"revoked": True}
