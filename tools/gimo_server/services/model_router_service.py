@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 from ..ops_models import ProviderRoleBinding, WorkflowNode
 from .cost_service import CostService
-from .model_inventory_service import ModelInventoryService, ModelEntry, _infer_capabilities, _infer_tier
+from .model_inventory_service import ModelInventoryService, ModelEntry, _infer_tier
 from .hardware_monitor_service import HardwareMonitorService
 
 logger = logging.getLogger("orchestrator.model_router")
@@ -169,7 +169,7 @@ class ModelRouterService:
             provider_type=provider_type,
             is_local=is_local,
             quality_tier=_infer_tier(binding.model),
-            capabilities=_infer_capabilities(binding.model),
+            capabilities={"chat"},
             cost_input=pricing.get("input", 0.0),
             cost_output=pricing.get("output", 0.0),
         )
@@ -349,14 +349,6 @@ class ModelRouterService:
 
     # Keep for backwards compat with CascadeService and tests
     _TIERS = _LEGACY_TIERS
-
-    DEFAULT_POLICY: Dict[str, str] = {
-        "classification": "haiku",
-        "code_generation": "sonnet",
-        "security_review": "opus",
-        "formatting": "local",
-        "default": "sonnet",
-    }
 
     PHASE6_PRIMARY_MODEL = "qwen3-coder:480b-cloud"
     PHASE6_FALLBACK_MODEL = "qwen3:8b"

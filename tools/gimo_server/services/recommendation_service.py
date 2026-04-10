@@ -261,13 +261,7 @@ class RecommendationService:
         caps = getattr(model, "capabilities", None)
         if not isinstance(caps, list):
             caps = []
-        bag = {str(c).strip().lower() for c in caps if str(c).strip()}
-        mid = str(getattr(model, "id", "") or "").lower()
-        if any(k in mid for k in ("coder", "codex", "code")):
-            bag.add("code")
-        if any(k in mid for k in ("reason", "think", "o1", "r1")):
-            bag.add("reasoning")
-        return bag
+        return {str(c).strip().lower() for c in caps if str(c).strip()}
 
     @classmethod
     def _reliability_for(cls, provider_type: str, model_id: str) -> Dict[str, Any]:
@@ -306,7 +300,7 @@ class RecommendationService:
             if m_size_gb > max(vram_gb, 0.5):
                 continue
             caps = cls._model_capability_tags(m)
-            if "code" not in caps and not any(k in str(m.id).lower() for k in ("qwen", "llama", "code", "coder")):
+            if "code" not in caps:
                 continue
             reliability = cls._reliability_for(catalog_provider, str(m.id))
             if reliability["anomaly"]:
