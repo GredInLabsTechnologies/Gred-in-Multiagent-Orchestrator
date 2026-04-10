@@ -171,6 +171,7 @@ class OpsConfig(BaseModel):
     refactor: RefactorConfig = Field(default_factory=RefactorConfig)
     ui_show_ids_events: bool = True
     ui_enable_chat_investigation: bool = True
+    mesh_enabled: bool = False
 
 
 class OpsCreateDraftRequest(BaseModel):

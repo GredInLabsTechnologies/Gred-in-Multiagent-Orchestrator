@@ -447,6 +447,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("ExecutionAuthority init warning: %s", exc)
 
+        # Initialize Mesh Registry (lazy — dirs created only when mesh_enabled)
+        try:
+            from tools.gimo_server.services.mesh.registry import MeshRegistry
+            app.state.mesh_registry = MeshRegistry()
+            logger.info("Mesh registry initialized")
+        except Exception as exc:
+            logger.warning("Mesh registry init warning: %s", exc)
+
         # F8.1: Seed initial preset telemetry for adaptive routing
         try:
             from tools.gimo_server.services.preset_telemetry_service import PresetTelemetryService
@@ -800,6 +808,7 @@ def create_app() -> FastAPI:
     from tools.gimo_server.routers.ops.service_router import router as svc_router
     from tools.gimo_server.routers.ops.ide_context_router import router as ide_context_router
     from tools.gimo_server.routers.ops.checkpoint_router import router as checkpoint_router
+    from tools.gimo_server.routers.ops.mesh_router import router as mesh_router
     app.include_router(file_router)
     app.include_router(repo_router)
     app.include_router(graph_router)
@@ -807,6 +816,7 @@ def create_app() -> FastAPI:
     app.include_router(svc_router)
     app.include_router(ide_context_router)
     app.include_router(checkpoint_router)
+    app.include_router(mesh_router)
 
     mount_static(app)
 
