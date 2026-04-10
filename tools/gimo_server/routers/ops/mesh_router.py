@@ -205,8 +205,16 @@ async def report_thermal_event(
     _require_role(auth, "operator")
     registry = _get_registry(request)
     registry.record_thermal_event(event)
+
+    # Feed telemetry service for profile + GICS integration
+    from tools.gimo_server.services.mesh.telemetry import TelemetryService
+    telemetry = TelemetryService()
+    profile = telemetry.ingest_thermal_event(event)
+    gics = getattr(request.app.state, "gics", None)
+    telemetry.feed_gics(gics, event, profile)
+
     audit_log("OPS", "/ops/mesh/thermal-event", event.device_id, operation="WRITE", actor=_actor_label(auth))
-    return {"recorded": True}
+    return {"recorded": True, "health_score": profile.health_score}
 
 
 @router.get("/thermal-history")
@@ -233,6 +241,33 @@ async def eligible_devices(
     _require_role(auth, "operator")
     registry = _get_registry(request)
     return registry.get_eligible_devices(_get_mesh_enabled(request))
+
+
+# ── Thermal profiles + health ────────────────────────────────
+
+@router.get("/profiles")
+async def list_thermal_profiles(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+) -> list:
+    _require_role(auth, "operator")
+    from tools.gimo_server.services.mesh.telemetry import TelemetryService
+    telemetry = TelemetryService()
+    return [p.to_dict() for p in telemetry.list_profiles()]
+
+
+@router.get("/profiles/{device_id}")
+async def get_thermal_profile(
+    device_id: str,
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+) -> dict:
+    _require_role(auth, "operator")
+    from tools.gimo_server.services.mesh.telemetry import TelemetryService
+    telemetry = TelemetryService()
+    return telemetry.get_profile(device_id).to_dict()
 
 
 # ── Enrollment tokens ────────────────────────────────────────
