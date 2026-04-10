@@ -359,7 +359,6 @@ class ProviderService:
         provider_id: str,
         *,
         requested_model: str | None = None,
-        prefer_family: str | None = None,
     ) -> str:
         cfg = cls.get_config()
         if not cfg:
@@ -371,7 +370,6 @@ class ProviderService:
         canonical = cls.normalize_provider_type(entry.provider_type or entry.type)
         current_model = str(entry.model_id or entry.model or "").strip()
         requested_model = str(requested_model or "").strip() or None
-        prefer_family = str(prefer_family or "").strip().lower() or None
 
         if canonical != "ollama_local":
             return requested_model or current_model
@@ -396,15 +394,12 @@ class ProviderService:
             return current_model
 
         ranked_ids = list(installed_ids)
-        preferred_tokens = [prefer_family] if prefer_family else []
-        preferred_tokens.extend(["coder", "code"])
+        preferred_tokens = ["coder", "code"]
 
         def _score(model_id: str) -> tuple[int, int, str]:
             lower = model_id.lower()
             family_score = 0
-            if preferred_tokens and preferred_tokens[0] and preferred_tokens[0] in lower:
-                family_score += 2
-            if any(token in lower for token in preferred_tokens[1:]):
+            if any(token in lower for token in preferred_tokens):
                 family_score += 1
             return (-family_score, len(lower), lower)
 
@@ -417,7 +412,6 @@ class ProviderService:
         *,
         provider_id: str,
         model: str | None = None,
-        prefer_family: str | None = None,
         api_key: str | None = None,
     ) -> ProviderConfig:
         cfg = cls.get_config()
@@ -429,7 +423,6 @@ class ProviderService:
         resolved_model = await cls._resolve_runtime_model(
             provider_id,
             requested_model=model,
-            prefer_family=prefer_family,
         )
         updates: dict = {"model": resolved_model, "model_id": resolved_model}
         if api_key:
