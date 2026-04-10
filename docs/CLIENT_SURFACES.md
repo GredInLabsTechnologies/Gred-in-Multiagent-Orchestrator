@@ -89,7 +89,7 @@ See [SAGP Architecture](architecture/SAGP.md) for the full protocol specificatio
 
 | Feature | Web | CLI/TUI | MCP (Claude/VS Code/Cursor) | App Façade | Agent SDK |
 |---|---|---|---|---|---|
-| Status | `/ops/operator/status` | `/ops/operator/status` | `gimo_status` | `/ops/operator/status` | `gimo_status` |
+| Status | `/ui/status` *(legacy — migrate to `/ops/operator/status`)* | `/ops/operator/status` | `gimo_status` | `/ops/operator/status` | `gimo_status` |
 | Governance | `/ops/governance/snapshot` | `gimo status --json` | `gimo_get_governance_snapshot` | `/ops/governance/snapshot` | `gimo_get_governance_snapshot` |
 | Pre-action check | (backend-enforced) | (backend-enforced) | `gimo_evaluate_action` | (backend-enforced) | `gimo_evaluate_action` |
 | Notices | `/ops/notices` | `/ops/notices` | `gimo_event_stream` | `/ops/notices` | `gimo_event_stream` |

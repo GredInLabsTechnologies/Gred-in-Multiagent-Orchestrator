@@ -290,11 +290,8 @@ def select_chat_provider(
     provider_id: str,
     *,
     model: str | None = None,
-    prefer_family: str | None = None,
 ) -> tuple[int, Any]:
     payload: dict[str, Any] = {"provider_id": provider_id}
     if model:
         payload["model"] = model
-    if prefer_family:
-        payload["prefer_family"] = prefer_family
     return api_request(config, "POST", "/ops/provider/select", json_body=payload)

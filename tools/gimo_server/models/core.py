@@ -157,6 +157,10 @@ class RefactorConfig(BaseModel):
     adaptive_risk_enabled: bool = False
     self_healing_enabled: bool = False
 
+class Phase6StrategyConfig(BaseModel):
+    primary_model: str = "qwen3-coder:480b-cloud"
+    fallback_model: str = "qwen3:8b"
+
 class OpsConfig(BaseModel):
     default_auto_run: bool = False
     # Intent types that are never eligible for auto_run, regardless of default_auto_run.
@@ -169,6 +173,7 @@ class OpsConfig(BaseModel):
     operator_can_generate: bool = False
     economy: UserEconomyConfig = Field(default_factory=UserEconomyConfig)
     refactor: RefactorConfig = Field(default_factory=RefactorConfig)
+    phase6: Phase6StrategyConfig = Field(default_factory=Phase6StrategyConfig)
     ui_show_ids_events: bool = True
     ui_enable_chat_investigation: bool = True
 
