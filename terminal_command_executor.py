@@ -207,13 +207,9 @@ def build_terminal_command_callbacks(
         parts = normalized.split()
         provider_id = parts[0]
         model_id = parts[1] if len(parts) > 1 else None
-        prefer_family = "qwen" if "ollama" in provider_id.lower() and model_id is None else None
-
         payload: dict[str, Any] = {"provider_id": provider_id}
         if model_id:
             payload["model"] = model_id
-        if prefer_family:
-            payload["prefer_family"] = prefer_family
 
         status_code, response_payload = context.api_request(
             context.config,
@@ -496,12 +492,6 @@ def build_terminal_command_callbacks(
             if not run_id:
                 surface.render_message("[yellow]No active run found to merge.[/yellow]")
                 return None
-            if snapshot.get("active_run_status") != "AWAITING_MERGE":
-                surface.render_message(
-                    f"[yellow]Active run {run_id} is in status '{snapshot.get('active_run_status')}', not AWAITING_MERGE.[/yellow]"
-                )
-                return None
-
         status_code, payload = context.api_request(
             context.config,
             "POST",

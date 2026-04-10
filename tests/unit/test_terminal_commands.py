@@ -253,14 +253,19 @@ def test_shared_executor_model_persists_local_preference():
     assert saved
 
 
-def test_shared_executor_merge_requires_awaiting_merge_status():
+def test_shared_executor_merge_delegates_to_backend_even_if_not_awaiting():
+    """CLI no longer pre-validates merge status; backend is authoritative."""
     calls: list[tuple[str, str]] = []
     snapshot = {"active_run_id": "run-1", "active_run_status": "EXECUTING"}
 
     def api_request(config, method, path, **kwargs):
         del config, kwargs
         calls.append((method, path))
-        return 200, snapshot
+        if path == "/ops/operator/status":
+            return 200, snapshot
+        if path == "/ops/runs/run-1/merge":
+            return 400, {"detail": "Run is not in AWAITING_MERGE status"}
+        raise AssertionError(path)
 
     surface = _surface()
     callbacks = build_terminal_command_callbacks(_context(api_request), surface)
@@ -268,8 +273,10 @@ def test_shared_executor_merge_requires_awaiting_merge_status():
     handled, _ = dispatch_slash_command("/merge", "", callbacks)
 
     assert handled is True
-    assert calls == [("GET", "/ops/operator/status")]
-    assert any("not AWAITING_MERGE" in message for message in surface.messages)
+    assert calls == [
+        ("GET", "/ops/operator/status"),
+        ("POST", "/ops/runs/run-1/merge"),
+    ]
 
 
 def test_shared_executor_merge_infers_run_and_posts_canonical_merge():
