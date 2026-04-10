@@ -351,3 +351,34 @@ async def revoke_enrollment_token(
         raise HTTPException(404, detail="Token not found")
     audit_log("OPS", "/ops/mesh/enrollment/token", "revoked", operation="DELETE", actor=_actor_label(auth))
     return {"revoked": True}
+
+
+# ── Audit log ────────────────────────────────────────────────
+
+@router.get("/audit")
+async def query_audit(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+    category: Annotated[str | None, Query()] = None,
+    device_id: Annotated[str | None, Query()] = None,
+    task_id: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> list:
+    _require_role(auth, "admin")
+    from tools.gimo_server.services.mesh.audit import MeshAuditService
+    return MeshAuditService().query(
+        category=category, device_id=device_id, task_id=task_id, limit=limit,
+    )
+
+
+@router.get("/audit/receipt/{receipt_id}")
+async def correlate_receipt(
+    receipt_id: str,
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+) -> list:
+    _require_role(auth, "admin")
+    from tools.gimo_server.services.mesh.audit import MeshAuditService
+    return MeshAuditService().correlate_receipt(receipt_id)
