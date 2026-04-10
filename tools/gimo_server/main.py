@@ -809,6 +809,7 @@ def create_app() -> FastAPI:
     from tools.gimo_server.routers.ops.ide_context_router import router as ide_context_router
     from tools.gimo_server.routers.ops.checkpoint_router import router as checkpoint_router
     from tools.gimo_server.routers.ops.mesh_router import router as mesh_router
+    from tools.gimo_server.routers.ops.gics_patterns_router import router as gics_patterns_router
     app.include_router(file_router)
     app.include_router(repo_router)
     app.include_router(graph_router)
@@ -817,6 +818,7 @@ def create_app() -> FastAPI:
     app.include_router(ide_context_router)
     app.include_router(checkpoint_router)
     app.include_router(mesh_router)
+    app.include_router(gics_patterns_router)
 
     mount_static(app)
 
