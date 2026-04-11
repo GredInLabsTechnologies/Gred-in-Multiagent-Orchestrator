@@ -85,12 +85,6 @@ export const useProviders = () => {
                     setProviderCapabilities(normalizedCaps);
                 }
             } else {
-                // legacy bridge fallback
-                const legacyRes = await fetchWithRetry(`${API_BASE}/ui/providers`, getRequestInit());
-                if (legacyRes.ok) {
-                    const legacyData = await legacyRes.json();
-                    setProviders(Array.isArray(legacyData) ? legacyData : (legacyData.providers ?? []));
-                }
                 setEffectiveState({});
                 setRoles(null);
             }

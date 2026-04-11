@@ -34,10 +34,6 @@ from tools.gimo_server.version import __version__
 logger = logging.getLogger("orchestrator.routes.legacy_ui")
 
 ERR_OPERATOR_ADMIN_REQUIRED = "operator or admin role required"
-ERR_ADMIN_REQUIRED = "admin role or higher required"
-ERR_PROVIDER_MISSING = "Provider config missing"
-ERR_PROVIDER_NOT_FOUND = "Provider not found"
-
 router = APIRouter(tags=["legacy-ui"])
 
 
@@ -210,99 +206,6 @@ def reject_draft(
 
 
 # ── Provider bridges ─────────────────────────────────────────────────
-
-@router.get("/ui/providers")
-def list_ui_providers(
-    auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    _rl: Annotated[None, Depends(check_rate_limit)],
-):
-    cfg = ProviderService.get_public_config()
-    if not cfg:
-        return []
-    result = []
-    for pid, entry in cfg.providers.items():
-        caps = entry.capabilities or {}
-        provider_type = entry.provider_type or entry.type
-        result.append({
-            "id": pid, "type": provider_type,
-            "is_local": not bool(caps.get("requires_remote_api", True)),
-            "config": {"display_name": entry.display_name, "base_url": entry.base_url, "model": entry.model, "capabilities": caps},
-            "deprecated": True, "deprecation_note": "Use /ops/provider as canonical source.",
-        })
-    return result
-
-
-@router.post("/ui/providers")
-def add_ui_provider(
-    body: dict,
-    auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    _rl: Annotated[None, Depends(check_rate_limit)],
-):
-    from tools.gimo_server.ops_models import ProviderEntry, ProviderConfig
-
-    if auth.role != "admin":
-        raise HTTPException(status_code=403, detail=ERR_ADMIN_REQUIRED)
-    cfg = ProviderService.get_config()
-    if not cfg:
-        raise HTTPException(status_code=404, detail=ERR_PROVIDER_MISSING)
-    provider_id = str(body.get("id") or body.get("name") or "").strip()
-    if not provider_id:
-        raise HTTPException(status_code=400, detail="provider id is required")
-    raw_type = str(body.get("provider_type") or body.get("type") or "custom_openai_compatible")
-    canonical_type = ProviderService.normalize_provider_type(raw_type)
-    model = str(body.get("model") or body.get("default_model") or "gpt-4o-mini")
-    base_url = body.get("base_url")
-    if canonical_type == "ollama_local" and not base_url:
-        base_url = "http://localhost:11434/v1"
-    cfg.providers[provider_id] = ProviderEntry(
-        type=raw_type, provider_type=canonical_type, display_name=body.get("display_name") or provider_id,
-        base_url=base_url, api_key=body.get("api_key"), model=model,
-        capabilities=ProviderService.capabilities_for(canonical_type),
-    )
-    updated = ProviderService.set_config(
-        ProviderConfig(active=cfg.active if cfg.active in cfg.providers else provider_id, providers=cfg.providers, mcp_servers=cfg.mcp_servers)
-    )
-    audit_log("UI", "LEGACY_PROVIDER_ADD", provider_id, actor=f"{auth.role}:legacy_bridge")
-    return {"id": provider_id, "status": "registered", "active": updated.active, "deprecated": True}
-
-
-@router.delete("/ui/providers/{provider_id}")
-def remove_ui_provider(
-    provider_id: str,
-    auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    _rl: Annotated[None, Depends(check_rate_limit)],
-):
-    from tools.gimo_server.ops_models import ProviderConfig
-
-    if auth.role != "admin":
-        raise HTTPException(status_code=403, detail=ERR_ADMIN_REQUIRED)
-    cfg = ProviderService.get_config()
-    if not cfg:
-        raise HTTPException(status_code=404, detail=ERR_PROVIDER_MISSING)
-    if provider_id not in cfg.providers:
-        raise HTTPException(status_code=404, detail=ERR_PROVIDER_NOT_FOUND)
-    cfg.providers.pop(provider_id, None)
-    if not cfg.providers:
-        raise HTTPException(status_code=400, detail="At least one provider is required")
-    if cfg.active == provider_id:
-        cfg.active = next(iter(cfg.providers.keys()))
-    ProviderService.set_config(ProviderConfig(active=cfg.active, providers=cfg.providers, mcp_servers=cfg.mcp_servers))
-    audit_log("UI", "LEGACY_PROVIDER_REMOVE", provider_id, actor=f"{auth.role}:legacy_bridge")
-    return {"status": "removed", "id": provider_id, "deprecated": True}
-
-
-@router.post("/ui/providers/{provider_id}/test")
-async def test_ui_provider(
-    provider_id: str,
-    auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    _rl: Annotated[None, Depends(check_rate_limit)],
-):
-    cfg = ProviderService.get_config()
-    if not cfg or provider_id not in cfg.providers:
-        raise HTTPException(status_code=404, detail=ERR_PROVIDER_NOT_FOUND)
-    healthy = await ProviderService.health_check() if provider_id == cfg.active else True
-    return {"status": "ok" if healthy else "error", "message": "Provider reachable" if healthy else "Provider unreachable", "deprecated": True}
-
 
 # ── Nodes / Cost bridges ─────────────────────────────────────────────
 

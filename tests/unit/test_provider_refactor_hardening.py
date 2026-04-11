@@ -130,6 +130,53 @@ def test_upsert_provider_entry_preserves_active_topology_when_not_activating(tmp
     assert str(updated.providers["groq-main"].auth_ref or "").startswith("env:")
 
 
+def test_upsert_provider_entry_preserves_worker_bindings_when_not_activating(tmp_path, monkeypatch) -> None:
+    cfg = ProviderConfig(
+        active="openai-main",
+        providers={
+            "openai-main": ProviderEntry(
+                type="openai",
+                provider_type="openai",
+                auth_mode="api_key",
+                model="gpt-4o",
+            ),
+            "worker-main": ProviderEntry(
+                type="openai",
+                provider_type="openai",
+                auth_mode="api_key",
+                model="gpt-4o-mini",
+            ),
+        },
+        roles=ProviderRolesConfig(
+            orchestrator=ProviderRoleBinding(provider_id="openai-main", model="gpt-4o"),
+            workers=[ProviderRoleBinding(provider_id="worker-main", model="gpt-4o-mini")],
+        ),
+    )
+    config_file = tmp_path / "provider.json"
+    config_file.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+
+    monkeypatch.setattr(ProviderService, "CONFIG_FILE", config_file)
+    monkeypatch.setattr(
+        ProviderService,
+        "_inject_cli_account_providers",
+        classmethod(lambda cls, providers: providers),
+    )
+
+    updated = ProviderService.upsert_provider_entry(
+        provider_id="groq-main",
+        provider_type="groq",
+        api_key="gsk_test_1234567890",
+        model="qwen/qwen3-32b",
+        activate=False,
+    )
+
+    assert updated.active == "openai-main"
+    assert updated.roles is not None
+    assert updated.roles.orchestrator == ProviderRoleBinding(provider_id="openai-main", model="gpt-4o")
+    assert updated.roles.workers == [ProviderRoleBinding(provider_id="worker-main", model="gpt-4o-mini")]
+    assert "groq-main" in updated.providers
+
+
 def test_provider_metadata_contracts_keep_catalog_and_adapter_sets_aligned() -> None:
     # Catalog-discoverable OpenAI-compatible providers should be adapter-compatible too.
     assert OPENAI_COMPAT_CATALOG_TYPES.issubset(OPENAI_COMPAT_ADAPTER_TYPES)

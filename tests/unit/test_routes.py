@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tools.gimo_server.main import app
+from tools.gimo_server.mcp_bridge.manifest import MANIFEST
 from tools.gimo_server.models import RepoEntry
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
@@ -225,6 +226,30 @@ def test_get_ui_allowlist(client, tmp_path):
                 assert response.status_code == 200
                 assert response.json()["paths"][0]["path"] == "file.py"
                 assert len(response.json()["paths"]) == 1
+
+
+def test_ui_provider_legacy_routes_absent_from_router_table():
+    route_paths = {getattr(route, "path", None) for route in app.routes}
+    assert "/ui/providers" not in route_paths
+    assert "/ui/providers/{provider_id}" not in route_paths
+    assert "/ui/providers/{provider_id}/test" not in route_paths
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/ui/providers",
+        "/ui/providers/openai-main",
+        "/ui/providers/openai-main/test",
+    ],
+)
+def test_ui_provider_legacy_paths_return_not_found_for_get(client, path):
+    response = client.get(path)
+    assert response.status_code == 404
+
+
+def test_mcp_bridge_manifest_does_not_publish_legacy_provider_routes():
+    assert not any(str(entry.get("path", "")).startswith("/ui/providers") for entry in MANIFEST)
 
 
 def test_list_repos(client, tmp_path):

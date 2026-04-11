@@ -90,6 +90,7 @@ class TestRBAC:
 
     @pytest.mark.parametrize("endpoint,method,json_body", [
         ("/ops/provider", "put", {"active": "openai", "providers": {}}),
+        ("/ops/provider/upsert", "post", {"provider_id": "groq-main", "provider_type": "groq"}),
         ("/ops/config", "put", {"default_auto_run": True, "draft_cleanup_ttl_days": 7}),
         ("/ops/plan", "put", {
             "id": "p1", "title": "test", "workspace": ".", "created": "2024-01-01",
