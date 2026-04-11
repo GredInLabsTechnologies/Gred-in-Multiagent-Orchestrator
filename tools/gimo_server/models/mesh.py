@@ -38,6 +38,7 @@ class OperationalState(str, Enum):
 class MeshDeviceInfo(BaseModel):
     device_id: str
     name: str = ""
+    device_secret: str = ""  # HMAC secret for heartbeat authentication
     device_mode: DeviceMode = DeviceMode.inference
     connection_state: ConnectionState = ConnectionState.offline
     operational_state: OperationalState = OperationalState.idle
@@ -62,6 +63,8 @@ class MeshDeviceInfo(BaseModel):
     thermal_throttled: bool = False
     thermal_locked_out: bool = False
     active_task_id: str = ""
+    inference_endpoint: str = ""
+    inference_endpoint: str = ""  # e.g. "http://192.168.0.244:8080"
 
     def can_execute(self, mesh_enabled: bool) -> bool:
         return (
@@ -123,8 +126,8 @@ class EnrollmentToken(BaseModel):
 
 class HeartbeatPayload(BaseModel):
     device_id: str
+    device_secret: str = ""  # Must match enrolled device_secret
     device_mode: DeviceMode = DeviceMode.inference
-    connection_state: ConnectionState = ConnectionState.connected
     operational_state: OperationalState = OperationalState.idle
     device_class: str = "desktop"
     soc_model: str = ""
@@ -142,3 +145,4 @@ class HeartbeatPayload(BaseModel):
     thermal_throttled: bool = False
     thermal_locked_out: bool = False
     active_task_id: str = ""
+    inference_endpoint: str = ""

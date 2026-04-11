@@ -121,6 +121,25 @@ async def _notify_sessions_for_run(run, sessions, logger, ops_service):
             logger.error(f"Failed to push Sampling to MCP client: {e}")
             ops_service.append_log(run.id, level="WARN", msg="MCP handover blocked: no session available")
 
+async def _mesh_heartbeat_timeout_loop(app):
+    """Expire mesh devices that haven't sent a heartbeat recently."""
+    import asyncio
+    import logging
+    logger = logging.getLogger("orchestrator")
+    while True:
+        try:
+            await asyncio.sleep(15)
+            registry = getattr(app.state, "mesh_registry", None)
+            if registry is None:
+                continue
+            expired = registry.expire_stale_devices(timeout_seconds=90.0)
+            if expired:
+                logger.info("Mesh heartbeat timeout: expired %s", expired)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Mesh heartbeat timeout loop error: %s", exc)
+
 async def _mcp_sampling_loop():
     """
     Periodically checks for Runs that are blocked waiting for human/agent review (status: blocked_handover)
@@ -330,6 +349,7 @@ async def lifespan(app: FastAPI):
         integrity_task = asyncio.create_task(_integrity_recheck_loop(settings))
 
         mcp_sampling_task = asyncio.create_task(_mcp_sampling_loop())
+        mesh_timeout_task = asyncio.create_task(_mesh_heartbeat_timeout_loop(app))
 
         # Startup reconcile + rotation for runtime consistency
         try:
@@ -480,7 +500,7 @@ async def lifespan(app: FastAPI):
         # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
         logger.info("Shutting down GIMO Orchestrator...")
         try:
-            tasks = [cleanup_task, threat_cleanup_task, ops_cleanup_task, mcp_sampling_task, integrity_task]
+            tasks = [cleanup_task, threat_cleanup_task, ops_cleanup_task, mcp_sampling_task, integrity_task, mesh_timeout_task]
             await _shutdown_services(logger, app, hw_monitor, run_worker, tasks)
             if hasattr(app.state, "run_worker"):
                 delattr(app.state, "run_worker")

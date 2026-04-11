@@ -72,7 +72,12 @@ def telemetry(mesh_tmpdir: Path, monkeypatch: pytest.MonkeyPatch) -> TelemetrySe
     monkeypatch.setattr(telemetry_mod, "_MESH_DIR", mesh_tmpdir / "mesh")
     monkeypatch.setattr(telemetry_mod, "_PROFILES_DIR", mesh_tmpdir / "mesh" / "thermal_profiles")
     monkeypatch.setattr(telemetry_mod, "_LOCK_FILE", mesh_tmpdir / "mesh" / ".telemetry.lock")
-    return TelemetryService()
+    # Reset singleton so each test gets a fresh instance with patched paths
+    monkeypatch.setattr(telemetry_mod, "_singleton_instance", None)
+    svc = TelemetryService()
+    svc._initialized = False
+    svc.__init__()
+    return svc
 
 
 @pytest.fixture()
@@ -83,6 +88,12 @@ def audit(mesh_tmpdir: Path, monkeypatch: pytest.MonkeyPatch) -> MeshAuditServic
     return MeshAuditService()
 
 
+def _get_secret(registry: MeshRegistry, device_id: str) -> str:
+    """Get device_secret from enrolled device."""
+    device = registry.get_device(device_id)
+    return device.device_secret if device else ""
+
+
 # ── 1. Registry: enrollment + state machine ─────────────────
 
 class TestRegistryLifecycle:
@@ -91,6 +102,7 @@ class TestRegistryLifecycle:
         assert device.device_id == "phone-01"
         assert device.name == "Mi Pixel"
         assert device.connection_state == ConnectionState.pending_approval
+        assert device.device_secret  # Secret should be auto-generated
 
     def test_approve_device(self, registry: MeshRegistry):
         registry.enroll_device("phone-01")
@@ -110,8 +122,10 @@ class TestRegistryLifecycle:
     def test_heartbeat_auto_connects(self, registry: MeshRegistry):
         registry.enroll_device("phone-01")
         registry.approve_device("phone-01")
+        secret = _get_secret(registry, "phone-01")
         payload = HeartbeatPayload(
             device_id="phone-01",
+            device_secret=secret,
             cpu_temp_c=55.0,
             gpu_temp_c=60.0,
             battery_percent=85.0,
@@ -125,11 +139,24 @@ class TestRegistryLifecycle:
         assert device.soc_model == "Tensor G4"
         assert device.soc_vendor == "Google"
 
-    def test_heartbeat_thermal_lockout(self, registry: MeshRegistry):
+    def test_heartbeat_wrong_secret_rejected(self, registry: MeshRegistry):
         registry.enroll_device("phone-01")
         registry.approve_device("phone-01")
         payload = HeartbeatPayload(
             device_id="phone-01",
+            device_secret="wrong-secret",
+            cpu_temp_c=55.0,
+        )
+        with pytest.raises(ValueError, match="Invalid device_secret"):
+            registry.process_heartbeat(payload)
+
+    def test_heartbeat_thermal_lockout(self, registry: MeshRegistry):
+        registry.enroll_device("phone-01")
+        registry.approve_device("phone-01")
+        secret = _get_secret(registry, "phone-01")
+        payload = HeartbeatPayload(
+            device_id="phone-01",
+            device_secret=secret,
             thermal_locked_out=True,
             cpu_temp_c=98.0,
         )
@@ -305,8 +332,10 @@ class TestDispatch:
     ) -> MeshDeviceInfo:
         registry.enroll_device(device_id)
         registry.approve_device(device_id)
+        secret = _get_secret(registry, device_id)
         defaults = dict(
             device_id=device_id,
+            device_secret=secret,
             cpu_temp_c=50.0,
             gpu_temp_c=55.0,
             battery_percent=80.0,
@@ -372,8 +401,10 @@ class TestDispatch:
 
     def test_locked_out_device_not_eligible(self, registry: MeshRegistry):
         self._connect_device(registry, "phone-01")
+        secret = _get_secret(registry, "phone-01")
         registry.process_heartbeat(HeartbeatPayload(
-            device_id="phone-01", thermal_locked_out=True, cpu_temp_c=98.0,
+            device_id="phone-01", device_secret=secret,
+            thermal_locked_out=True, cpu_temp_c=98.0,
         ))
         dispatch = DispatchService(registry)
         fp = TaskFingerprint(action_class="inference")
@@ -541,8 +572,10 @@ class TestFullLifecycle:
         audit.record("connection", "approve", device_id="pixel-7", actor="admin")
 
         # 4: Heartbeat → auto-connect
+        secret = _get_secret(registry, "pixel-7")
         device = registry.process_heartbeat(HeartbeatPayload(
             device_id="pixel-7",
+            device_secret=secret,
             soc_model="Tensor G4",
             soc_vendor="Google",
             max_model_params_b=3.0,
@@ -610,6 +643,7 @@ class TestFullLifecycle:
         # 11: Lockout
         registry.process_heartbeat(HeartbeatPayload(
             device_id="pixel-7",
+            device_secret=secret,
             thermal_locked_out=True,
             cpu_temp_c=97.0,
         ))

@@ -95,7 +95,7 @@ class EnrollmentService:
         Anti-replay: token can only be used once.
         """
         with self._lock():
-            # All validation inside lock to prevent TOCTOU race
+            # All validation AND enrollment inside lock to prevent TOCTOU race
             token = self._load_token(token_str)
             if token is None:
                 raise ValueError("Invalid enrollment token")
@@ -116,13 +116,14 @@ class EnrollmentService:
             token.device_id = device_id
             self._save_token(token)
 
-        # Enroll device
-        device = self._registry.enroll_device(
-            device_id=device_id,
-            name=name,
-            device_mode=device_mode,
-            device_class=device_class,
-        )
+            # Enroll device inside lock to prevent double-enrollment
+            device = self._registry.enroll_device(
+                device_id=device_id,
+                name=name,
+                device_mode=device_mode,
+                device_class=device_class,
+            )
+
         logger.info("Device %s claimed token and enrolled", device_id)
         return device
 

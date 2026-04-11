@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -34,6 +36,7 @@ def _json_dump(obj: Any) -> str:
 _CONNECTION_TRANSITIONS: Dict[ConnectionState, set[ConnectionState]] = {
     ConnectionState.offline: {
         ConnectionState.discoverable,
+        ConnectionState.connected,  # Device reconnects via heartbeat
     },
     ConnectionState.discoverable: {
         ConnectionState.pending_approval,
@@ -49,7 +52,8 @@ _CONNECTION_TRANSITIONS: Dict[ConnectionState, set[ConnectionState]] = {
         ConnectionState.offline,
     },
     ConnectionState.refused: {
-        ConnectionState.pending_approval,
+        ConnectionState.pending_approval,  # Re-enrollment path
+        ConnectionState.approved,  # Admin can directly approve after refusal
         ConnectionState.offline,
     },
     ConnectionState.connected: {
@@ -118,18 +122,31 @@ class MeshRegistry:
     def save_device(self, device: MeshDeviceInfo) -> None:
         with self._lock():
             path = self._device_path(device.device_id)
-            path.write_text(
-                _json_dump(device.model_dump(mode="json")),
-                encoding="utf-8",
-            )
+            # Atomic write: write to temp file then rename (safe on crash)
+            tmp = Path(tempfile.mktemp(dir=str(self.DEVICES_DIR), suffix=".tmp"))
+            try:
+                tmp.write_text(
+                    _json_dump(device.model_dump(mode="json")),
+                    encoding="utf-8",
+                )
+                tmp.replace(path)  # Atomic on all platforms
+            except Exception:
+                if tmp.exists():
+                    tmp.unlink()
+                raise
 
     def remove_device(self, device_id: str) -> bool:
         with self._lock():
             path = self._device_path(device_id)
-            if path.exists():
-                path.unlink()
-                return True
-            return False
+            if not path.exists():
+                return False
+            path.unlink()
+        # Cleanup thermal profile
+        profile_path = self.MESH_DIR / "thermal_profiles" / f"{device_id}.json"
+        if profile_path.exists():
+            profile_path.unlink()
+            logger.info("Removed thermal profile for %s", device_id)
+        return True
 
     # ── Enrollment ───────────────────────────────────────────
 
@@ -141,9 +158,11 @@ class MeshRegistry:
         device_class: str = "desktop",
     ) -> MeshDeviceInfo:
         now = _utcnow()
+        device_secret = secrets.token_urlsafe(32)
         device = MeshDeviceInfo(
             device_id=device_id,
             name=name or device_id,
+            device_secret=device_secret,
             device_mode=device_mode,
             connection_state=ConnectionState.pending_approval,
             operational_state=OperationalState.idle,
@@ -189,14 +208,21 @@ class MeshRegistry:
         if device is None:
             raise ValueError(f"Device {payload.device_id} not registered")
 
+        # Validate device secret to prevent impersonation
+        if device.device_secret and payload.device_secret != device.device_secret:
+            raise ValueError(f"Invalid device_secret for {payload.device_id}")
+
         device.last_heartbeat = _utcnow()
         device.device_mode = payload.device_mode
         device.operational_state = payload.operational_state
-        device.device_class = payload.device_class
+        # device_class is set at enrollment — only update if agent explicitly reports it
+        if payload.device_class and payload.device_class != "desktop":
+            device.device_class = payload.device_class
         device.soc_model = payload.soc_model
         device.soc_vendor = payload.soc_vendor
         device.max_model_params_b = payload.max_model_params_b
         device.model_loaded = payload.model_loaded
+        device.inference_endpoint = payload.inference_endpoint
         device.health_score = payload.health_score
         device.cpu_percent = payload.cpu_percent
         device.ram_percent = payload.ram_percent
@@ -209,10 +235,12 @@ class MeshRegistry:
         device.thermal_locked_out = payload.thermal_locked_out
         device.active_task_id = payload.active_task_id
 
-        # Auto-transition to connected if approved
-        if device.connection_state == ConnectionState.approved:
-            device.connection_state = ConnectionState.connected
-        elif device.connection_state == ConnectionState.reconnecting:
+        # Auto-transition to connected on heartbeat
+        if device.connection_state in (
+            ConnectionState.approved,
+            ConnectionState.reconnecting,
+            ConnectionState.offline,  # Device came back online
+        ):
             device.connection_state = ConnectionState.connected
 
         # Thermal lockout — non-bypassable safety valve
@@ -276,6 +304,35 @@ class MeshRegistry:
             devices_by_mode=by_mode,
             devices_connected=connected,
         )
+
+    # ── Heartbeat timeout ─────────────────────────────────────
+
+    def expire_stale_devices(self, timeout_seconds: float = 90.0) -> List[str]:
+        """Transition devices to offline if heartbeat is stale.
+
+        Returns list of device_ids that were expired.
+        """
+        now = _utcnow()
+        expired: List[str] = []
+        for device in self.list_devices():
+            if device.connection_state not in (
+                ConnectionState.connected,
+                ConnectionState.reconnecting,
+            ):
+                continue
+            if device.last_heartbeat is None:
+                continue
+            age = (now - device.last_heartbeat).total_seconds()
+            if age > timeout_seconds:
+                device.connection_state = ConnectionState.offline
+                device.operational_state = OperationalState.idle
+                self.save_device(device)
+                expired.append(device.device_id)
+                logger.warning(
+                    "Device %s expired (no heartbeat for %.0fs)",
+                    device.device_id, age,
+                )
+        return expired
 
     # ── Eligible devices for task dispatch ────────────────────
 

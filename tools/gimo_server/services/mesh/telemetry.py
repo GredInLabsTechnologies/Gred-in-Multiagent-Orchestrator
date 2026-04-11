@@ -65,10 +65,26 @@ class DeviceThermalProfile:
         }
 
 
+_singleton_instance: Optional["TelemetryService"] = None
+
+
 class TelemetryService:
-    """Ingests thermal events, builds profiles, computes health scores."""
+    """Ingests thermal events, builds profiles, computes health scores.
+
+    Use get_instance() to access the singleton.
+    """
+
+    def __new__(cls) -> "TelemetryService":
+        global _singleton_instance
+        if _singleton_instance is None:
+            _singleton_instance = super().__new__(cls)
+            _singleton_instance._initialized = False
+        return _singleton_instance
 
     def __init__(self) -> None:
+        if self._initialized:
+            return
+        self._initialized = True
         _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
     def _lock(self) -> FileLock:
@@ -124,16 +140,26 @@ class TelemetryService:
     def _compute_health_score(profile: DeviceThermalProfile) -> float:
         """Device health score: 100 = pristine, 0 = severely degraded.
 
-        Penalties:
-        - Each lockout: -5 points
-        - Each throttle: -2 points
-        - Each warning: -0.5 points
-        Floor at 0.
+        Penalties with temporal decay — recent events weigh more.
+        Events older than 7 days are discounted by 50%.
+        Raw penalties: lockout=-5, throttle=-2, warning=-0.5.
         """
         score = 100.0
-        score -= profile.lockouts * 5.0
-        score -= profile.throttles * 2.0
-        score -= profile.warnings * 0.5
+        # Temporal decay factor: reduce penalty for old profiles
+        decay = 1.0
+        if profile.last_event_at:
+            try:
+                last = datetime.fromisoformat(profile.last_event_at)
+                age_days = (_utcnow() - last).total_seconds() / 86400
+                if age_days > 7:
+                    decay = 0.5  # Old events matter less
+                elif age_days > 3:
+                    decay = 0.75
+            except (ValueError, TypeError):
+                pass
+        score -= profile.lockouts * 5.0 * decay
+        score -= profile.throttles * 2.0 * decay
+        score -= profile.warnings * 0.5 * decay
         return max(0.0, score)
 
     # ── Duty cycle scheduling ────────────────────────────────

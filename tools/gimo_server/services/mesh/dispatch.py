@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from ...models.mesh import MeshDeviceInfo, TaskFingerprint
@@ -29,6 +30,7 @@ class DispatchDecision:
     thermal_headroom_ok: bool = True
     health_score: float = 100.0
     duty_cycle_remaining_min: float = 0.0
+    inference_endpoint: str = ""
 
 
 class DispatchService:
@@ -86,6 +88,14 @@ class DispatchService:
                 reason="No devices with sufficient capacity",
             )
 
+        # Staleness filter: reject devices with no recent heartbeat
+        eligible = self._filter_stale_heartbeats(eligible)
+        if not eligible:
+            return DispatchDecision(
+                fallback_to_local=True,
+                reason="All eligible devices have stale heartbeats",
+            )
+
         # Thermal-predictive pre-check: filter out devices that are close to throttle
         eligible = self._filter_thermal_headroom(eligible)
         if not eligible:
@@ -119,7 +129,26 @@ class DispatchService:
             thermal_headroom_ok=True,
             health_score=best["health"],
             duty_cycle_remaining_min=best.get("duty_remaining", 0.0),
+            inference_endpoint=device.inference_endpoint,
         )
+
+    @staticmethod
+    def _filter_stale_heartbeats(
+        devices: List[MeshDeviceInfo], max_age_seconds: float = 120.0
+    ) -> List[MeshDeviceInfo]:
+        """Reject devices whose last heartbeat is too old."""
+        now = datetime.now(timezone.utc)
+        fresh: List[MeshDeviceInfo] = []
+        for d in devices:
+            if d.last_heartbeat is None:
+                logger.debug("Skipping %s: no heartbeat recorded", d.device_id)
+                continue
+            age = (now - d.last_heartbeat).total_seconds()
+            if age > max_age_seconds:
+                logger.debug("Skipping %s: heartbeat stale (%.0fs)", d.device_id, age)
+                continue
+            fresh.append(d)
+        return fresh
 
     def _filter_thermal_headroom(
         self, devices: List[MeshDeviceInfo]

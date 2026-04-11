@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 from filelock import FileLock
@@ -20,6 +22,7 @@ logger = logging.getLogger("orchestrator.mesh.audit")
 _MESH_DIR = OPS_DATA_DIR / "mesh"
 _AUDIT_LOG = _MESH_DIR / "audit.jsonl"
 _LOCK_FILE = _MESH_DIR / ".audit.lock"
+_MAX_AUDIT_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB rotation threshold
 
 AuditCategory = Literal[
     "enrollment",
@@ -67,8 +70,31 @@ class MeshAuditService:
             "details": details or {},
         }
         with self._lock():
+            self._rotate_if_needed()
             with open(_AUDIT_LOG, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, default=str) + "\n")
+
+    @staticmethod
+    def _rotate_if_needed() -> None:
+        """Rotate audit log if it exceeds size threshold. Keeps last 3 rotations."""
+        if not _AUDIT_LOG.exists():
+            return
+        try:
+            if _AUDIT_LOG.stat().st_size < _MAX_AUDIT_SIZE_BYTES:
+                return
+        except OSError:
+            return
+        # Rotate: audit.jsonl → audit.1.jsonl, audit.1 → audit.2, audit.2 → audit.3
+        for i in range(3, 0, -1):
+            src = _MESH_DIR / f"audit.{i}.jsonl"
+            dst = _MESH_DIR / f"audit.{i + 1}.jsonl"
+            if src.exists():
+                if i == 3:
+                    src.unlink()  # Delete oldest
+                else:
+                    shutil.move(str(src), str(dst))
+        shutil.move(str(_AUDIT_LOG), str(_MESH_DIR / "audit.1.jsonl"))
+        logger.info("Rotated mesh audit log (exceeded %d bytes)", _MAX_AUDIT_SIZE_BYTES)
 
     def query(
         self,
