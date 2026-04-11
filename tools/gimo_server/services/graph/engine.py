@@ -351,6 +351,7 @@ class GraphEngine(
                 descriptor=descriptor,
                 constraints=constraints,
                 requested_preset=agent_preset,
+                requested_mood=str(node.config.get("mood") or "").strip() or None,
             )
 
             # Extract provider/model from routing_decision (v2.0 canonical fields)

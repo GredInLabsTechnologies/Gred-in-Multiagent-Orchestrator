@@ -22,6 +22,14 @@ components:
         detail:
           type: string
 
+    ServiceStatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [RUNNING, STOPPED, STARTING, STOPPING, UNKNOWN]
+
     OpsTask:
       type: object
       required: [id, title, scope, description]
@@ -712,6 +720,9 @@ paths:
       responses:
         '200':
           description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceStatusResponse' }
 
   /ops/service/restart:
     post:

@@ -130,7 +130,7 @@ class EconomyService:
                     "quality_score": quality.score, "cost_usd": step_cost,
                     "success": quality.score >= config.quality_threshold
                 })
-                final_output = output
+                final_output = output.copy()
                 if quality.score >= config.quality_threshold:
                     success = True; break
                 

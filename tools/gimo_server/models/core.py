@@ -247,6 +247,13 @@ class StatusResponse(BaseModel):
     uptime_seconds: float
 
 
+ServiceLifecycleStatus = Literal["RUNNING", "STOPPED", "STARTING", "STOPPING", "UNKNOWN"]
+
+
+class ServiceStatusResponse(BaseModel):
+    status: ServiceLifecycleStatus
+
+
 class UiStatusResponse(BaseModel):
     version: str
     uptime_seconds: float

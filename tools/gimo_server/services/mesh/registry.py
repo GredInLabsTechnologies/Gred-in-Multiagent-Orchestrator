@@ -146,7 +146,32 @@ class MeshRegistry:
         if profile_path.exists():
             profile_path.unlink()
             logger.info("Removed thermal profile for %s", device_id)
+        # Cleanup workspace memberships (force — bypass INV-W5 owner check)
+        try:
+            from tools.gimo_server.services.mesh.workspace_service import WorkspaceService
+            ws_svc = getattr(self, "_ws_svc_cache", None) or WorkspaceService()
+            self._ws_svc_cache = ws_svc
+            for membership in ws_svc.get_device_workspaces(device_id):
+                ws_svc.force_remove_member(membership.workspace_id, device_id)
+        except Exception:
+            logger.warning("Failed to cleanup workspace memberships for %s", device_id)
         return True
+
+    # ── Authentication ──────────────────────────────────────
+
+    def authenticate_device(self, secret: str) -> Optional[MeshDeviceInfo]:
+        """Find a device by its device_secret. Returns device or None.
+
+        Used by verify_token to grant 'operator' role to mesh devices
+        that present their device_secret as a Bearer token.
+        O(n) scan — acceptable for mesh scale (tens of devices).
+        """
+        if not secret or len(secret) < 16:
+            return None
+        for device in self.list_devices():
+            if device.device_secret and device.device_secret == secret:
+                return device
+        return None
 
     # ── Enrollment ───────────────────────────────────────────
 
@@ -172,6 +197,16 @@ class MeshRegistry:
         )
         self.save_device(device)
         logger.info("Enrolled device %s (mode=%s)", device_id, device_mode)
+
+        # Auto-enroll in default workspace so activate("default") works
+        try:
+            from tools.gimo_server.services.mesh.workspace_service import WorkspaceService
+            ws_svc = WorkspaceService()
+            if ws_svc.get_member("default", device_id) is None:
+                ws_svc.add_member("default", device_id, device_mode=device_mode)
+        except Exception:
+            logger.warning("Failed to auto-enroll %s in default workspace", device_id)
+
         return device
 
     # ── State transitions ────────────────────────────────────
@@ -213,7 +248,10 @@ class MeshRegistry:
             raise ValueError(f"Invalid device_secret for {payload.device_id}")
 
         device.last_heartbeat = _utcnow()
-        device.device_mode = payload.device_mode
+        # INV-W3: device_mode is per-workspace — only accept heartbeat mode
+        # if device is in the default workspace (no workspace-specific override)
+        if device.active_workspace_id == "default":
+            device.device_mode = payload.device_mode
         device.operational_state = payload.operational_state
         # device_class is set at enrollment — only update if agent explicitly reports it
         if payload.device_class and payload.device_class != "desktop":
@@ -234,6 +272,24 @@ class MeshRegistry:
         device.thermal_throttled = payload.thermal_throttled
         device.thermal_locked_out = payload.thermal_locked_out
         device.active_task_id = payload.active_task_id
+        device.local_allow_core_control = not payload.mode_locked
+
+        # Persist capabilities if sent
+        if payload.capabilities is not None:
+            device.capabilities = payload.capabilities
+
+        # Track active workspace (INV-W1) — only accept if device is a member
+        if payload.workspace_id and payload.workspace_id != device.active_workspace_id:
+            from tools.gimo_server.services.mesh.workspace_service import WorkspaceService
+            _ws_svc = getattr(self, "_ws_svc_cache", None) or WorkspaceService()
+            self._ws_svc_cache = _ws_svc
+            if _ws_svc.get_member(payload.workspace_id, payload.device_id) is not None:
+                device.active_workspace_id = payload.workspace_id
+            else:
+                logger.warning(
+                    "Device %s reported unauthorized workspace %s — ignored",
+                    payload.device_id, payload.workspace_id,
+                )
 
         # Auto-transition to connected on heartbeat
         if device.connection_state in (

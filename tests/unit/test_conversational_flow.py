@@ -133,7 +133,7 @@ class TestGetThreadEndpoint:
         assert thread["workflow_phase"] == "awaiting_approval"
         assert thread["profile_summary"]["agent_preset"] == "researcher"
         assert thread["proposed_plan"]["tasks"][0]["agent_preset"] == "researcher"
-        assert "mood" not in thread["proposed_plan"]["tasks"][0]
+        assert thread["proposed_plan"]["tasks"][0]["mood"] == "analytical"
 
     def test_thread_mutation_writes_back_canonical_shape_for_legacy_thread(self, test_client, valid_token, tmp_path):
         create_resp = test_client.post(
@@ -163,7 +163,7 @@ class TestGetThreadEndpoint:
         assert rewritten["workflow_phase"] == "awaiting_approval"
         assert rewritten["profile_summary"]["agent_preset"] == "researcher"
         assert rewritten["proposed_plan"]["tasks"][0]["agent_preset"] == "researcher"
-        assert "mood" not in rewritten["proposed_plan"]["tasks"][0]
+        assert rewritten["proposed_plan"]["tasks"][0]["mood"] == "analytical"
 
     def test_fork_thread_preserves_thread_surface_state(self, test_client, valid_token, tmp_path):
         create_resp = test_client.post(

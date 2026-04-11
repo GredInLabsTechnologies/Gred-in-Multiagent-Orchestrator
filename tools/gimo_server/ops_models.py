@@ -8,7 +8,7 @@ try:
         OpsTask, OpsPlan, OpsDraft, OpsApproved, OpsRunStatus, OpsRun,
         OpsConfig, ExecutorReport, OpsCreateDraftRequest, OpsUpdateDraftRequest,
         OpsApproveResponse, OpsCreateRunRequest, OpsResumeRunRequest, ChildRunRequest, RepoEntry, RunEvent,
-        StatusResponse, UiStatusResponse, VitaminizeResponse,
+        StatusResponse, ServiceStatusResponse, UiStatusResponse, VitaminizeResponse,
         SubAgent, SubAgentConfig,
         GimoItemType, GimoItemStatus, GimoThreadStatus, GimoItem, GimoTurn, GimoThread,
         AgentRole, AgentChannel, AgentProfile, AgentActionEvent, AgentInsight,

@@ -61,7 +61,7 @@ async def test_enforce_tool_governance_denies_unauthorized_tool():
 
 @pytest.mark.asyncio
 async def test_enforce_tool_governance_legacy_role_profile():
-    """_enforce_tool_governance falls back to role_profile when execution_policy is absent."""
+    """_enforce_tool_governance defaults legacy role_profile nodes to workspace_safe."""
     from tools.gimo_server.services.execution_policy_service import ExecutionPolicyService
 
     engine = MockEngine()
@@ -76,11 +76,7 @@ async def test_enforce_tool_governance_legacy_role_profile():
         },
     )
 
-    # Mock the canonical execution policy path (legacy derives policy from role_profile)
-    with (
-        patch.object(ExecutionPolicyService, "policy_name_from_legacy_mood", return_value="workspace_safe") as mock_derive,
-        patch.object(ExecutionPolicyService, "get_policy") as mock_get_policy,
-    ):
+    with patch.object(ExecutionPolicyService, "get_policy") as mock_get_policy:
         mock_policy = MagicMock()
         mock_policy.allowed_tools = frozenset()  # empty = allow all
         mock_policy.requires_confirmation = frozenset()
@@ -88,8 +84,6 @@ async def test_enforce_tool_governance_legacy_role_profile():
 
         await engine._enforce_tool_governance(node=node, tool_name="any_tool", args={})
 
-        # Verify legacy derivation was called
-        mock_derive.assert_called_once_with("executor")
         mock_get_policy.assert_called_once_with("workspace_safe")
 
 

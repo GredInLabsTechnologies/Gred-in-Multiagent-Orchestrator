@@ -297,9 +297,13 @@ CHAT_TOOLS: List[Dict[str, Any]] = [
                                     "type": "string",
                                     "description": "High-level agent preset for this task (plan_orchestrator, researcher, executor, reviewer, safety_reviewer, human_gate).",
                                 },
+                                "mood": {
+                                    "type": "string",
+                                    "description": "Canonical execution-style mood for this task. Use this to modulate HOW the agent approaches the work; combine with agent_preset rather than using it as a permission hint.",
+                                },
                                 "agent_mood": {
                                     "type": "string",
-                                    "description": "Optional legacy mood hint for read compatibility only; prefer agent_preset for new plans.",
+                                    "description": "Optional legacy mood alias for read compatibility only; prefer the canonical mood field for new plans.",
                                 },
                                 "agent_rationale": {
                                     "type": "string",

@@ -1041,7 +1041,7 @@ class AgenticLoopService:
         if execution_policy:
             resolved_execution_policy = ExecutionPolicyService.canonical_policy_name(execution_policy)
         else:
-            resolved_execution_policy = ExecutionPolicyService.policy_name_from_legacy_mood(mood)
+            resolved_execution_policy = "workspace_safe"
         policy_profile = ExecutionPolicyService.get_policy(resolved_execution_policy)
         # Bootstrap workspace contract for governance + audit
         ws_contract = None
@@ -2256,7 +2256,7 @@ class AgenticLoopService:
         if execution_policy:
             resolved_policy = ExecutionPolicyService.canonical_policy_name(execution_policy)
         else:
-            resolved_policy = ExecutionPolicyService.policy_name_from_legacy_mood(mood)
+            resolved_policy = "workspace_safe"
         resolved_temperature = mood_profile.temperature if temperature is None else temperature
         system_prompt = AgenticLoopService._build_system_prompt(
             workspace_root,

@@ -46,12 +46,12 @@ def test_resolve_policy_prefers_explicit_over_mood():
 
 
 def test_resolve_policy_fallback_from_mood():
-    """resolve_policy falls back to legacy_mood when execution_policy is None."""
+    """resolve_policy no longer treats legacy_mood as a policy carrier."""
     policy = ExecutionPolicyService.resolve_policy(
         execution_policy=None,
         legacy_mood="forensic",
     )
-    assert policy.name == "docs_research"
+    assert policy.name == "workspace_safe"
 
 
 def test_resolve_policy_default_fallback():

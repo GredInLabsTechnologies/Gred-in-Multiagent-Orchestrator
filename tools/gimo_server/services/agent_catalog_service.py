@@ -174,15 +174,22 @@ class AgentCatalogService:
         cls,
         *,
         agent_preset: str | None = None,
+        mood: str | None = None,
         legacy_mood: str | None = None,
         workflow_phase: WorkflowPhase | None = None,
     ) -> ResolvedAgentProfile:
         preset_name = cls.resolve_preset_name(agent_preset=agent_preset, legacy_mood=legacy_mood)
         preset = cls.get_preset(preset_name)
+        if mood:
+            resolved_mood = cls.get_mood(mood).name
+        elif legacy_mood:
+            resolved_mood = cls.get_mood(legacy_mood).name
+        else:
+            resolved_mood = preset.mood
         return ResolvedAgentProfile(
             agent_preset=preset.name,
             task_role=preset.task_role,
-            mood=cls.get_mood(legacy_mood).name if legacy_mood else preset.mood,
+            mood=resolved_mood,
             execution_policy=preset.execution_policy,
             workflow_phase=workflow_phase or preset.workflow_phase,
         )

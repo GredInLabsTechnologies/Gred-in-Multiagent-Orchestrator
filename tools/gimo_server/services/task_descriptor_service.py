@@ -40,15 +40,22 @@ class TaskDescriptorService:
     def normalize_task(cls, task: Dict[str, Any]) -> Dict[str, Any]:
         agent = task.get("agent_assignee") or {}
         depends_on = cls._string_list(task.get("depends_on") or task.get("depends"))
-        legacy_mood = task.get("legacy_mood") or task.get("agent_mood") or task.get("mood") or agent.get("mood")
+        raw_legacy_mood = task.get("legacy_mood") or task.get("agent_mood")
+        raw_mood = task.get("mood") or raw_legacy_mood or agent.get("mood")
         requested_model = task.get("requested_model") or task.get("model") or agent.get("model") or "auto"
         requested_provider = task.get("requested_provider") or task.get("provider") or agent.get("provider") or "auto"
         role_definition = task.get("role_definition") or agent.get("system_prompt") or ""
         requested_role = task.get("requested_role") or task.get("role") or agent.get("role") or task.get("node_type") or "worker"
         agent_preset = str(task.get("agent_preset") or "").strip() or None
-        if not agent_preset and legacy_mood:
+        canonical_mood = None
+        if raw_mood:
             try:
-                agent_preset = AgentCatalogService.resolve_preset_name(legacy_mood=str(legacy_mood).strip())
+                canonical_mood = AgentCatalogService.get_mood(str(raw_mood).strip()).name
+            except KeyError:
+                canonical_mood = None
+        if not agent_preset and raw_mood:
+            try:
+                agent_preset = AgentCatalogService.resolve_preset_name(legacy_mood=str(raw_mood).strip())
             except KeyError:
                 agent_preset = None
         return {
@@ -60,7 +67,8 @@ class TaskDescriptorService:
             "requested_model": str(requested_model or "auto").strip(),
             "requested_provider": str(requested_provider or "auto").strip(),
             "role_definition": str(role_definition).strip(),
-            "legacy_mood": str(legacy_mood).strip() if legacy_mood else None,
+            "mood": canonical_mood,
+            "legacy_mood": str(raw_legacy_mood).strip() if raw_legacy_mood else None,
             "agent_preset": agent_preset,
             "agent_rationale": task.get("routing_rationale") or task.get("agent_rationale") or "",
             "path_scope": cls._string_list(task.get("path_scope") or task.get("paths")),
@@ -75,9 +83,9 @@ class TaskDescriptorService:
             return explicit_source_shape
         if task.get("agent_assignee"):
             return "structured_plan"
-        if task.get("agent_mood") is not None or task.get("depends_on") is not None:
+        if task.get("agent_mood") is not None or task.get("legacy_mood") is not None or task.get("depends_on") is not None:
             return "conversational_plan"
-        if task.get("mood") is not None:
+        if task.get("mood") is not None and not task.get("agent_preset"):
             return "legacy"
         return "unknown"
 

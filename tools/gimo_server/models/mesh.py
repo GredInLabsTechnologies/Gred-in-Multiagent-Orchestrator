@@ -35,6 +35,56 @@ class OperationalState(str, Enum):
     locked_out = "locked_out"
 
 
+class DeviceCapabilities(BaseModel):
+    """Hardware profile — collected once at boot, sent with heartbeat."""
+    arch: str = ""                    # arm64-v8a, armeabi-v7a, x86_64
+    cpu_cores: int = 0
+    ram_total_mb: int = 0
+    storage_free_mb: int = 0
+    api_level: int = 0                # Android SDK_INT (0 for non-Android)
+    soc_model: str = ""
+    has_gpu_compute: bool = False     # Vulkan / OpenCL support
+    max_file_descriptors: int = 1024
+
+
+class WorkspaceRole(str, Enum):
+    owner = "owner"
+    member = "member"
+
+
+class Workspace(BaseModel):
+    """A workspace groups devices into an isolated session.
+
+    INV-L1: Every workspace is bound to the GIMO Core license that created it.
+    ``license_key_hash`` stores SHA-256 of the license key at creation time.
+    If the Core's license changes or expires, the workspace becomes inert.
+    """
+    workspace_id: str
+    name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    owner_device_id: str = ""
+    license_key_hash: str = ""  # INV-L1: SHA-256 of ORCH_LICENSE_KEY at creation
+
+
+class WorkspaceMembership(BaseModel):
+    """Per-workspace device configuration (INV-W3: mode is per-workspace)."""
+    workspace_id: str
+    device_id: str
+    role: WorkspaceRole = WorkspaceRole.member
+    device_mode: DeviceMode = DeviceMode.inference
+    joined_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PairingCode(BaseModel):
+    """Ephemeral code to join a workspace (INV-S3: max 5 min TTL, single-use)."""
+    code: str
+    workspace_id: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime
+    used: bool = False
+    used_by: Optional[str] = None
+
+
 class MeshDeviceInfo(BaseModel):
     device_id: str
     name: str = ""
@@ -64,7 +114,8 @@ class MeshDeviceInfo(BaseModel):
     thermal_locked_out: bool = False
     active_task_id: str = ""
     inference_endpoint: str = ""
-    inference_endpoint: str = ""  # e.g. "http://192.168.0.244:8080"
+    capabilities: Optional[DeviceCapabilities] = None
+    active_workspace_id: str = "default"  # INV-W2: exactly 1 workspace active
 
     def can_execute(self, mesh_enabled: bool) -> bool:
         return (
@@ -146,3 +197,67 @@ class HeartbeatPayload(BaseModel):
     thermal_locked_out: bool = False
     active_task_id: str = ""
     inference_endpoint: str = ""
+    mode_locked: bool = False  # True = user locked mode, Core cannot change it
+    capabilities: Optional[DeviceCapabilities] = None
+    workspace_id: str = "default"  # INV-W1: heartbeat reports active workspace
+
+
+# --- Utility Task System ---
+
+class TaskStatus(str, Enum):
+    pending = "pending"
+    assigned = "assigned"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    timed_out = "timed_out"
+
+
+class UtilityTaskType(str, Enum):
+    ping = "ping"
+    text_validate = "text_validate"
+    text_transform = "text_transform"
+    json_validate = "json_validate"
+    shell_exec = "shell_exec"
+    file_read = "file_read"
+    file_hash = "file_hash"
+
+
+# Default hardware requirements per task type
+TASK_TYPE_REQUIREMENTS: Dict[str, Dict[str, Any]] = {
+    "ping": {"min_ram_mb": 0},
+    "text_validate": {"min_ram_mb": 64},
+    "text_transform": {"min_ram_mb": 64},
+    "json_validate": {"min_ram_mb": 128},
+    "shell_exec": {"min_ram_mb": 256},
+    "file_read": {"min_ram_mb": 128},
+    "file_hash": {"min_ram_mb": 256},
+}
+
+
+class MeshTask(BaseModel):
+    task_id: str
+    task_type: UtilityTaskType
+    workspace_id: str = "default"  # INV-W1/T2: task belongs to exactly 1 workspace
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    assigned_device_id: str = ""
+    status: TaskStatus = TaskStatus.pending
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    assigned_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    timeout_seconds: int = 60
+    result: Dict[str, Any] = Field(default_factory=dict)
+    error: str = ""
+    min_ram_mb: int = 0
+    min_api_level: int = 0
+    requires_arch: str = ""
+
+
+class TaskResult(BaseModel):
+    task_id: str
+    device_id: str
+    device_secret: str = ""
+    status: Literal["completed", "failed"]
+    result: Dict[str, Any] = Field(default_factory=dict)
+    error: str = ""
+    duration_ms: int = 0

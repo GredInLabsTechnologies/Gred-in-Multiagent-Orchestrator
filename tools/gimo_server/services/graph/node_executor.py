@@ -67,6 +67,7 @@ class NodeExecutorMixin:
                 descriptor=descriptor,
                 constraints=constraints,
                 requested_preset=agent_preset,
+                requested_mood=str(node.config.get("mood") or "").strip() or None,
             )
 
             # Store routing decision in node config for observability (v2.0 canonical)
@@ -191,22 +192,20 @@ class NodeExecutorMixin:
             except (KeyError, PermissionError) as e:
                 raise PermissionError(f"Execution policy '{execution_policy}' denied tool '{tool_name}': {e}")
         elif role_profile:
-            # F7.2: Legacy fallback - derive execution_policy from role_profile
+            # F7.2: Legacy fallback - preserve behavior tag but never derive authority from it.
             logger.warning(
-                "Node %s uses legacy role_profile='%s'. Migrate to execution_policy.",
+                "Node %s uses legacy role_profile='%s' without execution_policy. Defaulting to workspace_safe.",
                 node.id,
                 role_profile,
             )
-            # Derive execution policy from legacy role_profile
-            policy_name = ExecutionPolicyService.policy_name_from_legacy_mood(role_profile)
             try:
-                policy = ExecutionPolicyService.get_policy(policy_name)
+                policy = ExecutionPolicyService.get_policy("workspace_safe")
                 # Check if tool is in allowed_tools
                 if policy.allowed_tools and tool_name not in policy.allowed_tools:
                     raise PermissionError(f"Tool '{tool_name}' not in allowed_tools")
                 hitl_required = bool(tool_name in policy.requires_confirmation)
             except (KeyError, PermissionError) as e:
-                raise PermissionError(f"Derived policy '{policy_name}' from role '{role_profile}' denied tool '{tool_name}': {e}")
+                raise PermissionError(f"Default policy 'workspace_safe' denied tool '{tool_name}': {e}")
         else:
             # No governance configured
             return

@@ -1,0 +1,580 @@
+package com.gredinlabs.gimomesh.ui.setup
+
+import android.os.Build
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.gredinlabs.gimomesh.data.api.OnboardingApiResult
+import com.gredinlabs.gimomesh.data.api.OnboardingClient
+import com.gredinlabs.gimomesh.data.model.CoreDiscovery
+import com.gredinlabs.gimomesh.data.model.ModelInfo
+import com.gredinlabs.gimomesh.data.store.SettingsStore
+import com.gredinlabs.gimomesh.ui.theme.GimoAccents
+import com.gredinlabs.gimomesh.ui.theme.GimoBorders
+import com.gredinlabs.gimomesh.ui.theme.GimoDisplay
+import com.gredinlabs.gimomesh.ui.theme.GimoMono
+import com.gredinlabs.gimomesh.ui.theme.GimoSurfaces
+import com.gredinlabs.gimomesh.ui.theme.GimoText
+import com.gredinlabs.gimomesh.ui.theme.GimoTypography
+import com.gredinlabs.gimomesh.ui.theme.MeshStateColors
+import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+private val SetupAccent = MeshStateColors.approved
+private val ErrorAccent = Color(0xFFEF4444)
+
+sealed class SetupStep {
+    object Welcome : SetupStep()
+    object CoreUrl : SetupStep()
+    object ManualCode : SetupStep()
+    object Enrolling : SetupStep()
+    object WaitApproval : SetupStep()
+    object ModelSelect : SetupStep()
+    object Downloading : SetupStep()
+    object Done : SetupStep()
+}
+
+@Composable
+fun SetupWizardScreen(
+    onSetupComplete: () -> Unit,
+    onStartMesh: () -> Unit,
+    settingsStore: SettingsStore,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val settings by settingsStore.settings.collectAsState(initial = SettingsStore.Settings())
+
+    var step by remember { mutableStateOf<SetupStep>(SetupStep.Welcome) }
+    var coreUrlInput by rememberSaveable { mutableStateOf(settings.coreUrl) }
+    var connectedCoreUrl by rememberSaveable { mutableStateOf("") }
+    var code by rememberSaveable { mutableStateOf("") }
+    var lastSubmittedCode by rememberSaveable { mutableStateOf("") }
+    var error by rememberSaveable { mutableStateOf("") }
+    var bearerToken by rememberSaveable { mutableStateOf("") }
+    var workspaceName by rememberSaveable { mutableStateOf("") }
+    var onboardingStatus by rememberSaveable { mutableStateOf("pending_approval") }
+    var isConnecting by remember { mutableStateOf(false) }
+    var catalogLoaded by rememberSaveable { mutableStateOf(false) }
+    var isCatalogLoading by remember { mutableStateOf(false) }
+    var catalogRetryNonce by rememberSaveable { mutableStateOf(0) }
+    var approvalRetryNonce by rememberSaveable { mutableStateOf(0) }
+    var meshAutoStarted by rememberSaveable { mutableStateOf(false) }
+    var coreDiscovery by remember { mutableStateOf<CoreDiscovery?>(null) }
+    var models by remember { mutableStateOf<List<ModelInfo>>(emptyList()) }
+    var selectedModel by remember { mutableStateOf<ModelInfo?>(null) }
+    var downloadProgress by remember { mutableFloatStateOf(0f) }
+    var downloadBytes by remember { mutableStateOf(0L) }
+    var downloadTotalBytes by remember { mutableStateOf(-1L) }
+
+    val deviceId = remember(settings.deviceId) {
+        settings.deviceId.ifEmpty { "${Build.MODEL.replace(" ", "-").lowercase()}-${UUID.randomUUID().toString().take(8)}" }
+    }
+    val deviceName = remember(settings.deviceName) { settings.deviceName.ifEmpty { Build.MODEL } }
+
+    fun connectToCore() {
+        val normalized = normalizeCoreUrl(coreUrlInput)
+        if (normalized.isBlank() || isConnecting) {
+            if (normalized.isBlank()) error = "Enter a valid Core URL"
+            return
+        }
+        scope.launch {
+            isConnecting = true
+            error = ""
+            coreDiscovery = null
+            val client = OnboardingClient(normalized)
+            try {
+                when (val result = client.discoverCore()) {
+                    is OnboardingApiResult.Success -> {
+                        connectedCoreUrl = normalized
+                        coreDiscovery = result.value
+                        settingsStore.updateCoreUrl(normalized)
+                        step = SetupStep.ManualCode
+                    }
+                    is OnboardingApiResult.Error -> error = result.message
+                }
+            } finally {
+                isConnecting = false
+                client.shutdown()
+            }
+        }
+    }
+
+    fun submitCode() {
+        if (connectedCoreUrl.isBlank()) {
+            error = "Connect to a Core before redeeming a code"
+            step = SetupStep.CoreUrl
+            return
+        }
+        if (code.length != 6) {
+            error = "Enter a 6-digit code"
+            return
+        }
+        lastSubmittedCode = code
+        error = ""
+        step = SetupStep.Enrolling
+    }
+
+    LaunchedEffect(bearerToken) {
+        models = emptyList()
+        selectedModel = null
+        catalogLoaded = false
+    }
+
+    LaunchedEffect(code, step, connectedCoreUrl) {
+        if (step == SetupStep.ManualCode && connectedCoreUrl.isNotBlank() && code.length == 6 && code != lastSubmittedCode) submitCode()
+    }
+
+    LaunchedEffect(step, connectedCoreUrl, code) {
+        if (step != SetupStep.Enrolling || connectedCoreUrl.isBlank()) return@LaunchedEffect
+        val client = OnboardingClient(connectedCoreUrl)
+        try {
+            when (val result = client.redeemCode(code = code, deviceId = deviceId, name = deviceName)) {
+                is OnboardingApiResult.Success -> {
+                    val onboard = result.value
+                    error = ""
+                    bearerToken = onboard.bearerToken
+                    workspaceName = onboard.workspaceName
+                    onboardingStatus = onboard.status
+                    meshAutoStarted = false
+                    settingsStore.updateCoreUrl(connectedCoreUrl)
+                    settingsStore.updateToken(onboard.bearerToken)
+                    settingsStore.updateDeviceId(onboard.deviceId)
+                    settingsStore.updateDeviceName(deviceName)
+                    settingsStore.updateDeviceMode("inference")
+                    settingsStore.updateActiveWorkspace(onboard.workspaceId, onboard.workspaceName)
+                    step = SetupStep.ModelSelect
+                }
+                is OnboardingApiResult.Error -> {
+                    error = result.message
+                    step = SetupStep.ManualCode
+                }
+            }
+        } finally {
+            client.shutdown()
+        }
+    }
+
+    LaunchedEffect(step, bearerToken, connectedCoreUrl, catalogRetryNonce) {
+        if (step != SetupStep.ModelSelect || bearerToken.isBlank() || connectedCoreUrl.isBlank() || catalogLoaded) return@LaunchedEffect
+        isCatalogLoading = true
+        val client = OnboardingClient(connectedCoreUrl)
+        try {
+            when (val result = client.listModels(bearerToken)) {
+                is OnboardingApiResult.Success -> {
+                    models = result.value
+                    catalogLoaded = true
+                    error = ""
+                }
+                is OnboardingApiResult.Error -> {
+                    if (result.code in listOf(401, 403) && onboardingStatus == "pending_approval") {
+                        error = ""
+                        step = SetupStep.WaitApproval
+                    } else {
+                        error = result.message
+                    }
+                }
+            }
+        } finally {
+            isCatalogLoading = false
+            client.shutdown()
+        }
+    }
+
+    LaunchedEffect(step, bearerToken, connectedCoreUrl, approvalRetryNonce) {
+        if (step != SetupStep.WaitApproval || bearerToken.isBlank() || connectedCoreUrl.isBlank()) return@LaunchedEffect
+        val client = OnboardingClient(connectedCoreUrl)
+        try {
+            while (true) {
+                when (val result = client.listModels(bearerToken)) {
+                    is OnboardingApiResult.Success -> {
+                        models = result.value
+                        catalogLoaded = true
+                        error = ""
+                        step = SetupStep.ModelSelect
+                        return@LaunchedEffect
+                    }
+                    is OnboardingApiResult.Error -> if (result.code !in listOf(401, 403)) {
+                        error = result.message
+                        return@LaunchedEffect
+                    }
+                }
+                delay(5_000)
+            }
+        } finally {
+            client.shutdown()
+        }
+    }
+
+    LaunchedEffect(step, bearerToken, connectedCoreUrl, selectedModel?.modelId) {
+        val model = selectedModel
+        if (step != SetupStep.Downloading || model == null || bearerToken.isBlank() || connectedCoreUrl.isBlank()) return@LaunchedEffect
+        error = ""
+        downloadProgress = 0f
+        downloadBytes = 0L
+        downloadTotalBytes = -1L
+        val targetFile = File(context.filesDir, "models/${model.filename.ifBlank { "${model.modelId}.gguf" }}")
+        val client = OnboardingClient(connectedCoreUrl)
+        try {
+            when (val result = client.downloadModel(bearerToken, model.modelId, targetFile) { downloaded, total ->
+                scope.launch {
+                    downloadBytes = downloaded
+                    downloadTotalBytes = total
+                    downloadProgress = if (total > 0) (downloaded.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
+                }
+            }) {
+                is OnboardingApiResult.Success -> {
+                    settingsStore.updateModel(model.modelId)
+                    settingsStore.updateDownloadedModelPath(targetFile.absolutePath)
+                    step = SetupStep.Done
+                }
+                is OnboardingApiResult.Error -> {
+                    error = result.message
+                    step = SetupStep.ModelSelect
+                }
+            }
+        } finally {
+            client.shutdown()
+        }
+    }
+
+    LaunchedEffect(step) {
+        if (step == SetupStep.Done && !meshAutoStarted) {
+            meshAutoStarted = true
+            onStartMesh()
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize().background(Color(0xFF0A0A0A)).padding(24.dp)) {
+        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+            Column {
+                Header(step)
+                Spacer(modifier = Modifier.height(18.dp))
+                AnimatedContent(targetState = step, label = "setupStep") { current ->
+                    when (current) {
+                        SetupStep.Welcome -> StepCard {
+                            StepTitle("Join the mesh", "Connect to your Core, redeem a 6-digit code, pick a GGUF, and boot this device without ADB or cables.")
+                            Spacer(modifier = Modifier.height(18.dp))
+                            Pill("30-60 sec setup", SetupAccent)
+                            Spacer(modifier = Modifier.height(18.dp))
+                            PrimaryAction("Start", true) { step = SetupStep.CoreUrl }
+                        }
+                        SetupStep.CoreUrl -> StepCard {
+                            StepTitle("Locate the Core", "Enter the Core URL on your LAN. The wizard verifies that mesh onboarding is enabled before asking for a code.")
+                            Spacer(modifier = Modifier.height(16.dp))
+                            InputField(coreUrlInput, { coreUrlInput = it; error = "" }, "http://192.168.0.49:9325", ::connectToCore)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            coreDiscovery?.let { Banner("Core found: ${it.coreId.ifBlank { "mesh-enabled core" }} · v${it.version}", SetupAccent) }
+                            if (error.isNotBlank()) { Spacer(modifier = Modifier.height(12.dp)); Banner(error, ErrorAccent) }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            PrimaryAction(if (isConnecting) "Connecting..." else "Connect", !isConnecting && normalizeCoreUrl(coreUrlInput).isNotBlank(), ::connectToCore)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SecondaryAction("Back") { step = SetupStep.Welcome }
+                        }
+                        SetupStep.ManualCode -> StepCard {
+                            StepTitle("Redeem your code", "Ask an admin for a 6-digit onboarding code. The code itself authorizes this pre-enrollment request.")
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Pill(connectedCoreUrl.removePrefix("http://").removePrefix("https://"), SetupAccent)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            CodeField(code) {
+                                code = it
+                                error = ""
+                                if (it.length < 6 && it != lastSubmittedCode) lastSubmittedCode = ""
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text("Device ID: $deviceId", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+                            if (error.isNotBlank()) { Spacer(modifier = Modifier.height(12.dp)); Banner(error, ErrorAccent) }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            PrimaryAction("Redeem", code.length == 6 && connectedCoreUrl.isNotBlank(), ::submitCode)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SecondaryAction("Change Core URL") { step = SetupStep.CoreUrl }
+                        }
+                        SetupStep.Enrolling -> LoadingCard("Registering device...", "Redeeming the onboarding code and storing the bearer token locally.")
+                        SetupStep.WaitApproval -> StepCard {
+                            StepTitle("Waiting for approval", "The device is enrolled and the wizard is polling the Core until the model catalog becomes available.")
+                            Spacer(modifier = Modifier.height(18.dp))
+                            if (error.isBlank()) {
+                                CircularProgressIndicator(color = SetupAccent, modifier = Modifier.align(Alignment.CenterHorizontally))
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(workspaceName.ifBlank { "Pending workspace approval" }, style = GimoTypography.bodyMedium.copy(color = GimoText.secondary), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                            } else {
+                                Banner(error, ErrorAccent)
+                                Spacer(modifier = Modifier.height(12.dp))
+                                PrimaryAction("Retry", true) { error = ""; approvalRetryNonce += 1 }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SecondaryAction("Back to code") { error = ""; step = SetupStep.ManualCode }
+                        }
+                        SetupStep.ModelSelect -> StepCard {
+                            StepTitle("Choose a GGUF", "Models are listed directly from the Core. Downloads stream over LAN and resume with HTTP Range if interrupted.")
+                            if (error.isNotBlank()) { Spacer(modifier = Modifier.height(12.dp)); Banner(error, ErrorAccent) }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            when {
+                                isCatalogLoading && !catalogLoaded -> LoadingBody("Loading model catalog...")
+                                models.isEmpty() -> {
+                                    Text("No models are currently exposed by the Core.", style = GimoTypography.bodyMedium.copy(color = GimoText.secondary))
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    PrimaryAction("Retry catalog", true) { error = ""; catalogLoaded = false; catalogRetryNonce += 1 }
+                                }
+                                else -> Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    models.forEach { model ->
+                                        ModelCard(model) { selectedModel = model; step = SetupStep.Downloading }
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SecondaryAction("Back to code") { error = ""; step = SetupStep.ManualCode }
+                        }
+                        SetupStep.Downloading -> StepCard {
+                            StepTitle("Downloading model", selectedModel?.let { "Streaming ${it.name} from the Core into local storage." } ?: "Preparing download...")
+                            Spacer(modifier = Modifier.height(16.dp))
+                            selectedModel?.let {
+                                Pill("${it.name} ${it.params.ifBlank { it.quantization }}".trim(), SetupAccent)
+                                Spacer(modifier = Modifier.height(16.dp))
+                            }
+                            if (downloadTotalBytes > 0) {
+                                LinearProgressIndicator(progress = { downloadProgress }, color = SetupAccent, trackColor = GimoSurfaces.surface3, modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(999.dp)))
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text("${(downloadProgress * 100).toInt()}% · ${formatBytes(downloadBytes)} / ${formatBytes(downloadTotalBytes)}", style = GimoTypography.bodyMedium.copy(color = GimoText.secondary))
+                            } else {
+                                LinearProgressIndicator(color = SetupAccent, trackColor = GimoSurfaces.surface3, modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(999.dp)))
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text("Downloaded ${formatBytes(downloadBytes)}", style = GimoTypography.bodyMedium.copy(color = GimoText.secondary))
+                            }
+                        }
+                        SetupStep.Done -> StepCard {
+                            StepTitle("Ready", "Token, workspace, model selection, and download path are stored locally. The mesh has been started automatically.")
+                            Spacer(modifier = Modifier.height(18.dp))
+                            Box(modifier = Modifier.size(84.dp).clip(CircleShape).background(SetupAccent.copy(alpha = 0.14f)).border(1.dp, SetupAccent.copy(alpha = 0.45f), CircleShape).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
+                                Text("OK", fontFamily = GimoMono, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = SetupAccent)
+                            }
+                            Spacer(modifier = Modifier.height(18.dp))
+                            Text(buildString {
+                                append("Workspace: ")
+                                append(workspaceName.ifBlank { "Default" })
+                                selectedModel?.let { append("\nModel: ${it.modelId}") }
+                            }, style = GimoTypography.bodyMedium.copy(color = GimoText.secondary), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                            Spacer(modifier = Modifier.height(24.dp))
+                            PrimaryAction("Open Dashboard", true, onSetupComplete)
+                        }
+                    }
+                }
+            }
+            Text("Core LAN only. No ADB. No cables.", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun Header(step: SetupStep) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text("GIMO", fontFamily = GimoDisplay, fontWeight = FontWeight.Bold, fontSize = 24.sp, letterSpacing = 2.sp, color = GimoText.primary)
+                Text("MESH / ZERO-ADB SETUP", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+            }
+            Pill(stepLabel(step), SetupAccent)
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(GimoBorders.primary))
+    }
+}
+
+@Composable
+private fun StepCard(content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(GimoSurfaces.surface1).border(1.dp, GimoBorders.primary, RoundedCornerShape(20.dp)).padding(20.dp), content = content)
+}
+
+@Composable
+private fun StepTitle(title: String, body: String) {
+    Text(title, fontFamily = GimoDisplay, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = GimoText.primary)
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(body, style = GimoTypography.bodyMedium.copy(color = GimoText.secondary))
+}
+
+@Composable
+private fun LoadingCard(title: String, body: String) = StepCard {
+    StepTitle(title, body)
+    Spacer(modifier = Modifier.height(18.dp))
+    LoadingBody(title)
+}
+
+@Composable
+private fun LoadingBody(text: String) {
+    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        CircularProgressIndicator(color = SetupAccent)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(text, style = GimoTypography.bodyMedium.copy(color = GimoText.secondary), textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun InputField(value: String, onValueChange: (String) -> Unit, placeholder: String, onDone: () -> Unit) {
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = GimoTypography.bodyLarge.copy(color = GimoText.primary),
+        cursorBrush = SolidColor(SetupAccent),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        modifier = Modifier.fillMaxWidth(),
+        decorationBox = { inner ->
+            Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(GimoSurfaces.surface0).border(1.dp, GimoBorders.primary, RoundedCornerShape(14.dp)).padding(horizontal = 16.dp, vertical = 14.dp)) {
+                if (value.isBlank()) Text(placeholder, style = GimoTypography.bodyLarge.copy(color = GimoText.tertiary))
+                inner()
+            }
+        },
+    )
+}
+
+@Composable
+private fun CodeField(code: String, onCodeChange: (String) -> Unit) {
+    BasicTextField(
+        value = code,
+        onValueChange = { onCodeChange(it.filter(Char::isDigit).take(6)) },
+        singleLine = true,
+        textStyle = GimoTypography.headlineLarge.copy(color = Color.Transparent),
+        cursorBrush = SolidColor(SetupAccent),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+        modifier = Modifier.fillMaxWidth(),
+        decorationBox = { inner ->
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    repeat(6) { index ->
+                        val char = code.getOrNull(index)?.toString().orEmpty()
+                        val active = code.length == index || (code.length == 6 && index == 5)
+                        Box(modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(GimoSurfaces.surface0).border(1.dp, if (active) SetupAccent else GimoBorders.primary, RoundedCornerShape(14.dp)).padding(vertical = 18.dp), contentAlignment = Alignment.Center) {
+                            Text(char.ifBlank { "•" }, fontFamily = GimoMono, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = if (char.isBlank()) GimoText.tertiary else GimoText.primary)
+                        }
+                    }
+                }
+                Box(modifier = Modifier.fillMaxSize().background(Color.Transparent.copy(alpha = 0.01f))) { inner() }
+            }
+        },
+    )
+}
+
+@Composable
+private fun ModelCard(model: ModelInfo, onClick: () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(GimoSurfaces.surface0).border(1.dp, GimoBorders.primary, RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(16.dp)) {
+        Text(model.name, fontFamily = GimoDisplay, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = GimoText.primary)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(model.modelId, style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Pill(model.params.ifBlank { "unknown params" }, SetupAccent)
+            Pill(model.quantization.ifBlank { "raw gguf" }, GimoAccents.green)
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(formatBytes(model.sizeBytes), style = GimoTypography.bodyMedium.copy(color = GimoText.secondary))
+    }
+}
+
+@Composable
+private fun PrimaryAction(text: String, enabled: Boolean, onClick: () -> Unit) {
+    Button(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = SetupAccent, contentColor = Color(0xFF07140C), disabledContainerColor = SetupAccent.copy(alpha = 0.35f), disabledContentColor = Color(0xFF07140C).copy(alpha = 0.5f)), modifier = Modifier.fillMaxWidth()) {
+        Text(text.uppercase(), fontFamily = GimoMono, fontWeight = FontWeight.Bold, fontSize = 11.sp, letterSpacing = 1.sp)
+    }
+}
+
+@Composable
+private fun SecondaryAction(text: String, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, GimoBorders.primary), colors = ButtonDefaults.outlinedButtonColors(contentColor = GimoText.secondary), modifier = Modifier.fillMaxWidth()) {
+        Text(text.uppercase(), fontFamily = GimoMono, fontWeight = FontWeight.Medium, fontSize = 10.sp, letterSpacing = 0.8.sp)
+    }
+}
+
+@Composable
+private fun Pill(text: String, accent: Color) {
+    Row(modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(accent.copy(alpha = 0.12f)).border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(999.dp)).padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(accent))
+        Text(text, style = GimoTypography.labelLarge.copy(color = accent))
+    }
+}
+
+@Composable
+private fun Banner(message: String, accent: Color) {
+    Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(accent.copy(alpha = 0.08f)).border(1.dp, accent.copy(alpha = 0.3f), RoundedCornerShape(14.dp)).padding(14.dp)) {
+        Text(message, style = GimoTypography.bodyMedium.copy(color = if (accent == ErrorAccent) accent else GimoText.primary))
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val units = listOf("B", "KB", "MB", "GB", "TB")
+    var value = bytes.toDouble()
+    var index = 0
+    while (value >= 1024 && index < units.lastIndex) {
+        value /= 1024
+        index += 1
+    }
+    return if (value >= 10 || index == 0) "${value.toInt()} ${units[index]}" else String.format("%.1f %s", value, units[index])
+}
+
+private fun stepLabel(step: SetupStep): String = when (step) {
+    SetupStep.Welcome -> "WELCOME"
+    SetupStep.CoreUrl -> "CORE URL"
+    SetupStep.ManualCode -> "REDEEM CODE"
+    SetupStep.Enrolling -> "ENROLLING"
+    SetupStep.WaitApproval -> "WAITING"
+    SetupStep.ModelSelect -> "MODEL CATALOG"
+    SetupStep.Downloading -> "DOWNLOADING"
+    SetupStep.Done -> "COMPLETE"
+}
+
+private fun normalizeCoreUrl(raw: String): String {
+    val trimmed = raw.trim().trimEnd('/')
+    if (trimmed.isBlank()) return ""
+    return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) trimmed else "http://$trimmed"
+}
