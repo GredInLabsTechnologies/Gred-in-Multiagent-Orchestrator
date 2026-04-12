@@ -3,6 +3,7 @@ package com.gredinlabs.gimomesh.data.api
 import com.gredinlabs.gimomesh.data.model.CoreDiscovery
 import com.gredinlabs.gimomesh.data.model.ModelInfo
 import com.gredinlabs.gimomesh.data.model.OnboardResult
+import com.gredinlabs.gimomesh.data.model.PendingCode
 import com.gredinlabs.gimomesh.data.model.RedeemRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -103,6 +104,27 @@ class OnboardingClient(coreUrl: String) {
             }
         } catch (e: Exception) {
             OnboardingApiResult.Error(e.message ?: "Failed to redeem onboarding code")
+        }
+    }
+
+    /**
+     * GET /ops/mesh/onboard/pending — fetch the most recent pending code.
+     * Used for auto-enrollment: app opens → discovers Core → gets code → redeems → done.
+     */
+    suspend fun fetchPendingCode(): OnboardingApiResult<PendingCode> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("$baseUrl/ops/mesh/onboard/pending")
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext response.toError("No pending code")
+                val body = response.body?.string()
+                    ?: return@withContext OnboardingApiResult.Error("Empty response")
+                OnboardingApiResult.Success(json.decodeFromString<PendingCode>(body))
+            }
+        } catch (e: Exception) {
+            OnboardingApiResult.Error(e.message ?: "Failed to fetch pending code")
         }
     }
 

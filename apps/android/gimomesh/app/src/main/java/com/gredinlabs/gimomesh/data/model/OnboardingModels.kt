@@ -29,6 +29,14 @@ data class CoreDiscovery(
 )
 
 @Serializable
+data class PendingCode(
+    val code: String,
+    @SerialName("workspace_id") val workspaceId: String = "default",
+    @SerialName("core_url") val coreUrl: String = "",
+    @SerialName("expires_at") val expiresAt: String = "",
+)
+
+@Serializable
 data class ModelInfo(
     @SerialName("model_id") val modelId: String,
     val filename: String,

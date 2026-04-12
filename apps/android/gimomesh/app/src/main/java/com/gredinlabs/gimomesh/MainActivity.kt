@@ -35,6 +35,17 @@ class MainActivity : ComponentActivity() {
             runBlocking { store.updateDeviceMode(mode) }
         }
 
+        // Deep link: gimo://enroll?code=XXXXXX&host=IP&port=9325
+        val deepLinkCode = intent?.data?.getQueryParameter("code") ?: ""
+        val deepLinkHost = intent?.data?.getQueryParameter("host") ?: ""
+        val deepLinkPort = intent?.data?.getQueryParameter("port") ?: "9325"
+        if (deepLinkCode.isNotBlank() && deepLinkHost.isNotBlank()) {
+            val store = (application as GimoMeshApp).settingsStore
+            runBlocking {
+                store.updateCoreUrl("http://$deepLinkHost:$deepLinkPort")
+            }
+        }
+
         val autoStart = intent?.getBooleanExtra("auto_start_mesh", false) == true
 
         setContent {
@@ -52,7 +63,12 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    GimoMeshNavHost(viewModel = viewModel)
+                    GimoMeshNavHost(
+                        viewModel = viewModel,
+                        deepLinkCode = deepLinkCode,
+                        deepLinkHost = deepLinkHost,
+                        deepLinkPort = deepLinkPort,
+                    )
                 }
             }
         }

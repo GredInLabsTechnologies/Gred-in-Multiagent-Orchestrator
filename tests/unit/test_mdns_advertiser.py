@@ -151,7 +151,7 @@ class TestQrPayload:
         assert r.status_code == 200
         data = r.json()
         assert "qr_payload" in data
-        assert data["qr_payload"].startswith("gimo://")
+        assert data["qr_payload"].startswith("http://")
 
     def test_qr_payload_contains_code(self, test_client, _isolated_onboard):
         from tests.conftest import DEFAULT_TEST_TOKEN
@@ -188,10 +188,16 @@ class TestQrPayload:
             headers={"Authorization": f"Bearer {DEFAULT_TEST_TOKEN}"},
         )
         data = r.json()
-        qr = data["qr_payload"]  # gimo://host:port/code?sig=xxxx
-        # Parse
-        without_scheme = qr.replace("gimo://", "")
-        payload_part, sig = without_scheme.split("?sig=")
+        qr = data["qr_payload"]  # http://ip:port/ops/mesh/onboard/code/install?sig=xxxx
+        # The sig is computed over "ip:port/code" — extract from the URL
+        # URL format: http://IP:PORT/ops/mesh/onboard/CODE/install?sig=XXXX
+        import re
+        m = re.search(r"http://([^/]+)/ops/mesh/onboard/(\d{6})/install\?sig=(\w+)", qr)
+        assert m, f"QR payload format unexpected: {qr}"
+        host_port = m.group(1)
+        qr_code = m.group(2)
+        sig = m.group(3)
+        payload_part = f"{host_port}/{qr_code}"
         # Verify — the token used is ORCH_TOKEN
         token = os.environ.get("ORCH_TOKEN", DEFAULT_TEST_TOKEN)
         assert verify_payload(token, payload_part, sig) is True

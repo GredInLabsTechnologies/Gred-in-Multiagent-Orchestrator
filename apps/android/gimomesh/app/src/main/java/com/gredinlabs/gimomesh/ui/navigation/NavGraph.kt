@@ -54,7 +54,12 @@ enum class Screen(val label: String) {
 }
 
 @Composable
-fun GimoMeshNavHost(viewModel: MeshViewModel = viewModel()) {
+fun GimoMeshNavHost(
+    viewModel: MeshViewModel = viewModel(),
+    deepLinkCode: String = "",
+    deepLinkHost: String = "",
+    deepLinkPort: String = "9325",
+) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
     val settings by viewModel.settingsStore.settings.collectAsState(
@@ -96,6 +101,9 @@ fun GimoMeshNavHost(viewModel: MeshViewModel = viewModel()) {
                         }
                     },
                     settingsStore = viewModel.settingsStore,
+                    deepLinkCode = deepLinkCode,
+                    deepLinkHost = deepLinkHost,
+                    deepLinkPort = deepLinkPort,
                 )
                 Screen.DASH -> DashboardScreen(
                     state = state,

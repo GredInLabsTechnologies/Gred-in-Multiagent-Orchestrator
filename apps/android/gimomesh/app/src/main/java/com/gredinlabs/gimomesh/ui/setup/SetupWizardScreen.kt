@@ -31,6 +31,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -56,6 +57,7 @@ import com.gredinlabs.gimomesh.data.api.OnboardingApiResult
 import com.gredinlabs.gimomesh.data.api.OnboardingClient
 import com.gredinlabs.gimomesh.data.model.CoreDiscovery
 import com.gredinlabs.gimomesh.data.model.ModelInfo
+import com.gredinlabs.gimomesh.data.network.CoreDiscoveryManager
 import com.gredinlabs.gimomesh.data.store.SettingsStore
 import com.gredinlabs.gimomesh.ui.theme.GimoAccents
 import com.gredinlabs.gimomesh.ui.theme.GimoBorders
@@ -75,6 +77,7 @@ private val ErrorAccent = Color(0xFFEF4444)
 
 sealed class SetupStep {
     object Welcome : SetupStep()
+    object QRScanner : SetupStep()
     object CoreUrl : SetupStep()
     object ManualCode : SetupStep()
     object Enrolling : SetupStep()
@@ -90,15 +93,23 @@ fun SetupWizardScreen(
     onStartMesh: () -> Unit,
     settingsStore: SettingsStore,
     modifier: Modifier = Modifier,
+    deepLinkCode: String = "",
+    deepLinkHost: String = "",
+    deepLinkPort: String = "9325",
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by settingsStore.settings.collectAsState(initial = SettingsStore.Settings())
 
-    var step by remember { mutableStateOf<SetupStep>(SetupStep.Welcome) }
-    var coreUrlInput by rememberSaveable { mutableStateOf(settings.coreUrl) }
-    var connectedCoreUrl by rememberSaveable { mutableStateOf("") }
-    var code by rememberSaveable { mutableStateOf("") }
+    // If deep link provided, skip straight to enrolling
+    val hasDeepLink = deepLinkCode.length == 6 && deepLinkHost.isNotBlank()
+    val initialStep = if (hasDeepLink) SetupStep.Enrolling else SetupStep.Welcome
+    val initialCoreUrl = if (hasDeepLink) "http://$deepLinkHost:$deepLinkPort" else settings.coreUrl
+
+    var step by remember { mutableStateOf<SetupStep>(initialStep) }
+    var coreUrlInput by rememberSaveable { mutableStateOf(initialCoreUrl) }
+    var connectedCoreUrl by rememberSaveable { mutableStateOf(if (hasDeepLink) initialCoreUrl else "") }
+    var code by rememberSaveable { mutableStateOf(if (hasDeepLink) deepLinkCode else "") }
     var lastSubmittedCode by rememberSaveable { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf("") }
     var bearerToken by rememberSaveable { mutableStateOf("") }
@@ -111,11 +122,47 @@ fun SetupWizardScreen(
     var approvalRetryNonce by rememberSaveable { mutableStateOf(0) }
     var meshAutoStarted by rememberSaveable { mutableStateOf(false) }
     var coreDiscovery by remember { mutableStateOf<CoreDiscovery?>(null) }
+    val discoveryManager = remember(context) { CoreDiscoveryManager(context) }
+    var discoveredLanCore by remember { mutableStateOf<CoreDiscoveryManager.DiscoveredCore?>(null) }
     var models by remember { mutableStateOf<List<ModelInfo>>(emptyList()) }
     var selectedModel by remember { mutableStateOf<ModelInfo?>(null) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
     var downloadBytes by remember { mutableStateOf(0L) }
     var downloadTotalBytes by remember { mutableStateOf(-1L) }
+
+    // Auto-enrollment: on first launch, try to fetch pending code from Core on LAN
+    var autoEnrollAttempted by remember { mutableStateOf(false) }
+    LaunchedEffect(step, hasDeepLink, autoEnrollAttempted) {
+        if (step == SetupStep.Welcome && !hasDeepLink && !autoEnrollAttempted) {
+            autoEnrollAttempted = true
+            // Try the default Core URL first, then any mDNS-discovered Core
+            val urlsToTry = listOfNotNull(
+                settings.coreUrl.takeIf { it.isNotBlank() },
+                discoveredLanCore?.url,
+            ).distinct()
+            for (url in urlsToTry) {
+                val client = OnboardingClient(url)
+                try {
+                    when (val result = client.fetchPendingCode()) {
+                        is OnboardingApiResult.Success -> {
+                            val pending = result.value
+                            val c = pending.code
+                            if (c.length == 6 && c.all { ch -> ch.isDigit() }) {
+                                connectedCoreUrl = pending.coreUrl.ifBlank { url }
+                                coreUrlInput = connectedCoreUrl
+                                code = c
+                                step = SetupStep.Enrolling
+                                return@LaunchedEffect
+                            }
+                        }
+                        is OnboardingApiResult.Error -> { /* try next URL */ }
+                    }
+                } finally {
+                    client.shutdown()
+                }
+            }
+        }
+    }
 
     val deviceId = remember(settings.deviceId) {
         settings.deviceId.ifEmpty { "${Build.MODEL.replace(" ", "-").lowercase()}-${UUID.randomUUID().toString().take(8)}" }
@@ -295,6 +342,22 @@ fun SetupWizardScreen(
         }
     }
 
+    LaunchedEffect(step) {
+        if (step != SetupStep.CoreUrl) {
+            discoveryManager.stopDiscovery()
+            return@LaunchedEffect
+        }
+        discoveredLanCore = null
+        discoveryManager.startDiscovery(onFound = { core ->
+            if (discoveredLanCore == null) discoveredLanCore = core
+            if (normalizeCoreUrl(coreUrlInput).isBlank()) coreUrlInput = core.url
+        })
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { discoveryManager.stopDiscovery() }
+    }
+
     Box(modifier = modifier.fillMaxSize().background(Color(0xFF0A0A0A)).padding(24.dp)) {
         Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Column {
@@ -307,11 +370,28 @@ fun SetupWizardScreen(
                             Spacer(modifier = Modifier.height(18.dp))
                             Pill("30-60 sec setup", SetupAccent)
                             Spacer(modifier = Modifier.height(18.dp))
-                            PrimaryAction("Start", true) { step = SetupStep.CoreUrl }
+                            PrimaryAction("Scan QR Code", true) { step = SetupStep.QRScanner }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SecondaryAction("Enter code manually") { step = SetupStep.CoreUrl }
                         }
+                        SetupStep.QRScanner -> QrScannerScreen(
+                            onQrScanned = { result ->
+                                coreUrlInput = result.coreUrl
+                                connectedCoreUrl = result.coreUrl
+                                code = result.code
+                                lastSubmittedCode = result.code
+                                error = ""
+                                step = SetupStep.Enrolling
+                            },
+                            onCancel = { step = SetupStep.CoreUrl },
+                        )
                         SetupStep.CoreUrl -> StepCard {
                             StepTitle("Locate the Core", "Enter the Core URL on your LAN. The wizard verifies that mesh onboarding is enabled before asking for a code.")
                             Spacer(modifier = Modifier.height(16.dp))
+                            discoveredLanCore?.let {
+                                Banner("Core auto-discovered at ${it.url} (${if (it.verified) "verified" else "unverified"})", SetupAccent)
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
                             InputField(coreUrlInput, { coreUrlInput = it; error = "" }, "http://192.168.0.49:9325", ::connectToCore)
                             Spacer(modifier = Modifier.height(12.dp))
                             coreDiscovery?.let { Banner("Core found: ${it.coreId.ifBlank { "mesh-enabled core" }} · v${it.version}", SetupAccent) }
@@ -564,6 +644,7 @@ private fun formatBytes(bytes: Long): String {
 
 private fun stepLabel(step: SetupStep): String = when (step) {
     SetupStep.Welcome -> "WELCOME"
+    SetupStep.QRScanner -> "SCAN QR"
     SetupStep.CoreUrl -> "CORE URL"
     SetupStep.ManualCode -> "REDEEM CODE"
     SetupStep.Enrolling -> "ENROLLING"

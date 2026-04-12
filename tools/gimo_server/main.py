@@ -872,9 +872,10 @@ if __name__ == "__main__":
     # Can be overridden for advanced setups via ORCH_PORT.
     port = int(__import__("os").environ.get("ORCH_PORT", "9325"))
 
+    host = __import__("os").environ.get("ORCH_HOST", "127.0.0.1")
     uvicorn.run(
         "tools.gimo_server.main:app",
-        host="127.0.0.1",  # nosec B104 - CLI entrypoint for local/dev use
+        host=host,
         port=port,
         reload=DEBUG,
         log_level=LOG_LEVEL.lower(),

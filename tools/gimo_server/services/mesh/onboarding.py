@@ -90,6 +90,18 @@ class OnboardingService:
         logger.info("Onboarding code generated for workspace=%s (expires %d min)", workspace_id, _CODE_TTL_MINUTES)
         return oc
 
+    def get_pending_code(self):
+        """Return the most recent valid (not expired, not used) code, or None."""
+        from datetime import datetime, timezone
+        _BASE.mkdir(parents=True, exist_ok=True)
+        best = None
+        for path in sorted(_BASE.glob("*.json"), reverse=True):
+            oc = self._load_code(path.stem)
+            if oc and not oc.used and datetime.now(timezone.utc) <= oc.expires_at:
+                if best is None or oc.created_at > best.created_at:
+                    best = oc
+        return best
+
     # ── Code redemption (unauthenticated) ───────────────────────
 
     def redeem_code(

@@ -853,10 +853,12 @@ async def generate_onboard_code(
     import os as _os
     _port = _os.environ.get("ORCH_PORT", "9325")
     _ip = _get_local_ip()
+    # QR payload is an HTTP URL to the landing page (not a deep link)
+    # because the app isn't installed yet when user scans the QR
     qr_base = f"{_ip}:{_port}/{oc.code}"
     token_for_sig = _os.environ.get("ORCH_TOKEN", "")
     sig = sign_payload(token_for_sig, qr_base) if token_for_sig else ""
-    qr_payload = f"gimo://{qr_base}?sig={sig}" if sig else f"gimo://{qr_base}"
+    qr_payload = f"http://{_ip}:{_port}/ops/mesh/onboard/{oc.code}/install?sig={sig}"
 
     return {
         "code": oc.code,
@@ -911,6 +913,181 @@ async def redeem_onboard_code(
 
     audit_log("OPS", "/ops/mesh/onboard/redeem", f"device={body.device_id} workspace={result.workspace_id}", operation="WRITE", actor=f"onboard:{body.device_id}")
     return result.model_dump(mode="json")
+
+
+@router.get("/onboard/{code}/install")
+async def onboard_install_page(code: str, request: Request):
+    """Landing page for QR-based onboarding. NO auth.
+
+    Flow: user scans QR → browser opens this URL → page auto-downloads APK
+    → after install, "Open" button fires gimo:// deep link with code + Core URL.
+    """
+    import html as _html
+    import re as _re
+    from tools.gimo_server.services.mesh.mdns_advertiser import _get_local_ip
+    import os as _os
+
+    # Validate code format (6 digits only — prevent XSS injection)
+    if not _re.fullmatch(r"\d{6}", code):
+        raise HTTPException(400, detail="Invalid code format")
+
+    _port = _os.environ.get("ORCH_PORT", "9325")
+    _ip = _get_local_ip()
+    _code = _html.escape(code)
+    core_url = f"http://{_ip}:{_port}"
+    apk_url = f"{core_url}/ops/mesh/onboard/apk"
+    deep_link = f"gimo://enroll?code={_code}&host={_ip}&port={_port}"
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GIMO Mesh</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#0a0a0a;color:#e5e5e5;font-family:system-ui,-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px}}
+.card{{background:#111;border:1px solid #222;border-radius:24px;padding:36px 28px;max-width:400px;width:100%;text-align:center}}
+.logo{{font-family:monospace;font-size:26px;font-weight:900;letter-spacing:4px;color:#fff;margin-bottom:4px}}
+.logo span{{color:#4ade80}}
+.divider{{width:40px;height:2px;background:#4ade80;margin:16px auto;border-radius:2px}}
+h2{{font-size:16px;color:#fff;font-weight:600;margin-bottom:16px}}
+.warn{{background:#1a1209;border:1px solid #3d2e0a;border-radius:14px;padding:16px;margin:20px 0;text-align:left}}
+.warn p{{color:#d4a017;font-size:13px;line-height:1.6}}
+.warn .title{{font-weight:700;font-size:14px;margin-bottom:6px;color:#eab308}}
+.info{{color:#666;font-size:12px;line-height:1.7;margin:16px 0;text-align:left}}
+.info b{{color:#888}}
+.btn{{display:block;width:100%;padding:16px;border-radius:14px;font-weight:700;font-size:14px;letter-spacing:1px;text-transform:uppercase;text-decoration:none;margin-top:12px;cursor:pointer;border:none;font-family:monospace;transition:opacity .2s}}
+.btn:active{{opacity:.7}}
+.btn-accept{{background:#4ade80;color:#07140c}}
+.btn-cancel{{background:transparent;border:1px solid #333;color:#666;margin-top:8px}}
+.core{{color:#4ade80;font-family:monospace;font-size:12px;margin-top:20px;opacity:.5}}
+#phase2{{display:none}}
+.progress-wrap{{background:#1a1a1a;border-radius:10px;height:8px;margin:20px 0 12px;overflow:hidden}}
+.progress-bar{{background:#4ade80;height:100%;width:0%;border-radius:10px;transition:width .3s}}
+.status{{color:#888;font-size:13px}}
+.done{{color:#4ade80;font-size:18px;font-weight:700;margin-top:20px}}
+</style></head><body>
+<div class="card">
+<div class="logo"><span>GIMO</span> MESH</div>
+<div class="divider"></div>
+
+<div id="phase1">
+<h2>Se va a descargar GIMO Mesh</h2>
+
+<div class="warn">
+<p class="title">Aviso</p>
+<p>GIMO Core podra operar este dispositivo como nodo de inferencia dentro de la red mesh. El dispositivo ejecutara modelos de IA localmente y compartira recursos de computo con el workspace.</p>
+</div>
+
+<div class="info">
+<b>Servidor:</b> {_ip}:{_port}<br>
+<b>Workspace:</b> default<br>
+<b>Codigo:</b> {code}<br>
+<b>Tamano:</b> ~84 MB
+</div>
+
+<button class="btn btn-accept" onclick="acceptDownload()">Aceptar y descargar</button>
+<button class="btn btn-cancel" onclick="window.close()">Cancelar</button>
+
+<p class="core">Servido desde GIMO Core LAN</p>
+</div>
+
+<div id="phase2">
+<h2>Descargando GIMO Mesh...</h2>
+<div class="progress-wrap"><div class="progress-bar" id="pbar"></div></div>
+<p class="status" id="pstatus">Iniciando descarga...</p>
+<p class="core">No cierre esta pagina durante la descarga</p>
+</div>
+
+</div>
+<script>
+function acceptDownload() {{
+  document.getElementById('phase1').style.display='none';
+  document.getElementById('phase2').style.display='block';
+  var bar = document.getElementById('pbar');
+  var st = document.getElementById('pstatus');
+
+  // Step 1: Download APK
+  var a = document.createElement('a');
+  a.href = '{apk_url}';
+  a.download = 'gimomesh.apk';
+  document.body.appendChild(a);
+  a.click();
+
+  st.textContent = 'Descargando APK...';
+  bar.style.width = '33%';
+
+  // Step 2: After download, try deep link every 5s
+  // If app installed → opens with code pre-filled → auto-registers
+  // If not yet installed → keeps retrying silently
+  var attempts = 0;
+  setTimeout(function tryOpen() {{
+    attempts++;
+    bar.style.width = Math.min(33 + attempts*5, 95) + '%';
+    if (attempts <= 3) {{
+      st.textContent = 'Instale el APK descargado...';
+    }} else {{
+      st.textContent = 'Abriendo GIMO Mesh...';
+      window.location.href = '{deep_link}';
+    }}
+    if (attempts < 12) setTimeout(tryOpen, 5000);
+    else {{
+      bar.style.width = '100%';
+      st.innerHTML = '<a href="{deep_link}" class="btn btn-accept" style="margin-top:12px">ABRIR GIMO MESH</a>';
+    }}
+  }}, 10000);
+}}
+</script>
+</body></html>"""
+
+    from starlette.responses import HTMLResponse
+    return HTMLResponse(html)
+
+
+@router.get("/onboard/pending")
+async def get_pending_onboard(request: Request):
+    """Returns the most recent unused onboarding code for auto-enrollment. NO auth.
+
+    The app calls this on first launch (token empty) after discovering the Core.
+    If there's a pending code, the app auto-redeems it — zero user interaction.
+    """
+    svc = _get_onboarding_service(request)
+    pending = svc.get_pending_code()
+    if pending is None:
+        raise HTTPException(404, detail="No pending onboarding code")
+    from tools.gimo_server.services.mesh.mdns_advertiser import _get_local_ip
+    import os as _os
+    _ip = _get_local_ip()
+    _port = _os.environ.get("ORCH_PORT", "9325")
+    return {
+        "code": pending.code,
+        "workspace_id": pending.workspace_id,
+        "core_url": f"http://{_ip}:{_port}",
+        "expires_at": pending.expires_at.isoformat(),
+    }
+
+
+@router.get("/onboard/apk")
+async def serve_apk(request: Request):
+    """Serve the GIMO Mesh APK for download. NO auth.
+
+    Looks for the APK at OPS_DATA_DIR/mesh/gimomesh.apk or the build output.
+    """
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    import os as _os
+
+    # Search order: published APK, then build output
+    candidates = [
+        Path(_os.environ.get("OPS_DATA_DIR", "ops_data")) / "mesh" / "gimomesh.apk",
+        Path(__file__).resolve().parents[4] / "apps" / "android" / "gimomesh" / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk",
+    ]
+    for apk_path in candidates:
+        if apk_path.exists():
+            return FileResponse(
+                path=str(apk_path),
+                media_type="application/vnd.android.package-archive",
+                filename="gimomesh.apk",
+            )
+    raise HTTPException(404, detail="APK not found. Build with: gradlew assembleDebug")
 
 
 @router.get("/onboard/discover")
