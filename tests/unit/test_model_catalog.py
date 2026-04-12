@@ -93,11 +93,16 @@ class TestMetadataParsing:
         m = svc.list_models()[0]
         assert m.size_bytes == 4096
 
-    def test_sha256_computed(self, svc: ModelCatalogService, models_dir: Path):
+    def test_sha256_computed_on_get(self, svc: ModelCatalogService, models_dir: Path):
+        """SHA-256 is lazy — only computed via get_model(), not list_models()."""
         content = b"deterministic content for hash"
         (models_dir / "model.gguf").write_bytes(content)
-        m = svc.list_models()[0]
-        assert m.sha256 == _sha256(content)
+        # list_models returns empty sha256
+        m_list = svc.list_models()[0]
+        assert m_list.sha256 == ""
+        # get_model computes it
+        m_get = svc.get_model("model")
+        assert m_get.sha256 == _sha256(content)
 
     def test_fallback_name_for_simple_filename(self, svc: ModelCatalogService, models_dir: Path):
         _write_fake_gguf(models_dir, "simple-model.gguf")
@@ -153,4 +158,6 @@ class TestCaching:
         path.write_bytes(b"y" * 2048)
         m2 = svc.list_models()[0]
         assert m2.size_bytes == 2048
-        assert m2.sha256 == _sha256(b"y" * 2048)
+        # SHA-256 is lazy — verify via get_model
+        m2_full = svc.get_model("changing")
+        assert m2_full.sha256 == _sha256(b"y" * 2048)

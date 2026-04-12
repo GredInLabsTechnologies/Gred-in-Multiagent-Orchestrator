@@ -602,8 +602,8 @@ private fun fitColor(level: String): Color = when (level) {
 private fun fitLabel(level: String): String = when (level) {
     "optimal" -> "OPTIMAL"
     "comfortable" -> "COMPATIBLE"
-    "tight" -> "AJUSTADO"
-    "overload" -> "SOBRECARGA"
+    "tight" -> "TIGHT"
+    "overload" -> "OVERLOAD"
     else -> level.uppercase()
 }
 
@@ -649,7 +649,7 @@ private fun ModelCard(model: ModelInfo, onClick: () -> Unit) {
 
         // Resource bar: RAM usage vs device RAM
         if (rec != null && rec.deviceRamGb > 0) {
-            Text("Carga en tu dispositivo", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+            Text("Device load", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
             Spacer(modifier = Modifier.height(6.dp))
             // Bar
             val ratio = (rec.estimatedRamGb / rec.deviceRamGb).coerceIn(0f, 1f)
@@ -702,7 +702,7 @@ private fun ModelCard(model: ModelInfo, onClick: () -> Unit) {
             if (isOverload) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(FitOverload.copy(alpha = 0.1f)).border(1.dp, FitOverload.copy(alpha = 0.3f), RoundedCornerShape(10.dp)).padding(10.dp)) {
-                    Text("Ejecutelo bajo su responsabilidad", style = GimoTypography.labelLarge.copy(color = FitOverload, fontWeight = FontWeight.Bold), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Text("Run at your own risk", style = GimoTypography.labelLarge.copy(color = FitOverload, fontWeight = FontWeight.Bold), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
             }
         } else {

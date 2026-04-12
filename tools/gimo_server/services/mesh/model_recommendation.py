@@ -297,45 +297,45 @@ def score_model(
     # ── Impact description ────────────────────────────────────
     if rec.fit_level == FitLevel.optimal:
         rec.impact = (
-            f"Excelente. El modelo usa {rec.estimated_ram_gb:.1f} GB de "
-            f"{device_ram_gb:.0f} GB disponibles. Rendimiento estimado: "
+            f"Excellent. Model uses {rec.estimated_ram_gb:.1f} GB of "
+            f"{device_ram_gb:.0f} GB available. Estimated performance: "
             f"~{rec.estimated_tokens_per_sec:.0f} tok/s. "
-            f"El dispositivo funcionara con normalidad."
+            f"Device will run normally."
         )
     elif rec.fit_level == FitLevel.comfortable:
         rec.impact = (
-            f"Bueno. El modelo usa {rec.estimated_ram_gb:.1f} GB de "
-            f"{device_ram_gb:.0f} GB. Rendimiento: ~{rec.estimated_tokens_per_sec:.0f} tok/s. "
-            f"Puede notar lentitud leve en otras apps durante inferencia."
+            f"Good. Model uses {rec.estimated_ram_gb:.1f} GB of "
+            f"{device_ram_gb:.0f} GB. Performance: ~{rec.estimated_tokens_per_sec:.0f} tok/s. "
+            f"May notice slight slowdown in other apps during inference."
         )
     elif rec.fit_level == FitLevel.tight:
         rec.impact = (
-            f"Ajustado. El modelo necesita {rec.estimated_ram_gb:.1f} GB y el "
-            f"dispositivo tiene {device_ram_gb:.0f} GB. Rendimiento: "
+            f"Tight. Model needs {rec.estimated_ram_gb:.1f} GB and "
+            f"device has {device_ram_gb:.0f} GB. Performance: "
             f"~{rec.estimated_tokens_per_sec:.0f} tok/s. "
-            f"Se recomienda modo hibrido. Apps en segundo plano se cerraran."
+            f"Hybrid mode recommended. Background apps will be killed."
         )
     else:
         rec.impact = (
-            f"Sobrecarga. El modelo necesita {rec.estimated_ram_gb:.1f} GB pero solo "
-            f"hay {available_ram_gb:.1f} GB disponibles. El dispositivo sufrira "
-            f"inestabilidad, cierres forzados, y posible throttling termico. "
-            f"Ejecutelo bajo su responsabilidad."
+            f"Overload. Model needs {rec.estimated_ram_gb:.1f} GB but only "
+            f"{available_ram_gb:.1f} GB available. Device will experience "
+            f"instability, force-closes, and thermal throttling. "
+            f"Run at your own risk."
         )
 
     # ── Warnings ──────────────────────────────────────────────
     if rec.fit_level == FitLevel.overload:
-        rec.warnings.append("RAM insuficiente — el sistema Android cerrara apps agresivamente")
+        rec.warnings.append("Insufficient RAM — Android will aggressively kill background apps")
     if rec.ram_headroom_pct < 10:
-        rec.warnings.append(f"Solo {rec.ram_headroom_pct:.0f}% de RAM libre durante inferencia")
+        rec.warnings.append(f"Only {rec.ram_headroom_pct:.0f}% RAM free during inference")
     if rec.estimated_battery_drain_pct_hr > 20:
-        rec.warnings.append(f"Consumo alto: ~{rec.estimated_battery_drain_pct_hr:.0f}%/hora de bateria")
+        rec.warnings.append(f"High drain: ~{rec.estimated_battery_drain_pct_hr:.0f}%/hour battery")
     if not storage_ok:
-        rec.warnings.append(f"Espacio insuficiente: necesita {rec.storage_required_gb:.1f} GB, libre: {device_storage_gb:.1f} GB")
+        rec.warnings.append(f"Insufficient storage: needs {rec.storage_required_gb:.1f} GB, free: {device_storage_gb:.1f} GB")
     if rec.estimated_tokens_per_sec < 3:
-        rec.warnings.append("Rendimiento muy lento (<3 tok/s) — experiencia degradada")
+        rec.warnings.append("Very slow (<3 tok/s) — degraded experience")
     if params_b >= 7 and ram_total_mb < 8192:
-        rec.warnings.append("Modelos 7B+ no recomendados en dispositivos con <8 GB RAM")
+        rec.warnings.append("7B+ models not recommended on devices with <8 GB RAM")
 
     return rec
 
@@ -391,8 +391,8 @@ def recommend_models(
         if recs:
             recs[0].recommended = True
             recs[0].recommendation_reason = (
-                "Ningun modelo encaja comodamente en este dispositivo. "
-                "Se recomienda modo utility (sin inferencia local)."
+                "No model fits comfortably on this device. "
+                "Utility mode recommended (no local inference)."
             )
 
     return recs
@@ -402,20 +402,20 @@ def _build_reason(rec: ModelRecommendation) -> str:
     """Build human-readable recommendation reason."""
     parts = []
     if rec.fit_level == FitLevel.optimal:
-        parts.append("Mejor equilibrio rendimiento/calidad para este hardware")
+        parts.append("Best performance/quality balance for this hardware")
     elif rec.fit_level == FitLevel.comfortable:
-        parts.append("Buen equilibrio con margen de RAM suficiente")
+        parts.append("Good balance with sufficient RAM headroom")
     elif rec.fit_level == FitLevel.tight:
-        parts.append("Funcional pero ajustado — considere modo hibrido")
+        parts.append("Functional but tight — consider hybrid mode")
 
-    parts.append(f"~{rec.estimated_tokens_per_sec:.0f} tok/s estimados")
-    parts.append(f"~{rec.estimated_battery_drain_pct_hr:.0f}%/hora bateria")
+    parts.append(f"~{rec.estimated_tokens_per_sec:.0f} tok/s estimated")
+    parts.append(f"~{rec.estimated_battery_drain_pct_hr:.0f}%/hour battery")
 
     if rec.quality_tier >= 7:
-        parts.append("calidad alta")
+        parts.append("high quality")
     elif rec.quality_tier >= 5:
-        parts.append("calidad buena")
+        parts.append("good quality")
     else:
-        parts.append("calidad basica (compresion agresiva)")
+        parts.append("basic quality (aggressive compression)")
 
     return ". ".join(parts) + "."

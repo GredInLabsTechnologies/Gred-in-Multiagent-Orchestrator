@@ -1141,18 +1141,39 @@ async def list_models(
     # Look up device capabilities for recommendations
     registry = _get_registry(request)
     device = registry.get_device(device_id)
-    if device is None or device.capabilities is None:
+    if device is None:
         return [m.model_dump(mode="json") for m in models]
 
     from tools.gimo_server.services.mesh.model_recommendation import recommend_models
-    cap = device.capabilities
+
+    # Use real capabilities if available, otherwise estimate from device_class
+    if device.capabilities is not None:
+        cap = device.capabilities
+        ram_mb = cap.ram_total_mb
+        storage_mb = cap.storage_free_mb
+        cores = cap.cpu_cores
+        soc = cap.soc_model
+        gpu = cap.has_gpu_compute
+    else:
+        # Estimate from device_class (pre-heartbeat fallback)
+        _class_defaults = {
+            "smartphone": (6144, 20480, 8, "", False),
+            "tablet": (8192, 40960, 8, "", False),
+            "laptop": (16384, 102400, 8, "", True),
+            "server": (32768, 512000, 16, "", True),
+            "desktop": (16384, 204800, 8, "", True),
+        }
+        ram_mb, storage_mb, cores, soc, gpu = _class_defaults.get(
+            device.device_class, (4096, 20480, 4, "", False)
+        )
+
     recs = recommend_models(
         models=models,
-        ram_total_mb=cap.ram_total_mb,
-        storage_free_mb=cap.storage_free_mb,
-        cpu_cores=cap.cpu_cores,
-        soc_model=cap.soc_model,
-        has_gpu_compute=cap.has_gpu_compute,
+        ram_total_mb=ram_mb,
+        storage_free_mb=storage_mb,
+        cpu_cores=cores,
+        soc_model=soc,
+        has_gpu_compute=gpu,
     )
     # Merge model info with recommendation
     model_map = {m.model_id: m.model_dump(mode="json") for m in models}

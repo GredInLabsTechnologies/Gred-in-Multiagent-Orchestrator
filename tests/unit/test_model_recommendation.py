@@ -87,7 +87,7 @@ class TestScoreModel:
             cpu_cores=8, soc_model="Exynos 9820",
         )
         assert rec.fit_level == FitLevel.overload
-        assert "bajo su responsabilidad" in rec.impact
+        assert "Run at your own risk" in rec.impact
         assert rec.recommended_mode == "utility"
 
     def test_storage_insufficient(self):
@@ -98,7 +98,7 @@ class TestScoreModel:
             ram_total_mb=6144, storage_free_mb=10240,  # 10GB free
             cpu_cores=4, soc_model="Exynos 9820",
         )
-        assert any("Espacio insuficiente" in w for w in rec.warnings)
+        assert any("Insufficient storage" in w for w in rec.warnings)
 
     def test_flagship_device_handles_7b(self):
         """Snapdragon 8 Gen 3 + 12GB RAM should handle 7B comfortably."""
@@ -185,7 +185,7 @@ class TestRecommendModels:
         recommended = [r for r in recs if r.recommended]
         assert len(recommended) == 1
         assert "utility" in recommended[0].recommendation_reason.lower() or \
-               "ningun modelo" in recommended[0].recommendation_reason.lower()
+               "no model" in recommended[0].recommendation_reason.lower()
 
     def test_flagship_recommends_bigger_model(self):
         recs = recommend_models(

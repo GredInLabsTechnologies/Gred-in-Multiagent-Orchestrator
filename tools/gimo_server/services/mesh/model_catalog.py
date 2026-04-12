@@ -56,9 +56,15 @@ class ModelCatalogService:
         return result
 
     def get_model(self, model_id: str) -> Optional[ModelInfo]:
-        """Get metadata for a specific model."""
+        """Get metadata for a specific model (includes SHA-256)."""
         for model in self.list_models():
             if model.model_id == model_id:
+                # Compute SHA-256 on demand (not during list)
+                if not model.sha256:
+                    path = _MODELS_DIR / model.filename
+                    if path.exists():
+                        model.sha256 = self._compute_sha256(path)
+                        self._cache[model.filename] = model
                 return model
         return None
 
@@ -95,9 +101,8 @@ class ModelCatalogService:
         # Generate stable model_id from filename
         model_id = filename.replace(".gguf", "").lower().replace(" ", "-")
 
-        # SHA-256 (compute once, cache)
-        sha = self._compute_sha256(path)
-
+        # SHA-256 deferred — only computed on get_model(), not list_models()
+        # Hashing a 4GB file takes ~20s, unacceptable for catalog listing
         info = ModelInfo(
             model_id=model_id,
             filename=filename,
@@ -105,7 +110,7 @@ class ModelCatalogService:
             params=params,
             quantization=quant,
             size_bytes=path.stat().st_size,
-            sha256=sha,
+            sha256="",  # Lazy — computed on demand
         )
         self._cache[filename] = info
         return info
