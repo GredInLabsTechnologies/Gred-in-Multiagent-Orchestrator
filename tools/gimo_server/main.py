@@ -475,6 +475,18 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Mesh registry init warning: %s", exc)
 
+        # mDNS advertiser — OFF by default, admin opts-in via ORCH_MDNS_ENABLED=true
+        if _os.environ.get("ORCH_MDNS_ENABLED", "false").lower() == "true":
+            try:
+                from tools.gimo_server.services.mesh.mdns_advertiser import MdnsAdvertiser
+                _mdns_port = int(_os.environ.get("ORCH_PORT", "9325"))
+                _mdns_token = _os.environ.get("ORCH_TOKEN", "")
+                advertiser = MdnsAdvertiser(port=_mdns_port, token=_mdns_token)
+                advertiser.start()
+                app.state.mdns_advertiser = advertiser
+            except Exception as exc:
+                logger.warning("mDNS advertiser init warning: %s", exc)
+
         # F8.1: Seed initial preset telemetry for adaptive routing
         try:
             from tools.gimo_server.services.preset_telemetry_service import PresetTelemetryService
@@ -496,6 +508,13 @@ async def lifespan(app: FastAPI):
         await supervisor.shutdown(timeout=15.0)
         # Drain any externally-registered supervised tasks (R17 Cluster A)
         await SupervisedTask.drain(timeout=10.0)
+
+        # Shutdown mDNS advertiser
+        if hasattr(app.state, "mdns_advertiser"):
+            try:
+                app.state.mdns_advertiser.stop()
+            except Exception:
+                pass
 
         # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
         logger.info("Shutting down GIMO Orchestrator...")

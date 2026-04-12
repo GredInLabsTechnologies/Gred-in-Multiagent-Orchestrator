@@ -166,12 +166,15 @@ class MeshRegistry:
         that present their device_secret as a Bearer token.
         O(n) scan — acceptable for mesh scale (tens of devices).
         """
+        import hmac as _hmac
         if not secret or len(secret) < 16:
             return None
+        # Constant-time scan: always check ALL devices to prevent timing leaks
+        match = None
         for device in self.list_devices():
-            if device.device_secret and device.device_secret == secret:
-                return device
-        return None
+            if device.device_secret and _hmac.compare_digest(device.device_secret, secret):
+                match = device
+        return match
 
     # ── Enrollment ───────────────────────────────────────────
 

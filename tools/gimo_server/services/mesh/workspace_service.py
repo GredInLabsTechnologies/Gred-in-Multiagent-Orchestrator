@@ -289,7 +289,8 @@ class WorkspaceService:
         # No license on Core → debug/test mode, allow
         if not core_hash:
             return True
-        return ws.license_key_hash == core_hash
+        import hmac as _hmac
+        return _hmac.compare_digest(ws.license_key_hash, core_hash)
 
     # ── INV-W6 — Core presence ─────────────────────────────────
 

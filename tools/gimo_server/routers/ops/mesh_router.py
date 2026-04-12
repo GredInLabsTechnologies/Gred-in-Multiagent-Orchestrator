@@ -845,7 +845,25 @@ async def generate_onboard_code(
     svc = _get_onboarding_service(request)
     oc = svc.create_code(workspace_id=body.workspace_id)
     audit_log("OPS", "/ops/mesh/onboard/code", f"workspace={body.workspace_id}", operation="WRITE", actor=_actor_label(auth))
-    return {"code": oc.code, "workspace_id": oc.workspace_id, "expires_at": oc.expires_at.isoformat()}
+
+    # Build signed QR payload for zero-touch onboarding
+    # SECURITY: use server config for host, NEVER trust Host header (injection risk)
+    from tools.gimo_server.services.mesh.hmac_signer import sign_payload
+    from tools.gimo_server.services.mesh.mdns_advertiser import _get_local_ip
+    import os as _os
+    _port = _os.environ.get("ORCH_PORT", "9325")
+    _ip = _get_local_ip()
+    qr_base = f"{_ip}:{_port}/{oc.code}"
+    token_for_sig = _os.environ.get("ORCH_TOKEN", "")
+    sig = sign_payload(token_for_sig, qr_base) if token_for_sig else ""
+    qr_payload = f"gimo://{qr_base}?sig={sig}" if sig else f"gimo://{qr_base}"
+
+    return {
+        "code": oc.code,
+        "workspace_id": oc.workspace_id,
+        "expires_at": oc.expires_at.isoformat(),
+        "qr_payload": qr_payload,
+    }
 
 
 @router.post("/onboard/redeem")
@@ -978,7 +996,9 @@ async def download_model(
 
         start = int(match.group(1))
         end = int(match.group(2)) if match.group(2) else file_size - 1
-        if start >= file_size:
+        # Clamp end to file boundary and validate
+        end = min(end, file_size - 1)
+        if start >= file_size or start < 0 or end < start:
             raise HTTPException(416, detail="Range not satisfiable")
 
         def iter_range():

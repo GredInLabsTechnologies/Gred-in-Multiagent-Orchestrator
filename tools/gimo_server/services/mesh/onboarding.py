@@ -114,20 +114,24 @@ class OnboardingService:
             if oc is None:
                 return None
 
+            # Check expiry FIRST (before marking used — correct error semantics)
+            if datetime.now(timezone.utc) > oc.expires_at:
+                logger.warning("Onboarding code expired for device=%s", device_id)
+                # Still mark as used to prevent probing
+                oc.used = True
+                oc.used_by = f"expired:{device_id}"
+                self._save_code(oc)
+                return None
+
             # Already used? Reject.
             if oc.used:
                 logger.warning("Onboarding code already used (by=%s)", oc.used_by)
                 return None
 
-            # Always consume to prevent probing
+            # Consume code (single-use, anti-brute-force)
             oc.used = True
             oc.used_by = device_id
             self._save_code(oc)
-
-            # Validate expiry
-            if datetime.now(timezone.utc) > oc.expires_at:
-                logger.warning("Onboarding code expired for device=%s", device_id)
-                return None
 
             # Enroll device via registry
             from .registry import MeshRegistry
