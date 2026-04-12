@@ -936,7 +936,8 @@ async def onboard_install_page(code: str, request: Request):
     _code = _html.escape(code)
     core_url = f"http://{_ip}:{_port}"
     apk_url = f"{core_url}/ops/mesh/onboard/apk"
-    deep_link = f"gimo://enroll?code={_code}&host={_ip}&port={_port}"
+    # Chrome blocks custom schemes from <a href>. Use Android intent URL instead.
+    deep_link = f"intent://enroll?code={_code}&host={_ip}&port={_port}#Intent;scheme=gimo;package=com.gredinlabs.gimomesh;end"
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1122,11 +1123,45 @@ async def list_models(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
     _rl: Annotated[None, Depends(check_rate_limit)],
+    device_id: Annotated[str | None, Query()] = None,
 ):
-    """List available GGUF models for download."""
+    """List available GGUF models with hardware-aware recommendations.
+
+    If device_id is provided, models are scored against the device's
+    capabilities (RAM, storage, SoC) and sorted by recommendation score.
+    The response includes fit_level, estimated performance, and warnings.
+    """
     _require_role(auth, "operator")
     catalog = _get_model_catalog(request)
-    return [m.model_dump(mode="json") for m in catalog.list_models()]
+    models = catalog.list_models()
+
+    if not device_id:
+        return [m.model_dump(mode="json") for m in models]
+
+    # Look up device capabilities for recommendations
+    registry = _get_registry(request)
+    device = registry.get_device(device_id)
+    if device is None or device.capabilities is None:
+        return [m.model_dump(mode="json") for m in models]
+
+    from tools.gimo_server.services.mesh.model_recommendation import recommend_models
+    cap = device.capabilities
+    recs = recommend_models(
+        models=models,
+        ram_total_mb=cap.ram_total_mb,
+        storage_free_mb=cap.storage_free_mb,
+        cpu_cores=cap.cpu_cores,
+        soc_model=cap.soc_model,
+        has_gpu_compute=cap.has_gpu_compute,
+    )
+    # Merge model info with recommendation
+    model_map = {m.model_id: m.model_dump(mode="json") for m in models}
+    result = []
+    for rec in recs:
+        entry = model_map.get(rec.model_id, {})
+        entry["recommendation"] = rec.to_dict()
+        result.append(entry)
+    return result
 
 
 @router.get("/models/{model_id}")
