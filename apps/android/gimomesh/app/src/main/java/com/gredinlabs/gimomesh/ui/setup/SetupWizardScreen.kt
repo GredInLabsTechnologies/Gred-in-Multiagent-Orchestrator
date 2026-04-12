@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -257,7 +258,7 @@ fun SetupWizardScreen(
         isCatalogLoading = true
         val client = OnboardingClient(connectedCoreUrl)
         try {
-            when (val result = client.listModels(bearerToken)) {
+            when (val result = client.listModels(bearerToken, deviceId)) {
                 is OnboardingApiResult.Success -> {
                     models = result.value
                     catalogLoaded = true
@@ -283,7 +284,7 @@ fun SetupWizardScreen(
         val client = OnboardingClient(connectedCoreUrl)
         try {
             while (true) {
-                when (val result = client.listModels(bearerToken)) {
+                when (val result = client.listModels(bearerToken, deviceId)) {
                     is OnboardingApiResult.Success -> {
                         models = result.value
                         catalogLoaded = true
@@ -585,19 +586,129 @@ private fun CodeField(code: String, onCodeChange: (String) -> Unit) {
     )
 }
 
+private val FitOptimal = Color(0xFF4ADE80)
+private val FitComfortable = Color(0xFF60A5FA)
+private val FitTight = Color(0xFFEAB308)
+private val FitOverload = Color(0xFFEF4444)
+
+private fun fitColor(level: String): Color = when (level) {
+    "optimal" -> FitOptimal
+    "comfortable" -> FitComfortable
+    "tight" -> FitTight
+    "overload" -> FitOverload
+    else -> FitComfortable
+}
+
+private fun fitLabel(level: String): String = when (level) {
+    "optimal" -> "OPTIMAL"
+    "comfortable" -> "COMPATIBLE"
+    "tight" -> "AJUSTADO"
+    "overload" -> "SOBRECARGA"
+    else -> level.uppercase()
+}
+
 @Composable
 private fun ModelCard(model: ModelInfo, onClick: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(GimoSurfaces.surface0).border(1.dp, GimoBorders.primary, RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(16.dp)) {
-        Text(model.name, fontFamily = GimoDisplay, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = GimoText.primary)
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(model.modelId, style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Pill(model.params.ifBlank { "unknown params" }, SetupAccent)
-            Pill(model.quantization.ifBlank { "raw gguf" }, GimoAccents.green)
+    val rec = model.recommendation
+    val accent = if (rec != null) fitColor(rec.fitLevel) else SetupAccent
+    val isRecommended = rec?.recommended == true
+    val isOverload = rec?.fitLevel == "overload"
+
+    Column(modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(16.dp))
+        .background(GimoSurfaces.surface0)
+        .border(
+            width = if (isRecommended) 2.dp else 1.dp,
+            color = if (isRecommended) accent.copy(alpha = 0.7f) else GimoBorders.primary,
+            shape = RoundedCornerShape(16.dp),
+        )
+        .clickable(onClick = onClick)
+        .padding(16.dp)
+    ) {
+        // Header: name + recommended badge
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(model.name, fontFamily = GimoDisplay, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = GimoText.primary, modifier = Modifier.weight(1f))
+            if (isRecommended) {
+                Pill("RECOMENDADO", accent)
+            }
         }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Tags: params + quant + fit level
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Pill(model.params.ifBlank { "?" }, SetupAccent)
+            Pill(model.quantization.ifBlank { "gguf" }, GimoAccents.green)
+            if (rec != null) {
+                Pill(fitLabel(rec.fitLevel), accent)
+            }
+        }
+
         Spacer(modifier = Modifier.height(12.dp))
-        Text(formatBytes(model.sizeBytes), style = GimoTypography.bodyMedium.copy(color = GimoText.secondary))
+
+        // Resource bar: RAM usage vs device RAM
+        if (rec != null && rec.deviceRamGb > 0) {
+            Text("Carga en tu dispositivo", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+            Spacer(modifier = Modifier.height(6.dp))
+            // Bar
+            val ratio = (rec.estimatedRamGb / rec.deviceRamGb).coerceIn(0f, 1f)
+            Box(modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(999.dp)).background(GimoSurfaces.surface3)) {
+                Box(modifier = Modifier.fillMaxWidth(ratio).height(10.dp).clip(RoundedCornerShape(999.dp)).background(accent))
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "${String.format("%.1f", rec.estimatedRamGb)} / ${String.format("%.0f", rec.deviceRamGb)} GB RAM",
+                style = GimoTypography.labelLarge.copy(color = accent),
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Stats row
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text("~${rec.estimatedTokensPerSec.toInt()} tok/s", style = GimoTypography.bodyMedium.copy(color = GimoText.primary, fontWeight = FontWeight.Bold))
+                    Text("velocidad", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("~${rec.estimatedBatteryDrainPctHr.toInt()}%/h", style = GimoTypography.bodyMedium.copy(color = if (rec.estimatedBatteryDrainPctHr > 20) FitOverload else GimoText.primary, fontWeight = FontWeight.Bold))
+                    Text("bateria", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(rec.recommendedMode.uppercase(), style = GimoTypography.bodyMedium.copy(color = accent, fontWeight = FontWeight.Bold))
+                    Text("modo", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+                }
+            }
+
+            // Impact text
+            if (rec.impact.isNotBlank()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(rec.impact, style = GimoTypography.bodySmall.copy(color = GimoText.secondary, lineHeight = 16.sp))
+            }
+
+            // Warnings
+            if (rec.warnings.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                rec.warnings.forEach { warning ->
+                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        Text("!", style = GimoTypography.labelLarge.copy(color = FitOverload, fontWeight = FontWeight.Bold))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(warning, style = GimoTypography.bodySmall.copy(color = FitOverload.copy(alpha = 0.8f)))
+                    }
+                }
+            }
+
+            // Overload disclaimer
+            if (isOverload) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(FitOverload.copy(alpha = 0.1f)).border(1.dp, FitOverload.copy(alpha = 0.3f), RoundedCornerShape(10.dp)).padding(10.dp)) {
+                    Text("Ejecutelo bajo su responsabilidad", style = GimoTypography.labelLarge.copy(color = FitOverload, fontWeight = FontWeight.Bold), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                }
+            }
+        } else {
+            // No recommendation data — basic info only
+            Text(formatBytes(model.sizeBytes), style = GimoTypography.bodyMedium.copy(color = GimoText.secondary))
+        }
     }
 }
 

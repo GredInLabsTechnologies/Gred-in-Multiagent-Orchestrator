@@ -128,11 +128,12 @@ class OnboardingClient(coreUrl: String) {
         }
     }
 
-    suspend fun listModels(bearerToken: String): OnboardingApiResult<List<ModelInfo>> =
+    suspend fun listModels(bearerToken: String, deviceId: String = ""): OnboardingApiResult<List<ModelInfo>> =
         withContext(Dispatchers.IO) {
             try {
+                val url = if (deviceId.isNotBlank()) "$baseUrl/ops/mesh/models?device_id=$deviceId" else "$baseUrl/ops/mesh/models"
                 val request = Request.Builder()
-                    .url("$baseUrl/ops/mesh/models")
+                    .url(url)
                     .header("Authorization", "Bearer $bearerToken")
                     .get()
                     .build()
