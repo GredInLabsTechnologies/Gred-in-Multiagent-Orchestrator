@@ -15,6 +15,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -237,6 +238,33 @@ class TestDeviceAuth:
         assert isinstance(models, list)
         assert len(models) >= 1
         assert models[0]["model_id"] == "test-model"
+
+    def test_onboarding_rate_limit_entry_does_not_break_global_cleanup(
+        self, test_client, _isolated_onboard, _isolated_models
+    ):
+        """Legacy onboarding entries must not poison later rate-limited endpoints."""
+        from tools.gimo_server.security import rate_limit
+
+        code_r = test_client.post(
+            "/ops/mesh/onboard/code",
+            json={"workspace_id": "default"},
+            headers=AUTH,
+        )
+        code = code_r.json()["code"]
+        redeem_r = test_client.post(
+            "/ops/mesh/onboard/redeem",
+            json={"code": code, "device_id": "dev-cleanup-test", "name": "CleanupTest"},
+        )
+        assert redeem_r.status_code == 200
+        bearer = redeem_r.json()["bearer_token"]
+
+        rate_limit._last_cleanup = datetime.now() - timedelta(seconds=rate_limit.RATE_LIMIT_CLEANUP_SECONDS + 1)
+
+        models_r = test_client.get(
+            "/ops/mesh/models",
+            headers={"Authorization": f"Bearer {bearer}"},
+        )
+        assert models_r.status_code == 200
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -67,14 +67,19 @@ async def observability_rate_limits(
     _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
-    from tools.gimo_server.security.rate_limit import rate_limit_store, ROLE_RATE_LIMITS, RATE_LIMIT_WINDOW_SECONDS
+    from tools.gimo_server.security.rate_limit import (
+        rate_limit_store,
+        ROLE_RATE_LIMITS,
+        RATE_LIMIT_WINDOW_SECONDS,
+        window_elapsed_seconds,
+    )
     from datetime import datetime
 
     now = datetime.now()
     entries = []
     for key, data in rate_limit_store.items():
-        elapsed = (now - data["start_time"]).total_seconds()
-        if elapsed > RATE_LIMIT_WINDOW_SECONDS:
+        elapsed = window_elapsed_seconds(data, now)
+        if elapsed is None or elapsed > RATE_LIMIT_WINDOW_SECONDS:
             continue
         parts = key.split(":", 1)
         ip = parts[0]

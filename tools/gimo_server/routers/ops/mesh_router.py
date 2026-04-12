@@ -878,22 +878,16 @@ async def redeem_onboard_code(
     The code IS the authentication. Rate-limited to 5/min per IP.
     Returns bearer_token for all future requests.
     """
-    # Manual rate-limit (no verify_token dependency)
-    from tools.gimo_server.security.rate_limit import rate_limit_store
-    from datetime import datetime as _dt, timezone as _tz
+    # Manual rate-limit (no verify_token dependency) still uses the canonical
+    # in-memory bucket implementation to avoid store contract drift.
+    from tools.gimo_server.security.rate_limit import consume_rate_limit
     client_ip = request.client.host if request.client else "unknown"
     rl_key = f"onboard:{client_ip}"
-    now = _dt.now(_tz.utc)
-    data = rate_limit_store.get(rl_key)
-    if data is None:
-        rate_limit_store[rl_key] = {"count": 1, "start_time": now}
-    else:
-        if (now - data["start_time"]).total_seconds() > 60:
-            rate_limit_store[rl_key] = {"count": 1, "start_time": now}
-        else:
-            data["count"] += 1
-            if data["count"] > 5:
-                raise HTTPException(429, detail="Too many onboarding attempts. Try again in 1 minute.")
+    consume_rate_limit(
+        rl_key,
+        limit=5,
+        error_detail="Too many onboarding attempts. Try again in 1 minute.",
+    )
 
     # Validate device_id format
     import re
