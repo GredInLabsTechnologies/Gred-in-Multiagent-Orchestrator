@@ -336,12 +336,8 @@ fun SetupWizardScreen(
         }
     }
 
-    LaunchedEffect(step) {
-        if (step == SetupStep.Done && !meshAutoStarted) {
-            meshAutoStarted = true
-            onStartMesh()
-        }
-    }
+    // Mesh starts OFF — user activates from Dashboard, or Core requests it
+    // LaunchedEffect(step) { if (step == SetupStep.Done) onStartMesh() }  // REMOVED
 
     LaunchedEffect(step) {
         if (step != SetupStep.CoreUrl) {
@@ -474,7 +470,7 @@ fun SetupWizardScreen(
                             }
                         }
                         SetupStep.Done -> StepCard {
-                            StepTitle("Ready", "Token, workspace, model selection, and download path are stored locally. The mesh has been started automatically.")
+                            StepTitle("Ready", "Token, workspace, and model are stored locally. Activate the mesh from the Dashboard when ready.")
                             Spacer(modifier = Modifier.height(18.dp))
                             Box(modifier = Modifier.size(84.dp).clip(CircleShape).background(SetupAccent.copy(alpha = 0.14f)).border(1.dp, SetupAccent.copy(alpha = 0.45f), CircleShape).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
                                 Text("OK", fontFamily = GimoMono, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = SetupAccent)

@@ -90,53 +90,18 @@ class MeshAgentService : Service() {
 
             watchInferenceStatus()
 
-            val needsInference = settings.deviceMode in listOf("inference", "hybrid")
-            val modelFile = resolveModelFile(settings)
-            when {
-                needsInference && !shellReady -> {
-                    terminalBuffer.append(
-                        LogSource.INFER,
-                        "inference unavailable - embedded binaries are not ready",
-                        LogLevel.WARN,
-                    )
-                }
+            // Model is NOT loaded automatically at mesh start.
+            // Inference starts only when:
+            //   1. Core sends a load_model task
+            //   2. User explicitly activates from Dashboard
+            // This preserves battery and RAM until actually needed.
+            terminalBuffer.append(
+                LogSource.INFER,
+                "inference standby - model loaded on demand by Core or user",
+            )
 
-                needsInference && modelFile.exists() -> {
-                    val started = inferenceRunner.start(
-                        modelPath = modelFile.absolutePath,
-                        port = settings.inferencePort,
-                        threads = settings.threads,
-                        contextSize = settings.contextSize,
-                    )
-                    if (started) {
-                        terminalBuffer.append(LogSource.INFER, "llama-server started - port=${settings.inferencePort}")
-                        inferenceOutputJob?.cancel()
-                        inferenceOutputJob = scope.launch {
-                            inferenceRunner.readOutput { line ->
-                                terminalBuffer.append(LogSource.INFER, line)
-                            }
-                        }
-                    } else {
-                        terminalBuffer.append(LogSource.INFER, "llama-server failed to start", LogLevel.ERROR)
-                    }
-                }
-
-                !needsInference -> {
-                    terminalBuffer.append(
-                        LogSource.INFER,
-                        "mode=${settings.deviceMode} - inference not required",
-                    )
-                    startTaskPolling(settings)
-                }
-
-                else -> {
-                    terminalBuffer.append(
-                        LogSource.INFER,
-                        "model not found at ${modelFile.path} - inference offline",
-                        LogLevel.WARN,
-                    )
-                }
-            }
+            // Start task polling for all modes (utility tasks + load_model commands)
+            startTaskPolling(settings)
         }
 
         heartbeatJob = scope.launch {
