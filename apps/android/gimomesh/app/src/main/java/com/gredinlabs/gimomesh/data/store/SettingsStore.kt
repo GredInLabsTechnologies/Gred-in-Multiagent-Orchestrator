@@ -19,6 +19,9 @@ class SettingsStore(private val context: Context) {
     private object Keys {
         val CORE_URL = stringPreferencesKey("core_url")
         val TOKEN = stringPreferencesKey("token")
+        val LOCAL_CORE_TOKEN = stringPreferencesKey("local_core_token")
+        val LOCAL_DEVICE_SECRET = stringPreferencesKey("local_device_secret")
+        val MESH_SERVICE_RUNNING = booleanPreferencesKey("mesh_service_running")
         val DEVICE_ID = stringPreferencesKey("device_id")
         val DEVICE_NAME = stringPreferencesKey("device_name")
         val DEVICE_MODE = stringPreferencesKey("device_mode")
@@ -48,6 +51,9 @@ class SettingsStore(private val context: Context) {
     data class Settings(
         val coreUrl: String = "http://192.168.0.49:9325",
         val token: String = "",
+        val localCoreToken: String = "",
+        val localDeviceSecret: String = "",
+        val meshServiceRunning: Boolean = false,
         val deviceId: String = "",
         val deviceName: String = "",
         val deviceMode: String = "inference",
@@ -77,6 +83,9 @@ class SettingsStore(private val context: Context) {
         Settings(
             coreUrl = prefs[Keys.CORE_URL] ?: Settings().coreUrl,
             token = prefs[Keys.TOKEN] ?: "",
+            localCoreToken = prefs[Keys.LOCAL_CORE_TOKEN] ?: "",
+            localDeviceSecret = prefs[Keys.LOCAL_DEVICE_SECRET] ?: "",
+            meshServiceRunning = prefs[Keys.MESH_SERVICE_RUNNING] ?: false,
             deviceId = prefs[Keys.DEVICE_ID] ?: "",
             deviceName = prefs[Keys.DEVICE_NAME] ?: "",
             deviceMode = prefs[Keys.DEVICE_MODE] ?: "inference",
@@ -109,6 +118,18 @@ class SettingsStore(private val context: Context) {
 
     suspend fun updateToken(token: String) {
         context.dataStore.edit { it[Keys.TOKEN] = token }
+    }
+
+    suspend fun updateLocalCoreToken(token: String) {
+        context.dataStore.edit { it[Keys.LOCAL_CORE_TOKEN] = token }
+    }
+
+    suspend fun updateLocalDeviceSecret(secret: String) {
+        context.dataStore.edit { it[Keys.LOCAL_DEVICE_SECRET] = secret }
+    }
+
+    suspend fun updateMeshServiceRunning(running: Boolean) {
+        context.dataStore.edit { it[Keys.MESH_SERVICE_RUNNING] = running }
     }
 
     suspend fun updateDeviceId(id: String) {

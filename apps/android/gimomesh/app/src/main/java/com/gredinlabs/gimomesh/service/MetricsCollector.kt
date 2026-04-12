@@ -34,7 +34,8 @@ class MetricsCollector(private val context: Context) {
     private var prevIdle = 0L
 
     suspend fun collect(): Snapshot = withContext(Dispatchers.IO) {
-        // Read battery sticky intent once for temp + charging
+        // Read battery sticky intent once — used for percent, temp, and charging state.
+        // This is more reliable than BatteryManager.getIntProperty() on Android 12+.
         val batteryIntent = try {
             context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         } catch (_: Exception) { null }
@@ -42,7 +43,7 @@ class MetricsCollector(private val context: Context) {
         Snapshot(
             cpuPercent = readCpuPercent(),
             ramPercent = readRamPercent(),
-            batteryPercent = readBatteryPercent(),
+            batteryPercent = readBatteryPercent(batteryIntent),
             cpuTempC = readThermalZone("cpu"),
             batteryTempC = readBatteryTemp(batteryIntent),
             isCharging = isCharging(batteryIntent),
@@ -83,9 +84,19 @@ class MetricsCollector(private val context: Context) {
         } catch (_: Exception) { 0f }
     }
 
-    private fun readBatteryPercent(): Float {
-        val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-        return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).toFloat()
+    private fun readBatteryPercent(batteryIntent: Intent?): Float {
+        // Preferred: sticky intent level/scale (works on all Android versions without permissions)
+        if (batteryIntent != null) {
+            val level = batteryIntent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = batteryIntent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+            if (level >= 0 && scale > 0) return level.toFloat() / scale * 100f
+        }
+        // Fallback: BatteryManager API (may return Integer.MIN_VALUE on some Android 12+ devices)
+        return try {
+            val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+            val cap = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            if (cap in 0..100) cap.toFloat() else -1f
+        } catch (_: Exception) { -1f }
     }
 
     private fun readBatteryTemp(batteryIntent: Intent?): Float {
@@ -142,19 +153,57 @@ class MetricsCollector(private val context: Context) {
 
     fun getDeviceCapabilities(): DeviceCapabilities = _capabilities
 
+    /**
+     * Reads CPU temperature from /sys/class/thermal/.
+     * Samsung Exynos devices (S10, etc.) use zone type names like "big_s1", "LITTLE_s1",
+     * "xclkevt_little", "xclkevt_big" — not "cpu". We try a broad set of aliases and
+     * fall back to the hottest of thermal_zone0..3 if nothing matches.
+     */
     private fun readThermalZone(type: String): Float {
         return try {
-            // Try thermal zones
             val thermalDir = File("/sys/class/thermal/")
             if (!thermalDir.exists()) return -1f
-            thermalDir.listFiles()?.filter { it.name.startsWith("thermal_zone") }?.forEach { zone ->
-                val zoneType = File(zone, "type").readText().trim()
-                if (zoneType.contains(type, ignoreCase = true)) {
-                    val temp = File(zone, "temp").readText().trim().toIntOrNull() ?: return@forEach
-                    return temp / 1000f
+
+            val zones = thermalDir.listFiles()
+                ?.filter { it.name.startsWith("thermal_zone") }
+                ?: return -1f
+
+            // Broad keyword list that covers AOSP, Qualcomm and Exynos naming
+            val cpuKeywords = listOf(
+                "cpu", "big", "little", "cluster", "core", "ap", "soc", "main",
+                "xclkevt", "tmu_cpu", "mngs", "apollo",
+            )
+
+            // First pass: find the hottest zone whose type matches any keyword
+            var best = -1f
+            for (zone in zones) {
+                val zoneType = runCatching { File(zone, "type").readText().trim() }.getOrNull()
+                    ?: continue
+                val matches = when (type) {
+                    "cpu" -> cpuKeywords.any { zoneType.contains(it, ignoreCase = true) }
+                    else  -> zoneType.contains(type, ignoreCase = true)
+                }
+                if (matches) {
+                    val temp = runCatching {
+                        File(zone, "temp").readText().trim().toIntOrNull()
+                    }.getOrNull() ?: continue
+                    // Temperatures can be in millidegrees (>1000) or degrees directly
+                    val tempC = if (temp > 1000) temp / 1000f else temp.toFloat()
+                    if (tempC > best) best = tempC
                 }
             }
-            -1f
+            if (best >= 0f) return best
+
+            // Fallback: return max of first 4 zones (better than nothing on exotic devices)
+            zones.sortedBy { it.name }
+                .take(4)
+                .mapNotNull { zone ->
+                    runCatching {
+                        val raw = File(zone, "temp").readText().trim().toIntOrNull() ?: return@mapNotNull null
+                        if (raw > 1000) raw / 1000f else raw.toFloat()
+                    }.getOrNull()
+                }
+                .maxOrNull() ?: -1f
         } catch (_: Exception) { -1f }
     }
 }

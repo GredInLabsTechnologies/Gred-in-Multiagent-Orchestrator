@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.gredinlabs.gimomesh.GimoMeshApp
@@ -15,45 +16,57 @@ import com.gredinlabs.gimomesh.data.model.LogLevel
 import com.gredinlabs.gimomesh.data.model.LogSource
 import com.gredinlabs.gimomesh.data.store.SettingsStore
 import java.io.File
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
- * Foreground service that keeps the mesh agent alive.
- * Runs heartbeat loop, task polling, and the embedded inference server.
+ * Foreground service that owns the Android mesh node lifecycle.
+ * It composes serve/inference/utility capabilities from a single runtime owner.
  */
 class MeshAgentService : Service() {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var heartbeatJob: Job? = null
-    private var inferenceOutputJob: Job? = null
     private var inferenceStatusJob: Job? = null
     private var taskPollJob: Job? = null
+    private var settingsObserverJob: Job? = null
 
     private lateinit var terminalBuffer: TerminalBuffer
+    private lateinit var hostRuntimeReporter: HostRuntimeReporter
     private lateinit var settingsStore: SettingsStore
     private lateinit var metricsCollector: MetricsCollector
     private lateinit var shell: ShellEnvironment
     private lateinit var inferenceRunner: InferenceRunner
+    private lateinit var coreRunner: EmbeddedCoreRunner
+
     private var coreClient: GimoCoreClient? = null
+    private var coreClientKey: String = ""
 
     override fun onCreate() {
         super.onCreate()
         val app = application as GimoMeshApp
         terminalBuffer = app.terminalBuffer
+        hostRuntimeReporter = app.hostRuntimeReporter
         settingsStore = app.settingsStore
         metricsCollector = MetricsCollector(applicationContext)
         shell = ShellEnvironment(applicationContext)
         inferenceRunner = InferenceRunner(applicationContext, shell)
+        coreRunner = EmbeddedCoreRunner(
+            context = applicationContext,
+            shell = shell,
+            terminalBuffer = terminalBuffer,
+            reporter = hostRuntimeReporter,
+        )
         createNotificationChannel()
     }
 
@@ -67,19 +80,23 @@ class MeshAgentService : Service() {
 
     private fun startMesh() {
         startForeground(NOTIFICATION_ID, buildNotification("Mesh active - idle"))
+        scope.launch { settingsStore.updateMeshServiceRunning(true) }
 
-        scope.launch {
-            val settings = settingsStore.settings.first()
-            val baseUrl = settings.coreUrl.let {
-                if (it.startsWith("http")) it else "http://$it"
-            }
-            if (settings.token.isNotEmpty()) {
-                coreClient = GimoCoreClient(baseUrl, settings.token)
-            }
-
+        settingsObserverJob?.cancel()
+        settingsObserverJob = scope.launch {
             val shellReady = shell.init()
             if (shellReady) {
-                terminalBuffer.append(LogSource.SYS, "embedded shell ready - ${shell.getBinaryPath("busybox").parent}")
+                terminalBuffer.append(
+                    LogSource.SYS,
+                    "embedded shell ready - ${shell.getBinaryPath("busybox").parent}",
+                )
+                if (shell.getEmbeddedCoreRuntime() == null) {
+                    terminalBuffer.append(
+                        LogSource.SYS,
+                        "embedded Core runtime contract absent - serve mode will stay unavailable",
+                        LogLevel.WARN,
+                    )
+                }
             } else {
                 terminalBuffer.append(
                     LogSource.SYS,
@@ -90,28 +107,20 @@ class MeshAgentService : Service() {
 
             watchInferenceStatus()
 
-            // Model is NOT loaded automatically at mesh start.
-            // Inference starts only when:
-            //   1. Core sends a load_model task
-            //   2. User explicitly activates from Dashboard
-            // This preserves battery and RAM until actually needed.
-            terminalBuffer.append(
-                LogSource.INFER,
-                "inference standby - model loaded on demand by Core or user",
-            )
-
-            // Start task polling for all modes (utility tasks + load_model commands)
-            startTaskPolling(settings)
+            settingsStore.settings.collect { rawSettings ->
+                val settings = ensureRuntimeIdentity(rawSettings)
+                rebuildCoreClient(settings)
+                applyRuntimeComposition(settings)
+            }
         }
 
+        heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             while (isActive) {
                 try {
-                    val settings = settingsStore.settings.first()
-                    val deviceId = settings.deviceId.ifEmpty {
-                        android.os.Build.MODEL.lowercase().replace(" ", "-")
-                    }
-                    val token = settings.token
+                    val settings = ensureRuntimeIdentity(settingsStore.settings.first())
+                    rebuildCoreClient(settings)
+
                     val snapshot = metricsCollector.collect()
                     val statusText = "CPU ${snapshot.cpuPercent.toInt()}% | " +
                         "${snapshot.cpuTempC.toInt()}C | BAT ${snapshot.batteryPercent.toInt()}%"
@@ -124,29 +133,37 @@ class MeshAgentService : Service() {
                         null
                     }
 
-                    coreClient?.let { client ->
-                        try {
-                            val payload = HeartbeatPayload(
-                                deviceId = deviceId,
-                                deviceSecret = token,
-                                deviceMode = settings.deviceMode,
-                                cpuPercent = snapshot.cpuPercent,
-                                ramPercent = snapshot.ramPercent,
-                                batteryPercent = snapshot.batteryPercent,
-                                cpuTempC = snapshot.cpuTempC,
-                                gpuTempC = snapshot.gpuTempC,
-                                batteryTempC = snapshot.batteryTempC,
-                                modelLoaded = if (inferenceRunning) settings.model else null,
-                                inferenceEndpoint = inferenceEndpoint,
-                                capabilities = metricsCollector.getDeviceCapabilities(),
-                            )
-                            client.sendHeartbeat(payload)
-                        } catch (e: Exception) {
-                            terminalBuffer.append(
-                                LogSource.AGENT,
-                                "service heartbeat error: ${e.message}",
-                                LogLevel.WARN,
-                            )
+                    val deviceSecret = resolveHeartbeatSecret(settings)
+                    if (isServeMode(settings) && deviceSecret.isBlank()) {
+                        syncLocalDeviceSecret(settings)
+                    }
+
+                    val heartbeatSecret = resolveHeartbeatSecret(settingsStore.settings.first())
+                    if (heartbeatSecret.isNotBlank()) {
+                        coreClient?.let { client ->
+                            try {
+                                val payload = HeartbeatPayload(
+                                    deviceId = resolveDeviceId(settings),
+                                    deviceSecret = heartbeatSecret,
+                                    deviceMode = settings.deviceMode,
+                                    cpuPercent = snapshot.cpuPercent,
+                                    ramPercent = snapshot.ramPercent,
+                                    batteryPercent = snapshot.batteryPercent,
+                                    cpuTempC = snapshot.cpuTempC,
+                                    gpuTempC = snapshot.gpuTempC,
+                                    batteryTempC = snapshot.batteryTempC,
+                                    modelLoaded = if (inferenceRunning) settings.model else null,
+                                    inferenceEndpoint = inferenceEndpoint,
+                                    capabilities = metricsCollector.getDeviceCapabilities(),
+                                )
+                                client.sendHeartbeat(payload)
+                            } catch (e: Exception) {
+                                terminalBuffer.append(
+                                    LogSource.AGENT,
+                                    "service heartbeat error: ${e.message}",
+                                    LogLevel.WARN,
+                                )
+                            }
                         }
                     }
 
@@ -155,10 +172,11 @@ class MeshAgentService : Service() {
                     ) {
                         terminalBuffer.append(
                             LogSource.SYS,
-                            "thermal lockout - service stopping inference",
+                            "thermal lockout - stopping local runtimes",
                             LogLevel.ERROR,
                         )
                         inferenceRunner.stop()
+                        coreRunner.stop()
                         settingsStore.updateInferenceRunning(false)
                     }
                 } catch (_: Exception) {
@@ -170,12 +188,101 @@ class MeshAgentService : Service() {
         }
     }
 
-    private fun startTaskPolling(settings: SettingsStore.Settings) {
-        taskPollJob?.cancel()
-        val deviceId = settings.deviceId.ifEmpty {
-            android.os.Build.MODEL.lowercase().replace(" ", "-")
+    private suspend fun ensureRuntimeIdentity(settings: SettingsStore.Settings): SettingsStore.Settings {
+        var changed = false
+        if (settings.deviceId.isBlank()) {
+            settingsStore.updateDeviceId(resolveDeviceId(settings))
+            changed = true
         }
-        val token = settings.token
+        if (settings.deviceName.isBlank()) {
+            settingsStore.updateDeviceName(resolveDeviceName(settings))
+            changed = true
+        }
+        if (isServeMode(settings) && settings.localCoreToken.isBlank()) {
+            settingsStore.updateLocalCoreToken(UUID.randomUUID().toString().replace("-", ""))
+            terminalBuffer.append(LogSource.SYS, "generated local control token for embedded Core")
+            changed = true
+        }
+        return if (changed) settingsStore.settings.first() else settings
+    }
+
+    private fun resolveDeviceId(settings: SettingsStore.Settings): String =
+        settings.deviceId.ifBlank { Build.MODEL.lowercase().replace(" ", "-") }
+
+    private fun resolveDeviceName(settings: SettingsStore.Settings): String =
+        settings.deviceName.ifBlank { "${Build.MANUFACTURER} ${Build.MODEL}" }
+
+    private suspend fun rebuildCoreClient(settings: SettingsStore.Settings) {
+        val baseUrl = resolveControlPlaneBaseUrl(settings)
+        val token = resolveControlPlaneToken(settings)
+        val newKey = "$baseUrl|$token"
+        if (newKey == coreClientKey) return
+
+        coreClient?.shutdown()
+        coreClient = if (token.isNotBlank()) GimoCoreClient(baseUrl, token) else null
+        coreClientKey = newKey
+    }
+
+    private suspend fun applyRuntimeComposition(settings: SettingsStore.Settings) {
+        if (isServeMode(settings)) {
+            if (coreRunner.start(settings)) {
+                syncLocalDeviceSecret(settings)
+            }
+        } else {
+            coreRunner.stop()
+        }
+
+        syncInferenceRuntime(settings)
+
+        if (allowsUtility(settings)) {
+            startTaskPolling(settings)
+        } else {
+            stopTaskPolling()
+        }
+    }
+
+    private suspend fun syncLocalDeviceSecret(settings: SettingsStore.Settings) {
+        if (!isServeMode(settings)) return
+        val device = coreClient?.getDevice(resolveDeviceId(settings)) ?: return
+        if (device.deviceSecret.isNotBlank() && device.deviceSecret != settings.localDeviceSecret) {
+            settingsStore.updateLocalDeviceSecret(device.deviceSecret)
+        }
+    }
+
+    private suspend fun syncInferenceRuntime(settings: SettingsStore.Settings) {
+        if (!allowsInference(settings)) {
+            if (inferenceRunner.status.value != InferenceRunner.Status.STOPPED) {
+                inferenceRunner.stop()
+            }
+            return
+        }
+
+        val modelFile = resolveModelFile(settings)
+        if (!modelFile.exists()) {
+            terminalBuffer.append(
+                LogSource.INFER,
+                "inference enabled but no local model is available yet",
+                LogLevel.WARN,
+            )
+            return
+        }
+
+        if (inferenceRunner.status.value != InferenceRunner.Status.RUNNING) {
+            inferenceRunner.start(
+                modelPath = modelFile.absolutePath,
+                port = settings.inferencePort,
+                threads = settings.threads,
+                contextSize = settings.contextSize,
+            )
+        }
+    }
+
+    private fun startTaskPolling(settings: SettingsStore.Settings) {
+        val deviceId = resolveDeviceId(settings)
+        val deviceSecret = resolveHeartbeatSecret(settings)
+        if (deviceSecret.isBlank()) return
+        if (taskPollJob?.isActive == true) return
+
         taskPollJob = scope.launch {
             val executor = TaskExecutor(filesDir, terminalBuffer)
             terminalBuffer.append(
@@ -190,7 +297,7 @@ class MeshAgentService : Service() {
                             LogSource.TASK,
                             ">> ${task.taskType} [${task.taskId.take(8)}]",
                         )
-                        val result = executor.execute(task, deviceId, token)
+                        val result = executor.execute(task, deviceId, deviceSecret)
                         coreClient?.submitTaskResult(result)
                         terminalBuffer.append(
                             LogSource.TASK,
@@ -209,19 +316,28 @@ class MeshAgentService : Service() {
         }
     }
 
+    private fun stopTaskPolling() {
+        taskPollJob?.cancel()
+        taskPollJob = null
+    }
+
     private fun stopMesh() {
         heartbeatJob?.cancel()
         heartbeatJob = null
-        inferenceOutputJob?.cancel()
-        inferenceOutputJob = null
+        settingsObserverJob?.cancel()
+        settingsObserverJob = null
         inferenceStatusJob?.cancel()
         inferenceStatusJob = null
-        taskPollJob?.cancel()
-        taskPollJob = null
-        inferenceRunner.stop()
+        stopTaskPolling()
+        runBlocking {
+            coreRunner.stop()
+            inferenceRunner.stop()
+            settingsStore.updateInferenceRunning(false)
+            settingsStore.updateMeshServiceRunning(false)
+        }
         coreClient?.shutdown()
         coreClient = null
-        scope.launch { settingsStore.updateInferenceRunning(false) }
+        coreClientKey = ""
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -259,7 +375,12 @@ class MeshAgentService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
-        runBlocking { settingsStore.updateInferenceRunning(false) }
+        runBlocking {
+            settingsStore.updateInferenceRunning(false)
+            settingsStore.updateMeshServiceRunning(false)
+            coreRunner.stop()
+        }
+        hostRuntimeReporter.reset()
         coreClient?.shutdown()
         inferenceRunner.stop()
         super.onDestroy()

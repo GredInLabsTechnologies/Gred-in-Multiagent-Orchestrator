@@ -114,6 +114,23 @@ private fun InstrumentView(
         )
         Spacer(Modifier.height(7.dp))
 
+        if (
+            state.deviceMode == com.gredinlabs.gimomesh.data.model.DeviceMode.SERVER ||
+            state.deviceMode == com.gredinlabs.gimomesh.data.model.DeviceMode.HYBRID ||
+            state.hostRuntimeAvailable ||
+            state.hostRuntimeError.isNotBlank()
+        ) {
+            HostRuntimeCard(
+                status = state.hostRuntimeStatus,
+                available = state.hostRuntimeAvailable,
+                lanUrl = state.hostLanUrl,
+                webUrl = state.hostWebUrl,
+                mcpUrl = state.hostMcpUrl,
+                error = state.hostRuntimeError,
+            )
+            Spacer(Modifier.height(7.dp))
+        }
+
         // Plan Graph
         PlanGraphView(
             nodes = state.planNodes,

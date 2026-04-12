@@ -10,6 +10,12 @@ data class MeshState(
     val isLinked: Boolean = false,
     val deviceId: String = "",
     val deviceName: String = "",
+    val hostRuntimeStatus: String = "stopped",
+    val hostRuntimeAvailable: Boolean = false,
+    val hostLanUrl: String = "",
+    val hostWebUrl: String = "",
+    val hostMcpUrl: String = "",
+    val hostRuntimeError: String = "",
 
     // Device status
     val connectionState: ConnectionState = ConnectionState.OFFLINE,

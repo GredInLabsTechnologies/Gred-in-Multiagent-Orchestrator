@@ -37,6 +37,10 @@ from tools.gimo_server.services.mesh.audit import MeshAuditService
 from tools.gimo_server.services.mesh.decomposer import PlanDecomposer
 from tools.gimo_server.services.mesh.dispatch import DispatchService
 from tools.gimo_server.services.mesh.enrollment import EnrollmentService
+from tools.gimo_server.services.mesh.host_bootstrap import (
+    AndroidHostBootstrapConfig,
+    AndroidHostBootstrapService,
+)
 from tools.gimo_server.services.mesh.registry import MeshRegistry
 from tools.gimo_server.services.mesh.telemetry import TelemetryService
 
@@ -188,6 +192,49 @@ class TestRegistryLifecycle:
         assert status.devices_connected == 1
         assert status.devices_by_mode["inference"] == 1
         assert status.devices_by_mode["hybrid"] == 1
+
+
+class TestAndroidHostBootstrap:
+    def test_bootstrap_registers_host_device(self, registry: MeshRegistry):
+        service = AndroidHostBootstrapService(registry)
+        device = service.bootstrap(
+            AndroidHostBootstrapConfig(
+                enabled=True,
+                device_id="phone-host",
+                device_name="Galaxy Host",
+                device_mode=DeviceMode.server,
+                device_class="smartphone",
+                inference_endpoint="",
+            )
+        )
+
+        assert device.device_id == "phone-host"
+        assert device.connection_state == ConnectionState.connected
+        assert device.device_mode == DeviceMode.server
+        assert service.runtime_path.exists()
+        runtime_text = service.runtime_path.read_text(encoding="utf-8")
+        assert '"device_id": "phone-host"' in runtime_text
+        assert '"device_mode": "server"' in runtime_text
+
+    def test_bootstrap_updates_existing_host_device(self, registry: MeshRegistry):
+        registry.enroll_device("phone-host", name="Old Name", device_mode=DeviceMode.inference)
+        service = AndroidHostBootstrapService(registry)
+
+        updated = service.bootstrap(
+            AndroidHostBootstrapConfig(
+                enabled=True,
+                device_id="phone-host",
+                device_name="Galaxy Host",
+                device_mode=DeviceMode.hybrid,
+                device_class="smartphone",
+                inference_endpoint="http://192.168.0.24:8080",
+            )
+        )
+
+        assert updated.name == "Galaxy Host"
+        assert updated.device_mode == DeviceMode.hybrid
+        assert updated.connection_state == ConnectionState.connected
+        assert updated.inference_endpoint == "http://192.168.0.24:8080"
 
 
 # ── 2. Enrollment tokens ────────────────────────────────────

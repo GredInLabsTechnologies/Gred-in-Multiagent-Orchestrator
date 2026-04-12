@@ -70,6 +70,24 @@ fun SettingsScreen(
             SettingsRow("Device Name", settings.deviceName.ifEmpty { state.deviceName }, isLast = true)
         }
 
+        SettingsGroup("Local Host") {
+            SettingsRow(
+                "Runtime",
+                state.hostRuntimeStatus,
+                valueColor = when (state.hostRuntimeStatus) {
+                    "ready" -> GimoAccents.green
+                    "degraded", "starting" -> GimoAccents.warning
+                    "error", "unavailable" -> GimoAccents.alert
+                    else -> GimoText.tertiary
+                },
+            )
+            SettingsRow("Control URL", if (state.hostRuntimeAvailable) "127.0.0.1:9325" else "disabled")
+            SettingsRow("LAN URL", state.hostLanUrl.ifBlank { "not published" })
+            SettingsRow("Web UI", state.hostWebUrl.ifBlank { "unavailable" })
+            SettingsRow("MCP", state.hostMcpUrl.ifBlank { "unavailable" })
+            SettingsRow("Runtime Error", state.hostRuntimeError.ifBlank { "none" }, isLast = true)
+        }
+
         // Mesh Node
         SettingsGroup("Mesh Node") {
             SettingsRow("Model", settings.model)

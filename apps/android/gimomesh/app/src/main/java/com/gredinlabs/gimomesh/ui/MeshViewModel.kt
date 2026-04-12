@@ -7,14 +7,26 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.gredinlabs.gimomesh.GimoMeshApp
 import com.gredinlabs.gimomesh.data.api.GimoCoreClient
-import com.gredinlabs.gimomesh.data.model.*
+import com.gredinlabs.gimomesh.data.model.ConnectionState
+import com.gredinlabs.gimomesh.data.model.DeviceMode
+import com.gredinlabs.gimomesh.data.model.MeshDevice
+import com.gredinlabs.gimomesh.data.model.MeshState
+import com.gredinlabs.gimomesh.data.model.OperationalState
 import com.gredinlabs.gimomesh.data.store.SettingsStore
+import com.gredinlabs.gimomesh.service.HostRuntimeStatus
 import com.gredinlabs.gimomesh.service.MeshAgentService
 import com.gredinlabs.gimomesh.service.MetricsCollector
 import com.gredinlabs.gimomesh.service.TerminalBuffer
+import com.gredinlabs.gimomesh.service.isServeMode
+import com.gredinlabs.gimomesh.service.resolveControlPlaneBaseUrl
+import com.gredinlabs.gimomesh.service.resolveControlPlaneToken
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -22,45 +34,68 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as GimoMeshApp
     private val terminalBuffer: TerminalBuffer = app.terminalBuffer
+    private val hostRuntimeReporter = app.hostRuntimeReporter
     val settingsStore: SettingsStore = app.settingsStore
     private val metricsCollector = MetricsCollector(application)
 
     private var coreClient: GimoCoreClient? = null
+    private var coreClientKey: String = ""
     private var metricsJob: Job? = null
-    private var heartbeatJob: Job? = null
+    private var devicePollJob: Job? = null
 
     private val _state = MutableStateFlow(MeshState())
     val state: StateFlow<MeshState> = _state.asStateFlow()
 
-    // Current settings snapshot (updated reactively)
     private var currentSettings = SettingsStore.Settings()
 
     init {
-        // Observe settings and rebuild client when they change
+        observeSettings()
+        observeTerminal()
+        observeHostRuntime()
+        startMetricsLoop()
+        startDevicePollLoop()
+    }
+
+    private fun observeSettings() {
         viewModelScope.launch {
             settingsStore.settings.collect { settings ->
                 currentSettings = settings
                 rebuildClient(settings)
-                _state.update {
-                    it.copy(
-                        coreUrl = settings.coreUrl.removePrefix("http://").removePrefix("https://"),
-                        deviceId = settings.deviceId.ifEmpty { Build.MODEL.lowercase().replace(" ", "-") },
-                        deviceName = settings.deviceName.ifEmpty { "${Build.MANUFACTURER} ${Build.MODEL}" },
-                        modelLoaded = settings.model,
+                _state.update { state ->
+                    state.copy(
+                        coreUrl = resolveDisplayCoreUrl(settings),
+                        deviceId = resolveDeviceId(settings),
+                        deviceName = resolveDeviceName(settings),
+                        modelLoaded = state.modelLoaded.ifBlank { settings.model },
                         inferenceRunning = settings.inferenceRunning,
                         inferencePort = settings.inferencePort,
-                        inferenceEndpoint = if (settings.inferenceRunning) {
-                            buildInferenceEndpoint(settings.inferencePort).orEmpty()
-                        } else {
-                            ""
+                        inferenceEndpoint = state.inferenceEndpoint.ifBlank {
+                            if (settings.inferenceRunning) {
+                                buildInferenceEndpoint(settings.inferencePort).orEmpty()
+                            } else {
+                                ""
+                            }
                         },
                         deviceMode = parseDeviceMode(settings.deviceMode),
+                        isMeshRunning = settings.meshServiceRunning,
+                        isLinked = if (settings.meshServiceRunning) state.isLinked else false,
+                        connectionState = if (settings.meshServiceRunning) {
+                            state.connectionState
+                        } else {
+                            ConnectionState.OFFLINE
+                        },
+                        operationalState = if (settings.meshServiceRunning) {
+                            state.operationalState
+                        } else {
+                            OperationalState.IDLE
+                        },
                     )
                 }
             }
         }
+    }
 
-        // Observe terminal buffer → state
+    private fun observeTerminal() {
         viewModelScope.launch {
             terminalBuffer.lines.collect { lines ->
                 _state.update { it.copy(terminalLines = lines) }
@@ -68,66 +103,48 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun rebuildClient(settings: SettingsStore.Settings) {
-        coreClient?.shutdown()
-        val baseUrl = settings.coreUrl.let {
-            if (it.startsWith("http")) it else "http://$it"
+    private fun observeHostRuntime() {
+        viewModelScope.launch {
+            hostRuntimeReporter.snapshot.collect { snapshot ->
+                _state.update { state ->
+                    val serveMode = isServeMode(currentSettings)
+                    val connectionState = when {
+                        !serveMode -> state.connectionState
+                        !currentSettings.meshServiceRunning -> ConnectionState.OFFLINE
+                        snapshot.status == HostRuntimeStatus.STARTING -> ConnectionState.RECONNECTING
+                        snapshot.status == HostRuntimeStatus.ERROR ||
+                            snapshot.status == HostRuntimeStatus.UNAVAILABLE -> ConnectionState.REFUSED
+                        else -> state.connectionState
+                    }
+
+                    state.copy(
+                        hostRuntimeStatus = snapshot.status.name.lowercase(),
+                        hostRuntimeAvailable = snapshot.available,
+                        hostLanUrl = snapshot.lanUrl,
+                        hostWebUrl = snapshot.webUrl,
+                        hostMcpUrl = snapshot.mcpUrl,
+                        hostRuntimeError = snapshot.error,
+                        connectionState = connectionState,
+                    )
+                }
+            }
         }
-        coreClient = if (settings.token.isNotEmpty()) {
-            GimoCoreClient(baseUrl, settings.token)
-        } else null
     }
 
-    fun toggleMesh() {
-        val running = _state.value.isMeshRunning
-        if (running) {
-            stopMesh()
-        } else {
-            startMesh()
-        }
-    }
-
-    private fun startMesh() {
-        _state.update {
-            it.copy(
-                isMeshRunning = true,
-                connectionState = ConnectionState.CONNECTED,
-                isLinked = true,
-            )
-        }
-
-        terminalBuffer.append(
-            LogSource.AGENT,
-            "mesh agent started — device=${_state.value.deviceId}",
-        )
-        terminalBuffer.append(
-            LogSource.SYS,
-            "soc=${Build.HARDWARE} model=${Build.MODEL}",
-        )
-
-        // Start foreground service
-        val ctx = getApplication<Application>()
-        val intent = Intent(ctx, MeshAgentService::class.java).apply {
-            action = MeshAgentService.ACTION_START
-        }
-        ctx.startForegroundService(intent)
-
-        // Start local metrics collection loop
+    private fun startMetricsLoop() {
+        metricsJob?.cancel()
         metricsJob = viewModelScope.launch {
             while (isActive) {
                 try {
                     val snapshot = metricsCollector.collect()
                     val settings = currentSettings
-
-                    // Thermal protection
                     val throttled = snapshot.cpuTempC > settings.cpuWarningTemp ||
-                            snapshot.batteryTempC > settings.batteryWarningTemp
+                        snapshot.batteryTempC > settings.batteryWarningTemp
                     val lockedOut = snapshot.cpuTempC > settings.cpuLockoutTemp ||
-                            snapshot.batteryTempC > settings.batteryLockoutTemp
-                    val lowBattery = snapshot.batteryPercent in 0f..settings.minBatteryPercent.toFloat()
+                        snapshot.batteryTempC > settings.batteryLockoutTemp
 
-                    _state.update {
-                        it.copy(
+                    _state.update { state ->
+                        state.copy(
                             cpuPercent = snapshot.cpuPercent,
                             ramPercent = snapshot.ramPercent,
                             batteryPercent = snapshot.batteryPercent,
@@ -136,125 +153,143 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
                             batteryTempC = snapshot.batteryTempC,
                             thermalThrottled = throttled,
                             thermalLockedOut = lockedOut,
-                            healthScore = computeHealthScore(snapshot, throttled, lockedOut),
                         )
                     }
-
-                    if (lockedOut || lowBattery) {
-                        val reason = if (lockedOut) "thermal lockout" else "low battery"
-                        terminalBuffer.append(LogSource.SYS, "⚠ $reason — stopping mesh", LogLevel.WARN)
-                        stopMesh()
-                        return@launch
-                    }
-                } catch (e: Exception) {
-                    terminalBuffer.append(LogSource.SYS, "metrics error: ${e.message}", LogLevel.ERROR)
+                } catch (_: Exception) {
+                    // Metrics are observational only; keep the UI loop alive.
                 }
                 delay(METRICS_INTERVAL_MS)
             }
         }
+    }
 
-        // Start heartbeat loop
-        heartbeatJob = viewModelScope.launch {
+    private fun startDevicePollLoop() {
+        devicePollJob?.cancel()
+        devicePollJob = viewModelScope.launch {
             while (isActive) {
-                delay(HEARTBEAT_INTERVAL_MS)
-                sendHeartbeat()
+                val settings = currentSettings
+                val client = coreClient
+
+                if (!settings.meshServiceRunning || client == null) {
+                    delay(DEVICE_POLL_INTERVAL_MS)
+                    continue
+                }
+
+                try {
+                    val device = client.getDevice(resolveDeviceId(settings))
+                    if (device != null) {
+                        applyAuthoritativeDeviceState(device)
+                    } else if (isServeMode(settings)) {
+                        _state.update { state ->
+                            state.copy(
+                                isLinked = false,
+                                operationalState = OperationalState.IDLE,
+                                connectionState = if (state.hostRuntimeAvailable) {
+                                    ConnectionState.RECONNECTING
+                                } else {
+                                    ConnectionState.REFUSED
+                                },
+                            )
+                        }
+                    } else {
+                        _state.update {
+                            it.copy(
+                                isLinked = false,
+                                operationalState = OperationalState.IDLE,
+                                connectionState = ConnectionState.OFFLINE,
+                            )
+                        }
+                    }
+                } catch (_: Exception) {
+                    _state.update { state ->
+                        state.copy(
+                            isLinked = false,
+                            connectionState = if (isServeMode(settings)) {
+                                ConnectionState.RECONNECTING
+                            } else {
+                                ConnectionState.OFFLINE
+                            },
+                        )
+                    }
+                }
+
+                delay(DEVICE_POLL_INTERVAL_MS)
             }
+        }
+    }
+
+    private fun applyAuthoritativeDeviceState(device: MeshDevice) {
+        _state.update { state ->
+            state.copy(
+                isLinked = device.connectionState != ConnectionState.OFFLINE &&
+                    device.connectionState != ConnectionState.REFUSED,
+                connectionState = device.connectionState,
+                operationalState = device.operationalState,
+                deviceMode = device.deviceMode,
+                healthScore = device.healthScore,
+                cpuPercent = device.cpuPercent.takeIf { it >= 0f } ?: state.cpuPercent,
+                ramPercent = device.ramPercent.takeIf { it >= 0f } ?: state.ramPercent,
+                batteryPercent = device.batteryPercent.takeIf { it >= 0f } ?: state.batteryPercent,
+                cpuTempC = device.cpuTempC.takeIf { it >= 0f } ?: state.cpuTempC,
+                gpuTempC = device.gpuTempC.takeIf { it >= 0f } ?: state.gpuTempC,
+                batteryTempC = device.batteryTempC.takeIf { it >= 0f } ?: state.batteryTempC,
+                thermalThrottled = device.thermalThrottled,
+                thermalLockedOut = device.thermalLockedOut,
+                modelLoaded = device.modelLoaded?.takeIf { it.isNotBlank() } ?: state.modelLoaded,
+                inferenceEndpoint = device.inferenceEndpoint.ifBlank { state.inferenceEndpoint },
+                activeTaskId = device.activeTaskId,
+            )
+        }
+    }
+
+    private fun rebuildClient(settings: SettingsStore.Settings) {
+        val baseUrl = resolveControlPlaneBaseUrl(settings)
+        val token = resolveControlPlaneToken(settings)
+        val newKey = "$baseUrl|$token"
+        if (newKey == coreClientKey) return
+
+        coreClient?.shutdown()
+        coreClient = if (token.isNotBlank()) GimoCoreClient(baseUrl, token) else null
+        coreClientKey = newKey
+    }
+
+    fun toggleMesh() {
+        if (currentSettings.meshServiceRunning) {
+            stopMesh()
+        } else {
+            startMesh()
+        }
+    }
+
+    private fun startMesh() {
+        val context = getApplication<Application>()
+        val intent = Intent(context, MeshAgentService::class.java).apply {
+            action = MeshAgentService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
         }
     }
 
     private fun stopMesh() {
-        metricsJob?.cancel()
-        metricsJob = null
-        heartbeatJob?.cancel()
-        heartbeatJob = null
-
-        _state.update {
-            it.copy(
-                isMeshRunning = false,
-                connectionState = ConnectionState.OFFLINE,
-                isLinked = false,
-                operationalState = OperationalState.IDLE,
-                inferenceRunning = false,
-                inferenceEndpoint = "",
-            )
-        }
-
-        terminalBuffer.append(LogSource.AGENT, "mesh agent stopped")
-
-        // Stop foreground service
-        val ctx = getApplication<Application>()
-        val intent = Intent(ctx, MeshAgentService::class.java).apply {
+        val context = getApplication<Application>()
+        val intent = Intent(context, MeshAgentService::class.java).apply {
             action = MeshAgentService.ACTION_STOP
         }
-        ctx.startService(intent)
-    }
-
-    private suspend fun sendHeartbeat() {
-        val client = coreClient ?: run {
-            _state.update { it.copy(isLinked = false) }
-            return
-        }
-        val s = _state.value
-
-        val inferenceEndpoint = if (currentSettings.inferenceRunning) {
-            buildInferenceEndpoint(currentSettings.inferencePort)
-        } else {
-            null
-        }
-        val payload = HeartbeatPayload(
-            deviceId = s.deviceId,
-            deviceSecret = currentSettings.token,
-            deviceMode = currentSettings.deviceMode,
-            cpuPercent = s.cpuPercent,
-            ramPercent = s.ramPercent,
-            batteryPercent = s.batteryPercent,
-            cpuTempC = s.cpuTempC,
-            gpuTempC = s.gpuTempC,
-            batteryTempC = s.batteryTempC,
-            modelLoaded = if (currentSettings.inferenceRunning) s.modelLoaded else null,
-            inferenceEndpoint = inferenceEndpoint,
-            modeLocked = currentSettings.modeLocked,
-        )
-
-        try {
-            val device = client.sendHeartbeat(payload)
-            if (device != null) {
-                terminalBuffer.append(
-                    LogSource.AGENT,
-                    "heartbeat OK — cpu=${s.cpuPercent.toInt()}% ram=${s.ramPercent.toInt()}% bat=${s.batteryPercent.toInt()}%",
-                )
-                _state.update {
-                    it.copy(
-                        isLinked = true,
-                        connectionState = device.connectionState,
-                        operationalState = device.operationalState,
-                        healthScore = device.healthScore,
-                    )
-                }
-            } else {
-                terminalBuffer.append(LogSource.AGENT, "heartbeat failed — no response", LogLevel.WARN)
-                _state.update { it.copy(connectionState = ConnectionState.RECONNECTING) }
-            }
-        } catch (e: Exception) {
-            terminalBuffer.append(LogSource.AGENT, "heartbeat error: ${e.message}", LogLevel.ERROR)
-            _state.update { it.copy(connectionState = ConnectionState.RECONNECTING, isLinked = false) }
-        }
+        context.startService(intent)
     }
 
     fun changeMode(mode: String) {
         viewModelScope.launch {
             settingsStore.updateDeviceMode(mode)
-            terminalBuffer.append(LogSource.AGENT, "mode changed → $mode")
         }
     }
 
     fun toggleModeLock(locked: Boolean) {
         viewModelScope.launch {
             settingsStore.updateModeLocked(locked)
-            terminalBuffer.append(
-                LogSource.AGENT,
-                if (locked) "mode LOCKED by user" else "mode UNLOCKED",
-            )
         }
     }
 
@@ -262,31 +297,27 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
         terminalBuffer.clear()
     }
 
-    private fun computeHealthScore(
-        snapshot: MetricsCollector.Snapshot,
-        throttled: Boolean,
-        lockedOut: Boolean,
-    ): Float {
-        if (lockedOut) return 0f
-        var score = 100f
-        // CPU penalty
-        if (snapshot.cpuPercent > 80f) score -= (snapshot.cpuPercent - 80f) * 1.5f
-        // RAM penalty
-        if (snapshot.ramPercent > 85f) score -= (snapshot.ramPercent - 85f) * 2f
-        // Battery penalty
-        if (snapshot.batteryPercent in 0f..30f) score -= (30f - snapshot.batteryPercent)
-        // Thermal penalty
-        if (throttled) score -= 20f
-        return score.coerceIn(0f, 100f)
-    }
+    private fun resolveDisplayCoreUrl(settings: SettingsStore.Settings): String =
+        resolveControlPlaneBaseUrl(settings)
+            .removePrefix("http://")
+            .removePrefix("https://")
+
+    private fun resolveDeviceId(settings: SettingsStore.Settings): String =
+        settings.deviceId.ifBlank { Build.MODEL.lowercase().replace(" ", "-") }
+
+    private fun resolveDeviceName(settings: SettingsStore.Settings): String =
+        settings.deviceName.ifBlank { "${Build.MANUFACTURER} ${Build.MODEL}" }
 
     private fun getLocalIp(): String {
         return try {
             java.net.NetworkInterface.getNetworkInterfaces()?.toList()
                 ?.flatMap { it.inetAddresses.toList() }
                 ?.firstOrNull { !it.isLoopbackAddress && it is java.net.Inet4Address }
-                ?.hostAddress ?: "0.0.0.0"
-        } catch (_: Exception) { "0.0.0.0" }
+                ?.hostAddress
+                ?: "0.0.0.0"
+        } catch (_: Exception) {
+            "0.0.0.0"
+        }
     }
 
     private fun buildInferenceEndpoint(port: Int): String? {
@@ -302,11 +333,13 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        metricsJob?.cancel()
+        devicePollJob?.cancel()
         coreClient?.shutdown()
     }
 
     companion object {
         const val METRICS_INTERVAL_MS = 5_000L
-        const val HEARTBEAT_INTERVAL_MS = 30_000L
+        const val DEVICE_POLL_INTERVAL_MS = 5_000L
     }
 }

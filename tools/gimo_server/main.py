@@ -470,7 +470,11 @@ async def lifespan(app: FastAPI):
         # Initialize Mesh Registry (lazy — dirs created only when mesh_enabled)
         try:
             from tools.gimo_server.services.mesh.registry import MeshRegistry
+            from tools.gimo_server.services.mesh.host_bootstrap import AndroidHostBootstrapService
             app.state.mesh_registry = MeshRegistry()
+            app.state.mesh_host_device = AndroidHostBootstrapService(
+                app.state.mesh_registry
+            ).bootstrap_from_env()
             logger.info("Mesh registry initialized")
         except Exception as exc:
             logger.warning("Mesh registry init warning: %s", exc)

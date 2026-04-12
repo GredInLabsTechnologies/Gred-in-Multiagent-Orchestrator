@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.gredinlabs.gimomesh.data.store.SettingsStore
+import com.gredinlabs.gimomesh.service.setupRequired
 import com.gredinlabs.gimomesh.ui.MeshViewModel
 import com.gredinlabs.gimomesh.ui.agent.AgentScreen
 import com.gredinlabs.gimomesh.ui.components.GimoIcons
@@ -69,7 +70,7 @@ fun GimoMeshNavHost(
     val requiresModel = remember(settings.downloadedModelPath, settings.model, settings.deviceMode) {
         requiresOnboardingModel(settings, context.filesDir)
     }
-    val needsSetup = settings.token.isEmpty() || requiresModel
+    val needsSetup = setupRequired(settings) || requiresModel
 
     var currentScreen by rememberSaveable {
         mutableStateOf(if (needsSetup) Screen.SETUP else Screen.DASH)
@@ -220,7 +221,7 @@ private fun requiresOnboardingModel(
     settings: SettingsStore.Settings,
     filesDir: File,
 ): Boolean {
-    val needsInferenceModel = settings.deviceMode in listOf("inference", "hybrid")
+    val needsInferenceModel = settings.deviceMode == "inference"
     if (!needsInferenceModel) {
         return false
     }

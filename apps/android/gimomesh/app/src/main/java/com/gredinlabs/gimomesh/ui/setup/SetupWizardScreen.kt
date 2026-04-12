@@ -60,10 +60,12 @@ import com.gredinlabs.gimomesh.data.model.CoreDiscovery
 import com.gredinlabs.gimomesh.data.model.ModelInfo
 import com.gredinlabs.gimomesh.data.network.CoreDiscoveryManager
 import com.gredinlabs.gimomesh.data.store.SettingsStore
+import com.gredinlabs.gimomesh.service.isServeMode
 import com.gredinlabs.gimomesh.ui.theme.GimoAccents
 import com.gredinlabs.gimomesh.ui.theme.GimoBorders
 import com.gredinlabs.gimomesh.ui.theme.GimoDisplay
 import com.gredinlabs.gimomesh.ui.theme.GimoMono
+import com.gredinlabs.gimomesh.ui.theme.MeshModeColors
 import com.gredinlabs.gimomesh.ui.theme.GimoSurfaces
 import com.gredinlabs.gimomesh.ui.theme.GimoText
 import com.gredinlabs.gimomesh.ui.theme.GimoTypography
@@ -101,6 +103,10 @@ fun SetupWizardScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by settingsStore.settings.collectAsState(initial = SettingsStore.Settings())
+    val serveMode = remember(settings.deviceMode, settings.hybridAuto, settings.hybridServe) {
+        isServeMode(settings)
+    }
+    val onboardingMode = !serveMode
 
     // If deep link provided, skip straight to enrolling
     val hasDeepLink = deepLinkCode.length == 6 && deepLinkHost.isNotBlank()
@@ -133,8 +139,8 @@ fun SetupWizardScreen(
 
     // Auto-enrollment: on first launch, try to fetch pending code from Core on LAN
     var autoEnrollAttempted by remember { mutableStateOf(false) }
-    LaunchedEffect(step, hasDeepLink, autoEnrollAttempted) {
-        if (step == SetupStep.Welcome && !hasDeepLink && !autoEnrollAttempted) {
+    LaunchedEffect(step, hasDeepLink, autoEnrollAttempted, onboardingMode) {
+        if (step == SetupStep.Welcome && onboardingMode && !hasDeepLink && !autoEnrollAttempted) {
             autoEnrollAttempted = true
             // Try the default Core URL first, then any mDNS-discovered Core
             val urlsToTry = listOfNotNull(
@@ -169,6 +175,15 @@ fun SetupWizardScreen(
         settings.deviceId.ifEmpty { "${Build.MODEL.replace(" ", "-").lowercase()}-${UUID.randomUUID().toString().take(8)}" }
     }
     val deviceName = remember(settings.deviceName) { settings.deviceName.ifEmpty { Build.MODEL } }
+
+    fun finishLocalHostSetup() {
+        scope.launch {
+            error = ""
+            settingsStore.updateDeviceId(deviceId)
+            settingsStore.updateDeviceName(deviceName)
+            step = SetupStep.Done
+        }
+    }
 
     fun connectToCore() {
         val normalized = normalizeCoreUrl(coreUrlInput)
@@ -227,7 +242,14 @@ fun SetupWizardScreen(
         if (step != SetupStep.Enrolling || connectedCoreUrl.isBlank()) return@LaunchedEffect
         val client = OnboardingClient(connectedCoreUrl)
         try {
-            when (val result = client.redeemCode(code = code, deviceId = deviceId, name = deviceName)) {
+            when (
+                val result = client.redeemCode(
+                    code = code,
+                    deviceId = deviceId,
+                    name = deviceName,
+                    deviceMode = settings.deviceMode,
+                )
+            ) {
                 is OnboardingApiResult.Success -> {
                     val onboard = result.value
                     error = ""
@@ -239,9 +261,12 @@ fun SetupWizardScreen(
                     settingsStore.updateToken(onboard.bearerToken)
                     settingsStore.updateDeviceId(onboard.deviceId)
                     settingsStore.updateDeviceName(deviceName)
-                    settingsStore.updateDeviceMode("inference")
                     settingsStore.updateActiveWorkspace(onboard.workspaceId, onboard.workspaceName)
-                    step = SetupStep.ModelSelect
+                    step = if (settings.deviceMode == "inference") {
+                        SetupStep.ModelSelect
+                    } else {
+                        SetupStep.Done
+                    }
                 }
                 is OnboardingApiResult.Error -> {
                     error = result.message
@@ -363,13 +388,39 @@ fun SetupWizardScreen(
                 AnimatedContent(targetState = step, label = "setupStep") { current ->
                     when (current) {
                         SetupStep.Welcome -> StepCard {
-                            StepTitle("Join the mesh", "Connect to your Core, redeem a 6-digit code, pick a GGUF, and boot this device without ADB or cables.")
+                            StepTitle(
+                                title = if (serveMode) "Run GIMO locally" else "Join the mesh",
+                                body = when {
+                                    serveMode -> "This device will host the authoritative GIMO Core locally. The Dashboard will show whether the embedded Core runtime is actually packaged in the APK."
+                                    settings.deviceMode == "utility" -> "Connect to your Core, redeem a 6-digit code, and register this phone as a utility worker. No GGUF download is required."
+                                    else -> "Connect to your Core, redeem a 6-digit code, pick a GGUF, and boot this device without ADB or cables."
+                                },
+                            )
                             Spacer(modifier = Modifier.height(18.dp))
-                            Pill("30-60 sec setup", SetupAccent)
+                            SetupModeSelector(
+                                selectedMode = settings.deviceMode,
+                                onSelect = { mode ->
+                                    scope.launch { settingsStore.updateDeviceMode(mode) }
+                                },
+                            )
                             Spacer(modifier = Modifier.height(18.dp))
-                            PrimaryAction("Scan QR Code", true) { step = SetupStep.QRScanner }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            SecondaryAction("Enter code manually") { step = SetupStep.CoreUrl }
+                            if (serveMode) {
+                                Banner(
+                                    "Server and hybrid modes do not require a remote Core URL. If the embedded runtime payload is missing, host runtime will remain unavailable until the APK bundles it.",
+                                    SetupAccent,
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                PrimaryAction("Finish local setup", true, ::finishLocalHostSetup)
+                            } else {
+                                Pill(
+                                    if (settings.deviceMode == "utility") "Utility worker setup" else "30-60 sec setup",
+                                    SetupAccent,
+                                )
+                                Spacer(modifier = Modifier.height(18.dp))
+                                PrimaryAction("Scan QR Code", true) { step = SetupStep.QRScanner }
+                                Spacer(modifier = Modifier.height(10.dp))
+                                SecondaryAction("Enter code manually") { step = SetupStep.CoreUrl }
+                            }
                         }
                         SetupStep.QRScanner -> QrScannerScreen(
                             onQrScanned = { result ->
@@ -445,7 +496,7 @@ fun SetupWizardScreen(
                                 }
                                 else -> Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     models.forEach { model ->
-                                        ModelCard(model) { selectedModel = model; step = SetupStep.Downloading }
+                                        ModelCard(model) { selectedModel = model; error = ""; step = SetupStep.Downloading }
                                     }
                                 }
                             }
@@ -470,15 +521,28 @@ fun SetupWizardScreen(
                             }
                         }
                         SetupStep.Done -> StepCard {
-                            StepTitle("Ready", "Token, workspace, and model are stored locally. Activate the mesh from the Dashboard when ready.")
+                            StepTitle(
+                                "Ready",
+                                when {
+                                    serveMode -> "Device identity is stored locally. Activate the mesh from the Dashboard to start the embedded Core host."
+                                    settings.deviceMode == "utility" -> "Token and workspace are stored locally. Activate the mesh from the Dashboard when ready."
+                                    else -> "Token, workspace, and model are stored locally. Activate the mesh from the Dashboard when ready."
+                                },
+                            )
                             Spacer(modifier = Modifier.height(18.dp))
                             Box(modifier = Modifier.size(84.dp).clip(CircleShape).background(SetupAccent.copy(alpha = 0.14f)).border(1.dp, SetupAccent.copy(alpha = 0.45f), CircleShape).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
                                 Text("OK", fontFamily = GimoMono, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = SetupAccent)
                             }
                             Spacer(modifier = Modifier.height(18.dp))
                             Text(buildString {
-                                append("Workspace: ")
-                                append(workspaceName.ifBlank { "Default" })
+                                append("Mode: ")
+                                append(settings.deviceMode.uppercase())
+                                append("\nDevice: ")
+                                append(deviceName)
+                                if (!serveMode) {
+                                    append("\nWorkspace: ")
+                                    append(workspaceName.ifBlank { "Default" })
+                                }
                                 selectedModel?.let { append("\nModel: ${it.modelId}") }
                             }, style = GimoTypography.bodyMedium.copy(color = GimoText.secondary), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                             Spacer(modifier = Modifier.height(24.dp))
@@ -734,6 +798,85 @@ private fun Pill(text: String, accent: Color) {
 private fun Banner(message: String, accent: Color) {
     Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(accent.copy(alpha = 0.08f)).border(1.dp, accent.copy(alpha = 0.3f), RoundedCornerShape(14.dp)).padding(14.dp)) {
         Text(message, style = GimoTypography.bodyMedium.copy(color = if (accent == ErrorAccent) accent else GimoText.primary))
+    }
+}
+
+@Composable
+private fun SetupModeSelector(
+    selectedMode: String,
+    onSelect: (String) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            "DEVICE MODE",
+            style = GimoTypography.labelLarge.copy(color = GimoText.tertiary),
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            SetupModeChip(
+                label = "INFERENCE",
+                accent = MeshModeColors.inference,
+                selected = selectedMode == "inference",
+                onClick = { onSelect("inference") },
+                modifier = Modifier.weight(1f),
+            )
+            SetupModeChip(
+                label = "UTILITY",
+                accent = MeshModeColors.utility,
+                selected = selectedMode == "utility",
+                onClick = { onSelect("utility") },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            SetupModeChip(
+                label = "SERVER",
+                accent = MeshModeColors.server,
+                selected = selectedMode == "server",
+                onClick = { onSelect("server") },
+                modifier = Modifier.weight(1f),
+            )
+            SetupModeChip(
+                label = "HYBRID",
+                accent = MeshModeColors.hybrid,
+                selected = selectedMode == "hybrid",
+                onClick = { onSelect("hybrid") },
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SetupModeChip(
+    label: String,
+    accent: Color,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) accent.copy(alpha = 0.14f) else GimoSurfaces.surface0)
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) accent.copy(alpha = 0.7f) else GimoBorders.primary,
+                shape = RoundedCornerShape(14.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+    ) {
+        Text(
+            text = label,
+            style = GimoTypography.labelLarge.copy(
+                color = if (selected) accent else GimoText.secondary,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            ),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

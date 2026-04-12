@@ -97,22 +97,24 @@ fun MetricsRow(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        // Local hardware metrics are always collected (MetricsCollector runs in ViewModel
+        // regardless of mesh state) — never gate display on isMeshRunning.
         MetricCard(
             label = "CPU",
             value = cpuPercent,
-            active = isMeshRunning,
+            active = true,
             modifier = Modifier.weight(1f),
         )
         MetricCard(
             label = "RAM",
             value = ramPercent,
-            active = isMeshRunning,
+            active = true,
             modifier = Modifier.weight(1f),
         )
         MetricCard(
             label = "Battery",
             value = batteryPercent,
-            active = isMeshRunning,
+            active = true,
             modifier = Modifier.weight(1f),
         )
     }

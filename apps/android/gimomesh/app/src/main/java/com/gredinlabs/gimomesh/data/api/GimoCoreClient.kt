@@ -72,6 +72,21 @@ class GimoCoreClient(
         }
     }
 
+    suspend fun getDevice(deviceId: String): MeshDevice? = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/ops/mesh/devices/$deviceId")
+            .header("Authorization", "Bearer $token")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return@withContext null
+            response.body?.string()?.let { body ->
+                json.decodeFromString<MeshDevice>(body)
+            }
+        }
+    }
+
     /**
      * GET /ops/mesh/status — fleet overview.
      */

@@ -35,6 +35,7 @@ enum class DeviceMode {
 data class MeshDevice(
     @SerialName("device_id") val deviceId: String,
     val name: String = "",
+    @SerialName("device_secret") val deviceSecret: String = "",
     @SerialName("device_mode") val deviceMode: DeviceMode = DeviceMode.INFERENCE,
     @SerialName("connection_state") val connectionState: ConnectionState = ConnectionState.OFFLINE,
     @SerialName("operational_state") val operationalState: OperationalState = OperationalState.IDLE,
@@ -48,6 +49,8 @@ data class MeshDevice(
     @SerialName("thermal_throttled") val thermalThrottled: Boolean = false,
     @SerialName("thermal_locked_out") val thermalLockedOut: Boolean = false,
     @SerialName("model_loaded") val modelLoaded: String? = null,
+    @SerialName("inference_endpoint") val inferenceEndpoint: String = "",
+    @SerialName("active_task_id") val activeTaskId: String = "",
 )
 
 @Serializable

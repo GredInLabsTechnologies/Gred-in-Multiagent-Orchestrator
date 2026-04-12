@@ -157,29 +157,41 @@ class OnboardingClient(coreUrl: String) {
         try {
             targetFile.parentFile?.mkdirs()
 
-            val existingBytes = if (targetFile.exists()) targetFile.length() else 0L
-            val requestBuilder = Request.Builder()
-                .url("$baseUrl/ops/mesh/models/$modelId/download")
-                .header("Authorization", "Bearer $bearerToken")
-                .get()
-            if (existingBytes > 0L) {
-                requestBuilder.header("Range", "bytes=$existingBytes-")
+            var resumeOffset = if (targetFile.exists()) targetFile.length() else 0L
+
+            val buildRequest: (Long) -> Request = { offset ->
+                Request.Builder()
+                    .url("$baseUrl/ops/mesh/models/$modelId/download")
+                    .header("Authorization", "Bearer $bearerToken")
+                    .apply { if (offset > 0L) header("Range", "bytes=$offset-") }
+                    .get()
+                    .build()
             }
 
-            downloadClient.newCall(requestBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful && response.code != 206) {
-                    return@withContext response.toError("Model download failed")
+            var response = downloadClient.newCall(buildRequest(resumeOffset)).execute()
+
+            // 416 Range Not Satisfiable: stale partial on disk — wipe and restart from 0
+            if (response.code == 416) {
+                response.close()
+                targetFile.delete()
+                resumeOffset = 0L
+                response = downloadClient.newCall(buildRequest(0L)).execute()
+            }
+
+            response.use { resp ->
+                if (!resp.isSuccessful && resp.code != 206) {
+                    return@withContext resp.toError("Model download failed")
                 }
 
-                val body = response.body
+                val body = resp.body
                     ?: return@withContext OnboardingApiResult.Error("Model download returned no file data")
-                val append = existingBytes > 0L && response.code == 206
+                val append = resumeOffset > 0L && resp.code == 206
                 val contentLength = body.contentLength()
                 val totalBytes = when {
-                    response.code == 206 -> response.header("Content-Range")
+                    resp.code == 206 -> resp.header("Content-Range")
                         ?.substringAfter("/")
                         ?.toLongOrNull()
-                        ?: if (contentLength >= 0) existingBytes + contentLength else -1L
+                        ?: if (contentLength >= 0) resumeOffset + contentLength else -1L
                     contentLength >= 0 -> contentLength
                     else -> -1L
                 }
@@ -187,7 +199,7 @@ class OnboardingClient(coreUrl: String) {
                 FileOutputStream(targetFile, append).use { output ->
                     body.byteStream().use { input ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        var downloaded = if (append) existingBytes else 0L
+                        var downloaded = if (append) resumeOffset else 0L
                         onProgress(downloaded, totalBytes)
                         while (true) {
                             val read = input.read(buffer)
