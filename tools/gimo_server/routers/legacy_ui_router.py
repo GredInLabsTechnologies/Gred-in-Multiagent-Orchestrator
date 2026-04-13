@@ -202,14 +202,6 @@ def reject_draft(
 
 # ── Nodes / Cost bridges ─────────────────────────────────────────────
 
-@router.get("/ui/nodes")
-def list_ui_nodes(
-    auth: Annotated[AuthContext, Depends(require_read_only_access)],
-    _rl: Annotated[None, Depends(check_rate_limit)],
-):
-    return {}
-
-
 @router.get("/ui/cost/compare")
 def compare_costs(
     model_a: Annotated[str, Query(..., min_length=1)],

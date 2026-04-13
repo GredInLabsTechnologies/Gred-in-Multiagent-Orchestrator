@@ -49,10 +49,8 @@ describe('useProviders', () => {
         vi.clearAllMocks();
     });
 
-    it('does not retry the removed legacy /ui/providers endpoint when canonical provider loading fails', async () => {
-        mocks.fetchWithRetryMock
-            .mockResolvedValueOnce({ ok: false })
-            .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
+    it('does not call removed legacy ui endpoints when canonical provider loading fails', async () => {
+        mocks.fetchWithRetryMock.mockResolvedValueOnce({ ok: false });
 
         const { result } = renderHook(() => useProviders());
 
@@ -63,7 +61,7 @@ describe('useProviders', () => {
         const calledUrls = mocks.fetchWithRetryMock.mock.calls.map(([url]) => String(url));
 
         expect(calledUrls).toContain('http://127.0.0.1:9325/ops/provider');
-        expect(calledUrls).toContain('http://127.0.0.1:9325/ui/nodes');
+        expect(calledUrls.some((url) => url.includes('/ui/nodes'))).toBe(false);
         expect(calledUrls.some((url) => url.includes('/ui/providers'))).toBe(false);
     });
 });

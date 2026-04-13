@@ -238,6 +238,7 @@ def test_get_ui_allowlist(client, tmp_path):
 
 def test_ui_provider_legacy_routes_absent_from_router_table():
     route_paths = {getattr(route, "path", None) for route in app.routes}
+    assert "/ui/nodes" not in route_paths
     assert "/ui/providers" not in route_paths
     assert "/ui/providers/{provider_id}" not in route_paths
     assert "/ui/providers/{provider_id}/test" not in route_paths
@@ -246,6 +247,7 @@ def test_ui_provider_legacy_routes_absent_from_router_table():
 @pytest.mark.parametrize(
     "path",
     [
+        "/ui/nodes",
         "/ui/providers",
         "/ui/providers/openai-main",
         "/ui/providers/openai-main/test",
@@ -258,6 +260,7 @@ def test_ui_provider_legacy_paths_return_not_found_for_get(client, path):
 
 def test_mcp_bridge_manifest_does_not_publish_legacy_provider_routes():
     assert not any(str(entry.get("path", "")).startswith("/ui/providers") for entry in MANIFEST)
+    assert not any(str(entry.get("path", "")) == "/ui/nodes" for entry in MANIFEST)
 
 
 def test_list_repos(client, tmp_path):
