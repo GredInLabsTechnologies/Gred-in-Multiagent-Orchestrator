@@ -15,6 +15,7 @@ from tools.gimo_server.models import UiStatusResponse
 from tools.gimo_server.security import (
     audit_log,
     check_rate_limit,
+    get_active_repo_dir,
     get_allowed_paths,
     serialize_allowlist,
     verify_token,
