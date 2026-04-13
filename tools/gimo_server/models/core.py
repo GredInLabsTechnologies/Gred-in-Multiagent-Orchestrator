@@ -254,14 +254,6 @@ class ServiceStatusResponse(BaseModel):
     status: ServiceLifecycleStatus
 
 
-class UiStatusResponse(BaseModel):
-    version: str
-    uptime_seconds: float
-    allowlist_count: int
-    last_audit_line: Optional[str] = None
-    service_status: str
-
-
 class VitaminizeResponse(BaseModel):
     status: str
     created_files: List[str] = Field(default_factory=list)

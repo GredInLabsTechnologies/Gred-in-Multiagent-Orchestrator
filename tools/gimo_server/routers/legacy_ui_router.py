@@ -11,7 +11,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from tools.gimo_server.models import UiStatusResponse
 from tools.gimo_server.security import (
     audit_log,
     check_rate_limit,
@@ -35,24 +34,6 @@ router = APIRouter(tags=["legacy-ui"])
 
 
 # ── Status / Hardware / Audit ─────────────────────────────────────────
-
-@router.get("/ui/status", response_model=UiStatusResponse)
-def get_ui_status(
-    request: Request,
-    auth: AuthContext = Depends(require_read_only_access),
-    rl: None = Depends(check_rate_limit),
-):
-    status = OperatorStatusService.get_status_snapshot(
-        app_start_time=getattr(request.app.state, "start_time", None),
-    )
-    return {
-        "version": status["backend_version"],
-        "uptime_seconds": status.get("uptime_seconds", 0.0),
-        "allowlist_count": status["allowlist_count"],
-        "last_audit_line": status["last_audit_line"],
-        "service_status": status["service_status"],
-    }
-
 
 @router.get("/ui/hardware")
 def get_ui_hardware(

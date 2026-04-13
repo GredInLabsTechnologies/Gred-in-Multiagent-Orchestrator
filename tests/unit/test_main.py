@@ -30,7 +30,7 @@ def test_panic_catcher_middleware(test_client, valid_token):
             side_effect=RuntimeError("critical fail"),
         ):
             response = test_client.get(
-                "/ui/status", headers={"Authorization": f"Bearer {valid_token}"}
+                "/ui/allowlist", headers={"Authorization": f"Bearer {valid_token}"}
             )
             assert response.status_code == 500
             data = response.json()
@@ -52,7 +52,7 @@ def test_lockdown_check_middleware(test_client, valid_token):
 
 def test_allow_options_preflight(test_client, valid_token):
     response = test_client.options(
-        "/ui/status",
+        "/ops/operator/status",
         headers={
             "Origin": "http://localhost:5173",
             "Access-Control-Request-Headers": "Content-Type",

@@ -42,7 +42,6 @@ def _actor_label(auth: AuthContext) -> str:
 _ACTIONS_SAFE_PATHS = {
     "/ops/plan", "/ops/drafts", "/ops/approved", "/ops/runs",
     "/ops/config", "/status", "/tree", "/file", "/search", "/diff",
-    "/ui/status",
 }
 _ACTIONS_SAFE_PATH_PREFIXES = (
     "/ops/drafts/", "/ops/approved/", "/ops/runs/",

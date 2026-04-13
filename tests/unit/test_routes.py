@@ -152,24 +152,6 @@ def test_cold_room_access_disabled(client):
         assert response.status_code == 404
 
 
-def test_get_ui_status(client):
-    with patch(
-        "tools.gimo_server.routers.legacy_ui_router.OperatorStatusService.get_status_snapshot",
-        return_value={
-            "backend_version": "1.2.3",
-            "uptime_seconds": 12.0,
-            "allowlist_count": 2,
-            "last_audit_line": "audit line",
-            "service_status": "RUNNING",
-        },
-    ) as mock_status:
-        response = client.get("/ui/status")
-        assert response.status_code == 200
-        assert response.json()["version"] == "1.2.3"
-        assert response.json()["last_audit_line"] == "audit line"
-        mock_status.assert_called_once()
-
-
 def test_get_ui_hardware(client):
     fake_hw = MagicMock()
     fake_hw.get_current_state.return_value = {"cpu_percent": 12.5}
@@ -239,6 +221,7 @@ def test_get_ui_allowlist(client, tmp_path):
 def test_ui_provider_legacy_routes_absent_from_router_table():
     route_paths = {getattr(route, "path", None) for route in app.routes}
     assert "/ui/nodes" not in route_paths
+    assert "/ui/status" not in route_paths
     assert "/ui/providers" not in route_paths
     assert "/ui/providers/{provider_id}" not in route_paths
     assert "/ui/providers/{provider_id}/test" not in route_paths
@@ -247,6 +230,7 @@ def test_ui_provider_legacy_routes_absent_from_router_table():
 @pytest.mark.parametrize(
     "path",
     [
+        "/ui/status",
         "/ui/nodes",
         "/ui/providers",
         "/ui/providers/openai-main",
@@ -259,6 +243,7 @@ def test_ui_provider_legacy_paths_return_not_found_for_get(client, path):
 
 
 def test_mcp_bridge_manifest_does_not_publish_legacy_provider_routes():
+    assert not any(str(entry.get("path", "")) == "/ui/status" for entry in MANIFEST)
     assert not any(str(entry.get("path", "")).startswith("/ui/providers") for entry in MANIFEST)
     assert not any(str(entry.get("path", "")) == "/ui/nodes" for entry in MANIFEST)
 

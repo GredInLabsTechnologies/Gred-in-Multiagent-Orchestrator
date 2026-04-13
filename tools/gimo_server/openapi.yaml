@@ -250,14 +250,6 @@ paths:
               schema: { type: string }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
-  /ui/status:
-    get:
-      summary: UI status payload
-      operationId: getUiStatus
-      responses:
-        '200':
-          description: OK
-
   /ui/audit:
     get:
       summary: Tail audit log lines

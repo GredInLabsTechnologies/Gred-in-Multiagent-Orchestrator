@@ -15,7 +15,6 @@ READ_ONLY_ACTIONS_PATHS = {
     "/status",
     "/health",
     "/health/deep",
-    "/ui/status",
     "/ui/repos",
     "/ui/repos/active",
     "/ui/repos/select",

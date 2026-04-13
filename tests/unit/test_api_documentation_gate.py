@@ -129,6 +129,23 @@ def test_api_documentation_deprecations_finalized():
         assert "[OFFICIAL]" in content
 
 
+def test_mcp_surface_docs_distinguish_chatgpt_apps_facade_from_generic_bridge():
+    docs_path = "docs/CLIENT_SURFACES.md"
+    assert os.path.exists(docs_path)
+    with open(docs_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "ChatGPT Apps façade" in content
+    assert "not a replacement for the generic MCP bridge" in content
+    assert "third-party client surface outside the GIMO trust boundary" in content
+
+    api_docs_path = "docs/API.md"
+    with open(api_docs_path, "r", encoding="utf-8") as f:
+        api_content = f.read()
+    assert "ChatGPT Apps façade" in api_content
+    assert "not a fallback spelling for the App façade" in api_content
+    assert "third-party surface outside the GIMO trust boundary" in api_content
+
+
 def test_surface_docs_remove_legacy_notices_contract():
     docs_path = "docs/CLIENT_SURFACES.md"
     assert os.path.exists(docs_path)
@@ -157,3 +174,4 @@ async def test_app_surface_lifecycle_not_implemented_removed():
     assert execute_run is not None
     assert get_run_review is not None
     assert discard_run is not None
+
