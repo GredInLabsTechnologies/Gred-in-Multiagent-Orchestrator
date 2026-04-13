@@ -512,7 +512,7 @@ GIMO is being used as the operational substrate for multi-agent execution.
 - All multi-agent execution must traverse SAGP governance (§9).
 - **Multi-Surface Stabilization (Phase 7B)**:
   - Canonical authority is strictly server-side.
-  - Clients (App, CLI, TUI) consume the same backend contracts (`/ops/operator/status`, `/ops/notices`).
+  - Clients (App, CLI, TUI) consume the same backend status snapshot (`/ops/operator/status`), including `alerts`.
   - Deprecated paths (`/mcp`, path-based repo selection) are marked as legacy and slated for removal.
   - The official App façade is hosted at `/mcp/app`.
   - The canonical MCP bridge is the **SAGP bridge** at `mcp_bridge/server.py`.

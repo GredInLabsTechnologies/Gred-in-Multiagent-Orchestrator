@@ -168,19 +168,6 @@ async def get_capabilities(
     from tools.gimo_server.services.capabilities_service import CapabilitiesService
     return await CapabilitiesService.get_capabilities(request, auth)
 
-
-@router.get("/notices")
-async def get_notices(request: Request, auth: Annotated[AuthContext, Depends(verify_token)]):
-    """
-    F2: returns a canonical backend-authored notice feed for all surfaces.
-    """
-    _require_role(auth, "operator")
-    from tools.gimo_server.services.notice_policy_service import NoticePolicyService
-    workspace = request.headers.get("X-Gimo-Workspace")
-    status = OperatorStatusService.get_status_snapshot(workspace_override=workspace)
-    return NoticePolicyService.evaluate_all(status)
-
-
 @router.get("/notifications/stream")
 async def ops_notifications_event_stream(request: Request):
     """Backward-compatible SSE endpoint alias for legacy UI clients."""

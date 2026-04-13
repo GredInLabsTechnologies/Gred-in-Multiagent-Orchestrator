@@ -141,12 +141,31 @@ describe('App', () => {
     });
 
     it('shows sidebar and menu when authenticated', async () => {
-        useAppStore.setState({ bootState: 'ready', authenticated: true });
+        useAppStore.setState({ bootState: 'ready', authenticated: true, graphNodeCount: 1 });
         render(<App />);
         await waitFor(() => {
             expect(screen.getByTestId('sidebar')).toBeInTheDocument();
             expect(screen.getByTestId('menu-bar')).toBeInTheDocument();
             expect(screen.getByTestId('status-bar')).toBeInTheDocument();
+        });
+    });
+
+    it('polls operator status from the canonical ops endpoint', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ backend_status: 'ok', backend_version: 'test-version' }),
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        useAppStore.setState({ bootState: 'ready', authenticated: true, graphNodeCount: 1 });
+
+        render(<App />);
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                expect.stringContaining('/ops/operator/status'),
+                expect.objectContaining({ credentials: 'include' }),
+            );
         });
     });
 

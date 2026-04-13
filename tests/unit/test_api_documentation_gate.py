@@ -128,6 +128,24 @@ def test_api_documentation_deprecations_finalized():
         assert "Preferred: `/mcp/app`" in content
         assert "[OFFICIAL]" in content
 
+
+def test_surface_docs_remove_legacy_notices_contract():
+    docs_path = "docs/CLIENT_SURFACES.md"
+    assert os.path.exists(docs_path)
+    with open(docs_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "/ops/notices" not in content
+    assert "alerts` in `/ops/operator/status" in content
+
+
+def test_api_docs_promote_operator_status_alerts_over_legacy_notices():
+    docs_path = "docs/API.md"
+    assert os.path.exists(docs_path)
+    with open(docs_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "/ops/notices" not in content
+    assert "including `alerts`" in content
+
 @pytest.mark.asyncio
 async def test_app_surface_lifecycle_not_implemented_removed():
     """

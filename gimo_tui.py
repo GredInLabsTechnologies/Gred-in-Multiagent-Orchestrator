@@ -754,27 +754,13 @@ class GimoApp(App):
 
     @work(thread=True)
     def update_notices(self):
-        """Backward-compatible notice refresh that consumes the canonical backend notice feed."""
+        """Refresh notices from the canonical operator status snapshot alerts."""
         try:
             status, payload = fetch_operator_status_snapshot(self.config, _api_request)
             if status != 200 or not isinstance(payload, dict):
                 self._safe_call(self._update_notices_widget, NO_NOTICES_MSG)
                 return
             self._safe_call(self._apply_status_snapshot, payload)
-            return
-            status, payload = _api_request(self.config, "GET", "/ops/notices")
-            if status != 200 or not isinstance(payload, list) or not payload:
-                self._safe_call(self._update_notices_widget, NO_NOTICES_MSG)
-                return
-
-            lines = []
-            for notice in payload:
-                lvl = notice.get("level", "info")
-                msg = notice.get("message", "")
-                icon = "âš " if lvl == "warning" else "âœ—" if lvl == "error" else "â„¹"
-                color = "yellow" if lvl == "warning" else "red" if lvl == "error" else "blue"
-                lines.append(f"[{color}]{icon} {msg}[/{color}]")
-            self._safe_call(self._update_notices_widget, "\n".join(lines))
         except Exception as e:
             self._safe_call(self._update_notices_widget, f"[red]Notice Error: {e}[/red]")
 

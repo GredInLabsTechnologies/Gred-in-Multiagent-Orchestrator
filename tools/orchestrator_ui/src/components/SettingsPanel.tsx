@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { API_BASE, UserEconomyConfig } from '../types';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
+import { fetchOperatorStatus } from '../lib/operatorStatus';
 import { Shield, SlidersHorizontal, Coins, Info, ArrowRight, Server, Wrench, Globe } from 'lucide-react';
 import { useToast } from './Toast';
 
@@ -53,13 +54,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [configRes, statusRes] = await Promise.all([
+                const [configRes, statusInfo] = await Promise.all([
                     fetchWithRetry(`${API_BASE}/ops/config`, { credentials: 'include' }),
-                    fetchWithRetry(`${API_BASE}/ui/status`, { credentials: 'include' }),
+                    fetchOperatorStatus().catch(() => null),
                 ]);
 
                 if (configRes.ok) setConfig(await configRes.json());
-                if (statusRes.ok) setStatusInfo(await statusRes.json());
+                if (statusInfo) setStatusInfo(statusInfo);
 
                 const economyRes = await fetchWithRetry(`${API_BASE}/ops/mastery/config/economy`, { credentials: 'include' });
                 if (economyRes.ok) setEconomyConfig(await economyRes.json());

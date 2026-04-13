@@ -39,8 +39,7 @@ All endpoints require `Authorization: Bearer <ORCH_TOKEN>`.
 - `/mcp/app/sse`: Official App MCP SSE transport for ChatGPT Developer Mode.
 - `/mcp/app/mcp`: Official App MCP streamable HTTP transport.
 - `/mcp`: **[LEGACY]** General-purpose MCP bridge.
-- `/ops/operator/status`: Canonical backend status for TUI/CLI parity.
-- `/ops/notices`: Canonical notification feed for all surfaces.
+- `/ops/operator/status`: Canonical backend status snapshot for all surfaces, including `alerts`.
 - Default App MCP profile is `safe`; `extended` is opt-in for broader internal dogfooding.
 - `POST /ops/app/sessions`: Create App session.
 - `GET /ops/app/sessions/{id}`: Read App session state.

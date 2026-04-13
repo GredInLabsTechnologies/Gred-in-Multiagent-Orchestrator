@@ -7,6 +7,7 @@ from tools.gimo_server.app_mcp.server import create_app_mcp, mcp
 from tools.gimo_server.app_mcp.tools import ALL_TOOL_NAMES, EXTENDED_ONLY_TOOL_NAMES, SAFE_TOOL_NAMES
 from tools.gimo_server.main import app
 from tools.gimo_server.services.app_session_service import AppSessionService
+from tools.gimo_server.services.ops_service import OpsService
 
 
 class _Dumpable:
@@ -230,7 +231,11 @@ async def test_app_mcp_extended_roundtrip_covers_mutating_tools(app_registered_r
         )
     )
     assert draft_payload["status"] == "ok"
+    assert draft_payload["draft_id"].startswith("d_")
     assert draft_payload["validated_task_spec"]["allowed_paths"] == ["app.py"]
+    created_draft = OpsService.get_draft(draft_payload["draft_id"])
+    assert created_draft is not None
+    assert created_draft.operator_class == "cognitive_agent"
 
     request_payload = _parse_text_payload(
         await extended_mcp.call_tool(

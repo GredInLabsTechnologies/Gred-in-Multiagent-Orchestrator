@@ -89,10 +89,10 @@ See [SAGP Architecture](architecture/SAGP.md) for the full protocol specificatio
 
 | Feature | Web | CLI/TUI | MCP (Claude/VS Code/Cursor) | App Façade | Agent SDK |
 |---|---|---|---|---|---|
-| Status | `/ops/operator/status` | `/ops/operator/status` | `gimo_status` | `/ops/operator/status` | `gimo_status` |
+| Status | `/ops/operator/status` | `/ops/operator/status` | `gimo_get_status` | `/ops/operator/status` | `gimo_get_status` |
 | Governance | `/ops/governance/snapshot` | `gimo status --json` | `gimo_get_governance_snapshot` | `/ops/governance/snapshot` | `gimo_get_governance_snapshot` |
 | Pre-action check | (backend-enforced) | (backend-enforced) | `gimo_evaluate_action` | (backend-enforced) | `gimo_evaluate_action` |
-| Notices | `/ops/notices` | `/ops/notices` | `gimo_event_stream` | `/ops/notices` | `gimo_event_stream` |
+| Notices | `alerts` in `/ops/operator/status` | `alerts` in `/ops/operator/status` | `alerts` in `gimo_get_status` | `alerts` in `/ops/operator/status` | `alerts` in `gimo_get_status` |
 | Approval | `/ops/drafts/{id}/approve` | `/ops/drafts/{id}/approve` | `gimo_approve_draft` | `/ops/drafts/{id}/approve` | `gimo_approve_draft` |
 | Execution | `RunWorker` (Backend) | `RunWorker` (Backend) | `RunWorker` (Backend) | `RunWorker` (Backend) | `RunWorker` (Backend) |
 | Trust | `/ops/trust/*` | `/ops/trust/*` | `gimo_get_trust_profile` | `/ops/trust/*` | `gimo_get_trust_profile` |
