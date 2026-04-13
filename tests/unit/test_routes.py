@@ -154,12 +154,20 @@ def test_cold_room_access_disabled(client):
 
 def test_get_ui_status(client):
     with patch(
-        "tools.gimo_server.routers.legacy_ui_router.FileService.tail_audit_lines", return_value=["audit line"]
-    ):
-        with patch("tools.gimo_server.routers.ops.file_router.get_active_repo_dir", return_value=Path(".")):
-            response = client.get("/ui/status")
-            assert response.status_code == 200
-            assert response.json()["last_audit_line"] == "audit line"
+        "tools.gimo_server.routers.legacy_ui_router.OperatorStatusService.get_status_snapshot",
+        return_value={
+            "backend_version": "1.2.3",
+            "uptime_seconds": 12.0,
+            "allowlist_count": 2,
+            "last_audit_line": "audit line",
+            "service_status": "RUNNING",
+        },
+    ) as mock_status:
+        response = client.get("/ui/status")
+        assert response.status_code == 200
+        assert response.json()["version"] == "1.2.3"
+        assert response.json()["last_audit_line"] == "audit line"
+        mock_status.assert_called_once()
 
 
 def test_get_ui_hardware(client):

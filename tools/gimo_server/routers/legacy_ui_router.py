@@ -1,24 +1,20 @@
-"""Legacy /ui/* endpoints still used by the frontend.
+"""Legacy /ui/* endpoints still used by compatibility surfaces.
 
-These will be migrated to /ops/* equivalents in a future iteration.
+These routes must stay thin adapters over canonical backend services.
 """
 
 from __future__ import annotations
 
 import logging
-import os
-import time
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from tools.gimo_server.config import ALLOWLIST_REQUIRE
 from tools.gimo_server.models import UiStatusResponse
 from tools.gimo_server.security import (
     audit_log,
     check_rate_limit,
-    get_active_repo_dir,
     get_allowed_paths,
     serialize_allowlist,
     verify_token,
@@ -26,10 +22,10 @@ from tools.gimo_server.security import (
 from tools.gimo_server.security.access_control import require_read_only_access
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.file_service import FileService
+from tools.gimo_server.services.operator_status_service import OperatorStatusService
 from tools.gimo_server.services.ops_service import OpsService
 from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
-from tools.gimo_server.version import __version__
 
 logger = logging.getLogger("orchestrator.routes.legacy_ui")
 
@@ -45,19 +41,15 @@ def get_ui_status(
     auth: AuthContext = Depends(require_read_only_access),
     rl: None = Depends(check_rate_limit),
 ):
-    audit_lines = FileService.tail_audit_lines(limit=1)
-    base_dir = get_active_repo_dir()
-    allowed_paths = get_allowed_paths(base_dir) if ALLOWLIST_REQUIRE else {}
-    is_healthy = base_dir.exists() and os.access(base_dir, os.R_OK)
-    status_str = "RUNNING" if is_healthy else "DEGRADED"
-    user_agent = request.headers.get("User-Agent", "").lower()
-    agent_label = "ChatGPT" if "openai" in user_agent or "gpt" in user_agent else "Dashboard"
+    status = OperatorStatusService.get_status_snapshot(
+        app_start_time=getattr(request.app.state, "start_time", None),
+    )
     return {
-        "version": __version__,
-        "uptime_seconds": time.time() - request.app.state.start_time,
-        "allowlist_count": len(allowed_paths),
-        "last_audit_line": audit_lines[-1] if audit_lines else None,
-        "service_status": f"{status_str} ({agent_label})",
+        "version": status["backend_version"],
+        "uptime_seconds": status.get("uptime_seconds", 0.0),
+        "allowlist_count": status["allowlist_count"],
+        "last_audit_line": status["last_audit_line"],
+        "service_status": status["service_status"],
     }
 
 

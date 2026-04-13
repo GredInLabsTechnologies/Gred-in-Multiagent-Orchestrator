@@ -152,7 +152,10 @@ async def get_operator_status(request: Request, auth: Annotated[AuthContext, Dep
     """
     _require_role(auth, "operator")
     workspace = request.headers.get("X-Gimo-Workspace")
-    return OperatorStatusService.get_status_snapshot(workspace_override=workspace)
+    return OperatorStatusService.get_status_snapshot(
+        workspace_override=workspace,
+        app_start_time=getattr(request.app.state, "start_time", None),
+    )
 
 
 @router.get("/capabilities")
