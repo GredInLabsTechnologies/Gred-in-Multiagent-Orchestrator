@@ -1,25 +1,27 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
 
 from .agent_telemetry_service import AgentTelemetryService
 from ..ops_models import AgentInsight
+from ..utils.debug_mode import is_debug_mode
 
 logger = logging.getLogger("orchestrator.services.insights")
 
-# Debug mode scaffold — insight detection stays active but patterns
-# are tagged with debug_mode=True so governance doesn't act on
-# development noise.  Activate via DEBUG=true env var.
-_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
-
 
 class AgentInsightService:
-    """Service to detect failure patterns and provide recommendations for agent governance."""
+    """Service to detect failure patterns and provide recommendations for agent governance.
 
-    debug_mode: bool = _DEBUG_MODE
+    Debug mode scaffold — insight detection stays active but patterns
+    are tagged with debug_mode=True so governance doesn't act on
+    development noise.  Activate via DEBUG=true env var.
+    """
+
+    @property
+    def debug_mode(self) -> bool:
+        return is_debug_mode()
 
     def __init__(self, telemetry: AgentTelemetryService):
         self.telemetry = telemetry

@@ -5,6 +5,7 @@ import os
 from typing import Any, Dict
 
 from ..models.agent_routing import TaskConstraints, TaskDescriptor, TrustAuthorityResult
+from ..utils.debug_mode import is_debug_mode
 from .intent_classification_service import IntentClassificationService
 from .providers.service import ProviderService
 from .providers.topology_service import ProviderTopologyService
@@ -12,8 +13,6 @@ from .runtime_policy_service import RuntimePolicyService
 from .workspace_policy_service import WorkspacePolicyService
 
 logger = logging.getLogger("orchestrator.services.constraint_compiler")
-
-_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
 
 
 class ConstraintCompilerService:
@@ -289,7 +288,7 @@ class ConstraintCompilerService:
 
         Fail-open: if signals unavailable, returns policy with no metadata.
         """
-        if _DEBUG_MODE:
+        if is_debug_mode():
             logger.warning(
                 "Trust authority: DEBUG mode — bypassing GICS/trust checks for %s/%s",
                 provider_type, model_id,

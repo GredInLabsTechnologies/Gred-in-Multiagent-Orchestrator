@@ -4,9 +4,9 @@ import logging
 import os
 from typing import Any, Dict
 
-logger = logging.getLogger("orchestrator.services.cost")
+from ...utils.debug_mode import is_debug_mode
 
-_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
+logger = logging.getLogger("orchestrator.services.cost")
 
 
 class CostService:
@@ -177,7 +177,7 @@ class CostService:
         input_cost = (input_tokens / 1_000_000) * pricing["input"]
         output_cost = (output_tokens / 1_000_000) * pricing["output"]
         cost = round(input_cost + output_cost, 6)
-        if _DEBUG_MODE:
+        if is_debug_mode():
             logger.debug("[CostService] DEBUG MODE — cost $%.6f for %s (not tracked against budget)", cost, model)
         return cost
 

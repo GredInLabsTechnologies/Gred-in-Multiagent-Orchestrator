@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from tools.gimo_server.security import audit_log
+from tools.gimo_server.utils.debug_mode import is_debug_mode
 
 logger = logging.getLogger(__name__)
-
-_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
 
 
 
@@ -50,7 +48,7 @@ class TrustEngine:
     @property
     def debug_mode(self) -> bool:
         """DEBUG=true bypasses trust scoring — dev failures don't trip breakers."""
-        return _DEBUG_MODE
+        return is_debug_mode()
 
     def query_dimension(self, dimension_key: str, *, events_limit: int = 5000) -> Dict[str, Any]:
         events = self.storage.list_trust_events(limit=events_limit)
