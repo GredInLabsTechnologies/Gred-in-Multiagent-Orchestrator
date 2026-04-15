@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 from typing import List, Dict, Any, Optional
 
 from tools.gimo_server.services.app_session_service import AppSessionService
-from tools.gimo_server.services.repo_service import RepoService
+from tools.gimo_server.services.workspace.repo_service import RepoService
 from tools.gimo_server.services.git_service import GitService
 
 logger = logging.getLogger("orchestrator.services.repo_recon")

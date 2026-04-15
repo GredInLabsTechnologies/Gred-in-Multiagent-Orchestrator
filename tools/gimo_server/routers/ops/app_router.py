@@ -5,7 +5,7 @@ from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.app_session_service import AppSessionService
 from tools.gimo_server.services.app_draft_service import AppDraftService, AppDraftSessionNotFoundError
-from tools.gimo_server.services.repo_recon_service import RepoReconService
+from tools.gimo_server.services.workspace.repo_recon_service import RepoReconService
 from tools.gimo_server.services.context_request_service import ContextRequestService
 from tools.gimo_server.services.lifecycle_errors import (
     LifecycleProofError,

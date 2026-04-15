@@ -32,7 +32,7 @@ from tools.gimo_server.services.observability_pkg.observability_service import O
 from tools.gimo_server.services.storage_service import StorageService
 from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.confidence_service import ConfidenceService
-from tools.gimo_server.services.cascade_service import CascadeService
+from tools.gimo_server.services.economy.cascade_service import CascadeService
 
 from .budget_guard import BudgetGuardMixin
 from .contract_validator import ContractValidatorMixin
@@ -436,7 +436,7 @@ class GraphEngine(
 
         if self.storage and hasattr(self.storage, "cost") and (tokens_used > 0 or cost_usd > 0):
              try:
-                 from tools.gimo_server.services.cost_service import CostService
+                 from tools.gimo_server.services.economy.cost_service import CostService
                  provider = CostService.get_provider(model_used)
 
                  event = CostEvent(

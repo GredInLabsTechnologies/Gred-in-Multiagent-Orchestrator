@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from tools.gimo_server.config import get_settings
 from tools.gimo_server.security.path_safety import PathTraversalError, safe_join
 from tools.gimo_server.services.git_service import GitService
-from tools.gimo_server.services.workspace_policy_service import WorkspacePolicyService
+from tools.gimo_server.services.workspace.workspace_policy_service import WorkspacePolicyService
 
 logger = logging.getLogger("orchestrator.services.app_session")
 

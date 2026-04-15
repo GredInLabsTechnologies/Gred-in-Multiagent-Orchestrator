@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from tools.gimo_server.services.cascade_service import CascadeService
+from tools.gimo_server.services.economy.cascade_service import CascadeService
 from tools.gimo_server.models.economy import CascadeConfig, CascadeResult, QualityRating
 from tools.gimo_server.services.model_inventory_service import ModelEntry
 
