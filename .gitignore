@@ -132,3 +132,10 @@ calc_lab/*
 
 # ── gimo_prueba: nested git repo (decide later: submodule vs absorb) ──
 gimo_prueba/
+
+# ── Codex scratch dir (per-session cache, never commit) ──────
+.codex_tmp/
+
+# ── Android app build/local artifacts ────────────────────────
+apps/android/gimomesh/.gradle/
+apps/android/gimomesh/local.properties
