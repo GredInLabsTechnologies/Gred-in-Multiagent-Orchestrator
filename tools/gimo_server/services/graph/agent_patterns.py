@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from tools.gimo_server.services.observability_service import ObservabilityService
 
 if TYPE_CHECKING:
-    from tools.gimo_server.ops_models import WorkflowNode
+    pass
 
 logger = logging.getLogger("orchestrator.services.graph_engine")
 
@@ -54,7 +54,6 @@ class AgentPatternsMixin:
         return None
 
     async def _run_agent_task(self, node) -> Dict[str, Any]:
-        from tools.gimo_server.ops_models import WorkflowNode
 
         # 1. Trust Proyectado: EVALUACION PROACTIVA
         doubt_response = await self._check_proactive_confidence(node)

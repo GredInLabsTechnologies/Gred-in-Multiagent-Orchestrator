@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import importlib.util
-import json
 import logging
 import os
 import re

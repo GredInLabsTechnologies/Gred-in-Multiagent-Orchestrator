@@ -87,13 +87,20 @@ class DeviceQueue:
         self._active: Dict[str, ExecutionTicket] = {}
         self._pending: List[_QueueEntry] = []
         self._lock = asyncio.Lock()
+        # Strong refs for fire-and-forget dispatch tasks (prevents premature GC).
+        self._dispatch_tasks: set[asyncio.Task] = set()
+
+    def _spawn_dispatch(self) -> None:
+        task = asyncio.create_task(self._try_dispatch())
+        self._dispatch_tasks.add(task)
+        task.add_done_callback(self._dispatch_tasks.discard)
 
     async def enqueue(self, ticket: ExecutionTicket) -> None:
         """Add ticket to queue and grant immediately if capacity allows."""
         async with self._lock:
             self._pending.append(_QueueEntry(ticket=ticket, priority=ticket.priority))
             self._pending.sort(key=lambda e: e.priority)
-        asyncio.create_task(self._try_dispatch())
+        self._spawn_dispatch()
 
     async def _try_dispatch(self) -> None:
         """Attempt to dispatch the next pending ticket."""
@@ -119,7 +126,7 @@ class DeviceQueue:
         """Called when a request finishes execution."""
         self._active.pop(ticket.ticket_id, None)
         self._sem.release()
-        asyncio.create_task(self._try_dispatch())
+        self._spawn_dispatch()
 
     @property
     def queue_depth(self) -> int:
@@ -217,6 +224,8 @@ class _AsyncDeviceQueue(DeviceQueue):
         self._pending: List[_QueueEntry] = []
         self._lock = asyncio.Lock()
         self._dispatch_lock = asyncio.Lock()
+        # Strong refs for fire-and-forget dispatch tasks (prevents premature GC).
+        self._dispatch_tasks: set[asyncio.Task] = set()
 
     async def _try_dispatch(self) -> None:
         """Non-blocking dispatch: try to acquire semaphore immediately."""
@@ -244,4 +253,4 @@ class _AsyncDeviceQueue(DeviceQueue):
     def release(self, ticket: ExecutionTicket) -> None:
         self._active.pop(ticket.ticket_id, None)
         self._sem.release()
-        asyncio.get_running_loop().create_task(self._try_dispatch())
+        self._spawn_dispatch()

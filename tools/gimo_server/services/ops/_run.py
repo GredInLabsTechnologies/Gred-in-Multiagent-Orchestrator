@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from ...config import OPS_RUN_TTL
 from ...ops_models import OpsRun
 from ..lifecycle_errors import RunNotFoundError
-from ..run_lifecycle import is_active_run_status, is_resumable_run_status
+from ..run_lifecycle import is_resumable_run_status
 from ._base import _utcnow, _json_dump
 
 logger = logging.getLogger("orchestrator.ops")

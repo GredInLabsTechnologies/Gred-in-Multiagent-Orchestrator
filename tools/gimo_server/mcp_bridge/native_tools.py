@@ -824,10 +824,9 @@ def register_native_tools(mcp: FastMCP):
             A status string containing the thread_id and polling instructions.
             Does NOT contain the assistant's response — fetch it from the thread.
         """
-        from .bridge import proxy_to_api, _get_auth_token, BACKEND_URL
+        from .bridge import _get_auth_token, BACKEND_URL
         import httpx
         import asyncio
-        import json
 
         try:
             token = _get_auth_token()

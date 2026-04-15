@@ -73,7 +73,7 @@ class AdvisoryEngine:
         # Calcular telemetry score
         success_rate = telemetry["success_rate"]
         avg_quality = telemetry["avg_quality_score"] / 100.0  # Normalize to 0-1
-        quality_confidence = telemetry["metadata"]["quality_confidence"]
+        telemetry["metadata"]["quality_confidence"]
 
         # Blended quality score (success + quality)
         if telemetry["quality_samples"] >= 2:

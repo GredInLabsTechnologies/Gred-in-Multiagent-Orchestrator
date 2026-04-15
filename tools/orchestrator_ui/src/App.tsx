@@ -24,6 +24,7 @@ import { SkillsRail } from './components/SkillsRail';
 /* ── Lazy-loaded views ─────────────────────────────────── */
 const GraphView = lazy(() => import('./views/GraphView'));
 const PlansView = lazy(() => import('./views/PlansView'));
+const ThreadView = lazy(() => import('./components/ThreadView').then(m => ({ default: m.ThreadView })));
 
 /* Overlay content (lazy) */
 const SettingsPanel = lazy(() => import('./components/SettingsPanel').then(m => ({ default: m.SettingsPanel })));
@@ -261,6 +262,10 @@ export default function App() {
                 );
             case 'plans':
                 return <PlansView />;
+            case 'threads':
+                // ThreadView consumes credentials via cookies (`credentials: 'include'`) and uses
+                // `API_BASE` directly — no extra props required from App state.
+                return <ThreadView />;
             default:
                 return null;
         }

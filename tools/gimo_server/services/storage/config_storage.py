@@ -16,7 +16,6 @@ class ConfigStorage:
 
     def ensure_tables(self) -> None:
         """No-op: using GICS."""
-        pass
 
     def get_circuit_breaker_config(self, dimension_key: str) -> Optional[Dict[str, Any]]:
         if not self.gics:

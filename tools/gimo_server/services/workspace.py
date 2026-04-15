@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple
 
 from ..config import (
     BASE_DIR, REPO_ROOT_DIR, ALLOWED_EXTENSIONS, 
-    SEARCH_EXCLUDE_DIRS, AUDIT_LOG_PATH, MAX_BYTES, MAX_LINES, SUBPROCESS_TIMEOUT
+    SEARCH_EXCLUDE_DIRS, MAX_BYTES, MAX_LINES, SUBPROCESS_TIMEOUT
 )
 from ..security import audit_log, redact_sensitive_data
 from .snapshot_service import SnapshotService

@@ -4,14 +4,13 @@ import asyncio
 import json as _json
 import logging
 import shutil
-from typing import List, Tuple
+from typing import List
 
 from ...ops_models import (
     NormalizedModelInfo,
     ProviderValidateResponse,
 )
 from ._base import (
-    ProviderCatalogBase,
     _run_sync,
     _fallback_models_for,
 )

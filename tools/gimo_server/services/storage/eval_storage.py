@@ -18,7 +18,6 @@ class EvalStorage:
 
     def ensure_tables(self) -> None:
         """No-op: using GICS."""
-        pass
 
     def save_eval_report(self, report: EvalRunReport | Dict[str, Any]) -> int:
         if not self.gics:

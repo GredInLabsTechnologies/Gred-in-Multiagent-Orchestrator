@@ -9,7 +9,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List
+from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Tuple
 
 from ..engine.moods import MoodProfile, get_mood_profile
 from ..engine.tools.chat_tools_schema import CHAT_TOOLS, filter_tools_by_policy, get_tool_risk_level
@@ -592,36 +592,17 @@ class AgenticLoopService:
                 total += cls._estimate_tokens(func.get("arguments", ""))
         return total
 
-    @classmethod
-    def _trim_messages_to_budget(
-        cls,
-        messages: List[Dict[str, Any]],
-        budget: int,
-        tools_tokens: int = 0,
-    ) -> List[Dict[str, Any]]:
-        """Trim message history to fit within token budget.
-
-        Strategy (preserves correctness of tool-call/tool-result pairs):
-        1. Always keep system prompt (messages[0]) and the last user message.
-        2. Compress tool result contents that exceed 500 chars.
-        3. If still over budget, drop oldest conversation turns (keeping
-           the system prompt and last 2 user/assistant exchanges).
-
-        Returns a new list — does not mutate the original.
-        """
-        import copy
-
-        # Reserve tokens for tools schema + output headroom
+    @staticmethod
+    def _compute_available_budget(budget: int, tools_tokens: int) -> int:
+        """Reserve tokens for tools schema + output headroom."""
         available = budget - tools_tokens - 512  # 512 for output headroom
         if available <= 0:
             available = max(budget // 2, 1024)
+        return available
 
-        est = cls._estimate_messages_tokens(messages)
-        if est <= available:
-            return messages
-
-        # Pass 1: Compress large tool results
-        trimmed = copy.deepcopy(messages)
+    @staticmethod
+    def _compress_tool_results_in_place(trimmed: List[Dict[str, Any]]) -> None:
+        """Pass 1: Compress large tool results (>500 chars)."""
         for msg in trimmed:
             if msg.get("role") == "tool":
                 content = msg.get("content", "")
@@ -629,22 +610,22 @@ class AgenticLoopService:
                     # Keep first 200 chars + last 100 chars
                     msg["content"] = content[:200] + "\n...(truncated)...\n" + content[-100:]
 
-        est = cls._estimate_messages_tokens(trimmed)
-        if est <= available:
-            return trimmed
-
-        # Pass 2: Compress assistant text content
+    @staticmethod
+    def _compress_assistant_text_in_place(trimmed: List[Dict[str, Any]]) -> None:
+        """Pass 2: Compress assistant text content (>300 chars)."""
         for msg in trimmed:
             if msg.get("role") == "assistant":
                 content = msg.get("content") or ""
                 if isinstance(content, str) and len(content) > 300:
                     msg["content"] = content[:200] + "...(truncated)"
 
-        est = cls._estimate_messages_tokens(trimmed)
-        if est <= available:
-            return trimmed
-
-        # Pass 3: Sliding window — keep system + last N exchanges
+    @classmethod
+    def _apply_sliding_window(
+        cls,
+        trimmed: List[Dict[str, Any]],
+        available: int,
+    ) -> List[Dict[str, Any]]:
+        """Pass 3: Sliding window — keep system + last N exchanges that fit."""
         # Find the system prompt and last user message
         system_msg = trimmed[0] if trimmed and trimmed[0].get("role") == "system" else None
         result: List[Dict[str, Any]] = []
@@ -673,6 +654,49 @@ class AgenticLoopService:
 
         result.extend(tail)
         return result
+
+    @classmethod
+    def _trim_messages_to_budget(
+        cls,
+        messages: List[Dict[str, Any]],
+        budget: int,
+        tools_tokens: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Trim message history to fit within token budget.
+
+        Strategy (preserves correctness of tool-call/tool-result pairs):
+        1. Always keep system prompt (messages[0]) and the last user message.
+        2. Compress tool result contents that exceed 500 chars.
+        3. If still over budget, drop oldest conversation turns (keeping
+           the system prompt and last 2 user/assistant exchanges).
+
+        Returns a new list — does not mutate the original.
+        """
+        import copy
+
+        available = cls._compute_available_budget(budget, tools_tokens)
+
+        est = cls._estimate_messages_tokens(messages)
+        if est <= available:
+            return messages
+
+        # Pass 1: Compress large tool results
+        trimmed = copy.deepcopy(messages)
+        cls._compress_tool_results_in_place(trimmed)
+
+        est = cls._estimate_messages_tokens(trimmed)
+        if est <= available:
+            return trimmed
+
+        # Pass 2: Compress assistant text content
+        cls._compress_assistant_text_in_place(trimmed)
+
+        est = cls._estimate_messages_tokens(trimmed)
+        if est <= available:
+            return trimmed
+
+        # Pass 3: Sliding window — keep system + last N exchanges
+        return cls._apply_sliding_window(trimmed, available)
 
     @classmethod
     def _build_context_budget_hint(
@@ -1013,6 +1037,203 @@ class AgenticLoopService:
         return base
 
     @classmethod
+    def _prepare_context_budget(
+        cls,
+        model: str,
+        provider_id: str,
+        tools: List[Dict[str, Any]],
+    ) -> Tuple[int, bool, List[Dict[str, Any]], int]:
+        """Resolve context budget, detect constrained mode, compact tool schemas.
+
+        Returns: (context_budget, is_constrained, compacted_tools, tools_tokens_est)
+        """
+        context_budget = cls._get_context_budget(model, provider_id)
+        is_constrained = context_budget <= 8192
+        # Compact tool schemas for providers with strict payload limits (e.g. Groq 413).
+        tool_schema_budget = min(4000, context_budget * 2) if is_constrained else 8000
+        tools = cls._compact_tools_if_needed(tools, max_schema_chars=tool_schema_budget)
+        tools_tokens_est = sum(cls._estimate_tokens(json.dumps(t)) for t in tools)
+        if is_constrained:
+            logger.info(
+                "Constrained provider detected: %s (budget=%d tokens, tools=%d tokens)",
+                provider_id, context_budget, tools_tokens_est,
+            )
+        return context_budget, is_constrained, tools, tools_tokens_est
+
+    @staticmethod
+    def _apply_response_honesty_gate(
+        all_tool_logs: List[Dict[str, Any]],
+        final_response: str,
+        finish_reason: str,
+    ) -> Tuple[str, str]:
+        """Wire 3: Response Honesty Gate.
+
+        Detect semantic mismatch between tool results and the LLM's text response.
+        If every tool call failed and the response doesn't mention the failure,
+        override with an honest summary so the user is never misled.
+
+        Returns: (final_response, finish_reason) — possibly overridden.
+        """
+        if all_tool_logs and finish_reason not in ("error", "tool_error", "user_question"):
+            _failed = [t for t in all_tool_logs if t.get("status") in ("error", "policy_denied", "denied")]
+            _succeeded = [t for t in all_tool_logs if t.get("status") == "success"]
+            if _failed and not _succeeded:
+                _failure_words = {"fail", "error", "denied", "could not", "unable", "cannot"}
+                _response_lower = (final_response or "").lower()
+                if not any(w in _response_lower for w in _failure_words):
+                    tool_errors = "; ".join(
+                        f"{t['name']}: {t.get('message', t.get('status', 'failed'))}"
+                        for t in _failed[:5]
+                    )
+                    final_response = f"All tool calls failed: {tool_errors}"
+                    finish_reason = "tool_error"
+        return final_response, finish_reason
+
+    @classmethod
+    def _record_unified_telemetry(
+        cls,
+        *,
+        thread_id: str | None,
+        thread: Any | None,
+        provider_id: str,
+        model: str,
+        task_key: str,
+        total_usage: Dict[str, Any],
+        total_cost: float,
+        all_tool_logs: List[Dict[str, Any]],
+        last_tool_call_format: str,
+        finish_reason: str,
+        resolved_execution_policy: str,
+        loop_started_at: float,
+    ) -> None:
+        """U4: Single telemetry sink — UnifiedObservabilityService owns metrics,
+        audit log, structured events, per-thread usage, and OTel spans.
+        """
+        try:
+            from .observability_service import ObservabilityService as UnifiedObservabilityService
+            from .ops_service import OpsService
+            from .storage_service import StorageService
+
+            try:
+                UnifiedObservabilityService.record_llm_usage(
+                    thread_id=thread_id,
+                    model=model or "unknown",
+                    prompt_tokens=total_usage.get("prompt_tokens", 0),
+                    completion_tokens=total_usage.get("completion_tokens", 0),
+                    cost_usd=total_cost,
+                    tools_executed=len(all_tool_logs),
+                    tool_call_format=last_tool_call_format or "none",
+                    estimated=bool(total_usage.get("estimated")),
+                )
+            except Exception:
+                logger.debug("record_llm_usage failed", exc_info=True)
+
+            cfg = ProviderService.get_config()
+            provider_entry = (cfg.providers.get(provider_id) if cfg else None)
+            provider_type = ProviderService.normalize_provider_type(
+                getattr(provider_entry, "provider_type", None) or getattr(provider_entry, "type", None) or provider_id
+            )
+            auth_mode = str(getattr(provider_entry, "auth_mode", "") or "")
+            trace_id = f"chat_{thread_id or uuid.uuid4().hex}_{uuid.uuid4().hex[:12]}"
+            request_id = f"chatreq_{uuid.uuid4().hex[:12]}"
+            workflow_id = str(thread_id or task_key or "agentic_chat")
+            duration_ms = int(max(time.monotonic() - loop_started_at, 0.0) * 1000)
+            input_tokens = int(total_usage.get("prompt_tokens", 0) or 0)
+            output_tokens = int(total_usage.get("completion_tokens", 0) or 0)
+            total_tokens = int(total_usage.get("total_tokens", 0) or (input_tokens + output_tokens))
+            evidence_status = "completed" if finish_reason not in {"error", "tool_error"} else "failed"
+            trust_outcome = "approved" if evidence_status == "completed" else "error"
+
+            UnifiedObservabilityService.record_workflow_start(workflow_id, trace_id)
+            UnifiedObservabilityService.record_node_span(
+                workflow_id=workflow_id,
+                trace_id=trace_id,
+                step_id="agentic_loop",
+                node_id="agentic_chat",
+                node_type="agentic_chat",
+                status=evidence_status,
+                duration_ms=duration_ms,
+                tokens_used=total_tokens,
+                cost_usd=float(total_cost or 0.0),
+            )
+            UnifiedObservabilityService.record_structured_event(
+                event_type="agentic_chat",
+                status=finish_reason or evidence_status,
+                trace_id=trace_id,
+                request_id=request_id,
+                run_id=workflow_id,
+                actor="orchestrator",
+                stage="agentic_loop",
+                final_model_used=model or "unknown",
+                latency_ms=duration_ms,
+                metadata={
+                    "thread_id": thread_id,
+                    "provider_id": provider_id,
+                    "tools_executed": len(all_tool_logs),
+                },
+            )
+            UnifiedObservabilityService.record_ai_usage(
+                run_id=workflow_id,
+                draft_id="",
+                provider_type=provider_type,
+                auth_mode=auth_mode,
+                model=model or "unknown",
+                tokens_in=input_tokens,
+                tokens_out=output_tokens,
+                cost_usd=float(total_cost or 0.0),
+                status=evidence_status,
+                latency_ms=duration_ms,
+                request_id=request_id,
+                error_code="" if evidence_status == "completed" else str(finish_reason or ""),
+            )
+            UnifiedObservabilityService.record_workflow_end(workflow_id, trace_id, status=evidence_status)
+
+            storage = StorageService()
+            storage.cost.save_cost_event(
+                CostEvent(
+                    id=uuid.uuid4().hex,
+                    workflow_id=workflow_id,
+                    node_id="agentic_chat",
+                    model=model or "unknown",
+                    provider=provider_id or provider_type,
+                    task_type=task_key or "agentic_chat",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    cost_usd=float(total_cost or 0.0),
+                    duration_ms=duration_ms,
+                    agent_preset=str(getattr(thread, "agent_preset", "") or ""),
+                    task_role=str(task_key or "agentic_chat"),
+                    execution_policy_name=str(resolved_execution_policy or ""),
+                )
+            )
+            storage.save_trust_event(
+                TrustEvent(
+                    dimension_key=f"model:{provider_type}:{model or 'unknown'}",
+                    tool="agentic_chat",
+                    context=str(task_key or "agentic_chat"),
+                    model=model or "unknown",
+                    task_type=str(task_key or "agentic_chat"),
+                    outcome=trust_outcome,
+                    actor=f"thread:{thread_id or 'unknown'}",
+                    post_check_passed=evidence_status == "completed",
+                    duration_ms=duration_ms,
+                    tokens_used=total_tokens,
+                    cost_usd=float(total_cost or 0.0),
+                )
+            )
+            OpsService.record_model_outcome(
+                provider_type=provider_type,
+                model_id=model or "unknown",
+                success=evidence_status == "completed",
+                latency_ms=duration_ms,
+                cost_usd=float(total_cost or 0.0),
+                task_type=str(task_key or "agentic_chat"),
+            )
+        except Exception:
+            logger.debug("persistent execution evidence failed", exc_info=True)
+
+    @classmethod
     async def _run_loop(
         cls,
         *,
@@ -1069,17 +1290,9 @@ class AgenticLoopService:
         last_content = ""
         last_tool_call_format = "none"
         # -- Context budget: adapt to provider token limits --
-        context_budget = cls._get_context_budget(model, provider_id)
-        is_constrained = context_budget <= 8192
-        # Compact tool schemas for providers with strict payload limits (e.g. Groq 413).
-        tool_schema_budget = min(4000, context_budget * 2) if is_constrained else 8000
-        tools = cls._compact_tools_if_needed(tools, max_schema_chars=tool_schema_budget)
-        tools_tokens_est = sum(cls._estimate_tokens(json.dumps(t)) for t in tools)
-        if is_constrained:
-            logger.info(
-                "Constrained provider detected: %s (budget=%d tokens, tools=%d tokens)",
-                provider_id, context_budget, tools_tokens_est,
-            )
+        context_budget, is_constrained, tools, tools_tokens_est = cls._prepare_context_budget(
+            model, provider_id, tools,
+        )
         loop_started_at = time.monotonic()
 
         await emit_event(
@@ -1650,149 +1863,24 @@ class AgenticLoopService:
                 executor_id=f"{provider_id or 'unknown'}:{model or 'unknown'}",
             )
 
-        # U4: Single telemetry sink — writes to metrics, audit log, and thread metadata.
-        try:
-            from .observability import ObservabilityService
-            ObservabilityService.record_llm_usage(
-                thread_id=thread_id,
-                model=model or "unknown",
-                prompt_tokens=total_usage.get("prompt_tokens", 0),
-                completion_tokens=total_usage.get("completion_tokens", 0),
-                cost_usd=total_cost,
-                tools_executed=len(all_tool_logs),
-                tool_call_format=last_tool_call_format or "none",
-                estimated=bool(total_usage.get("estimated")),
-            )
-        except Exception:
-            logger.debug("record_llm_usage failed", exc_info=True)
+        cls._record_unified_telemetry(
+            thread_id=thread_id,
+            thread=thread,
+            provider_id=provider_id,
+            model=model,
+            task_key=task_key,
+            total_usage=total_usage,
+            total_cost=total_cost,
+            all_tool_logs=all_tool_logs,
+            last_tool_call_format=last_tool_call_format,
+            finish_reason=finish_reason,
+            resolved_execution_policy=resolved_execution_policy,
+            loop_started_at=loop_started_at,
+        )
 
-        try:
-            from .observability_service import ObservabilityService as UnifiedObservabilityService
-            from .ops_service import OpsService
-            from .storage_service import StorageService
-
-            cfg = ProviderService.get_config()
-            provider_entry = (cfg.providers.get(provider_id) if cfg else None)
-            provider_type = ProviderService.normalize_provider_type(
-                getattr(provider_entry, "provider_type", None) or getattr(provider_entry, "type", None) or provider_id
-            )
-            auth_mode = str(getattr(provider_entry, "auth_mode", "") or "")
-            trace_id = f"chat_{thread_id or uuid.uuid4().hex}_{uuid.uuid4().hex[:12]}"
-            request_id = f"chatreq_{uuid.uuid4().hex[:12]}"
-            workflow_id = str(thread_id or task_key or "agentic_chat")
-            duration_ms = int(max(time.monotonic() - loop_started_at, 0.0) * 1000)
-            input_tokens = int(total_usage.get("prompt_tokens", 0) or 0)
-            output_tokens = int(total_usage.get("completion_tokens", 0) or 0)
-            total_tokens = int(total_usage.get("total_tokens", 0) or (input_tokens + output_tokens))
-            evidence_status = "completed" if finish_reason not in {"error", "tool_error"} else "failed"
-            trust_outcome = "approved" if evidence_status == "completed" else "error"
-
-            UnifiedObservabilityService.record_workflow_start(workflow_id, trace_id)
-            UnifiedObservabilityService.record_node_span(
-                workflow_id=workflow_id,
-                trace_id=trace_id,
-                step_id="agentic_loop",
-                node_id="agentic_chat",
-                node_type="agentic_chat",
-                status=evidence_status,
-                duration_ms=duration_ms,
-                tokens_used=total_tokens,
-                cost_usd=float(total_cost or 0.0),
-            )
-            UnifiedObservabilityService.record_structured_event(
-                event_type="agentic_chat",
-                status=finish_reason or evidence_status,
-                trace_id=trace_id,
-                request_id=request_id,
-                run_id=workflow_id,
-                actor="orchestrator",
-                stage="agentic_loop",
-                final_model_used=model or "unknown",
-                latency_ms=duration_ms,
-                metadata={
-                    "thread_id": thread_id,
-                    "provider_id": provider_id,
-                    "tools_executed": len(all_tool_logs),
-                },
-            )
-            UnifiedObservabilityService.record_ai_usage(
-                run_id=workflow_id,
-                draft_id="",
-                provider_type=provider_type,
-                auth_mode=auth_mode,
-                model=model or "unknown",
-                tokens_in=input_tokens,
-                tokens_out=output_tokens,
-                cost_usd=float(total_cost or 0.0),
-                status=evidence_status,
-                latency_ms=duration_ms,
-                request_id=request_id,
-                error_code="" if evidence_status == "completed" else str(finish_reason or ""),
-            )
-            UnifiedObservabilityService.record_workflow_end(workflow_id, trace_id, status=evidence_status)
-
-            storage = StorageService()
-            storage.cost.save_cost_event(
-                CostEvent(
-                    id=uuid.uuid4().hex,
-                    workflow_id=workflow_id,
-                    node_id="agentic_chat",
-                    model=model or "unknown",
-                    provider=provider_id or provider_type,
-                    task_type=task_key or "agentic_chat",
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    total_tokens=total_tokens,
-                    cost_usd=float(total_cost or 0.0),
-                    duration_ms=duration_ms,
-                    agent_preset=str(getattr(thread, "agent_preset", "") or ""),
-                    task_role=str(task_key or "agentic_chat"),
-                    execution_policy_name=str(resolved_execution_policy or ""),
-                )
-            )
-            storage.save_trust_event(
-                TrustEvent(
-                    dimension_key=f"model:{provider_type}:{model or 'unknown'}",
-                    tool="agentic_chat",
-                    context=str(task_key or "agentic_chat"),
-                    model=model or "unknown",
-                    task_type=str(task_key or "agentic_chat"),
-                    outcome=trust_outcome,
-                    actor=f"thread:{thread_id or 'unknown'}",
-                    post_check_passed=evidence_status == "completed",
-                    duration_ms=duration_ms,
-                    tokens_used=total_tokens,
-                    cost_usd=float(total_cost or 0.0),
-                )
-            )
-            OpsService.record_model_outcome(
-                provider_type=provider_type,
-                model_id=model or "unknown",
-                success=evidence_status == "completed",
-                latency_ms=duration_ms,
-                cost_usd=float(total_cost or 0.0),
-                task_type=str(task_key or "agentic_chat"),
-            )
-        except Exception:
-            logger.debug("persistent execution evidence failed", exc_info=True)
-
-        # Wire 3: Response Honesty Gate — detect semantic mismatch between
-        # tool results and the LLM's text response.  If every tool call failed
-        # and the response doesn't mention the failure, override with an honest
-        # summary so the user is never misled.
-        if all_tool_logs and finish_reason not in ("error", "tool_error", "user_question"):
-            _failed = [t for t in all_tool_logs if t.get("status") in ("error", "policy_denied", "denied")]
-            _succeeded = [t for t in all_tool_logs if t.get("status") == "success"]
-            if _failed and not _succeeded:
-                _failure_words = {"fail", "error", "denied", "could not", "unable", "cannot"}
-                _response_lower = (final_response or "").lower()
-                if not any(w in _response_lower for w in _failure_words):
-                    tool_errors = "; ".join(
-                        f"{t['name']}: {t.get('message', t.get('status', 'failed'))}"
-                        for t in _failed[:5]
-                    )
-                    final_response = f"All tool calls failed: {tool_errors}"
-                    finish_reason = "tool_error"
+        final_response, finish_reason = cls._apply_response_honesty_gate(
+            all_tool_logs, final_response, finish_reason,
+        )
 
         if persist_conversation and thread_id and final_response:
             final_turn = ConversationService.add_turn(thread_id, agent_id="orchestrator")
@@ -2098,6 +2186,94 @@ class AgenticLoopService:
             except Exception:
                 logger.exception("Lock release failed for thread %s", thread_id)
 
+    @staticmethod
+    def _inject_resolved_contexts_as_tool_results(
+        session_id: str,
+        thread_id: str,
+        turn_id: str,
+        resolved_list: List[Dict[str, Any]],
+    ) -> None:
+        """Inject resolved context requests as TOOL RESULTS on the given turn.
+
+        Archives each request after injection so it's only used once.
+        """
+        from .context_request_service import ContextRequestService
+        for req in resolved_list:
+            call_id = req.get("metadata", {}).get("call_id", f"call_{req['id'][:8]}")
+            content = f"[CONTEXT RESOLVED]: {req.get('result', 'No information provided.')}"
+            if req.get("payload"):
+                content += f"\nData: {json.dumps(req['payload'], indent=2)}"
+
+            ConversationService.append_item(
+                thread_id, turn_id,
+                GimoItem(
+                    type="tool_result",
+                    content=content,
+                    status="completed",
+                    metadata={"call_id": call_id, "tool_name": "request_context"}
+                )
+            )
+            # Archive so it's only used once
+            ContextRequestService.update_request_status(session_id, req["id"], "archived")
+
+    @classmethod
+    def _prepare_resume_execution_context(
+        cls,
+        thread: Any,
+        workspace_root: str,
+        runtime_context: Any,
+    ) -> Tuple[Any, str, str, Any, Any, List[Dict[str, Any]], List[Dict[str, Any]], Any]:
+        """Resolve adapter, trust-gated policy, system prompt, messages and effective tools.
+
+        Returns: (adapter, provider_id, model, mood, mood_profile, messages, effective_tools, trust_result)
+        """
+        mood, mood_profile, task_role, workflow_phase, execution_policy = runtime_context
+
+        adapter, provider_id, model, canonical_type = _resolve_orchestrator_adapter()
+
+        # Wire 2: Dynamic trust-gated authority
+        trust_result = ConstraintCompilerService.apply_trust_authority(
+            execution_policy,
+            model_id=model,
+            provider_type=canonical_type,
+            workspace_root=workspace_root,
+            task_type=str((thread.metadata or {}).get("task_type") or "agentic_chat"),
+            task_semantic=str((thread.metadata or {}).get("task_semantic") or "implementation"),
+        )
+        execution_policy = trust_result.policy
+
+        system_prompt = cls._build_system_prompt(
+            workspace_root,
+            mood_profile,
+            task_role=task_role,
+            workflow_phase=workflow_phase,
+        )
+        messages = _build_messages_from_thread(thread.turns, system_prompt)
+
+        # Wire 4: Schema-time tool filtering
+        policy_obj = ExecutionPolicyService.get_policy(execution_policy) if execution_policy else None
+        effective_tools = filter_tools_by_policy(CHAT_TOOLS, policy_obj.allowed_tools if policy_obj else None)
+
+        return adapter, provider_id, model, mood, mood_profile, messages, effective_tools, trust_result
+
+    @classmethod
+    async def _cleanup_resume_execution(
+        cls,
+        thread_id: str,
+        owner_id: str,
+        stop_event: Any,
+        heartbeat_task: Any,
+    ) -> None:
+        """Stop heartbeat and release thread execution lock, logging any exception."""
+        try:
+            await cls._stop_heartbeat(stop_event, heartbeat_task)
+        except Exception:
+            logger.exception("Heartbeat stop failed for thread %s", thread_id)
+        try:
+            cls.release_thread_execution(thread_id, owner_id)
+        except Exception:
+            logger.exception("Lock release failed for thread %s", thread_id)
+
     @classmethod
     async def resume_session(
         cls,
@@ -2107,7 +2283,7 @@ class AgenticLoopService:
         emit: EventEmitter | None = None,
     ) -> AgenticResult:
         """Resumes a paused execution after context requests are resolved.
-        
+
         This method is the canonical entry point for Phase 5B resume logic.
         """
         from .context_request_service import ContextRequestService
@@ -2135,55 +2311,24 @@ class AgenticLoopService:
             turn = ConversationService.add_turn(thread_id, agent_id="system")
             if not turn:
                  return AgenticResult(response="Failed to add recovery turn", finish_reason="error")
-                 
-            for req in resolved_list:
-                call_id = req.get("metadata", {}).get("call_id", f"call_{req['id'][:8]}")
-                content = f"[CONTEXT RESOLVED]: {req.get('result', 'No information provided.')}"
-                if req.get("payload"):
-                    content += f"\nData: {json.dumps(req['payload'], indent=2)}"
-                
-                ConversationService.append_item(
-                    thread_id, turn.id,
-                    GimoItem(
-                        type="tool_result",
-                        content=content,
-                        status="completed",
-                        metadata={"call_id": call_id, "tool_name": "request_context"}
-                    )
-                )
-                # Archive so it's only used once
-                ContextRequestService.update_request_status(session_id, req["id"], "archived")
+
+            cls._inject_resolved_contexts_as_tool_results(session_id, thread_id, turn.id, resolved_list)
 
             # Reload thread to get merged messages for the LLM
             thread = ConversationService.get_thread(thread_id)
             if not thread:
                 return AgenticResult(response=f"Thread {thread_id} not found after recovery write.", finish_reason="error")
-            mood, mood_profile, task_role, workflow_phase, execution_policy = runtime_context
 
-            adapter, provider_id, model, canonical_type = _resolve_orchestrator_adapter()
-
-            # Wire 2: Dynamic trust-gated authority
-            trust_result = ConstraintCompilerService.apply_trust_authority(
-                execution_policy,
-                model_id=model,
-                provider_type=canonical_type,
-                workspace_root=workspace_root,
-                task_type=str((thread.metadata or {}).get("task_type") or "agentic_chat"),
-                task_semantic=str((thread.metadata or {}).get("task_semantic") or "implementation"),
-            )
-            execution_policy = trust_result.policy
-
-            system_prompt = cls._build_system_prompt(
-                workspace_root,
+            (
+                adapter,
+                provider_id,
+                model,
+                mood,
                 mood_profile,
-                task_role=task_role,
-                workflow_phase=workflow_phase,
-            )
-            messages = _build_messages_from_thread(thread.turns, system_prompt)
-
-            # Wire 4: Schema-time tool filtering
-            policy_obj = ExecutionPolicyService.get_policy(execution_policy) if execution_policy else None
-            effective_tools = filter_tools_by_policy(CHAT_TOOLS, policy_obj.allowed_tools if policy_obj else None)
+                messages,
+                effective_tools,
+                trust_result,
+            ) = cls._prepare_resume_execution_context(thread, workspace_root, runtime_context)
 
             return await cls._run_loop(
                 adapter=adapter,
@@ -2192,7 +2337,7 @@ class AgenticLoopService:
                 workspace_root=workspace_root,
                 token=token,
                 mood=mood,
-                execution_policy=execution_policy,
+                execution_policy=trust_result.policy,
                 mood_profile=mood_profile,
                 messages=messages,
                 max_turns=10,
@@ -2208,14 +2353,7 @@ class AgenticLoopService:
                 session_id=session_id,
             )
         finally:
-            try:
-                await cls._stop_heartbeat(stop_event, heartbeat_task)
-            except Exception:
-                logger.exception("Heartbeat stop failed for thread %s", thread_id)
-            try:
-                cls.release_thread_execution(thread_id, owner_id)
-            except Exception:
-                logger.exception("Lock release failed for thread %s", thread_id)
+            await cls._cleanup_resume_execution(thread_id, owner_id, stop_event, heartbeat_task)
 
     @staticmethod
     async def run_node(

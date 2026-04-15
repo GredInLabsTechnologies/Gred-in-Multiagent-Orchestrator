@@ -3,6 +3,7 @@ import logging
 import re
 
 from tools.gimo_server.ops_models import StrictContract, RepoContext
+from tools.gimo_server.security.safe_log import sanitize_for_log
 from tools.gimo_server.services.providers.service import ProviderService
 
 logger = logging.getLogger("orchestrator.services.router_pm")
@@ -13,7 +14,10 @@ class RouterPM:
 
     @staticmethod
     async def generate_contract(user_request_raw: str, repo_context: RepoContext) -> StrictContract:
-        logger.info(f"RouterPM generating contract for request: {user_request_raw[:80]}...")
+        logger.info(
+            "RouterPM generating contract for request: %s...",
+            sanitize_for_log(user_request_raw[:80]),
+        )
         
         # Pass 1 & 2 combined into a single strict LLM call
         system_prompt = (
@@ -54,8 +58,14 @@ class RouterPM:
             return contract
             
         except json.JSONDecodeError as e:
-            logger.error(f"RouterPM received invalid JSON from LLM: {raw}")
+            logger.error(
+                "RouterPM received invalid JSON from LLM: %s",
+                sanitize_for_log(raw),
+            )
             raise ValueError(f"Failed to parse LLM response into JSON: {e}")
         except Exception as e:
-            logger.error(f"RouterPM contract generation failed: {str(e)}")
+            logger.error(
+                "RouterPM contract generation failed: %s",
+                sanitize_for_log(e),
+            )
             raise ValueError(f"RouterPM failed to compile prompt to contract: {e}")

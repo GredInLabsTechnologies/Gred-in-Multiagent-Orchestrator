@@ -7,6 +7,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from ..ops_models import McpServerConfig
+from ..security.safe_log import sanitize_for_log
 
 logger = logging.getLogger("orchestrator.adapters.mcp_client")
 
@@ -39,7 +40,12 @@ class McpClient:
         env = os.environ.copy()
         env.update(self.config.env)
 
-        logger.info(f"Starting MCP server [{self.server_name}]: {command} {args}")
+        logger.info(
+            "Starting MCP server [%s]: %s %s",
+            sanitize_for_log(self.server_name),
+            sanitize_for_log(command),
+            sanitize_for_log(args),
+        )
         try:
             self._process = await asyncio.create_subprocess_exec(
                 command,
@@ -50,7 +56,11 @@ class McpClient:
                 env=env,
             )
         except Exception as e:
-            logger.error(f"Failed to start MCP server [{self.server_name}]: {e}")
+            logger.error(
+                "Failed to start MCP server [%s]: %s",
+                sanitize_for_log(self.server_name),
+                e,
+            )
             raise
 
     async def stop(self) -> None:
@@ -92,7 +102,11 @@ class McpClient:
             if not line_bytes:
                 if self._process.stderr:
                     stderr = await self._process.stderr.read()
-                    logger.error(f"MCP Server [{self.server_name}] stderr: {stderr.decode('utf-8', errors='replace')}")
+                    logger.error(
+                        "MCP Server [%s] stderr: %s",
+                        sanitize_for_log(self.server_name),
+                        sanitize_for_log(stderr.decode('utf-8', errors='replace')),
+                    )
                 raise RuntimeError(f"MCP server [{self.server_name}] exited unexpectedly")
 
             line = line_bytes.decode("utf-8").strip()
@@ -112,12 +126,20 @@ class McpClient:
             if "error" in data:
                 if data.get("id") == request_id:
                      raise RuntimeError(f"MCP Error: {data['error']}")
-                logger.warning(f"MCP Server [{self.server_name}] reported error for unknown ID: {data}")
+                logger.warning(
+                    "MCP Server [%s] reported error for unknown ID: %s",
+                    sanitize_for_log(self.server_name),
+                    sanitize_for_log(data),
+                )
 
             if data.get("id") == request_id:
                 return data.get("result")
         except json.JSONDecodeError:
-            logger.warning(f"MCP Server [{self.server_name}] produced non-JSON stdout: {line}")
+            logger.warning(
+                "MCP Server [%s] produced non-JSON stdout: %s",
+                sanitize_for_log(self.server_name),
+                sanitize_for_log(line),
+            )
         return None
 
     async def initialize(self) -> None:

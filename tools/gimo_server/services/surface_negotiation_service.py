@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from ..models.surface import SurfaceIdentity, SurfaceType
+from ..models.surface import SurfaceIdentity
 
 logger = logging.getLogger("orchestrator.surface_negotiation")
 

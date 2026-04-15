@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from tools.gimo_server.config import get_settings
+from tools.gimo_server.security.path_safety import PathTraversalError, safe_join
 from tools.gimo_server.services.git_service import GitService
 from tools.gimo_server.services.workspace_policy_service import WorkspacePolicyService
 
@@ -28,11 +29,13 @@ class AppSessionService:
 
     @classmethod
     def _get_session_path(cls, session_id: str) -> Path:
-        return cls._get_sessions_dir() / f"{session_id}.json"
+        # Guard against path traversal via untrusted session_id (S2083/S6549).
+        return safe_join(cls._get_sessions_dir(), f"{session_id}.json")
 
     @classmethod
     def _get_bound_repo_workspace(cls, session_id: str) -> Path:
-        return cls._get_bound_repos_dir() / session_id
+        # Guard against path traversal via untrusted session_id (S2083/S6549).
+        return safe_join(cls._get_bound_repos_dir(), session_id)
 
     @classmethod
     def _remove_tree(cls, path: Path) -> None:
@@ -95,13 +98,17 @@ class AppSessionService:
 
     @classmethod
     def get_session(cls, session_id: str) -> Optional[Dict[str, Any]]:
-        path = cls._get_session_path(session_id)
+        try:
+            path = cls._get_session_path(session_id)
+        except PathTraversalError:
+            logger.warning("Rejected session fetch with unsafe id")
+            return None
         if not path.exists():
             return None
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except Exception as e:
-            logger.error(f"Error reading session {session_id}: {e}")
+            logger.error("Error reading session: %s", e)
             return None
 
     @classmethod
@@ -167,7 +174,11 @@ class AppSessionService:
         session = cls.get_session(session_id)
         if not session or not session.get("repo_id"):
             return None
-        workspace_path = cls._get_bound_repo_workspace(session_id)
+        try:
+            workspace_path = cls._get_bound_repo_workspace(session_id)
+        except PathTraversalError:
+            logger.warning("Rejected bound repo resolve with unsafe id")
+            return None
         if not workspace_path.exists() or not workspace_path.is_dir():
             return None
         return str(workspace_path)
@@ -183,10 +194,14 @@ class AppSessionService:
 
     @classmethod
     def purge_session(cls, session_id: str) -> bool:
-        path = cls._get_session_path(session_id)
+        try:
+            path = cls._get_session_path(session_id)
+            workspace_path = cls._get_bound_repo_workspace(session_id)
+        except PathTraversalError:
+            logger.warning("Rejected session purge with unsafe id")
+            return False
         deleted = False
 
-        workspace_path = cls._get_bound_repo_workspace(session_id)
         if workspace_path.exists():
             cls._remove_tree(workspace_path)
 

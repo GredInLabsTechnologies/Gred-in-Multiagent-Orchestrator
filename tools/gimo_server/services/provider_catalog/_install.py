@@ -3,18 +3,20 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import shutil
-from typing import Any, Dict, List, Tuple
+from typing import List, Tuple
 
 from ...ops_models import (
     ProviderModelInstallResponse,
 )
 from ..providers.service import ProviderService
 from ...security import audit_log
-from ._base import ProviderCatalogBase
 
 
 class InstallMixin:
     """Model installation/pull: install_model, get_install_job, execute_install_job, etc."""
+
+    # Strong refs for fire-and-forget install jobs (prevents premature GC).
+    _install_tasks: set[asyncio.Task] = set()
 
     @classmethod
     async def install_model(cls, provider_type: str, model_id: str) -> ProviderModelInstallResponse:
@@ -49,7 +51,7 @@ class InstallMixin:
                 operation="EXECUTE",
                 actor=cls._SYSTEM_ACTOR_INSTALL,
             )
-            asyncio.create_task(
+            _install_task = asyncio.create_task(
                 cls._execute_install_job(
                     provider_type=canonical,
                     model_id=model_id,
@@ -57,6 +59,8 @@ class InstallMixin:
                     cmd=["ollama", "pull", model_id],
                 )
             )
+            cls._install_tasks.add(_install_task)
+            _install_task.add_done_callback(cls._install_tasks.discard)
             result = ProviderModelInstallResponse(
                 status="queued",
                 message=f"Install queued for model '{model_id}'.",

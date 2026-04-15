@@ -66,7 +66,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                 if (economyRes.ok) setEconomyConfig(await economyRes.json());
 
                 const [hwRes, rtRes] = await Promise.all([
-                    fetchWithRetry(`${API_BASE}/ui/hardware`, { credentials: 'include' }).catch(() => null),
+                    fetchWithRetry(`${API_BASE}/ops/mastery/hardware`, { credentials: 'include' }).catch(() => null),
                     fetchWithRetry(`${API_BASE}/ops/realtime/metrics`, { credentials: 'include' }).catch(() => null),
                 ]);
                 if (hwRes?.ok) setHwMetrics(await hwRes.json());

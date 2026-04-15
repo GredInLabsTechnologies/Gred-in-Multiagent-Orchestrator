@@ -26,6 +26,8 @@ class ProviderAccountService:
     - Flow state is persisted in OPS state for restart survivability.
     """
 
+    # Fixed filename under OPS_DATA_DIR (server config) — no user-controlled
+    # segment. Sonar S2083/S6549 reports here are false positives.
     FLOWS_PATH: Path = OPS_DATA_DIR / "state" / "provider_account_flows.json"
 
     @classmethod

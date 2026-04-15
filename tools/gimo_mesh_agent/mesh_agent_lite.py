@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import json
 import signal
-import sys
 import time
 import urllib.request
 import urllib.error

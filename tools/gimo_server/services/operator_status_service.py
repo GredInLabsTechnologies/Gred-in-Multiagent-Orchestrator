@@ -26,11 +26,31 @@ class OperatorStatusService:
 
     @classmethod
     def _repo_root(cls, workspace_override: str | None = None) -> Path:
-        if workspace_override:
-            p = Path(workspace_override)
-            if p.is_dir():
-                return p
         settings = get_settings()
+        if workspace_override:
+            # Only accept the override if it resolves to an existing, registered
+            # repository directory. We validate against the repo registry to
+            # prevent path traversal via the X-Gimo-Workspace header
+            # (pythonsecurity:S2083/S6549).
+            try:
+                candidate = Path(workspace_override).resolve(strict=True)
+            except (OSError, ValueError):
+                candidate = None
+            if candidate is not None and candidate.is_dir():
+                try:
+                    from ..security import load_repo_registry
+
+                    registry = load_repo_registry() or {}
+                    registered = {
+                        Path(r).resolve() for r in (registry.get("repos") or [])
+                        if isinstance(r, str)
+                    }
+                except Exception:
+                    registered = set()
+                if candidate in registered:
+                    return candidate
+                # Fall through to the configured repo_root_dir — do not trust
+                # an unregistered workspace override.
         return Path(settings.repo_root_dir)
 
     @classmethod

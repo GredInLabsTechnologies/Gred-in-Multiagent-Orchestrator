@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import random
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from ...models.mesh import TaskFingerprint
 from ..gics_service import GicsService

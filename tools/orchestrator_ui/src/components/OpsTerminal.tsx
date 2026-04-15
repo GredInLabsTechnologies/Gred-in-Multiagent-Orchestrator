@@ -26,7 +26,7 @@ export const OpsTerminal: React.FC<OpsTerminalProps> = ({ inboundFromChat, onSen
     useEffect(() => {
         const pullAudit = async () => {
             try {
-                const response = await fetchWithRetry(`${API_BASE}/ui/audit?limit=30`, { credentials: 'include' });
+                const response = await fetchWithRetry(`${API_BASE}/ops/audit/tail?limit=30`, { credentials: 'include' });
                 if (!response.ok) return;
                 const data = await response.json();
                 const lines: string[] = Array.isArray(data?.lines) ? data.lines : [];

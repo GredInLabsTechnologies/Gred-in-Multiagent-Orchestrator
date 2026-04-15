@@ -319,6 +319,8 @@ class HardwareMonitorService:
         self._task_loop: Optional[asyncio.AbstractEventLoop] = None
         self._last_level: LoadLevel = "safe"
         self._running = False
+        # Strong refs for fire-and-forget notification tasks (prevents premature GC).
+        self._notification_tasks: set[asyncio.Task] = set()
 
     @classmethod
     def get_instance(cls) -> "HardwareMonitorService":
@@ -473,10 +475,12 @@ class HardwareMonitorService:
                 import asyncio
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    asyncio.create_task(NotificationService.publish(
+                    _notify_task = asyncio.create_task(NotificationService.publish(
                         "system_degraded",
                         {"level": new, "cpu": snap.cpu_percent, "ram": snap.ram_percent,
                          "vram_free_gb": snap.gpu_vram_free_gb, "critical": True},
                     ))
+                    self._notification_tasks.add(_notify_task)
+                    _notify_task.add_done_callback(self._notification_tasks.discard)
             except Exception:
                 pass

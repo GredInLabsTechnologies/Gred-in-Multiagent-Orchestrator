@@ -53,5 +53,4 @@ class RiskGate(ExecutionStage):
 
     async def rollback(self, input: StageInput) -> None:
         """Risk gate is stateless, nothing to rollback."""
-        pass
 

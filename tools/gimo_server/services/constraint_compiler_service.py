@@ -231,8 +231,7 @@ class ConstraintCompilerService:
         # Layer 2: Benchmark data — static capability scores by dimension
         dimension = cls._SEMANTIC_TO_DIMENSION.get(task_semantic or "implementation", "coding")
         try:
-            from .benchmark_enrichment_service import get_best_model_for_task, refresh_benchmarks
-            import asyncio
+            from .benchmark_enrichment_service import get_best_model_for_task
             # Use cached profiles (don't await refresh in sync context)
             from .benchmark_enrichment_service import _load_runtime_cache, _load_seed_file
             profiles = _load_runtime_cache() or _load_seed_file() or {}

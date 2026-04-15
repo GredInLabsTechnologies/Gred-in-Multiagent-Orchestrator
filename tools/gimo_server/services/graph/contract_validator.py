@@ -5,10 +5,10 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tools.gimo_server.ops_models import ContractCheck, WorkflowContract, WorkflowNode
+    pass
 
 logger = logging.getLogger("orchestrator.services.graph_engine")
 
@@ -53,7 +53,6 @@ class ContractValidatorMixin:
 
     async def _run_human_review(self, node) -> Dict[str, Any]:
         """Interactive HITL node."""
-        from tools.gimo_server.ops_models import WorkflowNode
 
         reviews = self.state.data.setdefault("human_reviews", {})
         annotations = self.state.data.setdefault("human_annotations", [])

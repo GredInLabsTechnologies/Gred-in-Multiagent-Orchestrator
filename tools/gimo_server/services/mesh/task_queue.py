@@ -14,7 +14,6 @@ from filelock import FileLock
 
 from ...config import OPS_DATA_DIR
 from ...models.mesh import (
-    ConnectionState,
     DeviceMode,
     MeshDeviceInfo,
     MeshTask,

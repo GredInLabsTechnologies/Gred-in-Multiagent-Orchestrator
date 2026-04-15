@@ -8,8 +8,8 @@
         }
     ],
     "sonarlint.connectedMode.project": {
-        "connectionId": "shiloren",
-        "projectKey": "Shiloren_gred_orchestrator"
+        "connectionId": "gredinlabstechnologies",
+        "projectKey": "GredInLabsTechnologies_Gred-in-Multiagent-Orchestrator"
     },
     "sonarlint.ls.nodePath": "C:\\Program Files\\nodejs\\node.exe"
 }

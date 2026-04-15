@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..models.agent_routing import RoutingDecision, RoutingDecisionSummary, TaskConstraints, TaskDescriptor, ModelBinding
+from ..models.agent_routing import RoutingDecision, TaskConstraints, TaskDescriptor, ModelBinding
 from .agent_catalog_service import AgentCatalogService, PRESET_CATALOG
 
 

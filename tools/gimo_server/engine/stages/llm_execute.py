@@ -267,5 +267,4 @@ class LlmExecute(ExecutionStage):
 
     async def rollback(self, input: StageInput) -> None:
         """LLM execution is stateless, nothing to rollback."""
-        pass
 

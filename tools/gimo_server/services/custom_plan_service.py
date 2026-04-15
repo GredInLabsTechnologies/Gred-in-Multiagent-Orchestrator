@@ -16,8 +16,6 @@ from ..models.plan import (
     CustomPlan,
     PlanEdge,
     PlanNode,
-    PlanNodeBinding,
-    PlanNodeExecutionHints,
     PlanNodePosition,
     UpdatePlanRequest,
 )
@@ -104,8 +102,6 @@ def llm_response_to_plan_nodes(
         })
 
         # Legacy compat: build routing_summary for backward compatibility
-        routing_summary = routing.summary
-        routing_reason = routing.routing_reason
 
         task_role = routing.profile.task_role
         node_type = {

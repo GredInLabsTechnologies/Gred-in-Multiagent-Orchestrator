@@ -24,8 +24,6 @@ from ..providers.service import ProviderService
 from ..notification_service import NotificationService
 from ..critic_service import CriticService
 from ..quality_service import QualityService
-from ..app_session_service import AppSessionService
-from ..repo_recon_service import RepoReconService
 from ..run_lifecycle import is_active_run_status
 
 logger = logging.getLogger("orchestrator.run_worker")
@@ -62,6 +60,12 @@ class RunWorker:
         self._running_ids: set[str] = set()
         self._wake_event = asyncio.Event()
         self._running = False
+        # Strong refs for per-run execution tasks (prevents premature GC).
+        self._run_tasks: set[asyncio.Task] = set()
+
+    def _track_run_task(self, task: asyncio.Task) -> None:
+        self._run_tasks.add(task)
+        task.add_done_callback(self._run_tasks.discard)
 
     async def start(self) -> None:
         await asyncio.sleep(0)
@@ -140,7 +144,7 @@ class RunWorker:
         for run in pending[:available_slots]:
             if run.id not in self._running_ids:
                 self._running_ids.add(run.id)
-                asyncio.create_task(self._execute_run(run.id))
+                self._track_run_task(asyncio.create_task(self._execute_run(run.id)))
 
     def _reclaim_stale_running_runs(self) -> None:
         """R17 Cluster A: transition stale `running` runs back to `pending`.
@@ -203,11 +207,9 @@ class RunWorker:
 
     async def _process_task(self, *args, **kwargs) -> None:
         """OBSOLETE: Replaced by ToolExecutor/EngineService."""
-        pass
 
     async def _execute_structured_plan(self, *args, **kwargs) -> None:
         """OBSOLETE: Replaced by EngineService."""
-        pass
 
     async def _critic_with_retry(
         self,
@@ -366,7 +368,6 @@ class RunWorker:
 
     async def _handle_legacy_execution(self, *args, **kwargs) -> None:
         """OBSOLETE: Replaced by ToolExecutor/EngineService."""
-        pass
 
     async def _handle_child_completion(self, child_run_id: str) -> None:
         """Called when a child run finishes. Decrements parent counter and wakes if zero."""
@@ -419,7 +420,7 @@ class RunWorker:
                 "critical": True,
             })
             self._running_ids.add(fresh.id)
-            asyncio.create_task(self._execute_run(fresh.id))
+            self._track_run_task(asyncio.create_task(self._execute_run(fresh.id)))
 
     def _validate_task_spec(self, spec: Any) -> tuple[bool, str]:
         """Strict validation of the Phase 5B task specification using Pydantic."""

@@ -6,7 +6,6 @@ auto-downgrade de presets con failure_streak persistente.
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("orchestrator.services.anomaly_detection")

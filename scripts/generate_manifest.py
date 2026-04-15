@@ -1,5 +1,4 @@
 import sys
-import json
 import pprint
 from pathlib import Path
 

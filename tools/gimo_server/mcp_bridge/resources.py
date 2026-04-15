@@ -63,7 +63,7 @@ def register_resources(mcp: FastMCP):
     @mcp.resource("audit://log")
     async def get_audit_log() -> str:
         """Recent security audit logs"""
-        return await _fetch_resource("/ui/audit?limit=50")
+        return await _fetch_resource("/ops/audit/tail?limit=50")
 
     # ── SAGP Governance Resources ───────────────────────────────────────
     @mcp.resource("governance://snapshot")

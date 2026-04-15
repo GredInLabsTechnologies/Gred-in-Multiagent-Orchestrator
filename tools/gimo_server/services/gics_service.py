@@ -298,7 +298,6 @@ class GicsService:
 
     def flush(self) -> Any:
         """No-op shim kept for backward compat — daemon auto-flushes."""
-        pass
 
     # ── 1.3.4 bulk & summary primitives ──────────────────────────────────────
 
