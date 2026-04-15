@@ -5,15 +5,13 @@ Handles inference and utility mode execution with receipts.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from .config import AgentConfig
 from .thermal import ThermalGuard
@@ -37,6 +35,7 @@ class TaskReceipt:
     thermal_phase_at_start: str = "normal"
     thermal_phase_at_end: str = "normal"
     aborted_by_lockout: bool = False
+    result_payload: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -53,6 +52,7 @@ class TaskReceipt:
             "thermal_phase_at_start": self.thermal_phase_at_start,
             "thermal_phase_at_end": self.thermal_phase_at_end,
             "aborted_by_lockout": self.aborted_by_lockout,
+            "result_payload": self.result_payload,
         }
 
 
@@ -119,6 +119,7 @@ class TaskExecutor:
             else:
                 result = await self._run_utility(action_class, payload)
 
+            receipt.result_payload = result or {}
             receipt.success = True
             receipt.latency_ms = (time.monotonic() - start_time) * 1000
 

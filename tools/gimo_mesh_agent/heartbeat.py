@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from .config import AgentConfig
+from .local_control import LocalControlManager
 from .thermal import ThermalGuard, ThermalPhase
 
 logger = logging.getLogger("gimo_mesh_agent.heartbeat")
@@ -21,9 +22,11 @@ class HeartbeatClient:
         self,
         config: AgentConfig,
         thermal_guard: ThermalGuard,
+        local_control: Optional[LocalControlManager] = None,
     ) -> None:
         self._config = config
         self._thermal = thermal_guard
+        self._local_control = local_control
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._active_task_id: str = ""
@@ -53,7 +56,11 @@ class HeartbeatClient:
             try:
                 await self._task
             except asyncio.CancelledError:
-                pass
+                # Intentional: we issued the cancel() above. Swallowing is the
+                # documented idiom (PEP 492, asyncio.Task.cancel docs). If our
+                # own coroutine is being cancelled from outside while awaiting
+                # the child, asyncio will re-raise on the next await anyway.
+                pass  # NOSONAR: S7497 — cooperative stop, not hiding external cancel.
         logger.info("Heartbeat stopped")
 
     def _build_payload(self) -> Dict[str, Any]:

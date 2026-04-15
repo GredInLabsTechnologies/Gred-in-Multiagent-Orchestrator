@@ -38,10 +38,12 @@ async def run_agent(config: AgentConfig) -> None:
     logger.info("GIMO Mesh Agent starting — device_id=%s", config.device_id)
     logger.info("Core URL: %s", config.core_url)
 
-    # Initialize components
+    # Initialize components. LocalControlManager must be retained: it owns
+    # the device-side refusal state (local_control.json) and is handed to the
+    # HeartbeatClient so status reporting can reflect local overrides.
     thermal = ThermalGuard(config)
     local_control = LocalControlManager(config.resolved_data_dir)
-    heartbeat = HeartbeatClient(config, thermal)
+    heartbeat = HeartbeatClient(config, thermal, local_control=local_control)
 
     # Determine device mode
     modes = []

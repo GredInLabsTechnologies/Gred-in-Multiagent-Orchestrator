@@ -19,13 +19,24 @@ export function usePlanEngine() {
         setLoading(true);
         setError(null);
         try {
-            const response = await fetchWithRetry(`${API_BASE}/ui/plan/create`, {
+            // Migrated from POST /ui/plan/create (now removed). The canonical
+            // surface is POST /ops/generate which produces an OpsDraft via the
+            // cognitive pipeline. Prompt travels as a query param.
+            //
+            // /ops/generate only accepts a single `prompt` field; the legacy
+            // form exposes `title` + `task_description`, so we fold the title
+            // into the prompt (as a heading) to avoid silently dropping it.
+            const description = (req as { task_description?: string; prompt?: string }).task_description
+                || (req as { prompt?: string }).prompt
+                || '';
+            const title = (req as { title?: string }).title || '';
+            const prompt = title && description
+                ? `${title}\n\n${description}`
+                : (title || description);
+            const url = `${API_BASE}/ops/generate?prompt=${encodeURIComponent(prompt)}`;
+            const response = await fetchWithRetry(url, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
                 credentials: 'include',
-                body: JSON.stringify(req),
             });
             if (!response.ok) throw new Error('Failed to create plan');
             const plan: Plan = await response.json();
