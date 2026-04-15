@@ -13,7 +13,7 @@ Por categoría:
 - Misc: 2
 
 Top 5 mas graves:
-1. Dual ObservabilityService (observability.py vs observability_pkg) - conflicto en agentic_loop_service
+1. ~~Dual ObservabilityService (observability.py vs observability_pkg)~~ — CERRADO 2026-04-15
 2. Legacy /ui/* endpoints aun activos - redundancia con /ops/*
 3. 16 archivos shim sin deprecation markers
 4. AdapterRegistry huerfano (0 callers)
@@ -51,41 +51,33 @@ Recomendacion: Anotar con deprecation headers + refactor imports en PR coordinad
 
 ---
 
-## HALLAZGO 2: Dual ObservabilityService implementations (CONFLICTO CRITICO)
+## HALLAZGO 2: Dual ObservabilityService implementations — CERRADO 2026-04-15
 
-Archivo 1: tools/gimo_server/services/observability.py
-- Clase ObservabilityService (SIMPLE)
-- 9 metodos: record_usage, record_llm_usage, record_agent_action, record_span, get_metrics, list_traces, etc.
-- JSONL logging + metrics counter
+Estado previo (snapshot del audit): observability.py exponia una clase SIMPLE con
+record_llm_usage/record_usage/record_span y agentic_loop_service.py hacia dual-import
+contra ambas implementaciones.
 
-Archivo 2: tools/gimo_server/services/observability_pkg/observability_service.py
-- Clase ObservabilityService (COMPLETA)
-- 18+ metodos con OpenTelemetry backend
-- record_workflow_start, record_node_span, record_handoff_event, list_traces, get_trace, reset, etc.
+Cierre 2026-04-15:
+1. observability.py ELIMINADO (era shim de 17 lineas, 0 callers runtime verificados
+   via grep en arbol completo: tools/, tests/, gimo_cli/, scripts/).
+2. agentic_loop_service.py ya usa un unico sink (UnifiedObservabilityService) —
+   el dual-import fue retirado en commits previos; el audit captur\u00f3 un estado
+   obsoleto.
+3. observability_pkg.ObservabilityService cubre tanto la API legacy
+   (record_llm_usage, record_usage, record_agent_action, get_agent_insights,
+   record_span, get_metrics, list_traces, record_structured_event) como la
+   OTel (record_workflow_start, record_node_span, record_handoff_event,
+   get_trace, reset, record_ai_usage).
+4. Shim observability_service.py (wildcard re-export desde observability_pkg)
+   permanece — 9 callers: engine/stages/llm_execute.py,
+   services/graph/engine.py, services/graph/agent_patterns.py,
+   services/providers/service_impl.py, services/agentic_loop_service.py,
+   routers/ops/observability_router.py, routers/ops/run_router.py,
+   tests/unit/test_observability.py, tests/unit/test_observability_preview.py.
+   Migracion masiva de esos callers queda bajo Hallazgo 1 (16 shims).
 
-CONFLICTO DUAL IMPORT en agentic_loop_service.py (lineas 1655-1670):
-
-try:
-    from .observability import ObservabilityService
-    ObservabilityService.record_llm_usage(...)  # SIMPLE version
-except Exception:
-    logger.debug("record_llm_usage failed", exc_info=True)
-
-try:
-    from .observability_service import ObservabilityService as UnifiedObservabilityService
-    UnifiedObservabilityService.record_ai_usage(...)  # OTel version (DIFERENTE nombre de metodo!)
-except Exception:
-    pass
-
-PROBLEMA: Metodos no solapan completamente. record_llm_usage (simple) != record_ai_usage (OTel).
-API incompatible. Ambos se ejecutan en agentic loop sin garantia de coerencia.
-
-Clasificacion: KILL CANDIDATE (observability.py como shim)
-Blast radius: ALTO (agentic_loop_service es critical path)
-Recomendacion:
-1. Verificar que observability_pkg.ObservabilityService.record_ai_usage() cubre 100% los casos de record_llm_usage()
-2. Cambiar agentic_loop_service a usar SOLO UnifiedObservabilityService
-3. Deprecate observability.py (marcar como shim)
+Verificacion: tests/unit/test_observability.py + test_observability_preview.py
+ambos verdes (10/10) tras eliminar observability.py.
 
 ---
 
