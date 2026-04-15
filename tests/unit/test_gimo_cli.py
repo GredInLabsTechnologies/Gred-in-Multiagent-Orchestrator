@@ -275,7 +275,7 @@ def test_audit_aggregates_backend_checks(tmp_path, monkeypatch):
             return 200, {"items": [], "count": 0}
         if path == "/ops/system/dependencies":
             return 200, {"items": [{"id": "git"}], "count": 1}
-        if path == "/ui/audit":
+        if path == "/ops/audit/tail":
             return 200, {"lines": ["line-1", "line-2"]}
         raise AssertionError(f"Unexpected path: {path}")
 

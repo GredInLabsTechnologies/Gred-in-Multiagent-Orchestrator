@@ -1,6 +1,8 @@
 """OPS graph endpoint — migrated from legacy /ui/graph."""
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 
 from ...security import check_rate_limit
@@ -65,8 +67,8 @@ def _build_engine_graph(engine):
 
 @router.get("")
 def get_graph(
-    auth: AuthContext = Depends(require_read),
-    _rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(require_read)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Generate dynamic graph structure for the UI based on active engines."""
     engine = None

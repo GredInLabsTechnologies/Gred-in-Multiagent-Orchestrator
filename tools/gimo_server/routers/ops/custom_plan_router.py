@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import List
+from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException
 
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
@@ -19,11 +19,14 @@ router = APIRouter()
 
 _NOT_FOUND = "Plan not found"
 
+# Strong refs for fire-and-forget plan runners (protects against premature GC).
+_PLAN_RUNNER_TASKS: set[asyncio.Task] = set()
+
 
 @router.get("/custom-plans", response_model=List[CustomPlan])
 async def list_plans(
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """List all custom execution plans."""
     return CustomPlanService.list_plans()
@@ -32,8 +35,8 @@ async def list_plans(
 @router.get("/custom-plans/{plan_id}", response_model=CustomPlan)
 async def get_plan(
     plan_id: str,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     plan = CustomPlanService.get_plan(plan_id)
     if not plan:
@@ -44,8 +47,8 @@ async def get_plan(
 @router.get("/custom-plans/{plan_id}/estimate")
 async def estimate_plan_cost(
     plan_id: str,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Pre-execution cost estimation per node."""
     estimate = CustomPlanService.estimate_plan_cost(plan_id)
@@ -57,8 +60,8 @@ async def estimate_plan_cost(
 @router.post("/custom-plans", response_model=CustomPlan, status_code=201)
 async def create_plan(
     body: CreatePlanRequest,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     try:
@@ -73,8 +76,8 @@ async def create_plan(
 async def update_plan(
     plan_id: str,
     body: UpdatePlanRequest,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     try:
@@ -90,8 +93,8 @@ async def update_plan(
 @router.delete("/custom-plans/{plan_id}", status_code=204)
 async def delete_plan(
     plan_id: str,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
     if not CustomPlanService.delete_plan(plan_id):
@@ -102,8 +105,8 @@ async def delete_plan(
 @router.post("/custom-plans/{plan_id}/execute", response_model=CustomPlan)
 async def execute_plan(
     plan_id: str,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     """Execute a custom plan — runs nodes layer-by-layer respecting the dependency graph."""
     _require_role(auth, "operator")
@@ -130,7 +133,9 @@ async def execute_plan(
             CustomPlanService.release_plan_execution(plan_id, owner_id)
 
     # Run in background to avoid HTTP timeout
-    asyncio.create_task(_runner())
+    _runner_task = asyncio.create_task(_runner())
+    _PLAN_RUNNER_TASKS.add(_runner_task)
+    _runner_task.add_done_callback(_PLAN_RUNNER_TASKS.discard)
     
     audit_log("PLANS", f"/ops/custom-plans/{plan_id}/execute", plan_id, operation="EXECUTE", actor=_actor_label(auth))
     return plan.model_copy(update={"status": "running", "run_log": []})

@@ -26,11 +26,11 @@ def test_panic_catcher_middleware(test_client, valid_token):
         "tools.gimo_server.security.load_security_db", return_value={"panic_mode": False}
     ):
         with patch(
-            "tools.gimo_server.routers.legacy_ui_router.get_active_repo_dir",
+            "tools.gimo_server.routers.ops.observability_router.get_active_repo_dir",
             side_effect=RuntimeError("critical fail"),
         ):
             response = test_client.get(
-                "/ui/allowlist", headers={"Authorization": f"Bearer {valid_token}"}
+                "/ops/allowlist", headers={"Authorization": f"Bearer {valid_token}"}
             )
             assert response.status_code == 500
             data = response.json()
@@ -41,13 +41,21 @@ def test_lockdown_check_middleware(test_client, valid_token):
     from tools.gimo_server.security import threat_engine
     from tools.gimo_server.security.threat_level import ThreatLevel, AUTH_FAILURE_LOCKDOWN_THRESHOLD
 
-    for _ in range(AUTH_FAILURE_LOCKDOWN_THRESHOLD):
-        threat_engine.record_auth_failure("attacker-1.2.3.4")
-    assert threat_engine.level >= ThreatLevel.LOCKDOWN
+    # Tests exercise real escalation — bypass DEBUG suppression
+    # (see ThreatEngine._set_level and tests/conftest.py DEBUG default).
+    prev_debug = threat_engine._debug_mode
+    threat_engine._debug_mode = False
+    try:
+        for _ in range(AUTH_FAILURE_LOCKDOWN_THRESHOLD):
+            threat_engine.record_auth_failure("attacker-1.2.3.4")
+        assert threat_engine.level >= ThreatLevel.LOCKDOWN
 
-    response = test_client.get("/status", headers={"Authorization": f"Bearer {valid_token}"})
-    assert response.status_code == 200
-    assert response.headers.get("X-Threat-Level") == "LOCKDOWN"
+        response = test_client.get("/status", headers={"Authorization": f"Bearer {valid_token}"})
+        assert response.status_code == 200
+        assert response.headers.get("X-Threat-Level") == "LOCKDOWN"
+    finally:
+        threat_engine._debug_mode = prev_debug
+        threat_engine.clear_all()
 
 
 def test_allow_options_preflight(test_client, valid_token):

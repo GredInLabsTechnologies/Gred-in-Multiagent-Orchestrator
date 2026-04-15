@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
@@ -14,9 +14,9 @@ router = APIRouter()
 async def evals_run(
     request: Request,
     body: EvalRunRequest,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
     fail_on_gate: bool = Query(False, description="If true and gate fails, returns HTTP 412"),
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
 ):
     _require_role(auth, "operator")
     if body.dataset.workflow_id != body.workflow.id:
@@ -39,10 +39,10 @@ async def evals_run(
 @router.get("/evals/runs", response_model=List[EvalRunSummary])
 async def list_eval_runs(
     request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
     workflow_id: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
 ):
     _require_role(auth, "operator")
     storage = StorageService(gics=getattr(request.app.state, "gics", None))
@@ -54,8 +54,8 @@ async def list_eval_runs(
 async def get_eval_run(
     request: Request,
     run_id: int,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     storage = StorageService(gics=getattr(request.app.state, "gics", None))
@@ -78,9 +78,9 @@ async def get_eval_run(
 async def create_eval_dataset(
     request: Request,
     dataset: EvalDataset,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
     version_tag: Optional[str] = Query(None, max_length=128),
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
 ):
     _require_role(auth, "operator")
     storage = StorageService(gics=getattr(request.app.state, "gics", None))
@@ -91,10 +91,10 @@ async def create_eval_dataset(
 @router.get("/evals/datasets")
 async def list_eval_datasets(
     request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
     workflow_id: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
 ):
     _require_role(auth, "operator")
     storage = StorageService(gics=getattr(request.app.state, "gics", None))
@@ -106,8 +106,8 @@ async def list_eval_datasets(
 async def get_eval_dataset(
     request: Request,
     dataset_id: int,
-    auth: AuthContext = Depends(verify_token),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "operator")
     storage = StorageService(gics=getattr(request.app.state, "gics", None))

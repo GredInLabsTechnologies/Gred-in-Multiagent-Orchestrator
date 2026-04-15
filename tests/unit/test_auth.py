@@ -80,8 +80,8 @@ class TestRBAC:
         ("/ops/service/restart", "post"),
         ("/ops/trust/reset", "post"),
         ("/ops/config", "get"), # Actions cannot read config in some versions, check rbac
-        ("/ui/audit", "get"),
-        ("/ui/allowlist", "get"),
+        ("/ops/audit/tail", "get"),
+        ("/ops/allowlist", "get"),
     ])
     def test_actions_role_restricted(self, test_client, endpoint, method):
         """Verify 'actions' role cannot access restricted endpoints (403)."""
@@ -128,45 +128,62 @@ class TestThreatResponse:
     def test_lockdown_blocks_unauthenticated(self, test_client):
         """Verify threat engine LOCKDOWN blocks unauthenticated requests (503)."""
         from tools.gimo_server.security import threat_engine
-        
+
         old_level = threat_engine.level
+        # Tests exercise real lockdown — bypass DEBUG suppression so the
+        # level setter actually moves the engine into LOCKDOWN.
+        prev_debug = threat_engine._debug_mode
+        threat_engine._debug_mode = False
         threat_engine.level = ThreatLevel.LOCKDOWN
         try:
             # Unauthenticated should be blocked
             response = test_client.get("/status")
             assert response.status_code == 503
             assert "LOCKDOWN" in response.text
-            
+
             # Authenticated admin should still work
             response = test_client.get("/status", headers=_admin_headers())
             assert response.status_code == 200
         finally:
             threat_engine.level = old_level
+            threat_engine._debug_mode = prev_debug
 
     def test_auth_failure_escalation_logic(self, test_client):
         """Verify engine escalates threat level on multiple failures from non-whitelisted source."""
         from tools.gimo_server.security import threat_engine
-        
+
         threat_engine.clear_all()
         assert threat_engine.level == ThreatLevel.NOMINAL
-        
-        # TestClient "testclient" is whitelisted, so we test engine directly
-        for _ in range(3):
-            threat_engine.record_auth_failure(source="1.2.3.4", detail="bruteforce")
-            
-        assert threat_engine.level == ThreatLevel.ALERT
+
+        # Tests exercise real escalation logic — bypass DEBUG suppression
+        # (see ThreatEngine._set_level and tests/conftest.py DEBUG default).
+        prev_debug = threat_engine._debug_mode
+        threat_engine._debug_mode = False
+        try:
+            # TestClient "testclient" is whitelisted, so we test engine directly
+            for _ in range(3):
+                threat_engine.record_auth_failure(source="1.2.3.4", detail="bruteforce")
+
+            assert threat_engine.level == ThreatLevel.ALERT
+        finally:
+            threat_engine._debug_mode = prev_debug
 
     def test_resolution_clears_lockdown(self, test_client):
         """Verify resolution endpoint clears threat level."""
         from tools.gimo_server.security import threat_engine
-        threat_engine.level = ThreatLevel.LOCKDOWN
+        prev_debug = threat_engine._debug_mode
+        threat_engine._debug_mode = False
+        try:
+            threat_engine.level = ThreatLevel.LOCKDOWN
 
-        response = test_client.post(
-            "/ops/security/resolve?action=clear_all",
-            headers=_admin_headers()
-        )
-        assert response.status_code == 200
-        assert threat_engine.level == ThreatLevel.NOMINAL
+            response = test_client.post(
+                "/ops/security/resolve?action=clear_all",
+                headers=_admin_headers()
+            )
+            assert response.status_code == 200
+            assert threat_engine.level == ThreatLevel.NOMINAL
+        finally:
+            threat_engine._debug_mode = prev_debug
 
 
 # ── Change 6: Provider select role demotion ──────────────────────────────

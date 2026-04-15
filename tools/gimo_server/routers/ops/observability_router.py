@@ -1,13 +1,61 @@
 from __future__ import annotations
+import logging
+from pathlib import Path
 from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
-from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
+from tools.gimo_server.security import (
+    audit_log,
+    check_rate_limit,
+    get_active_repo_dir,
+    get_allowed_paths,
+    serialize_allowlist,
+    verify_token,
+)
+from tools.gimo_server.security.access_control import require_read_only_access
 from tools.gimo_server.security.auth import AuthContext
+from tools.gimo_server.security.path_safety import is_within
+from tools.gimo_server.services.file_service import FileService
 from tools.gimo_server.services.observability_service import ObservabilityService
 from tools.gimo_server.services.notification_service import NotificationService
 from .common import _require_role, _actor_label
 
+logger = logging.getLogger("orchestrator.routers.ops.observability")
+
 router = APIRouter()
+
+
+@router.get("/audit/tail")
+def get_audit_tail(
+    auth: Annotated[AuthContext, Depends(require_read_only_access)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+    limit: Annotated[int, Query(ge=10, le=500)] = 200,
+):
+    """Tail the orchestrator audit log file (migrated from /ui/audit)."""
+    return {"lines": FileService.tail_audit_lines(limit=limit)}
+
+
+@router.get("/allowlist")
+def get_allowlist(
+    auth: Annotated[AuthContext, Depends(require_read_only_access)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """List allowed paths within the active repo (migrated from /ui/allowlist)."""
+    base_dir = get_active_repo_dir()
+    allowed_paths = get_allowed_paths(base_dir)
+    items = serialize_allowlist(allowed_paths)
+    safe_items = []
+    for item in items:
+        try:
+            resolved = Path(item["path"]).resolve()
+            if not is_within(base_dir, resolved):
+                logger.warning("Rejected allowlist path outside base %s: %s", base_dir, item.get("path"))
+                continue
+            item["path"] = str(resolved.relative_to(base_dir))
+            safe_items.append(item)
+        except (ValueError, TypeError, OSError) as exc:
+            logger.warning("Failed to relativize allowlist path %s: %s", item.get("path"), exc)
+            continue
+    return {"paths": safe_items}
 
 @router.get("/observability/metrics")
 async def observability_metrics(
@@ -152,7 +200,6 @@ async def observability_duration_stats(
     """
     _require_role(auth, "operator")
     from tools.gimo_server.services.timeout.duration_telemetry_service import DurationTelemetryService
-    from tools.gimo_server.services.ops_service import OpsService
 
     # Inject GICS
     DurationTelemetryService.set_gics(getattr(request.app.state, "gics", None))

@@ -60,42 +60,43 @@ def test_ui_plan_create_writes_canonical_plan_content(client):
         ],
     }
 
+    from tools.gimo_server.models.core import OpsDraft
+
     captured = {}
 
-    def _capture_create_draft(**kwargs):
+    def _capture_create_draft(*args, **kwargs):
+        # Handle both positional and keyword prompt invocations.
+        prompt = kwargs.get("prompt") if "prompt" in kwargs else (args[0] if args else "")
         captured["content"] = kwargs["content"]
-        return type(
-            "Draft",
-            (),
-            {
-                "id": "d_ui_1",
-                "status": "draft",
-                "prompt": kwargs["prompt"],
-                "content": kwargs["content"],
-            },
-        )()
+        return OpsDraft(
+            id="d_ui_1",
+            prompt=prompt,
+            content=kwargs["content"],
+            provider=kwargs.get("provider"),
+            status="draft",
+        )
 
-    async def _fake_generate(*_args, **_kwargs):
-        return {"content": json.dumps(raw_plan)}
+    async def _fake_generate_with_provider(*_args, **_kwargs):
+        return {"provider": "fake", "content": json.dumps(raw_plan)}
 
     with patch(
-        "tools.gimo_server.routers.legacy_ui_router.ProviderService.static_generate",
-        new=_fake_generate,
+        "tools.gimo_server.routers.ops.plan_router.ProviderService.static_generate",
+        new=_fake_generate_with_provider,
     ), patch(
-        "tools.gimo_server.routers.legacy_ui_router.OpsService.create_draft",
+        "tools.gimo_server.routers.ops.plan_router.OpsService.create_draft",
         side_effect=_capture_create_draft,
     ):
-        response = client.post("/ui/plan/create", json={"prompt": "ship p2"})
+        response = client.post("/ops/generate?prompt=ship%20p2")
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     payload = json.loads(captured["content"])
     assert payload["tasks"][0]["task_descriptor"]["task_id"] == "t1"
     assert "task_fingerprint" in payload["tasks"][0]
 
 
 def test_get_health_deep(client, tmp_path):
-    with patch("tools.gimo_server.routers.legacy_ui_router.ProviderService.health_check", return_value=True):
-        with patch("tools.gimo_server.routers.legacy_ui_router.OpsService.OPS_DIR", tmp_path):
+    with patch("tools.gimo_server.routers.core_router.ProviderService.health_check", return_value=True):
+        with patch("tools.gimo_server.routers.core_router.OpsService.OPS_DIR", tmp_path):
             response = client.get("/health/deep")
             assert response.status_code == 200
             payload = response.json()
@@ -162,7 +163,7 @@ def test_get_ui_hardware(client):
     ]
     with patch("tools.gimo_server.services.hardware_monitor_service.HardwareMonitorService.get_instance", return_value=fake_hw):
         with patch("tools.gimo_server.services.model_inventory_service.ModelInventoryService.get_available_models", return_value=fake_models):
-            response = client.get("/ui/hardware")
+            response = client.get("/ops/mastery/hardware")
             assert response.status_code == 200
             payload = response.json()
             assert payload["cpu_percent"] == 12.5
@@ -191,9 +192,9 @@ def test_get_me_uses_cookie_session(client):
 
 def test_get_ui_audit(client):
     with patch(
-        "tools.gimo_server.routers.legacy_ui_router.FileService.tail_audit_lines", return_value=["l1", "l2"]
+        "tools.gimo_server.routers.ops.observability_router.FileService.tail_audit_lines", return_value=["l1", "l2"]
     ):
-        response = client.get("/ui/audit?limit=10")
+        response = client.get("/ops/audit/tail?limit=10")
         assert response.status_code == 200
         assert len(response.json()["lines"]) == 2
 
@@ -203,16 +204,16 @@ def test_get_ui_allowlist(client, tmp_path):
     base.mkdir()
     f = base / "file.py"
     f.write_text("ok")
-    with patch("tools.gimo_server.routers.legacy_ui_router.get_active_repo_dir", return_value=base):
-        with patch("tools.gimo_server.routers.legacy_ui_router.get_allowed_paths", return_value={f}):
+    with patch("tools.gimo_server.routers.ops.observability_router.get_active_repo_dir", return_value=base):
+        with patch("tools.gimo_server.routers.ops.observability_router.get_allowed_paths", return_value={f}):
             with patch(
-                "tools.gimo_server.routers.legacy_ui_router.serialize_allowlist",
+                "tools.gimo_server.routers.ops.observability_router.serialize_allowlist",
                 return_value=[
                     {"path": str(f), "type": "file"},
                     {"path": "/outside", "type": "file"},
                 ],
             ):
-                response = client.get("/ui/allowlist")
+                response = client.get("/ops/allowlist")
                 assert response.status_code == 200
                 assert response.json()["paths"][0]["path"] == "file.py"
                 assert len(response.json()["paths"]) == 1

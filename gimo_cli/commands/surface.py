@@ -16,7 +16,6 @@ import typer
 from rich.table import Table
 
 from gimo_cli import app, console
-from gimo_cli.bond import gimo_home
 
 surface_app = typer.Typer(help="Manage surface connections (MCP clients)")
 app.add_typer(surface_app, name="surface")

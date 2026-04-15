@@ -250,10 +250,10 @@ paths:
               schema: { type: string }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
-  /ui/audit:
+  /ops/audit/tail:
     get:
       summary: Tail audit log lines
-      operationId: getUiAudit
+      operationId: getOpsAuditTail
       parameters:
         - name: limit
           in: query
@@ -263,10 +263,10 @@ paths:
         '200':
           description: OK
 
-  /ui/allowlist:
+  /ops/allowlist:
     get:
       summary: Return allowlist items (relative to active repo)
-      operationId: getUiAllowlist
+      operationId: getOpsAllowlist
       responses:
         '200':
           description: OK

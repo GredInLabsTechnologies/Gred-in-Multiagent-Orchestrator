@@ -11,10 +11,10 @@ from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
+from tools.gimo_server.security import check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
 
-from .common import _actor_label, _require_role
+from .common import _require_role
 
 router = APIRouter(prefix="/ops/gics/patterns", tags=["gics-patterns"])
 logger = logging.getLogger("orchestrator.routers.ops.gics_patterns")

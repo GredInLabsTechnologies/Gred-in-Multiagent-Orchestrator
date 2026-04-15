@@ -5,16 +5,15 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 import httpx
 import typer
 from rich.panel import Panel
 
 from gimo_cli import app, console
-from gimo_cli.api import api_request, api_settings, provider_config_request, resolve_server_url, resolve_token
+from gimo_cli.api import api_settings, provider_config_request, resolve_server_url, resolve_token
 from gimo_cli.bond import load_bond, load_cli_bond
-from gimo_cli.config import load_config, plans_dir, project_root
+from gimo_cli.config import load_config, plans_dir
 from gimo_cli.stream import emit_output, write_json
 
 
