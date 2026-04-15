@@ -19,12 +19,11 @@ export function usePlanEngine() {
         setLoading(true);
         setError(null);
         try {
-            // Migrated from POST /ui/plan/create (now removed). The canonical
-            // surface is POST /ops/generate which produces an OpsDraft via the
-            // cognitive pipeline. Prompt travels as a query param.
+            // Canonical surface: POST /ops/generate produces an OpsDraft via
+            // the cognitive pipeline. Prompt travels as a query param.
             //
-            // /ops/generate only accepts a single `prompt` field; the legacy
-            // form exposes `title` + `task_description`, so we fold the title
+            // /ops/generate only accepts a single `prompt` field; the form
+            // exposes `title` + `task_description`, so we fold the title
             // into the prompt (as a heading) to avoid silently dropping it.
             const description = (req as { task_description?: string; prompt?: string }).task_description
                 || (req as { prompt?: string }).prompt

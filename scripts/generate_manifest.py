@@ -12,7 +12,7 @@ def generate_manifest():
     tools = []
     
     for path, path_item in openapi.get("paths", {}).items():
-        if not path.startswith("/ops/") and not path.startswith("/ui/"):
+        if not path.startswith("/ops/"):
             continue
             
         for method, operation in path_item.items():

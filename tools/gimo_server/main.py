@@ -19,7 +19,6 @@ _middlewares_module = _importlib_util.module_from_spec(_middlewares_spec)
 _middlewares_spec.loader.exec_module(_middlewares_module)
 register_middlewares = _middlewares_module.register_middlewares
 from tools.gimo_server.routers.core_router import router as core_router
-from tools.gimo_server.routers.redirects import router as redirects_router
 from tools.gimo_server.version import __version__
 from tools.gimo_server.services.snapshot_service import SnapshotService
 from tools.gimo_server.services.gics_service import GicsService
@@ -847,7 +846,6 @@ def create_app() -> FastAPI:
 
     # Register all API routes
     app.include_router(core_router)
-    app.include_router(redirects_router)
     app.include_router(auth_router)
     app.include_router(ops_router)
 

@@ -330,7 +330,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                                 <SettingCell label="Version" value={statusInfo?.version ?? '—'} />
                                 <SettingCell label="Uptime" value={formatUptime(statusInfo?.uptime_seconds)} />
-                                <SettingCell label="Endpoints" value="/ui/* + /ops/*" />
+                                <SettingCell label="Endpoints" value="/ops/*" />
                             </div>
                         </section>
                     )}
