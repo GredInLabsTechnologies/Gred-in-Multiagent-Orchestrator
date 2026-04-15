@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import Depends, HTTPException, Request
 
 from tools.gimo_server.security.auth import AuthContext
@@ -61,7 +63,7 @@ def _is_operator_allowed_path(path: str) -> bool:
 
 
 def require_read_only_access(
-    request: Request, auth: AuthContext = Depends(verify_token)
+    request: Request, auth: Annotated[AuthContext, Depends(verify_token)]
 ) -> AuthContext:
     path = request.url.path
     if auth.role == "actions":

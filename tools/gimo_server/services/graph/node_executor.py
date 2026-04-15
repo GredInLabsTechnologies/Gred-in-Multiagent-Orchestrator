@@ -14,7 +14,7 @@ from tools.gimo_server.services.profile_router_service import ProfileRouterServi
 from tools.gimo_server.models.agent_routing import TaskDescriptor
 
 if TYPE_CHECKING:
-    from tools.gimo_server.ops_models import WorkflowGraph, WorkflowNode
+    pass
 
 logger = logging.getLogger("orchestrator.services.graph_engine")
 
@@ -118,7 +118,7 @@ class NodeExecutorMixin:
             else:
                prompt = prompt_template
         except Exception as e:
-            logger.warning(f"Prompt formatting failed for node {node.id}: {e}")
+            logger.warning("Prompt formatting failed for node %s: %s", node.id, e)
             prompt = prompt_template
 
         context = {

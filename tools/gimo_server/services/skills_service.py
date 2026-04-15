@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -8,13 +9,14 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from filelock import FileLock
 from pydantic import BaseModel, Field, field_validator
 
 from ..config import OPS_DATA_DIR
-from ..engine.moods import MoodType, MOOD_PROMPTS  # P2: Import moods from central engine
+from ..engine.moods import MOOD_PROMPTS  # P2: Import moods from central engine
+from ..security.path_safety import PathTraversalError, safe_join
 
 logger = logging.getLogger("orchestrator.skills")
 
@@ -135,6 +137,9 @@ class _GraphEdge:
 
 class SkillsService:
     """File-backed service for canonical visual Skills."""
+
+    # Strong refs for fire-and-forget skill-plan execution tasks (prevents GC).
+    _bg_execution_tasks: set[asyncio.Task] = set()
 
     @classmethod
     def _lock_path(cls) -> Path:
@@ -436,8 +441,7 @@ class SkillsService:
         plan = CustomPlanService.create_plan(plan_req)
 
         # Trigger execution in background to not block
-        import asyncio
-        asyncio.create_task(
+        _exec_task = asyncio.create_task(
             cls._execute_plan_background(
                 plan_id=plan.id,
                 skill_id=skill.id,
@@ -445,6 +449,8 @@ class SkillsService:
                 command=skill.command,
             )
         )
+        cls._bg_execution_tasks.add(_exec_task)
+        _exec_task.add_done_callback(cls._bg_execution_tasks.discard)
 
         return SkillExecuteResponse(
             skill_run_id=skill_run_id,
@@ -498,7 +504,7 @@ class SkillsService:
                 "finished_at": datetime.now(timezone.utc).isoformat(),
             })
         except Exception as e:
-            logger.error(f"Error executing skill {skill_id} via plan {plan_id}: {e}")
+            logger.error("Error executing skill %s via plan %s: %s", skill_id, plan_id, e)
             await NotificationService.publish("skill_execution_finished", {
                 "skill_run_id": skill_run_id,
                 "skill_id": skill_id,
@@ -522,8 +528,8 @@ class SkillsService:
             if not skill:
                 return None
 
-            # Archive current version
-            versions_dir = SKILLS_DIR / "versions" / skill_id
+            # Archive current version (skill_id already validated by get_skill/_skill_path).
+            versions_dir = safe_join(SKILLS_DIR, f"versions/{skill_id}")
             versions_dir.mkdir(parents=True, exist_ok=True)
             archive_path = versions_dir / f"v{skill.version}.json"
             cls._atomic_write(archive_path, skill.model_dump_json(indent=2))
@@ -549,7 +555,9 @@ class SkillsService:
     @classmethod
     def list_skill_versions(cls, skill_id: str) -> List[SkillDefinition]:
         """List all archived versions of a skill."""
-        versions_dir = SKILLS_DIR / "versions" / skill_id
+        if not SAFE_ID_RE.fullmatch(skill_id):
+            return []
+        versions_dir = safe_join(SKILLS_DIR, f"versions/{skill_id}")
         if not versions_dir.exists():
             return []
         out: List[SkillDefinition] = []
@@ -627,8 +635,10 @@ class SkillsService:
 
     @classmethod
     def _analytics_path(cls, skill_id: str) -> Path:
+        if not SAFE_ID_RE.fullmatch(skill_id):
+            raise ValueError("Invalid skill_id")
         ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
-        return ANALYTICS_DIR / f"{skill_id}.json"
+        return safe_join(ANALYTICS_DIR, f"{skill_id}.json")
 
     @classmethod
     def get_skill_analytics(cls, skill_id: str) -> SkillAnalytics:
@@ -702,7 +712,9 @@ class SkillsService:
     @classmethod
     def install_from_marketplace(cls, marketplace_skill_id: str) -> SkillDefinition:
         """Install a skill from the marketplace into local skills."""
-        mp_path = MARKETPLACE_DIR / f"{marketplace_skill_id}.json"
+        if not SAFE_ID_RE.fullmatch(marketplace_skill_id):
+            raise ValueError("Invalid marketplace_skill_id")
+        mp_path = safe_join(MARKETPLACE_DIR, f"{marketplace_skill_id}.json")
         if not mp_path.exists():
             raise ValueError(f"Marketplace skill {marketplace_skill_id} not found")
 
