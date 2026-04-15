@@ -4,7 +4,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from tools.gimo_server.services.sub_agent_manager import SubAgentManager
-from tools.gimo_server.services.run_worker import RunWorker
+from tools.gimo_server.services.execution.run_worker import RunWorker
 from tools.gimo_server.services.operator_status_service import OperatorStatusService
 from tools.gimo_server.services.notice_policy_service import NoticePolicyService
 from tools.gimo_server.services.merge_gate_service import MergeGateService

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from tools.gimo_server.ops_models import OpsApproved, OpsDraft
-from tools.gimo_server.services.observability_service import ObservabilityService
+from tools.gimo_server.services.observability_pkg.observability_service import ObservabilityService
 from tools.gimo_server.services.ops_service import OpsService
 
 

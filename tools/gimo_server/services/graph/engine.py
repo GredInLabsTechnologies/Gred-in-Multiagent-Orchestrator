@@ -28,7 +28,7 @@ from tools.gimo_server.models.agent_routing import TaskDescriptor
 from tools.gimo_server.services.constraint_compiler_service import ConstraintCompilerService
 from tools.gimo_server.services.model_router_service import ModelRouterService
 from tools.gimo_server.services.profile_router_service import ProfileRouterService
-from tools.gimo_server.services.observability_service import ObservabilityService
+from tools.gimo_server.services.observability_pkg.observability_service import ObservabilityService
 from tools.gimo_server.services.storage_service import StorageService
 from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.services.confidence_service import ConfidenceService

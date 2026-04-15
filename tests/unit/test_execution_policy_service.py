@@ -1,7 +1,7 @@
 """Tests for ExecutionPolicyService — policy resolution and canonicalization."""
 
 import pytest
-from tools.gimo_server.services.execution_policy_service import ExecutionPolicyService
+from tools.gimo_server.services.execution.execution_policy_service import ExecutionPolicyService
 
 
 def test_get_policy_all_names_valid():

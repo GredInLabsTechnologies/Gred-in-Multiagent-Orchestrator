@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.gimo_server.engine.contracts import StageOutput
-from tools.gimo_server.services.engine_service import EngineService
+from tools.gimo_server.services.execution.engine_service import EngineService
 
 import tools.gimo_server.engine as engine_pkg
 import tools.gimo_server.engine.stages as stages_pkg

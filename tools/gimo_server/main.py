@@ -23,7 +23,7 @@ from tools.gimo_server.routers.redirects import router as redirects_router
 from tools.gimo_server.version import __version__
 from tools.gimo_server.services.snapshot_service import SnapshotService
 from tools.gimo_server.services.gics_service import GicsService
-from tools.gimo_server.services.log_rotation_service import LogRotationService
+from tools.gimo_server.services.observability_pkg.log_rotation_service import LogRotationService
 from tools.gimo_server.static_app import mount_static
 from tools.gimo_server.tasks import snapshot_cleanup_loop
 from tools.gimo_server.ops_routes import _ACTIONS_SAFE_PUBLIC_ENDPOINTS, router as ops_router
@@ -438,7 +438,7 @@ async def lifespan(app: FastAPI):
         # ─────────────────────────────────────────────────────────────────
 
         # Start the Run Worker (processes pending runs in background)
-        from tools.gimo_server.services.run_worker import RunWorker
+        from tools.gimo_server.services.execution.run_worker import RunWorker
 
         run_worker = RunWorker()
         await run_worker.start()

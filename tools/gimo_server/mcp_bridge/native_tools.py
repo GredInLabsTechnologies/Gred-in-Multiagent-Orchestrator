@@ -319,7 +319,7 @@ def register_native_tools(mcp: FastMCP):
                 return f"❌ Module reload failed: {e}"
 
             try:
-                from tools.gimo_server.services.run_worker import RunWorker
+                from tools.gimo_server.services.execution.run_worker import RunWorker
                 server._active_run_worker = RunWorker()
                 await server._active_run_worker.start()
                 steps.append("✅ New RunWorker instantiated and started")

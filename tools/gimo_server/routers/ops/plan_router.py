@@ -197,7 +197,7 @@ async def run_slice0_pipeline(
     """Ejecuta el Pipeline estilo LangGraph E2E (Slice 0/Anexo A)."""
     _require_role(auth, "operator")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
-    from tools.gimo_server.services.engine_service import EngineService
+    from tools.gimo_server.services.execution.engine_service import EngineService
     try:
         # Create a draft first if needed, or assume a run is created
         draft = OpsService.create_draft(prompt, context={"repo_path": repo_path, "intent_effective": "SLICE0"})

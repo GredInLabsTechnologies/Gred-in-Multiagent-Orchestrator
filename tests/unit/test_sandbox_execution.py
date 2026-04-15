@@ -7,7 +7,7 @@ from tools.gimo_server.models import ProviderDiagnosticEntry
 from tools.gimo_server.services.sub_agent_manager import SubAgentManager
 from tools.gimo_server.services.merge_gate_service import MergeGateService
 from tools.gimo_server.services.ops_service import OpsService
-from tools.gimo_server.services.sandbox_service import SandboxService
+from tools.gimo_server.services.execution.sandbox_service import SandboxService
 
 
 def _setup_spawn_ops_dirs(tmp_path):

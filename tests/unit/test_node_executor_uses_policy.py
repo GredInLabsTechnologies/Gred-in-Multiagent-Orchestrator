@@ -62,7 +62,7 @@ async def test_enforce_tool_governance_denies_unauthorized_tool():
 @pytest.mark.asyncio
 async def test_enforce_tool_governance_legacy_role_profile():
     """_enforce_tool_governance defaults legacy role_profile nodes to workspace_safe."""
-    from tools.gimo_server.services.execution_policy_service import ExecutionPolicyService
+    from tools.gimo_server.services.execution.execution_policy_service import ExecutionPolicyService
 
     engine = MockEngine()
 

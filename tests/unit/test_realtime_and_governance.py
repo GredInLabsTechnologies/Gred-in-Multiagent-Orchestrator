@@ -24,7 +24,7 @@ from tools.gimo_server.main import app
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.authority import ExecutionAuthority
-from tools.gimo_server.services.log_rotation_service import LogRotationService
+from tools.gimo_server.services.observability_pkg.log_rotation_service import LogRotationService
 from tools.gimo_server.services.notification_service import (
     NotificationService,
     CIRCUIT_BREAKER_THRESHOLD,
@@ -96,7 +96,7 @@ def test_circuit_breaker_opens_for_slow_subscriber(monkeypatch):
 
 
 def test_event_driven_worker_notify_sets_wake_event():
-    from tools.gimo_server.services.run_worker import RunWorker
+    from tools.gimo_server.services.execution.run_worker import RunWorker
 
     worker = RunWorker()
     assert not worker._wake_event.is_set()
