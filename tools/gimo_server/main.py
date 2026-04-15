@@ -669,7 +669,7 @@ def _register_core_routes(app: FastAPI, settings):
             else:
                 os.kill(pid, signal.SIGINT)
 
-        asyncio.get_event_loop().create_task(_trigger_graceful_shutdown())
+        asyncio.create_task(_trigger_graceful_shutdown())
         return JSONResponse({"status": "shutting_down", "pid": pid})
 
     @app.get("/ops/openapi")

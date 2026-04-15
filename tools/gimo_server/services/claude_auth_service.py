@@ -102,7 +102,7 @@ class ClaudeAuthService:
                 "action": "npm install -g @anthropic-ai/claude-code",
             }
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             result = await asyncio.wait_for(
                 loop.run_in_executor(None, _login_flow_sync, binary),
@@ -124,7 +124,7 @@ class ClaudeAuthService:
         if shutil.which("claude") is None:
             return {"authenticated": False, "method": None, "detail": "Claude CLI not installed"}
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             rc, output = await asyncio.wait_for(
                 loop.run_in_executor(None, _run, ["claude", "auth", "status"]),
@@ -160,7 +160,7 @@ class ClaudeAuthService:
         if shutil.which("claude") is None:
             return {"status": "error", "message": "Claude CLI not installed"}
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             rc, output = await asyncio.wait_for(
                 loop.run_in_executor(None, _run, ["claude", "auth", "logout"]),

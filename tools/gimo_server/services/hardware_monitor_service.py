@@ -473,14 +473,16 @@ class HardwareMonitorService:
             try:
                 from .notification_service import NotificationService
                 import asyncio
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    _notify_task = asyncio.create_task(NotificationService.publish(
-                        "system_degraded",
-                        {"level": new, "cpu": snap.cpu_percent, "ram": snap.ram_percent,
-                         "vram_free_gb": snap.gpu_vram_free_gb, "critical": True},
-                    ))
-                    self._notification_tasks.add(_notify_task)
-                    _notify_task.add_done_callback(self._notification_tasks.discard)
+                # Called from an async monitor loop — get_running_loop raises
+                # RuntimeError if we somehow ended up outside a loop, which the
+                # outer try/except swallows (fail-open: just skip the notify).
+                asyncio.get_running_loop()
+                _notify_task = asyncio.create_task(NotificationService.publish(
+                    "system_degraded",
+                    {"level": new, "cpu": snap.cpu_percent, "ram": snap.ram_percent,
+                     "vram_free_gb": snap.gpu_vram_free_gb, "critical": True},
+                ))
+                self._notification_tasks.add(_notify_task)
+                _notify_task.add_done_callback(self._notification_tasks.discard)
             except Exception:
                 pass

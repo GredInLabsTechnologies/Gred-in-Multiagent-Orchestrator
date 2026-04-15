@@ -24,7 +24,7 @@ async def _fetch_claude_cli_models() -> List[NormalizedModelInfo]:
     Runs from the server process (no CLAUDECODE guard) using run_in_executor
     so it doesn't block the event loop.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         rc, output = await asyncio.wait_for(
             loop.run_in_executor(None, _run_sync, ["claude", "api", "get", "/v1/models"]),
