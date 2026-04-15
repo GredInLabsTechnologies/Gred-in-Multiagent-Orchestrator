@@ -248,7 +248,7 @@ class ProviderService:
                 cls.CONFIG_FILE.write_text(normalized_cfg.model_dump_json(indent=2), encoding="utf-8")
             return normalized_cfg
         except Exception as exc:
-            logger.error(f"Failed to load provider config from {cls.CONFIG_FILE}: {exc}", exc_info=True)
+            logger.error("Failed to load provider config from %s: %s", cls.CONFIG_FILE, exc, exc_info=True)
             return None
 
     @classmethod

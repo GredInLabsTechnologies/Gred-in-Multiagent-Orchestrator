@@ -118,7 +118,7 @@ class GenericCLISession(AgentSession):
         try:
             await asyncio.gather(_read_stdout(), _read_stderr())
         except Exception as e:
-            logger.error(f"Error reading from process: {e}")
+            logger.error("Error reading from process: %s", e)
             self.status = AgentStatus.FAILED
 
     def _handle_stdout_line(self, line: str) -> None:

@@ -127,5 +127,5 @@ class BudgetForecastService:
                 alert_level=alert_level,
             )
         except Exception as e:
-            logger.error(f"Failed to calculate forecast for {label}: {e}")
+            logger.error("Failed to calculate forecast for %s: %s", label, e)
             return None

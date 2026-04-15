@@ -3,6 +3,7 @@ import keyword
 from mcp.server.fastmcp import FastMCP
 from tools.gimo_server.mcp_bridge.manifest import MANIFEST
 from tools.gimo_server.mcp_bridge.bridge import proxy_to_api
+from tools.gimo_server.security.safe_log import sanitize_for_log
 
 logger = logging.getLogger("mcp_bridge.registrar")
 
@@ -93,7 +94,11 @@ async def {name}({signature_str}) -> str:
             count += 1
             
         except Exception as e:
-            logger.error(f"Failed to register tool {t_def.get('name')}: {e}")
+            logger.error(
+                "Failed to register tool %s: %s",
+                sanitize_for_log(t_def.get("name")),
+                sanitize_for_log(e),
+            )
 
     async def plan_create(
         objective: str,
@@ -136,6 +141,6 @@ async def {name}({signature_str}) -> str:
             mcp.add_tool(alias)
             count += 1
         except Exception as e:
-            logger.error(f"Failed to register MCP alias {alias.__name__}: {e}")
+            logger.error("Failed to register MCP alias %s: %s", alias.__name__, e)
 
-    logger.info(f"Successfully registered {count} dynamic tools from manifest.")
+    logger.info("Successfully registered %s dynamic tools from manifest.", count)

@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 import subprocess
 
+from tools.gimo_server.security.safe_log import sanitize_for_log
+
 logger = logging.getLogger("orchestrator.services.diff_application_service")
 
 class DiffApplicationService:
@@ -75,17 +77,20 @@ class DiffApplicationService:
             
             full_path = root / filepath
             if not DiffApplicationService._is_safe_path(root, full_path):
-                logger.error(f"Path traversal blocked for: {filepath}")
+                logger.error("Path traversal blocked for: %s", sanitize_for_log(filepath))
                 continue
-                
+
             if full_path.exists():
                 content = full_path.read_text(encoding='utf-8')
                 if search_str in content:
                     content = content.replace(search_str, replace_str)
                     full_path.write_text(content, encoding='utf-8')
-                    logger.info(f"Applied search/replace to {filepath}")
+                    logger.info("Applied search/replace to %s", sanitize_for_log(filepath))
                 else:
-                    logger.error(f"Search string not found in {filepath} (Exact match failed)")
+                    logger.error(
+                        "Search string not found in %s (Exact match failed)",
+                        sanitize_for_log(filepath),
+                    )
 
     @staticmethod
     def _apply_git_patch(worktree_path: str, agent_content: str) -> None:
@@ -109,7 +114,7 @@ class DiffApplicationService:
             if result.returncode == 0:
                 logger.info("Successfully applied git patch.")
             else:
-                logger.error(f"Git apply failed: {result.stderr}")
+                logger.error("Git apply failed: %s", result.stderr)
         finally:
             os.remove(patch_file)
 
@@ -130,12 +135,16 @@ class DiffApplicationService:
             if filepath:
                 full_path = root / filepath
                 if not DiffApplicationService._is_safe_path(root, full_path):
-                    logger.error(f"Path traversal blocked for: {filepath}")
+                    logger.error("Path traversal blocked for: %s", sanitize_for_log(filepath))
                     continue
-                    
+
                 try:
                     full_path.parent.mkdir(parents=True, exist_ok=True)
                     full_path.write_text(content, encoding='utf-8')
-                    logger.info(f"Wrote file {filepath}")
+                    logger.info("Wrote file %s", sanitize_for_log(filepath))
                 except Exception as e:
-                    logger.error(f"Failed to write file {filepath}: {e}")
+                    logger.error(
+                        "Failed to write file %s: %s",
+                        sanitize_for_log(filepath),
+                        e,
+                    )

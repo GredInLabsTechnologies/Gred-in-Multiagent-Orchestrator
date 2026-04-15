@@ -51,7 +51,7 @@ class EconomyService:
             else:
                 cls.PRICING_REGISTRY = {"local": {"input": 0.0, "output": 0.0}}
         except Exception as e:
-            logger.error(f"Failed to load pricing: {e}")
+            logger.error("Failed to load pricing: %s", e)
             cls.PRICING_REGISTRY = {"local": {"input": 0.0, "output": 0.0}}
 
     @classmethod
@@ -140,7 +140,7 @@ class EconomyService:
                 else: break
 
             except Exception as e:
-                logger.error(f"Cascade attempt {attempts} failed: {e}")
+                logger.error("Cascade attempt %s failed: %s", attempts, e)
                 break
 
         return CascadeResult(

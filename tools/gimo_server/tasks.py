@@ -14,7 +14,7 @@ async def snapshot_cleanup_loop():
             SnapshotService.cleanup_old_snapshots()
         except asyncio.CancelledError:
             logger.debug("Snapshot cleanup loop cancelled.")
-            break
+            raise
         except Exception as e:
-            logger.error(f"Error in snapshot cleanup: {str(e)}")
+            logger.error("Error in snapshot cleanup: %s", e)
             await asyncio.sleep(10)

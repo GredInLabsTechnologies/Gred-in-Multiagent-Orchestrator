@@ -41,7 +41,7 @@ class TrustService:
             self._buffer.clear()
             self._last_flush = time.monotonic()
         except Exception as e:
-            logger.error(f"Failed to flush trust events: {e}")
+            logger.error("Failed to flush trust events: %s", e)
 
     # --- Trust Computation ---
 

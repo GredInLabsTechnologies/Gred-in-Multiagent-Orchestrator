@@ -19,7 +19,6 @@ _middlewares_module = _importlib_util.module_from_spec(_middlewares_spec)
 _middlewares_spec.loader.exec_module(_middlewares_module)
 register_middlewares = _middlewares_module.register_middlewares
 from tools.gimo_server.routers.core_router import router as core_router
-from tools.gimo_server.routers.legacy_ui_router import router as legacy_ui_router
 from tools.gimo_server.routers.redirects import router as redirects_router
 from tools.gimo_server.version import __version__
 from tools.gimo_server.services.snapshot_service import SnapshotService
@@ -32,6 +31,11 @@ from tools.gimo_server.routers.auth_router import router as auth_router
 
 # Configure logging with dynamic level from env
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
+# Defense-in-depth: universal CR/LF/tab scrubber on every root handler so
+# user-controlled interpolation cannot forge log lines (CWE-117 / S5145).
+# Call-sites should still prefer %s formatting; this is the safety net.
+from tools.gimo_server.security.safe_log import install_log_sanitizer
+install_log_sanitizer()
 logger = logging.getLogger("orchestrator")
 if DEBUG:
     logger.info("DEBUG mode enabled (LOG_LEVEL=%s)", LOG_LEVEL)
@@ -116,9 +120,9 @@ async def _notify_sessions_for_run(run, sessions, logger, ops_service):
                 messages=[{"role": "user", "content": {"type": "text", "text": msg}}],
                 maxTokens=500,
             )
-            logger.info(f"Pushed Handover Sampling request for {run.id} to client via MCP")
+            logger.info("Pushed Handover Sampling request for %s to client via MCP", run.id)
         except Exception as e:
-            logger.error(f"Failed to push Sampling to MCP client: {e}")
+            logger.error("Failed to push Sampling to MCP client: %s", e)
             ops_service.append_log(run.id, level="WARN", msg="MCP handover blocked: no session available")
 
 async def _mesh_heartbeat_timeout_loop(app):
@@ -169,9 +173,12 @@ async def _mcp_sampling_loop():
             logger.warning("MCP sampling loop error: %s", exc)
 
 async def _shutdown_services(logger, app, hw_monitor, run_worker, tasks):
+    # Cleanup path: we deliberately swallow CancelledError for each subsystem so that
+    # a second cancel signal mid-shutdown doesn't leave later services un-stopped.
+    # This is the canonical lifespan teardown — no outer awaiter observes cancellation here.
     try:
         await hw_monitor.stop_monitoring()
-    except asyncio.CancelledError as exc:
+    except asyncio.CancelledError as exc:  # NOSONAR: S7497 — intentional cleanup continuation
         logger.debug("Hardware monitor shutdown cancelled: %s", exc)
     except Exception as exc:
         logger.debug("Hardware monitor shutdown warning: %s", exc)
@@ -184,7 +191,7 @@ async def _shutdown_services(logger, app, hw_monitor, run_worker, tasks):
 
     try:
         await run_worker.stop()
-    except asyncio.CancelledError as exc:
+    except asyncio.CancelledError as exc:  # NOSONAR: S7497 — intentional cleanup continuation
         logger.debug("Run worker shutdown cancelled: %s", exc)
     except Exception as exc:
         logger.debug("Run worker shutdown warning: %s", exc)
@@ -203,7 +210,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting GIMO Orchestrator...")
 
     if not BASE_DIR.exists():
-        logger.error(f"BASE_DIR {BASE_DIR} does not exist!")
+        logger.error("BASE_DIR %s does not exist!", BASE_DIR)
         raise RuntimeError(f"BASE_DIR {BASE_DIR} does not exist!")
 
     app.state.start_time = time.time()
@@ -282,7 +289,9 @@ async def lifespan(app: FastAPI):
     app.state.license_guard = _guard
     # Re-validate in background every 24h
     import asyncio as _asyncio
-    _asyncio.create_task(_guard.periodic_recheck())
+    _license_recheck_task = _asyncio.create_task(_guard.periodic_recheck())
+    # Keep strong reference on app.state to prevent premature GC of the background task.
+    app.state.license_recheck_task = _license_recheck_task
     # ──────────────────────────────────────────────────────────────────
 
     async with AsyncExitStack() as app_mcp_exit_stack:
@@ -535,7 +544,7 @@ async def lifespan(app: FastAPI):
                 pass
         except Exception as exc:
             logger.debug("Lifespan shutdown suppressed exception: %s", exc)
-        except asyncio.CancelledError as exc:
+        except asyncio.CancelledError as exc:  # NOSONAR: S7497 — lifespan teardown path; suppress to keep TestClient happy
             logger.debug("Lifespan shutdown cancelled: %s", exc)
 
 
@@ -686,7 +695,7 @@ def _register_core_routes(app: FastAPI, settings):
         connections are closed with 4401.
         """
         from tools.gimo_server.services.notification_service import NotificationService
-        from tools.gimo_server.security.auth import session_store, SESSION_COOKIE_NAME
+        from tools.gimo_server.security.auth import session_store
         from tools.gimo_server.config import TOKENS
         import asyncio
 
@@ -834,11 +843,10 @@ def create_app() -> FastAPI:
             app.mount("/mcp", legacy_mcp.sse_app())
             logger.info("General MCP Bridge mounted at /mcp [LEGACY]")
     except Exception as e:
-        logger.error(f"Failed to mount FastMCP Server: {e}")
+        logger.error("Failed to mount FastMCP Server: %s", e)
 
     # Register all API routes
     app.include_router(core_router)
-    app.include_router(legacy_ui_router)
     app.include_router(redirects_router)
     app.include_router(auth_router)
     app.include_router(ops_router)

@@ -4,9 +4,8 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
 
-from ..models.core import PurgeReceipt, OpsRun
+from ..models.core import PurgeReceipt
 from .ephemeral_repo_service import EphemeralRepoService
 from .git_service import GitService
 from .lifecycle_errors import LifecycleProofError, PurgeExecutionError, PurgeSafetyError, RunNotFoundError
@@ -72,7 +71,7 @@ class PurgeService:
                             )
                         removed_categories.append("workspace")
                     except Exception as e:
-                        logger.error(f"Failed to remove workspace {workspace_path}: {e}")
+                        logger.error("Failed to remove workspace %s: %s", workspace_path, e)
                         if workspace_path.exists():
                             raise PurgeExecutionError(f"Failed to remove workspace {workspace_path}: {str(e)}")
 
@@ -139,7 +138,7 @@ class PurgeService:
         except (RunNotFoundError, LifecycleProofError, PurgeSafetyError, PurgeExecutionError):
             raise
         except Exception as e:
-            logger.error(f"Purge failed for run {run_id}: {e}")
+            logger.error("Purge failed for run %s: %s", run_id, e)
             # Fail closed: ensure we don't return success
             raise PurgeExecutionError(f"Purge failed for run {run_id}: {str(e)}")
 

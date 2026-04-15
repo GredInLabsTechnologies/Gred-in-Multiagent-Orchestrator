@@ -16,6 +16,7 @@ from .base import (
 )
 from ..services.hitl_gate_service import HitlGateService
 from ..models.agent_routing import RoutingDecisionSummary
+from ..security.safe_log import sanitize_for_log
 
 logger = logging.getLogger("orchestrator.adapters.openai_compatible")
 
@@ -123,7 +124,7 @@ class OpenAICompatibleSession(AgentSession):
                 self._metrics["tokens_used"] += usage.get("total_tokens", 0)
 
         except Exception as e:
-            logger.error(f"OpenAI-compatible LLM error: {e}")
+            logger.error("OpenAI-compatible LLM error: %s", sanitize_for_log(e))
             self.status = AgentStatus.FAILED
             self._metrics["error"] = str(e)
 
@@ -188,7 +189,7 @@ class OpenAICompatibleSession(AgentSession):
             self._background_task = asyncio.create_task(self._process_turn())
             
         except Exception as e:
-            logger.error(f"Tool execution failed: {e}")
+            logger.error("Tool execution failed: %s", e)
             # Send error back to LLM
             self.messages.append({
                 "role": "tool", 
