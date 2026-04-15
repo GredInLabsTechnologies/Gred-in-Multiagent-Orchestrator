@@ -5,7 +5,7 @@ from ..contracts import StageInput, StageOutput, ExecutionStage
 from ...models.economy import CostEvent
 from ...models.policy import TrustEvent
 from ...services.providers.service import ProviderService
-from ...services.observability_service import ObservabilityService
+from ...services.observability_pkg.observability_service import ObservabilityService
 from ...services.ops_service import OpsService
 from ...services.storage_service import StorageService
 

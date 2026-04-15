@@ -252,8 +252,8 @@ class RunMixin:
 
             if validated_task_spec:
                 from ..app_session_service import AppSessionService
-                from ..sandbox_service import SandboxService
-                from ..workspace_policy_service import WorkspacePolicyService
+                from ..execution.sandbox_service import SandboxService
+                from ..workspace.workspace_policy_service import WorkspacePolicyService
 
                 repo_handle = str(validated_task_spec.get("repo_handle") or "").strip()
                 if surface == WorkspacePolicyService.SURFACE_CHATGPT_APP:

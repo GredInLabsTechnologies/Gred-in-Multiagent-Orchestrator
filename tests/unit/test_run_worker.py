@@ -1,4 +1,4 @@
-"""Unit tests for tools.gimo_server.services.run_worker.RunWorker.
+"""Unit tests for tools.gimo_server.services.execution.run_worker.RunWorker.
 
 Tests cover lifecycle (start/stop/notify), tick dispatch logic,
 concurrency limits, active-status detection, target-path extraction,
@@ -229,7 +229,7 @@ async def test_critic_gate_skips_mature_high_quality_outputs(mock_ops):
 
     worker = RunWorker()
 
-    with patch("tools.gimo_server.services.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
+    with patch("tools.gimo_server.services.execution.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
         approved, output, raw = await worker._critic_with_retry(
             run_id="r1",
             output_text="Concrete execution summary with no errors.",
@@ -279,7 +279,7 @@ async def test_critic_gate_uses_final_model_used_for_initial_skip_lookup(mock_op
 
     worker = RunWorker()
 
-    with patch("tools.gimo_server.services.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
+    with patch("tools.gimo_server.services.execution.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
         approved, output, raw = await worker._critic_with_retry(
             run_id="r1",
             output_text="Concrete execution summary with no errors.",
@@ -330,7 +330,7 @@ async def test_critic_gate_preserves_legacy_avg_output_tokens_history(mock_ops):
 
     worker = RunWorker()
 
-    with patch("tools.gimo_server.services.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
+    with patch("tools.gimo_server.services.execution.run_worker.CriticService.evaluate", new_callable=AsyncMock) as mock_critic:
         approved, output, raw = await worker._critic_with_retry(
             run_id="r1",
             output_text="Concrete execution summary with no errors.",

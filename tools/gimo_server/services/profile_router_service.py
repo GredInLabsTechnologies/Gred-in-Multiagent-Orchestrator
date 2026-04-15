@@ -34,7 +34,7 @@ class ProfileRouterService:
 
         P9: Filtra presets con failure_streak ≥ 5 (auto-downgrade).
         """
-        from .anomaly_detection_service import AnomalyDetectionService
+        from .observability_pkg.anomaly_detection_service import AnomalyDetectionService
 
         # Get downgrade list
         downgraded = AnomalyDetectionService.get_downgrade_list()

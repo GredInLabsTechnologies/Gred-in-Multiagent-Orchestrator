@@ -16,7 +16,7 @@ def mock_base_dir(tmp_path):
     return base
 
 
-@patch("tools.gimo_server.services.repo_service.GitService.list_repos")
+@patch("tools.gimo_server.services.workspace.repo_service.GitService.list_repos")
 def test_list_repos(mock_list):
     mock_list.return_value = [{"name": "repo1", "path": "/path/1"}]
     repos = RepoService.list_repos()

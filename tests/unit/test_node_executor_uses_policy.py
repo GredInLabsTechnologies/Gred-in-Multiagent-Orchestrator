@@ -50,7 +50,7 @@ async def test_enforce_tool_governance_denies_unauthorized_tool():
         },
     )
 
-    with patch("tools.gimo_server.services.execution_policy_service.ExecutionPolicyService.get_policy") as mock_get:
+    with patch("tools.gimo_server.services.execution.execution_policy_service.ExecutionPolicyService.get_policy") as mock_get:
         mock_policy = MagicMock()
         mock_policy.assert_tool_allowed = MagicMock(side_effect=PermissionError("Tool not allowed"))
         mock_get.return_value = mock_policy
@@ -104,7 +104,7 @@ async def test_enforce_tool_governance_hitl_required():
     )
 
     with (
-        patch("tools.gimo_server.services.execution_policy_service.ExecutionPolicyService.get_policy") as mock_get_policy,
+        patch("tools.gimo_server.services.execution.execution_policy_service.ExecutionPolicyService.get_policy") as mock_get_policy,
         patch("tools.gimo_server.services.hitl_gate_service.HitlGateService.gate_tool_call") as mock_gate,
     ):
         # Mock policy that allows the tool and requires confirmation

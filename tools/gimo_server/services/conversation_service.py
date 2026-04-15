@@ -14,9 +14,9 @@ from .notification_service import NotificationService
 from ..config import OPS_DATA_DIR
 from ..ops_models import GimoItem, GimoThread, GimoTurn
 from .agent_catalog_service import AgentCatalogService
-from .execution_policy_service import ExecutionPolicyService
+from .execution.execution_policy_service import ExecutionPolicyService
 from .task_descriptor_service import TaskDescriptorService
-from .workspace_policy_service import WorkspacePolicyService
+from .workspace.workspace_policy_service import WorkspacePolicyService
 
 logger = logging.getLogger("orchestrator.services.conversation")
 _MutationResultT = TypeVar("_MutationResultT")

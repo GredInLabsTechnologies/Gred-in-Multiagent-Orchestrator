@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from ...services.file_service import FileService
-from ...services.execution_policy_service import ExecutionPolicyProfile, ExecutionPolicyService
+from ...services.execution.execution_policy_service import ExecutionPolicyProfile, ExecutionPolicyService
 from ...services.task_descriptor_service import TaskDescriptorService
 from ...services.workspace.workspace_contract import WorkspaceContract
 from ..moods import get_mood_profile

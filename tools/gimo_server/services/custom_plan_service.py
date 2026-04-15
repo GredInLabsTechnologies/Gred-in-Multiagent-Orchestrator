@@ -24,7 +24,7 @@ from .constraint_compiler_service import ConstraintCompilerService
 from .git_service import GitService
 from .profile_binding_service import ProfileBindingService
 from .profile_router_service import ProfileRouterService
-from .sandbox_service import SandboxHandle, SandboxService
+from .execution.sandbox_service import SandboxHandle, SandboxService
 from .task_descriptor_service import TaskDescriptorService
 from .task_fingerprint_service import TaskFingerprintService
 

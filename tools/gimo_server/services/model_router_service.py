@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 from ..ops_models import ProviderRoleBinding, WorkflowNode
 from ..utils.debug_mode import is_debug_mode
-from .cost_service import CostService
+from .economy.cost_service import CostService
 from .model_inventory_service import ModelInventoryService, ModelEntry, _infer_capabilities, _infer_tier
 from .hardware_monitor_service import HardwareMonitorService
 

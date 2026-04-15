@@ -77,7 +77,7 @@ async def test_worker_context_is_scoped_by_task_spec(mock_ops_service, tmp_path)
 
     worker = RunWorker()
 
-    with patch("tools.gimo_server.services.engine_service.EngineService.execute_run") as mock_exec:
+    with patch("tools.gimo_server.services.execution.engine_service.EngineService.execute_run") as mock_exec:
         mock_exec.return_value = asyncio.Future()
         mock_exec.return_value.set_result({"status": "completed"})
 
@@ -285,7 +285,7 @@ async def test_allowed_paths_survives_engine_context_merge(mock_ops_service, tmp
     mock_ops_service._persist_run(run)
 
     worker = RunWorker()
-    with patch("tools.gimo_server.services.engine_service.EngineService.execute_run") as mock_exec:
+    with patch("tools.gimo_server.services.execution.engine_service.EngineService.execute_run") as mock_exec:
         await worker._execute_run(run.id)
 
         final_run = mock_ops_service.get_run(run.id)

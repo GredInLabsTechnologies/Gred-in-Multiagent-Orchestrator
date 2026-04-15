@@ -24,7 +24,7 @@ from .config_change_service import ProviderConfigChangeService
 from .topology_service import ProviderTopologyService
 from ..llm_cache import NormalizedLLMCache
 from ..model_router_service import ModelRouterService
-from ..observability_service import ObservabilityService
+from ..observability_pkg.observability_service import ObservabilityService
 
 logger = logging.getLogger("orchestrator.ops.provider")
 
@@ -794,7 +794,7 @@ class ProviderService:
     @classmethod
     async def static_generate(cls, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Static version of generate for legacy/class-level calls."""
-        from ..cost_service import CostService
+        from ..economy.cost_service import CostService
         from ..ops_service import OpsService
         
         cfg = cls.get_config()

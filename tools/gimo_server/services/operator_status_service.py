@@ -8,7 +8,7 @@ from typing import Any
 from ..config import ALLOWLIST_REQUIRE, get_settings
 from ..security import get_active_repo_dir, get_allowed_paths
 from ..version import __version__
-from .budget_forecast_service import BudgetForecastService
+from .economy.budget_forecast_service import BudgetForecastService
 from .conversation_service import ConversationService
 from .file_service import FileService
 from .git_service import GitService

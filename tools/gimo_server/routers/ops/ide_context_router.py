@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
-from ...services.workspace_context_service import WorkspaceContextService
+from ...services.workspace.workspace_context_service import WorkspaceContextService
 from ...services.context_analysis_service import ContextAnalysisService
 
 

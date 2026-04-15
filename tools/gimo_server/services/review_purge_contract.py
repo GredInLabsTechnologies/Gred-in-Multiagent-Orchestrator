@@ -7,7 +7,7 @@ from ..config import get_settings
 from .lifecycle_errors import LifecycleProofError, RunNotFoundError
 from .ops_service import OpsService
 from .app_session_service import AppSessionService
-from .workspace_policy_service import WorkspacePolicyService
+from .workspace.workspace_policy_service import WorkspacePolicyService
 
 
 def _validated_task_spec(run: Any) -> Dict[str, Any]:

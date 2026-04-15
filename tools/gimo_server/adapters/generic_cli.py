@@ -70,11 +70,11 @@ class GenericCLISession(AgentSession):
         # role_profile survives only as a behavior tag, never as a permission
         # source of truth.
         if routing_summary:
-            from ..services.execution_policy_service import ExecutionPolicyService
+            from ..services.execution.execution_policy_service import ExecutionPolicyService
             self._execution_policy = ExecutionPolicyService.get_policy(routing_summary.execution_policy)
             self._role_profile = routing_summary.mood  # For legacy compatibility
         elif role_profile:
-            from ..services.execution_policy_service import ExecutionPolicyService
+            from ..services.execution.execution_policy_service import ExecutionPolicyService
             logger.warning(
                 "Legacy role_profile='%s' provided without execution_policy; defaulting to workspace_safe.",
                 role_profile,
@@ -83,7 +83,7 @@ class GenericCLISession(AgentSession):
             self._role_profile = role_profile
         else:
             # Default fallback
-            from ..services.execution_policy_service import ExecutionPolicyService
+            from ..services.execution.execution_policy_service import ExecutionPolicyService
             self._execution_policy = ExecutionPolicyService.get_policy("workspace_safe")
             self._role_profile = "executor"
 

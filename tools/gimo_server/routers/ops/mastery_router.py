@@ -14,7 +14,7 @@ from ...ops_models import (
     PlanAutonomyUpdateRequest,
 )
 from ...services.model_router_service import ModelRouterService
-from ...services.budget_forecast_service import BudgetForecastService
+from ...services.economy.budget_forecast_service import BudgetForecastService
 
 
 # F8.3: User feedback model
@@ -259,7 +259,7 @@ async def predict_workflow_cost(
 ):
     """Predicts cost for a proposed workflow."""
     from ...services.ops_service import OpsService
-    from ...services.cost_predictor import CostPredictor
+    from ...services.economy.cost_predictor import CostPredictor
     from ...ops_models import WorkflowNode
 
     nodes_data = request.get("nodes", [])
@@ -464,7 +464,7 @@ async def get_anomalies(auth: Annotated[AuthContext, Depends(verify_token)]) -> 
             "count": int
         }
     """
-    from ...services.anomaly_detection_service import AnomalyDetectionService
+    from ...services.observability_pkg.anomaly_detection_service import AnomalyDetectionService
 
     anomalies = AnomalyDetectionService.detect_anomalies()
 
@@ -495,7 +495,7 @@ async def get_baseline(
         }
         O 404 si no hay baseline confiable
     """
-    from ...services.anomaly_detection_service import AnomalyDetectionService
+    from ...services.observability_pkg.anomaly_detection_service import AnomalyDetectionService
 
     baseline = AnomalyDetectionService.compute_baseline(task_semantic, preset_name)
 
@@ -519,7 +519,7 @@ async def get_downgraded_presets(auth: Annotated[AuthContext, Depends(verify_tok
             "threshold": int  # failure_streak threshold
         }
     """
-    from ...services.anomaly_detection_service import AnomalyDetectionService
+    from ...services.observability_pkg.anomaly_detection_service import AnomalyDetectionService
 
     downgraded = AnomalyDetectionService.get_downgrade_list()
 

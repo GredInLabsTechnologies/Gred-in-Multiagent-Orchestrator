@@ -22,8 +22,8 @@ from ..providers.base import ProviderAdapter
 from ..security.execution_proof import ExecutionProof, ExecutionProofChain
 from .agent_catalog_service import AgentCatalogService
 from .conversation_service import ConversationService
-from .cost_service import CostService
-from .execution_policy_service import ExecutionPolicyService
+from .economy.cost_service import CostService
+from .execution.execution_policy_service import ExecutionPolicyService
 from .notification_service import NotificationService
 from .providers.auth_service import ProviderAuthService
 from .providers.adapter_registry import build_provider_adapter
@@ -1110,7 +1110,7 @@ class AgenticLoopService:
         audit log, structured events, per-thread usage, and OTel spans.
         """
         try:
-            from .observability_service import ObservabilityService as UnifiedObservabilityService
+            from .observability_pkg.observability_service import ObservabilityService as UnifiedObservabilityService
             from .ops_service import OpsService
             from .storage_service import StorageService
 
