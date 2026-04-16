@@ -146,6 +146,50 @@ class TaskDescriptorService:
             return content
         return cls.canonicalize_plan_content(plan_data, indent=indent)
 
+    # BUGS_LATENTES §H2 — tool name canonical vocabulary.
+    # El campo TaskDescriptor.required_tools era dead (siempre vacío). Ahora se
+    # infiere del task_type + text del task. Los nombres son semánticos — los
+    # runners concretos resuelven aliases. Los consumers (intent classifier,
+    # constraint compiler, model router) pueden leer estos hints para refinar
+    # policy / binding filters sin depender de parsing textual.
+    _TOOLS_BY_TASK_TYPE: Dict[str, List[str]] = {
+        "orchestrator": ["plan_editor", "workflow_compose"],
+        "security_review": ["code_reader", "security_scanner"],
+        "review": ["code_reader", "diff_reader"],
+        "research": ["web_search", "doc_reader"],
+        "human_gate": ["hitl_gate"],
+        "execution": ["file_writer", "shell_exec"],
+    }
+
+    # Token hints que añaden tools adicionales sobre los inferidos por task_type.
+    _TOOL_TOKEN_HINTS: List[tuple[tuple[str, ...], str]] = [
+        (("git ", "commit", "branch", "rebase"), "git_ops"),
+        (("test ", "pytest", "jest", "unittest"), "test_runner"),
+        (("docker", "kubernetes", "kubectl"), "container_ops"),
+        (("sql", "database", "postgres", "mysql"), "db_query"),
+        (("api", "http", "rest", "graphql"), "http_client"),
+        (("patch", "refactor", "edit file"), "file_writer"),
+        (("search codebase", "grep", "ripgrep"), "code_search"),
+    ]
+
+    @classmethod
+    def _infer_required_tools(cls, task_type: str, text: str) -> List[str]:
+        """Infiere la lista canonical de tools del task_type + tokens del text.
+
+        BUGS_LATENTES §H2 fix. Devuelve lista de-duplicada preservando orden
+        (primero los defaults por task_type, después los hints por token).
+        Never raises — si no hay match, devuelve [].
+        """
+        tools: List[str] = list(cls._TOOLS_BY_TASK_TYPE.get(task_type, []))
+        seen = set(tools)
+        for tokens, tool in cls._TOOL_TOKEN_HINTS:
+            if tool in seen:
+                continue
+            if any(tok in text for tok in tokens):
+                tools.append(tool)
+                seen.add(tool)
+        return tools
+
     @classmethod
     def descriptor_from_task(cls, task: Dict[str, Any]) -> TaskDescriptor:
         normalized = cls.normalize_task(task)
@@ -199,7 +243,7 @@ class TaskDescriptorService:
             artifact_kind=artifact_kind,
             mutation_mode=mutation_mode,
             risk_band=risk_band,  # type: ignore[arg-type]
-            required_tools=[],
+            required_tools=cls._infer_required_tools(task_type, text),
             path_scope=normalized["path_scope"],
             complexity_band=complexity_band,  # type: ignore[arg-type]
             parallelism_hint=parallelism_hint,  # type: ignore[arg-type]

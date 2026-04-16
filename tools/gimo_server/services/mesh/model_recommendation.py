@@ -3,7 +3,7 @@
 Scores each model against a device's real hardware capabilities and returns:
 - Fit level (optimal / comfortable / tight / overload)
 - Estimated RAM usage, tokens/sec, battery drain
-- Recommended device mode (inference / hybrid / utility)
+- Recommended device mode (inference / hybrid / utility / server)
 - Impact warnings
 
 RAM formula (industry standard from llama.cpp):
@@ -71,7 +71,7 @@ class ModelRecommendation:
     model_id: str
     fit_level: FitLevel = FitLevel.comfortable
     recommended: bool = False
-    recommended_mode: str = "inference"  # inference / hybrid / utility
+    recommended_mode: str = "inference"  # inference / hybrid / utility / server
 
     # Resource estimates
     estimated_ram_gb: float = 0.0
@@ -287,10 +287,24 @@ def score_model(
     rec.score = max(0, min(100, rec.score))
 
     # ── Mode recommendation ───────────────────────────────────
+    # Server mode requires headroom to run GIMO Core itself concurrently with
+    # inference AND serve other mesh devices. Thresholds:
+    #   - Fit: optimal (model leaves RAM for FastAPI backend + OS)
+    #   - RAM: >= 12 GB (Core ~0.5 GB + model + OS + inference working set)
+    #   - SoC: flagship-tier (>= 18 tok/s base perf for 3B q4) so serving
+    #     HTTP requests doesn't starve inference
+    # The raw SoC lookup excludes the GPU bonus to keep the signal hardware-only.
+    _raw_soc_tps = _lookup_soc_perf(soc_model)
     if rec.fit_level == FitLevel.overload:
         rec.recommended_mode = "utility"
     elif rec.fit_level == FitLevel.tight:
         rec.recommended_mode = "hybrid"
+    elif (
+        rec.fit_level == FitLevel.optimal
+        and device_ram_gb >= 12.0
+        and _raw_soc_tps >= 18.0
+    ):
+        rec.recommended_mode = "server"
     else:
         rec.recommended_mode = "inference"
 

@@ -20,6 +20,7 @@ from ...models.mesh import (
     OperationalState,
     ThermalEvent,
 )
+from . import observability as _mesh_obs
 
 logger = logging.getLogger("orchestrator.mesh.registry")
 
@@ -200,6 +201,7 @@ class MeshRegistry:
         )
         self.save_device(device)
         logger.info("Enrolled device %s (mode=%s)", device_id, device_mode)
+        _mesh_obs.emit_enrollment(device_id, device_mode.value, device_class)
 
         # Auto-enroll in default workspace so activate("default") works
         try:
@@ -231,6 +233,7 @@ class MeshRegistry:
         device.connection_state = new_state
         self.save_device(device)
         logger.info("Device %s: %s → %s", device_id, old_state.value, new_state.value)
+        _mesh_obs.emit_state_change(device_id, old_state.value, new_state.value)
         return device
 
     def approve_device(self, device_id: str) -> MeshDeviceInfo:
@@ -326,6 +329,13 @@ class MeshRegistry:
             event.trigger_sensor,
             event.trigger_value,
             event.trigger_threshold,
+        )
+        _mesh_obs.emit_thermal(
+            device_id=event.device_id,
+            event_type=event.event_type,
+            trigger_sensor=event.trigger_sensor,
+            trigger_value=event.trigger_value,
+            trigger_threshold=event.trigger_threshold,
         )
 
     def get_thermal_history(

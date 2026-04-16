@@ -89,6 +89,64 @@ async def get_device(
     return device
 
 
+# ── Host (rev 2 Cambio 3) ────────────────────────────────────
+
+
+class MeshHostInfo(BaseModel):
+    """Server-mode host snapshot — the local orchestrator as a mesh device.
+
+    Exposes the bootstrapped host record plus the LAN reachability hints that
+    mDNS publishes. Clients can use this to show "this Core is serving on X" in
+    the UI without parsing TXT records themselves.
+    """
+    device: MeshDeviceInfo | None = None
+    lan_urls: List[str] = []
+    mdns_active: bool = False
+    advertised_signals: dict = {}
+
+
+@router.get("/host")
+async def mesh_host(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+) -> MeshHostInfo:
+    _require_role(auth, "operator")
+    host = getattr(request.app.state, "mesh_host_device", None)
+    advertiser = getattr(request.app.state, "mdns_advertiser", None)
+
+    # Prefer the live registry snapshot (heartbeats keep it fresh) over the
+    # bootstrap-time copy, so /ops/mesh/host and /ops/mesh/devices/{id} agree.
+    live: MeshDeviceInfo | None = None
+    if host is not None:
+        registry = getattr(request.app.state, "mesh_registry", None)
+        if registry is not None:
+            live = registry.get_device(host.device_id)
+    device = live or host
+
+    lan_urls: List[str] = []
+    advertised: dict = {}
+    if advertiser is not None and getattr(advertiser, "is_running", False):
+        from tools.gimo_server.services.mesh.mdns_advertiser import _get_local_ip
+        import os as _os
+        port = int(_os.environ.get("ORCH_PORT", "9325"))
+        ip = _get_local_ip()
+        if ip and ip != "127.0.0.1":
+            lan_urls.append(f"http://{ip}:{port}")
+        advertised = {
+            "mode": getattr(advertiser, "_mode", ""),
+            "health": getattr(advertiser, "_health", 0),
+            "load": getattr(advertiser, "_load", 0.0),
+        }
+
+    return MeshHostInfo(
+        device=device,
+        lan_urls=lan_urls,
+        mdns_active=advertiser is not None and getattr(advertiser, "is_running", False),
+        advertised_signals=advertised,
+    )
+
+
 # ── Enrollment ───────────────────────────────────────────────
 
 class EnrollRequest(BaseModel):
@@ -1258,5 +1316,166 @@ async def download_model(
         headers={
             "Accept-Ranges": "bytes",
             "Content-Length": str(file_size),
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Runtime Packaging — peer-to-peer Core bundle distribution (PKG-3)
+# Plan E2E_ENGINEERING_PLAN_20260416_RUNTIME_PACKAGING, Change 4
+# ═══════════════════════════════════════════════════════════════
+
+def _get_runtime_assets_dir() -> "Path":
+    """Resuelve el directorio donde vive el bundle del Core.
+
+    Prioridad:
+        1. Env var ``ORCH_RUNTIME_ASSETS_DIR`` (productor puede inyectar).
+        2. ``<repo_root>/runtime-assets`` (convención junto al launcher).
+    """
+    from pathlib import Path as _P
+    import os as _os
+    override = _os.environ.get("ORCH_RUNTIME_ASSETS_DIR", "").strip()
+    if override:
+        return _P(override).resolve()
+    repo_root = _P(__file__).resolve().parents[4]
+    return repo_root / "runtime-assets"
+
+
+@router.get("/runtime-manifest")
+async def get_runtime_manifest(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+):
+    """Devuelve el manifest del runtime actualmente servido por este Core.
+
+    Permite a peers decidir si necesitan upgrade comparando ``runtime_version``
+    antes de bajar el tarball (que es ~50 MB). Auth operator.
+    """
+    _require_role(auth, "operator")
+    from tools.gimo_server.models.runtime import RuntimeManifest
+
+    assets_dir = _get_runtime_assets_dir()
+    manifest_path = assets_dir / "gimo-core-runtime.json"
+    if not manifest_path.exists():
+        raise HTTPException(
+            404,
+            detail=(
+                f"runtime manifest not available on this Core (expected at "
+                f"{manifest_path}). Run scripts/package_core_runtime.py build "
+                f"or set ORCH_RUNTIME_ASSETS_DIR."
+            ),
+        )
+    try:
+        manifest = RuntimeManifest.model_validate_json(
+            manifest_path.read_text(encoding="utf-8")
+        )
+    except Exception as exc:
+        raise HTTPException(500, detail=f"runtime manifest invalid: {exc}")
+    return manifest.model_dump(mode="json")
+
+
+@router.get("/runtime-payload")
+async def get_runtime_payload(
+    request: Request,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+):
+    """Sirve el tarball firmado del runtime como streaming binario.
+
+    Rate limit estricto (6 / 60 s por IP ≈ 1 / 10 s) por encima del rate limit
+    de rol — sirve artefactos ejecutables grandes y no es gratis.
+    Soporta ``Range`` header para reanudar descargas tras corte de red.
+    """
+    _require_role(auth, "operator")
+
+    # Rate limit estricto dedicado — bucket separado del límite por rol
+    from tools.gimo_server.security.rate_limit import consume_rate_limit
+    client_ip = request.client.host if request.client else "unknown"
+    consume_rate_limit(
+        f"runtime-payload:{client_ip}",
+        limit=6,
+        error_detail="Too many runtime payload requests — try again in a minute.",
+    )
+
+    from tools.gimo_server.models.runtime import RuntimeManifest
+    assets_dir = _get_runtime_assets_dir()
+    manifest_path = assets_dir / "gimo-core-runtime.json"
+    if not manifest_path.exists():
+        raise HTTPException(404, detail="runtime manifest not available")
+    try:
+        manifest = RuntimeManifest.model_validate_json(
+            manifest_path.read_text(encoding="utf-8")
+        )
+    except Exception as exc:
+        raise HTTPException(500, detail=f"runtime manifest invalid: {exc}")
+
+    tarball_path = assets_dir / manifest.tarball_name
+    if not tarball_path.exists():
+        raise HTTPException(
+            404,
+            detail=f"runtime tarball not available: {manifest.tarball_name}",
+        )
+
+    file_size = tarball_path.stat().st_size
+
+    # Range support for resume
+    range_header = request.headers.get("range")
+    if range_header:
+        import re as _re
+        from starlette.responses import StreamingResponse
+        match = _re.match(r"bytes=(\d+)-(\d*)", range_header)
+        if not match:
+            raise HTTPException(416, detail="Invalid Range header")
+        start = int(match.group(1))
+        end = int(match.group(2)) if match.group(2) else file_size - 1
+        end = min(end, file_size - 1)
+        if start >= file_size or start < 0 or end < start:
+            raise HTTPException(416, detail="Range not satisfiable")
+
+        def iter_range():
+            with open(tarball_path, "rb") as f:
+                f.seek(start)
+                remaining = end - start + 1
+                while remaining > 0:
+                    chunk = f.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        audit_log(
+            "OPS", "/ops/mesh/runtime-payload",
+            f"range={start}-{end} version={manifest.runtime_version}",
+            operation="READ", actor=_actor_label(auth),
+        )
+        return StreamingResponse(
+            iter_range(),
+            status_code=206,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Content-Length": str(end - start + 1),
+                "Accept-Ranges": "bytes",
+                "Content-Type": "application/octet-stream",
+                "Content-Disposition": f'attachment; filename="{manifest.tarball_name}"',
+                "X-Runtime-Version": manifest.runtime_version,
+                "X-Runtime-Sha256": manifest.tarball_sha256,
+            },
+        )
+
+    from fastapi.responses import FileResponse
+    audit_log(
+        "OPS", "/ops/mesh/runtime-payload",
+        f"full version={manifest.runtime_version}",
+        operation="READ", actor=_actor_label(auth),
+    )
+    return FileResponse(
+        path=str(tarball_path),
+        media_type="application/octet-stream",
+        filename=manifest.tarball_name,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "X-Runtime-Version": manifest.runtime_version,
+            "X-Runtime-Sha256": manifest.tarball_sha256,
         },
     )

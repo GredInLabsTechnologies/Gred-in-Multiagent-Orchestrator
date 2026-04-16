@@ -45,6 +45,12 @@ class DeviceCapabilities(BaseModel):
     soc_model: str = ""
     has_gpu_compute: bool = False     # Vulkan / OpenCL support
     max_file_descriptors: int = 1024
+    # BUGS_LATENTES §H12 — runtimes que el device reporta poder ejecutar.
+    # Probed dinámicamente por HardwareMonitorService (Python) o por el
+    # adapter nativo (Android Kotlin) antes del enrollment. Valores típicos:
+    # "python_native", "wasm", "micro_c", "web". Vacío = incapaz de ejecutar
+    # ningún runtime del catálogo → solo rol de client/sensor en la mesh.
+    supported_runtimes: list[str] = Field(default_factory=list)
 
 
 class WorkspaceRole(str, Enum):

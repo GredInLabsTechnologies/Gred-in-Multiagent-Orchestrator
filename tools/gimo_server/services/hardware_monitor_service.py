@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import platform
+import sys
 import time
 import subprocess
 from collections import deque
@@ -18,6 +19,14 @@ import psutil
 from ..config import OPS_DATA_DIR
 
 logger = logging.getLogger("orchestrator.hardware")
+
+# BUGS_LATENTES §H12 — probe dinámico de runtimes disponibles.
+# El cache evita correr los probes en cada snapshot (10s por default) — los
+# runtimes cambian en escala de minutos/horas (install/uninstall tools), no
+# sub-segundo. 5 min TTL es conservador sin sobrecargar.
+_RUNTIMES_CACHE_TTL = 300.0
+_runtimes_cache: Optional[list[str]] = None
+_runtimes_cached_at: float = 0.0
 
 LoadLevel = Literal["safe", "caution", "critical"]
 
@@ -67,6 +76,13 @@ class HardwareSnapshot:
     # Thermal protection state
     thermal_throttled: bool = False        # true if any sensor above warning threshold
     thermal_locked_out: bool = False       # true if lockout active
+
+    # BUGS_LATENTES §H12 — runtimes disponibles detectados por probe dinámico.
+    # Valores actualmente mapeados: "python_native" (CPython ejecutable directo),
+    # "wasm" (wasmtime/wasmer CLI o python package wasmtime). Otros tiers
+    # (micro_c, web) se detectan en adapters específicos y se unen al vector
+    # vía enrollment — no en el snapshot del host Python.
+    supported_runtimes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -306,6 +322,97 @@ def _get_installed_providers() -> list[str]:
     return []
 
 
+# BUGS_LATENTES §H12 — probe functions. Miden qué runtimes pueden ejecutar
+# en este device. Cada probe devuelve True/False y nunca lanza; fallo =
+# runtime no disponible, no error.
+
+def _probe_python_native() -> bool:
+    """¿Puede este host ejecutar CPython directamente?
+
+    Usa ``sys.executable`` — el mismo intérprete que corre GIMO. Si GIMO
+    está corriendo, Python native es por definición disponible. El probe
+    funciona también como sanity check: un ambiente roto donde
+    sys.executable no ejecuta indica un problema grave.
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "--version"],
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+        return result.returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _probe_wasm() -> bool:
+    """¿Hay un runtime WASM disponible?
+
+    Chequea en orden:
+        1. ``wasmtime`` CLI en PATH
+        2. ``wasmer`` CLI en PATH
+        3. Python package ``wasmtime`` importable
+
+    Si cualquiera responde, el tier WASM es viable. Si ninguno, el device
+    aún puede consumir bundles que NO requieran WASM (e.g. python_native).
+    """
+    for candidate in ("wasmtime", "wasmer"):
+        try:
+            result = subprocess.run(
+                [candidate, "--version"],
+                capture_output=True,
+                timeout=2,
+                check=False,
+            )
+            if result.returncode == 0:
+                return True
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
+        except Exception:  # noqa: BLE001
+            continue
+    # Fallback: Python library
+    try:
+        import importlib
+        importlib.import_module("wasmtime")
+        return True
+    except ImportError:
+        return False
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _probe_supported_runtimes() -> list[str]:
+    """Probe todos los runtimes y devuelve la lista de disponibles. Cached.
+
+    TTL de 5 min — los runtimes raramente cambian en scale sub-minuto. Los
+    adapters específicos (Android Kotlin) reportan sus propios tiers al
+    backend vía enrollment; esta función cubre solo lo que el Python host
+    puede detectar localmente.
+    """
+    global _runtimes_cache, _runtimes_cached_at
+    now = time.time()
+    if _runtimes_cache is not None and (now - _runtimes_cached_at) < _RUNTIMES_CACHE_TTL:
+        return list(_runtimes_cache)
+
+    runtimes: list[str] = []
+    if _probe_python_native():
+        runtimes.append("python_native")
+    if _probe_wasm():
+        runtimes.append("wasm")
+
+    _runtimes_cache = runtimes
+    _runtimes_cached_at = now
+    return list(runtimes)
+
+
+def _invalidate_runtimes_cache() -> None:
+    """Exposed para tests — fuerza re-probe en el próximo snapshot."""
+    global _runtimes_cache, _runtimes_cached_at
+    _runtimes_cache = None
+    _runtimes_cached_at = 0.0
+
+
 class HardwareMonitorService:
     """Singleton that samples system state periodically."""
 
@@ -382,6 +489,8 @@ class HardwareMonitorService:
             battery_percent=battery_pct,
             battery_charging=battery_charging,
             battery_temp_c=battery_temp,
+            # BUGS_LATENTES §H12: runtime availability dinámico (cached 5 min).
+            supported_runtimes=_probe_supported_runtimes(),
         )
 
     def get_load_level(self, snapshot: Optional[HardwareSnapshot] = None) -> LoadLevel:
