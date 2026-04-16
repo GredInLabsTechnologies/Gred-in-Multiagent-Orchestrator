@@ -223,3 +223,164 @@ jobs:
           path: |
             out/metrics/**/*.json
             logs/llm_debug.log
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Runtime Packaging matrix — plan E2E_ENGINEERING_PLAN_20260416_RUNTIME_PACKAGING §9
+  # + CROSS_COMPILE rev 2026-04-16 (plan E2E_ENGINEERING_PLAN_20260416_RUNTIME_CROSS_COMPILE).
+  #
+  # Matrix: android-arm64 (cross) + linux-x86_64 (host) + windows-x86_64 (host)
+  # + darwin-arm64 (host). El target android-arm64 usa python-build-standalone
+  # aarch64-unknown-linux-gnu + pip --platform=manylinux2014_aarch64 — wheel-only.
+  # Los demás usan host Python del runner.
+  #
+  # Cada matrix entry:
+  #   1. Genera un keypair Ed25519 efímero (no se publica — los artefactos
+  #      son para smoke/producción-interna, no distribución firmada oficial).
+  #      Release oficial usará secrets.RUNTIME_SIGNING_KEY.
+  #   2. Invoca scripts/package_core_runtime.py build con --python-source.
+  #   3. Corre scripts/package_core_runtime.py verify (roundtrip).
+  #   4. Sube artefactos como output (consumido por Android :app:fetchRuntimeBundle).
+  # ─────────────────────────────────────────────────────────────────────────
+  runtime-packaging:
+    name: runtime-packaging / ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Cross-compile real: ubuntu runner + standalone Python aarch64-linux-gnu.
+          # El bundle corre en Linux aarch64 (glibc); para Android stock (Bionic)
+          # requiere Termux/proot hasta que el adapter Chaquopy esté integrado.
+          - target: android-arm64
+            runner: ubuntu-latest
+            package_target: android-arm64
+            python_source: standalone
+            runtime_version: "0.1.0-ci-${{ github.run_number }}-android"
+          - target: linux-x86_64
+            runner: ubuntu-latest
+            package_target: host
+            python_source: host
+            runtime_version: "0.1.0-ci-${{ github.run_number }}-linux"
+          - target: windows-x86_64
+            runner: windows-latest
+            package_target: host
+            python_source: host
+            runtime_version: "0.1.0-ci-${{ github.run_number }}-windows"
+          - target: darwin-arm64
+            runner: macos-14
+            package_target: host
+            python_source: host
+            runtime_version: "0.1.0-ci-${{ github.run_number }}-darwin"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate ephemeral Ed25519 keypair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+          from cryptography.hazmat.primitives.serialization import (
+              Encoding, NoEncryption, PrivateFormat, PublicFormat,
+          )
+          priv = Ed25519PrivateKey.generate()
+          priv_pem = priv.private_bytes(
+              encoding=Encoding.PEM,
+              format=PrivateFormat.PKCS8,
+              encryption_algorithm=NoEncryption(),
+          ).decode("utf-8")
+          pub_pem = priv.public_key().public_bytes(
+              encoding=Encoding.PEM, format=PublicFormat.SubjectPublicKeyInfo,
+          ).decode("utf-8")
+          import pathlib
+          pathlib.Path("ci_signing_key.pem").write_text(priv_pem, encoding="utf-8")
+          pathlib.Path("ci_public_key.pem").write_text(pub_pem, encoding="utf-8")
+          PY
+
+      - name: Build runtime bundle
+        shell: bash
+        run: |
+          python scripts/package_core_runtime.py build \
+            --target ${{ matrix.package_target }} \
+            --python-source ${{ matrix.python_source }} \
+            --compression xz \
+            --runtime-version "${{ matrix.runtime_version }}" \
+            --signing-key ci_signing_key.pem \
+            --builder "gh-actions-${{ github.run_id }}" \
+            --output "./runtime-assets/${{ matrix.target }}"
+
+      - name: Verify bundle (sha256 + signature roundtrip)
+        shell: bash
+        run: |
+          python scripts/package_core_runtime.py verify \
+            --bundle "./runtime-assets/${{ matrix.target }}" \
+            --public-key ci_public_key.pem
+
+      - name: Smoke — runtime_bootstrap roundtrip
+        # Solo corre cuando el runner puede EJECUTAR el Python del bundle.
+        # Cross-compile targets (android-arm64 en ubuntu-x86_64) solo verifican
+        # firma + sha256 — la ejecución real queda cubierta por el consumer
+        # (S10 runbook o un emulador aarch64 en follow-up).
+        if: matrix.python_source == 'host'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, pathlib, sys
+          sys.path.insert(0, ".")
+          from tools.gimo_server.services.runtime_bootstrap import ensure_extracted
+          target = "${{ matrix.target }}"
+          assets = pathlib.Path(f"runtime-assets/{target}").resolve()
+          out = pathlib.Path(f"runtime-extracted/{target}").resolve()
+          pub_pem = pathlib.Path("ci_public_key.pem").read_text(encoding="utf-8")
+          r = ensure_extracted(assets, out, public_key_pem=pub_pem)
+          print(f"OK extracted: runtime_dir={r.runtime_dir} version={r.runtime_version}")
+          assert r.python_binary.exists(), "python binary missing after extraction"
+          PY
+
+      - name: Smoke — cross-compile extract (no exec)
+        # Cross targets: extrae el tarball y valida layout contra manifest.
+        # No ejecuta Python — el runner no puede.
+        if: matrix.python_source == 'standalone'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib, tarfile
+          target = "${{ matrix.target }}"
+          assets = pathlib.Path(f"runtime-assets/{target}").resolve()
+          tarball = assets / "gimo-core-runtime.tar.xz"
+          with tarfile.open(tarball, "r:xz") as tf:
+              names = tf.getnames()
+          print(f"cross bundle entries: {len(names)}")
+          has_python = any("python/" in n for n in names)
+          has_repo = any(n.startswith("repo/") or "/repo/" in n for n in names)
+          has_site = any("site-packages/" in n for n in names)
+          assert has_python, "bundle missing python/ tree"
+          assert has_repo, "bundle missing repo/ tree"
+          assert has_site, "bundle missing site-packages/ tree"
+          print("cross-compile bundle layout OK")
+          PY
+
+      - name: Upload bundle artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gimo-core-runtime-${{ matrix.target }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            runtime-assets/${{ matrix.target }}/gimo-core-runtime.*
