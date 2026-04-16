@@ -132,6 +132,90 @@ S10 running GIMO Core (3W)
 
 **The three modes are NOT mutually exclusive.** A device with enough resources can be Server + Inference simultaneously.
 
+### 2.4 Runtime Packaging (Core portable)
+
+> **Status**: MVP Rev 0 — plan `E2E_ENGINEERING_PLAN_20260416_RUNTIME_PACKAGING`.
+
+GIMO Core se distribuye como un **bundle portable** firmado (manifest JSON +
+tarball XZ + firma Ed25519) para que Android, Windows, Linux y macOS
+compartan el mismo Core Python sin depender del Python del sistema. Esto
+habilita operación en cualquier hardware — Raspberry, tablet, portátil,
+desktop, SBC embebidos — sin reinstalar.
+
+**Artefactos (producidos por `scripts/package_core_runtime.py`):**
+
+| Fichero | Contenido | Tamaño típico |
+| --- | --- | --- |
+| `gimo-core-runtime.tar.xz` | CPython + stdlib + wheels + tools/gimo_server + gimo_cli + data | ~40–60 MiB |
+| `gimo-core-runtime.json` | `RuntimeManifest` (versión, target, sha256, firma) | <4 KiB |
+| `gimo-core-runtime.sig` | Firma Ed25519 hex (también en el manifest) | 128 B |
+
+**Campos del manifest** (`tools/gimo_server/models/runtime.py`): `runtime_version`,
+`target` (enum `{linux_x86_64, linux_arm64, darwin_x86_64, darwin_arm64,
+windows_x86_64, android_arm64}`), `compression` (`xz`/`zstd`/`none`),
+`tarball_sha256`, `compressed_size_bytes`, `uncompressed_size_bytes`,
+`python_rel_path`, `repo_root_rel_path`, `python_path_entries`, `files`,
+`extra_env`, `signature`.
+
+**Ciclo de vida** (canónico, un solo flujo para todas las plataformas):
+
+```
+           ┌─ productor (CI matrix) ─────────────────────────────┐
+           │ scripts/package_core_runtime.py build --target X    │
+           │   → runtime-assets/gimo-core-runtime.{tar.xz,json,sig}│
+           │   Firma Ed25519 reusa license_guard pattern         │
+           └──────────────────┬──────────────────────────────────┘
+                              │
+                 ┌────────────┴────────────┐
+                 │                         │
+          ┌──────▼──────┐           ┌──────▼───────┐
+          │   Android   │           │   Desktop    │
+          │  APK/assets │           │  launcher    │
+          └──────┬──────┘           └──────┬───────┘
+                 │ (liviana, tarball dentro) │
+                 ▼                         ▼
+      ShellEnvironment            gimo_cli.commands.server.
+      .prepareEmbeddedCore()      _resolve_launcher_python()
+                 │                         │
+                 └────────────┬────────────┘
+                              ▼
+        tools/gimo_server/services/runtime_bootstrap.py
+          ensure_extracted(assets_dir, target_dir)
+          • Verifica firma + sha256 antes de tocar FS
+          • Extrae a <target>-extracting/, atomic rename
+          • Marca <target>/.extracted-version
+          • Idempotente: reboots no re-extraen
+```
+
+**Lazy extraction** — El tarball **no** se descomprime al install. Se
+descomprime la primera vez que el Core arranca en server mode, o cuando
+`gimo runtime upgrade` lo solicita. Esto mantiene la APK inicial ultra
+liviana (~20 MiB) y deja la expansión (~200 MiB) para devices que realmente
+ejecuten Core — no para un teléfono actuando sólo como cliente mesh.
+
+**Upgrade peer-to-peer** — Un peer que corra Core expone:
+
+* `GET /ops/mesh/runtime-manifest` → JSON del manifest actual (auth operator).
+* `GET /ops/mesh/runtime-payload`  → tarball streaming con soporte `Range`
+  (resume), rate-limit estricto (6 / 60 s por IP).
+
+El CLI `gimo runtime upgrade --peer http://…:9325` valida firma + sha256 y
+promueve el bundle atómicamente con el helper `runtime_bootstrap`. El flujo
+Android mirror (UI) es un follow-up del MVP — el backend ya lo soporta.
+
+**Matrix CI** — `.github/workflows/ci.yml` corre el productor para:
+
+* `android-arm64` — MVP usa `ubuntu-latest` (cross-compile real con
+  python-build-standalone = follow-up documentado).
+* `windows-x86_64` — `windows-latest`, host Python.
+
+Cada run genera keypair Ed25519 efímero; release oficial usará
+`secrets.RUNTIME_SIGNING_KEY`.
+
+**Fallback** — Si el bundle está ausente o corrupto, el launcher desktop
+recae al Python del host con un warning (no crashea). Dev workflow nunca
+se bloquea por un bundle inválido.
+
 ---
 
 ## 3. State Machine
