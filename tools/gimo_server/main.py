@@ -1014,10 +1014,15 @@ if __name__ == "__main__":
     else:
         host = explicit_host or "127.0.0.1"
 
+    # Auto-reload NUNCA en server mode: watchfiles detecta escrituras a
+    # .orch_data/ (registry, thermal events, audit) y reinicia el proceso
+    # mid-heartbeat. En client/dev mode está bien porque el volumen de
+    # writes es menor.
+    _reload = DEBUG and args.role != "server"
     uvicorn.run(
         "tools.gimo_server.main:app",
         host=host,
         port=port,
-        reload=DEBUG,
+        reload=_reload,
         log_level=LOG_LEVEL.lower(),
     )
