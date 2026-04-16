@@ -131,6 +131,45 @@ class TestScoreModel:
         )
         assert rec_over.recommended_mode == "utility"
 
+    def test_server_mode_on_flagship_hardware(self):
+        """Flagship SoC + 12+ GB RAM + optimal fit → recommend server mode.
+
+        Rationale: device has headroom to run GIMO Core itself + inference +
+        serve other mesh devices.
+        """
+        rec = score_model(
+            model_id="qwen2.5_3b_q4_k_m", params_str="3b", quant_str="q4_k_m",
+            size_bytes=2_000_000_000, ram_total_mb=16384,  # 16 GB
+            storage_free_mb=50_000, cpu_cores=8,
+            soc_model="Snapdragon 8 Gen 3",
+            has_gpu_compute=True,
+        )
+        assert rec.fit_level == FitLevel.optimal
+        assert rec.recommended_mode == "server"
+
+    def test_inference_mode_when_ram_below_server_threshold(self):
+        """12 GB threshold: 8 GB device stays in inference even on flagship SoC."""
+        rec = score_model(
+            model_id="qwen2.5_3b_q4_k_m", params_str="3b", quant_str="q4_k_m",
+            size_bytes=2_000_000_000, ram_total_mb=8192,  # 8 GB
+            storage_free_mb=50_000, cpu_cores=8,
+            soc_model="Snapdragon 8 Gen 3",
+            has_gpu_compute=True,
+        )
+        # May be optimal or comfortable depending on model size; either way NOT server
+        assert rec.recommended_mode != "server"
+
+    def test_inference_mode_when_soc_below_server_threshold(self):
+        """Mid-range SoC stays in inference even with plenty of RAM."""
+        rec = score_model(
+            model_id="qwen2.5_0.5b_q4_k_m", params_str="0.5b", quant_str="q4_k_m",
+            size_bytes=400_000_000, ram_total_mb=16384,  # 16 GB
+            storage_free_mb=50_000, cpu_cores=8,
+            soc_model="Exynos 9820",  # base_tps=8.0, below 18.0 threshold
+        )
+        assert rec.fit_level == FitLevel.optimal
+        assert rec.recommended_mode == "inference"
+
     def test_to_dict(self):
         rec = score_model(
             model_id="test", params_str="3b", quant_str="q4_k_m",

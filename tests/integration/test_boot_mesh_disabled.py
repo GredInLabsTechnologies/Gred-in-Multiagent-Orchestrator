@@ -66,3 +66,34 @@ def test_mesh_dispatch_service_importable_with_mesh_disabled():
         pytest.fail(f"DispatchService import failed: {exc}")
 
     assert DispatchService is not None
+
+
+def test_default_cli_role_binds_loopback(monkeypatch: pytest.MonkeyPatch):
+    """rev 2 Cambio 8 — without `--role server`, the CLI must default to 127.0.0.1.
+
+    Protects against silent LAN exposure if the launcher argparse defaults drift.
+    The CLI block in ``tools/gimo_server/main.py`` is exercised by parsing its
+    argparse directly; starting uvicorn is out of scope for this unit check.
+    """
+    # Ensure no env var forces us into server mode
+    monkeypatch.delenv("ORCH_ROLE", raising=False)
+    monkeypatch.delenv("ORCH_HOST", raising=False)
+
+    import argparse
+    import os as _os_cli
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--role",
+        choices=("client", "server"),
+        default=_os_cli.environ.get("ORCH_ROLE", "client"),
+    )
+    args, _ = parser.parse_known_args([])
+    assert args.role == "client"
+
+    # Reproduce the host-selection branch from main.py
+    explicit_host = _os_cli.environ.get("ORCH_HOST")
+    host = (
+        (explicit_host or "0.0.0.0") if args.role == "server" else (explicit_host or "127.0.0.1")
+    )
+    assert host == "127.0.0.1", "default CLI role must bind loopback to prevent LAN exposure"

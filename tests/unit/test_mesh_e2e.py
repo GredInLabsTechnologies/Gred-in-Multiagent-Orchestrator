@@ -681,8 +681,13 @@ class TestFullLifecycle:
         assert profile.health_score == 97.5
 
         # 9: Audit trail
+        # BUGS_LATENTES §H9 fix (2026-04-17): DispatchService ahora audita cada
+        # decision automáticamente (action="routed"), además del manual
+        # "dispatch/assign" que emite este test. Total 5 entries.
         all_entries = audit.query(device_id="pixel-7")
-        assert len(all_entries) == 4  # claim, approve, dispatch, thermal warning
+        assert len(all_entries) == 5  # claim, approve, dispatch/routed (H9), dispatch/assign, thermal warning
+        dispatch_entries = [e for e in all_entries if e["category"] == "dispatch"]
+        assert {e["action"] for e in dispatch_entries} == {"routed", "assign"}
 
         # 10: Quantization
         assert dispatch.suggest_quantization(device) == "Q8_0"

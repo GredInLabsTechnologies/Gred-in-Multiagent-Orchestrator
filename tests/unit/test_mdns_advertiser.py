@@ -135,6 +135,40 @@ class TestMdnsAdvertiser:
             assert props["mesh"] == "true"
             assert props["version"] == "1.0.0"
 
+    def test_txt_record_includes_runtime_version(self):
+        """Plan 2026-04-16 Change 5: runtime_version must be published."""
+        from tools.gimo_server.services.mesh.mdns_advertiser import MdnsAdvertiser
+        mock_zc_cls = MagicMock()
+        mock_si_cls = MagicMock()
+
+        with patch.dict("sys.modules", {"zeroconf": MagicMock(
+            Zeroconf=mock_zc_cls, ServiceInfo=mock_si_cls
+        )}):
+            adv = MdnsAdvertiser(
+                port=9325, token="t", runtime_version="0.1.0-test",
+            )
+            adv.start()
+            props = mock_si_cls.call_args.kwargs.get("properties") or {}
+            assert props.get("runtime_version") == "0.1.0-test"
+
+    def test_hmac_covers_runtime_version(self):
+        """Signing the same hostname with different runtime_versions produces different HMACs."""
+        from tools.gimo_server.services.mesh.mdns_advertiser import MdnsAdvertiser
+
+        adv_a = MdnsAdvertiser(port=9325, token="tok", runtime_version="0.1.0")
+        adv_b = MdnsAdvertiser(port=9325, token="tok", runtime_version="0.2.0")
+        props_a = adv_a._build_properties("hostA")
+        props_b = adv_b._build_properties("hostA")
+        assert props_a["hmac"] != props_b["hmac"]
+
+    def test_update_signals_changes_runtime_version(self):
+        """update_signals(runtime_version=...) rewrites internal state."""
+        from tools.gimo_server.services.mesh.mdns_advertiser import MdnsAdvertiser
+        adv = MdnsAdvertiser(port=9325, token="t", runtime_version="0.1.0")
+        # Not started — still updates internal state
+        adv.update_signals(runtime_version="0.2.0")
+        assert adv._runtime_version == "0.2.0"
+
 
 # ═══════════════════════════════════════════════════════════════
 # QR Payload in onboard/code endpoint
