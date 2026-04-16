@@ -3,8 +3,10 @@ package com.gredinlabs.gimomesh.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -84,23 +86,39 @@ class MeshAgentService : Service() {
 
         settingsObserverJob?.cancel()
         settingsObserverJob = scope.launch {
-            val shellReady = shell.init()
-            if (shellReady) {
-                terminalBuffer.append(
-                    LogSource.SYS,
-                    "embedded shell ready - ${shell.getBinaryPath("busybox").parent}",
-                )
-                if (shell.getEmbeddedCoreRuntime() == null) {
-                    terminalBuffer.append(
-                        LogSource.SYS,
-                        "embedded Core runtime contract absent - serve mode will stay unavailable",
-                        LogLevel.WARN,
-                    )
-                }
+            // BUGS_LATENTES §H1 fix: ShellEnvironment.init() now boots the three
+            // sub-resources (shell / inference / core runtime) independently and
+            // surfaces a flag per sub-resource. Log each one honestly instead of
+            // the old coupled "shell unavailable" catch-all.
+            shell.init()
+            val binParent = shell.getBinaryPath("busybox").parent
+            if (shell.isShellReady) {
+                terminalBuffer.append(LogSource.SYS, "shell sub-resource ready - $binParent")
             } else {
                 terminalBuffer.append(
                     LogSource.SYS,
-                    "embedded shell unavailable - placeholders or extraction failure",
+                    "shell sub-resource unavailable (busybox placeholder empty or extraction failure) " +
+                        "- utility tasks disabled",
+                    LogLevel.WARN,
+                )
+            }
+            if (shell.isInferenceReady) {
+                terminalBuffer.append(LogSource.SYS, "inference sub-resource ready (llama-server)")
+            } else {
+                terminalBuffer.append(
+                    LogSource.SYS,
+                    "inference sub-resource unavailable (llama-server placeholder empty or not executable) " +
+                        "- local inference disabled",
+                    LogLevel.WARN,
+                )
+            }
+            if (shell.isCoreRuntimeReady) {
+                terminalBuffer.append(LogSource.SYS, "core runtime sub-resource ready (embedded GIMO Core)")
+            } else {
+                terminalBuffer.append(
+                    LogSource.SYS,
+                    "core runtime sub-resource unavailable (runtime/gimo-core-runtime.json missing or invalid) " +
+                        "- serve mode disabled",
                     LogLevel.WARN,
                 )
             }
@@ -124,7 +142,12 @@ class MeshAgentService : Service() {
                     val snapshot = metricsCollector.collect()
                     val statusText = "CPU ${snapshot.cpuPercent.toInt()}% | " +
                         "${snapshot.cpuTempC.toInt()}C | BAT ${snapshot.batteryPercent.toInt()}%"
-                    updateNotification("Mesh active - $statusText")
+                    // rev 2 Cambio 5 — include LAN URL in the notification when
+                    // the embedded Core is serving, so the operator can tap the
+                    // notification to open the web UI on this device.
+                    val lanUrl = hostRuntimeReporter.snapshot.value.lanUrl
+                    val serveLanUrl = if (isServeMode(settings)) lanUrl else ""
+                    updateNotification("Mesh active - $statusText", serveLanUrl)
 
                     val inferenceRunning = inferenceRunner.status.value == InferenceRunner.Status.RUNNING
                     val inferenceEndpoint = if (inferenceRunning) {
@@ -354,20 +377,43 @@ class MeshAgentService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private fun buildNotification(text: String): Notification {
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun buildNotification(text: String, lanUrl: String = ""): Notification {
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("GIMO Mesh")
+            .setContentTitle(
+                if (lanUrl.isNotBlank()) "GIMO Mesh — serving on LAN" else "GIMO Mesh",
+            )
             .setContentText(text)
             .setOngoing(true)
             .setSilent(true)
-            .build()
+
+        // rev 2 Cambio 5 — when the host is serving on the LAN, surface a deep
+        // link to the web UI so an operator tapping the notification lands
+        // directly on the dashboard of the just-started Core. Falls back to
+        // plain text when there is no reachable LAN URL.
+        if (lanUrl.isNotBlank()) {
+            val viewIntent = Intent(Intent.ACTION_VIEW, Uri.parse(lanUrl)).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pendingIntent = PendingIntent.getActivity(this, 0, viewIntent, flags)
+            builder.setContentIntent(pendingIntent)
+            builder.setStyle(
+                NotificationCompat.BigTextStyle().bigText("$text\nOpen $lanUrl"),
+            )
+        }
+
+        return builder.build()
     }
 
-    private fun updateNotification(text: String) {
+    private fun updateNotification(text: String, lanUrl: String = "") {
         getSystemService(NotificationManager::class.java).notify(
             NOTIFICATION_ID,
-            buildNotification(text),
+            buildNotification(text, lanUrl),
         )
     }
 

@@ -51,7 +51,10 @@ class InferenceRunner(
         stop()
         _status.value = Status.STARTING
 
-        if (!shell.isReady) {
+        // BUGS_LATENTES §H1: gate on the inference-specific sub-resource,
+        // not on the broader isReady flag — server-only devices may have
+        // Core runtime but no llama-server.
+        if (!shell.isInferenceReady) {
             _status.value = Status.ERROR
             return@withContext false
         }

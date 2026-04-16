@@ -14,6 +14,19 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Manages the embedded shell environment extracted from APK assets.
+ *
+ * Three independent sub-resources (BUGS_LATENTES §H1 fix 2026-04-17):
+ *   - [isShellReady]: busybox static + symlinks (sh, wget, curl, ls, …). Needed
+ *     by utility tasks that shell-out to coreutils.
+ *   - [isInferenceReady]: llama-server binary. Needed by InferenceRunner.
+ *   - [isCoreRuntimeReady]: embedded GIMO Core (Python bundle). Needed by
+ *     EmbeddedCoreRunner / server mode.
+ *
+ * The three are decoupled: a device can have Core runtime available but
+ * no inference binary (server mode without local inference), or vice-versa.
+ * Each sub-resource extracts independently and its own flag gates its runner.
+ * [isReady] is kept for backward-compat and is `true` if the shell sub-resource
+ * is usable (the most permissive historical meaning).
  */
 class ShellEnvironment(private val context: Context) {
 
@@ -25,44 +38,94 @@ class ShellEnvironment(private val context: Context) {
 
     private var embeddedCoreRuntime: EmbeddedCoreRuntime? = null
 
-    var isReady: Boolean = false
+    /**
+     * Busybox + coreutils symlinks were extracted and the shell binary is
+     * executable. This alone is enough for utility tasks that shell-out.
+     */
+    var isShellReady: Boolean = false
         private set
 
+    /** llama-server binary was extracted and is executable. */
+    var isInferenceReady: Boolean = false
+        private set
+
+    /** Embedded GIMO Core (Python bundle) manifest + layout is valid. */
+    var isCoreRuntimeReady: Boolean = false
+        private set
+
+    /**
+     * Backward-compatible flag. `true` when at least the shell sub-resource
+     * is operational. Prefer [isShellReady] / [isInferenceReady] /
+     * [isCoreRuntimeReady] in new code so callers gate on what they actually
+     * need.
+     */
+    val isReady: Boolean
+        get() = isShellReady
+
     suspend fun init(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            binDir.mkdirs()
-            modelsDir.mkdirs()
-            runtimeDir.mkdirs()
-            tmpDir.mkdirs()
+        binDir.mkdirs()
+        modelsDir.mkdirs()
+        runtimeDir.mkdirs()
+        tmpDir.mkdirs()
 
-            val busybox = File(binDir, "busybox")
-            val llamaServer = File(binDir, "llama-server")
-
-            val busyboxReady = extractAsset("bin/busybox", busybox)
-            val llamaReady = extractAsset("bin/llama-server", llamaServer)
-            if (!busyboxReady || !llamaReady) {
-                isReady = false
-                return@withContext false
-            }
-
-            val commands = listOf(
-                "sh", "wget", "curl", "ls", "cat", "grep", "sed", "awk",
-                "tar", "gzip", "gunzip", "cp", "mv", "rm", "mkdir",
-                "chmod", "kill", "ps", "top", "df", "du", "head", "tail",
-                "wc", "sort", "uniq", "find", "xargs", "tee", "nohup",
-            )
-            for (command in commands) {
-                ensureBusyboxLink(command, busybox)
-            }
-
-            embeddedCoreRuntime = prepareEmbeddedCoreRuntime()
-            isReady = File(binDir, "sh").exists() && llamaServer.canExecute()
-            isReady
+        // 1. Shell sub-resource (busybox + symlinks) — independent.
+        isShellReady = try {
+            initShell()
         } catch (_: Exception) {
-            embeddedCoreRuntime = null
-            isReady = false
             false
         }
+
+        // 2. Inference sub-resource (llama-server) — independent.
+        isInferenceReady = try {
+            initInference()
+        } catch (_: Exception) {
+            false
+        }
+
+        // 3. Core runtime sub-resource (embedded Python) — independent.
+        isCoreRuntimeReady = try {
+            embeddedCoreRuntime = prepareEmbeddedCoreRuntime()
+            embeddedCoreRuntime != null
+        } catch (_: Exception) {
+            embeddedCoreRuntime = null
+            false
+        }
+
+        // Boot succeeds if any sub-resource is operational; caller inspects
+        // the individual flags to decide what runners to launch.
+        isShellReady || isInferenceReady || isCoreRuntimeReady
+    }
+
+    /**
+     * Attempts to extract busybox and wire its coreutils symlinks. Returns
+     * `true` only if the shell binary `sh` is present and executable.
+     */
+    private fun initShell(): Boolean {
+        val busybox = File(binDir, "busybox")
+        val ok = extractAsset("bin/busybox", busybox)
+        if (!ok) return false
+
+        val commands = listOf(
+            "sh", "wget", "curl", "ls", "cat", "grep", "sed", "awk",
+            "tar", "gzip", "gunzip", "cp", "mv", "rm", "mkdir",
+            "chmod", "kill", "ps", "top", "df", "du", "head", "tail",
+            "wc", "sort", "uniq", "find", "xargs", "tee", "nohup",
+        )
+        for (command in commands) {
+            ensureBusyboxLink(command, busybox)
+        }
+        return File(binDir, "sh").exists()
+    }
+
+    /**
+     * Attempts to extract llama-server. Returns `true` if the binary is
+     * present and executable (does NOT validate that a model is loaded —
+     * that's InferenceRunner's responsibility).
+     */
+    private fun initInference(): Boolean {
+        val llamaServer = File(binDir, "llama-server")
+        val ok = extractAsset("bin/llama-server", llamaServer)
+        return ok && llamaServer.canExecute()
     }
 
     suspend fun exec(

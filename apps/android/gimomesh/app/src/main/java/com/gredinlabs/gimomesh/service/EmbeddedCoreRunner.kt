@@ -193,11 +193,30 @@ class EmbeddedCoreRunner(
             put("GIMO_MESH_HOST_ENABLED", "true")
             put("GIMO_MESH_HOST_DEVICE_ID", resolveDeviceId(settings))
             put("GIMO_MESH_HOST_DEVICE_NAME", resolveDeviceName(settings))
-            put("GIMO_MESH_HOST_DEVICE_MODE", settings.deviceMode.lowercase())
+            // rev 2 Cambio 4 — derive device_mode from the hybrid capability pills
+            // so toggling "Serve" in Settings flips the embedded Core into server
+            // mode (binds 0.0.0.0, auto-enables mDNS) without requiring the user
+            // to separately set `deviceMode`.
+            put("GIMO_MESH_HOST_DEVICE_MODE", resolveEffectiveDeviceMode(settings))
             put("GIMO_MESH_HOST_DEVICE_CLASS", "smartphone")
             put("GIMO_MESH_HOST_INFERENCE_ENDPOINT", "")
         }
     )
+
+    /** rev 2 Cambio 4 — single source of truth for device_mode derived from
+     *  the UI pills. `Serve` always wins (a host that serves must bind LAN);
+     *  otherwise we degrade to hybrid / utility / inference in that order. */
+    private fun resolveEffectiveDeviceMode(settings: SettingsStore.Settings): String {
+        if (settings.hybridServe) return "server"
+        val inf = settings.hybridInference
+        val util = settings.hybridUtility
+        return when {
+            inf && util -> "hybrid"
+            util -> "utility"
+            inf -> "inference"
+            else -> settings.deviceMode.lowercase().ifBlank { "inference" }
+        }
+    }
 
     private fun resolveDeviceId(settings: SettingsStore.Settings): String =
         settings.deviceId.ifBlank { "android-${UUID.randomUUID().toString().take(8)}" }
