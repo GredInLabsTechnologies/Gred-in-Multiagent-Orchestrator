@@ -31,7 +31,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
+import com.gredinlabs.gimomesh.R
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -659,12 +661,14 @@ private fun fitColor(level: String): Color = when (level) {
     else -> FitComfortable
 }
 
-private fun fitLabel(level: String): String = when (level) {
-    "optimal" -> "OPTIMAL"
-    "comfortable" -> "COMPATIBLE"
-    "tight" -> "TIGHT"
-    "overload" -> "OVERLOAD"
-    else -> level.uppercase()
+/** Resource ID del label localizado para el nivel de encaje del modelo.
+ *  ``null`` si el level no está en el catálogo (caller fallback a ``level.uppercase()``). */
+private fun fitLabelResId(level: String): Int? = when (level) {
+    "optimal" -> R.string.rec_fit_optimal
+    "comfortable" -> R.string.rec_fit_comfortable
+    "tight" -> R.string.rec_fit_tight
+    "overload" -> R.string.rec_fit_overload
+    else -> null
 }
 
 @Composable
@@ -690,7 +694,7 @@ private fun ModelCard(model: ModelInfo, onClick: () -> Unit) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(model.name, fontFamily = GimoDisplay, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = GimoText.primary, modifier = Modifier.weight(1f))
             if (isRecommended) {
-                Pill("RECOMENDADO", accent)
+                Pill(stringResource(R.string.rec_badge_recommended), accent)
             }
         }
 
@@ -701,7 +705,9 @@ private fun ModelCard(model: ModelInfo, onClick: () -> Unit) {
             Pill(model.params.ifBlank { "?" }, SetupAccent)
             Pill(model.quantization.ifBlank { "gguf" }, GimoAccents.green)
             if (rec != null) {
-                Pill(fitLabel(rec.fitLevel), accent)
+                val fitResId = fitLabelResId(rec.fitLevel)
+                val fitText = if (fitResId != null) stringResource(fitResId) else rec.fitLevel.uppercase()
+                Pill(fitText, accent)
             }
         }
 
@@ -709,7 +715,7 @@ private fun ModelCard(model: ModelInfo, onClick: () -> Unit) {
 
         // Resource bar: RAM usage vs device RAM
         if (rec != null && rec.deviceRamGb > 0) {
-            Text("Device load", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+            Text(stringResource(R.string.rec_device_load), style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
             Spacer(modifier = Modifier.height(6.dp))
             // Bar
             val ratio = (rec.estimatedRamGb / rec.deviceRamGb).coerceIn(0f, 1f)
@@ -718,7 +724,11 @@ private fun ModelCard(model: ModelInfo, onClick: () -> Unit) {
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                "${String.format("%.1f", rec.estimatedRamGb)} / ${String.format("%.0f", rec.deviceRamGb)} GB RAM",
+                stringResource(
+                    R.string.rec_ram_format,
+                    String.format("%.1f", rec.estimatedRamGb),
+                    String.format("%.0f", rec.deviceRamGb),
+                ),
                 style = GimoTypography.labelLarge.copy(color = accent),
             )
 
@@ -728,15 +738,15 @@ private fun ModelCard(model: ModelInfo, onClick: () -> Unit) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
                     Text("~${rec.estimatedTokensPerSec.toInt()} tok/s", style = GimoTypography.bodyMedium.copy(color = GimoText.primary, fontWeight = FontWeight.Bold))
-                    Text("velocidad", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+                    Text(stringResource(R.string.rec_stat_speed), style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("~${rec.estimatedBatteryDrainPctHr.toInt()}%/h", style = GimoTypography.bodyMedium.copy(color = if (rec.estimatedBatteryDrainPctHr > 20) FitOverload else GimoText.primary, fontWeight = FontWeight.Bold))
-                    Text("bateria", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+                    Text(stringResource(R.string.rec_stat_battery), style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(rec.recommendedMode.uppercase(), style = GimoTypography.bodyMedium.copy(color = accent, fontWeight = FontWeight.Bold))
-                    Text("modo", style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
+                    Text(stringResource(R.string.rec_stat_mode), style = GimoTypography.labelLarge.copy(color = GimoText.tertiary))
                 }
             }
 
@@ -762,7 +772,7 @@ private fun ModelCard(model: ModelInfo, onClick: () -> Unit) {
             if (isOverload) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(FitOverload.copy(alpha = 0.1f)).border(1.dp, FitOverload.copy(alpha = 0.3f), RoundedCornerShape(10.dp)).padding(10.dp)) {
-                    Text("Run at your own risk", style = GimoTypography.labelLarge.copy(color = FitOverload, fontWeight = FontWeight.Bold), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Text(stringResource(R.string.rec_run_at_your_own_risk), style = GimoTypography.labelLarge.copy(color = FitOverload, fontWeight = FontWeight.Bold), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
             }
         } else {
