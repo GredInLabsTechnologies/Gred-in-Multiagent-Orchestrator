@@ -133,6 +133,14 @@ if [ ! -f "$MARKER" ] || [ "requirements.txt" -nt "$MARKER" ]; then
     # via pkg (system site-packages) y satisfacen los requirements.
     # requirements.txt incluye ./vendor/rove/rove_toolkit-1.0.0-py3-none-any.whl
     # — pip lo resuelve relativo a $REPO_DIR donde ya estamos via `cd`.
+    #
+    # Env vars requeridos cuando algún sdist cae a compile (p.ej. pydantic-core
+    # via maturin — no hay wheel pre-built para la combinación Python+Android
+    # de Termux). Los valores vienen del patch registry rove-patches
+    # (vendor/rove-patches/patches/maturin/android-api-level.env). Sin ellos,
+    # maturin abortaría con metadata-generation-failed.
+    export ANDROID_API_LEVEL=24
+    export ANDROID_PLATFORM=android-24
     pip install --prefer-binary -r requirements.txt || fail "pip install falló"
     touch "$MARKER"
 else
