@@ -235,7 +235,7 @@ class ShellEnvironment(private val context: Context) {
         }
 
         val pythonBinary = File(runtimeDir, manifest.pythonRelPath)
-        val repoRoot = File(runtimeDir, manifest.repoRootRelPath)
+        val repoRoot = File(runtimeDir, manifest.projectRootRelPath)
         if (!pythonBinary.exists() || !repoRoot.exists()) {
             return null
         }
@@ -283,11 +283,28 @@ class ShellEnvironment(private val context: Context) {
     }
 }
 
+/**
+ * Espejo Kotlin del subset del [rove.manifest.WheelhouseManifest] (rove 1.0.0)
+ * que el runtime Android necesita a extract-time.
+ *
+ * NOTA — el campo `repo_root_rel_path` fue renombrado a `project_root_rel_path`
+ * cuando GIMO migró al schema canónico de rove (2026-04-18). Tolerar ambos
+ * nombres sería una regresión de seguridad (dos fuentes de verdad sobre qué
+ * path ejecutar), así que sólo se acepta el nuevo nombre — el packaging step
+ * (`scripts/package_core_runtime.py`) emite sólo este nombre tras la migración.
+ *
+ * Campos ignorados del manifest canónico (project_name, tarball_sha256,
+ * signature, etc.) son redundantes en Android porque la confianza se deriva
+ * del signing del APK, no de verificación Ed25519 in-device. Si en el futuro
+ * se añade verificación peer-to-peer de bundles descargados, el signing
+ * payload canónico es 4-tupla `<sha>|<target>|<runtime_version>|<project_name>`
+ * (ver `rove.manifest.WheelhouseManifest.signing_payload()`).
+ */
 @Serializable
 data class EmbeddedCoreRuntimeManifest(
     val files: List<String> = emptyList(),
     @SerialName("python_rel_path") val pythonRelPath: String,
-    @SerialName("repo_root_rel_path") val repoRootRelPath: String,
+    @SerialName("project_root_rel_path") val projectRootRelPath: String,
     @SerialName("python_path_entries") val pythonPathEntries: List<String> = emptyList(),
     @SerialName("extra_env") val extraEnv: Map<String, String> = emptyMap(),
 )
