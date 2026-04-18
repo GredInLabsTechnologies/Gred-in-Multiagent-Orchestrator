@@ -53,7 +53,7 @@ logger = logging.getLogger("orchestrator.runtime_signature")
 # side la carga a través de ``assets/runtime/trusted-pubkey.pem`` (copia del
 # mismo PEM, inyectada por el gradle task ``:app:packageCoreRuntime``).
 EMBEDDED_RUNTIME_PUBLIC_KEY: str = """-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEARb761DZGp2pTUSFXe9vSyY/k4JmQQhoxvVxy8z6vY4w=
+MCowBQYDK2VwAyEAOMPyX9o1ks9PgF3EBwX0eirWwro0PbUt95tuqr0ZcLQ=
 -----END PUBLIC KEY-----
 """
 
