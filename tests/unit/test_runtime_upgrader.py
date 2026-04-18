@@ -79,6 +79,7 @@ def _build_bundle(version: str, priv_pem: str, *, staging_marker: str = "hello")
     sha = hashlib.sha256(tarball_bytes).hexdigest()
 
     manifest = RuntimeManifest(
+        project_name="gimo-core",
         runtime_version=version,
         target=RuntimeTarget.linux_x86_64,
         compression=RuntimeCompression.xz,
@@ -87,7 +88,7 @@ def _build_bundle(version: str, priv_pem: str, *, staging_marker: str = "hello")
         compressed_size_bytes=len(tarball_bytes),
         uncompressed_size_bytes=len(b"#!/bin/sh\n") + len(staging_marker.encode()),
         python_rel_path="python/bin/python",
-        repo_root_rel_path="repo",
+        project_root_rel_path="repo",
         python_path_entries=["repo"],
         files=["python/bin/python", "repo/marker.txt"],
         extra_env={},

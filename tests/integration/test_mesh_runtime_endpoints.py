@@ -66,6 +66,7 @@ def _make_bundle(assets_dir: Path) -> tuple[RuntimeManifest, str]:
     ).decode("utf-8")
 
     manifest = RuntimeManifest(
+        project_name="gimo-core",
         runtime_version="0.1.0-endpoint-test",
         target=RuntimeTarget.linux_x86_64,
         compression=RuntimeCompression.xz,
@@ -74,7 +75,7 @@ def _make_bundle(assets_dir: Path) -> tuple[RuntimeManifest, str]:
         compressed_size_bytes=compressed,
         uncompressed_size_bytes=uncompressed,
         python_rel_path="python/bin/python",
-        repo_root_rel_path="repo",
+        project_root_rel_path="repo",
         python_path_entries=["repo"],
         files=["python/bin/python", "repo/marker.txt"],
         extra_env={},

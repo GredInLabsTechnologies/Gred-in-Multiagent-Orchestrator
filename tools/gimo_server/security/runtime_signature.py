@@ -1,36 +1,46 @@
 """
-GIMO Core Runtime Signature — Ed25519
-======================================
-Firma y verifica bundles del Core usando la misma infraestructura Ed25519
-que ``license_guard.py``. La clave privada vive en CI secrets
-(``ORCH_RUNTIME_SIGNING_KEY``); la clave pública viaja embebida en el
-producto (bundled) y en env var ``ORCH_RUNTIME_PUBLIC_KEY`` para override.
+GIMO Runtime Signature — Thin adapter sobre ``rove.signing.ed25519``
+====================================================================
+La implementación Ed25519 vive ahora en :mod:`rove.signing.ed25519`
+(``rove-toolkit`` v1.0.0 vendorizado en ``vendor/rove/``). Este módulo
+preserva la API pública histórica de GIMO para que el resto del codebase
+y los tests no tengan que migrar en bloque.
 
-La firma cubre el payload canónico de :meth:`RuntimeManifest.signing_payload`
-— por contrato eso es ``<tarball_sha256>|<target>|<runtime_version>`` UTF-8.
-Esto evita ambigüedades de serialización JSON entre productores y consumers
-en distintos lenguajes.
+API preservada
+--------------
+- :data:`EMBEDDED_RUNTIME_PUBLIC_KEY` — clave pública Ed25519 bundled.
+  Rotación via ``scripts/generate_runtime_keys.py``.
+- :func:`get_runtime_public_key_pem` — env var ``ORCH_RUNTIME_PUBLIC_KEY``
+  tiene prioridad, fallback al valor embebido. Distinto del mecanismo de
+  rove (``ROVE_TRUSTED_PUBKEYS`` + ``~/.config/rove/trusted_keys/``).
+  GIMO conserva su env var por continuidad operacional.
+- :func:`sign_manifest(manifest, private_key_pem) -> str` — devuelve hex
+  string de 128 chars. Rove devuelve un ``WheelhouseManifest`` nuevo;
+  extraemos ``.signature`` para preservar el contrato histórico.
+- :func:`verify_manifest(manifest, public_key_pem=None) -> bool` — nunca
+  raisea. Rove's ``verify_manifest`` raisea :class:`RuntimeSignatureError`
+  cuando no hay ninguna trusted key configurada; nosotros lo absorbemos
+  y devolvemos ``False`` para no romper callers que tratan el retorno
+  como booleano plano.
+- :func:`sha256_file(path, chunk_size=1MiB) -> str` — delega en rove
+  preservando el chunk size histórico (rove default es 64 KiB).
 
-Rev 0 — 2026-04-16 (plan E2E_ENGINEERING_PLAN_20260416_RUNTIME_PACKAGING)
+Migración a rove 1.0.0 — 2026-04-18 (ver ``vendor/rove/README.md``).
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
+from pathlib import Path
 from typing import Optional
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-    Ed25519PrivateKey,
-    Ed25519PublicKey,
+from rove.manifest import WheelhouseManifest
+from rove.signing.ed25519 import (
+    RuntimeSignatureError,
+    sha256_file as _rove_sha256_file,
+    sign_manifest as _rove_sign_manifest,
+    verify_manifest as _rove_verify_manifest,
 )
-from cryptography.hazmat.primitives.serialization import (
-    load_pem_private_key,
-    load_pem_public_key,
-)
-
-from tools.gimo_server.models.runtime import RuntimeManifest
 
 logger = logging.getLogger("orchestrator.runtime_signature")
 
@@ -42,15 +52,10 @@ logger = logging.getLogger("orchestrator.runtime_signature")
 # clave hay que regenerar y publicar un release nuevo del Core — el Android
 # side la carga a través de ``assets/runtime/trusted-pubkey.pem`` (copia del
 # mismo PEM, inyectada por el gradle task ``:app:packageCoreRuntime``).
-# Override via env var ``ORCH_RUNTIME_PUBLIC_KEY`` sigue siendo prioritario.
 EMBEDDED_RUNTIME_PUBLIC_KEY: str = """-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEARb761DZGp2pTUSFXe9vSyY/k4JmQQhoxvVxy8z6vY4w=
 -----END PUBLIC KEY-----
 """
-
-
-class RuntimeSignatureError(Exception):
-    """Error genérico de firma/verificación del runtime."""
 
 
 def get_runtime_public_key_pem() -> str:
@@ -58,7 +63,7 @@ def get_runtime_public_key_pem() -> str:
 
     Prioridad:
         1. Env var ``ORCH_RUNTIME_PUBLIC_KEY`` (tolera escape ``\\n``).
-        2. Valor embebido ``EMBEDDED_RUNTIME_PUBLIC_KEY``.
+        2. Valor embebido :data:`EMBEDDED_RUNTIME_PUBLIC_KEY`.
     """
     env_key = os.environ.get("ORCH_RUNTIME_PUBLIC_KEY", "").strip()
     if env_key:
@@ -66,56 +71,37 @@ def get_runtime_public_key_pem() -> str:
     return EMBEDDED_RUNTIME_PUBLIC_KEY
 
 
-def _load_private_key(pem: str) -> Ed25519PrivateKey:
-    try:
-        key = load_pem_private_key(pem.encode("utf-8"), password=None)
-    except Exception as exc:  # formato PEM inválido, padding, etc.
-        raise RuntimeSignatureError(f"invalid Ed25519 private key PEM: {exc}") from exc
-    if not isinstance(key, Ed25519PrivateKey):
-        raise RuntimeSignatureError("PEM does not encode an Ed25519 private key")
-    return key
+def sign_manifest(manifest: WheelhouseManifest, private_key_pem: str) -> str:
+    """Firma el payload canónico del manifest y devuelve hex lowercase.
 
-
-def _load_public_key(pem: str) -> Ed25519PublicKey:
-    try:
-        key = load_pem_public_key(pem.encode("utf-8"))
-    except Exception as exc:
-        raise RuntimeSignatureError(f"invalid Ed25519 public key PEM: {exc}") from exc
-    if not isinstance(key, Ed25519PublicKey):
-        raise RuntimeSignatureError("PEM does not encode an Ed25519 public key")
-    return key
-
-
-def sign_manifest(manifest: RuntimeManifest, private_key_pem: str) -> str:
-    """Firma el payload canónico del manifest con una clave privada Ed25519.
-
-    Args:
-        manifest: manifest validado (sin firma o con firma a sobreescribir).
-        private_key_pem: clave privada Ed25519 en PEM PKCS8.
-
-    Returns:
-        firma Ed25519 como string hex lowercase de 128 chars (64 bytes).
+    Wraps :func:`rove.signing.ed25519.sign_manifest` (que devuelve un
+    ``WheelhouseManifest`` con la firma ya inyectada) para preservar la
+    API histórica que devuelve sólo el hex de la firma — el caller GIMO
+    típico construye el manifest definitivo después con ``model_copy``.
 
     Raises:
         RuntimeSignatureError: si la clave PEM es inválida o no es Ed25519.
     """
-    priv = _load_private_key(private_key_pem)
-    signature_bytes = priv.sign(manifest.signing_payload())
-    return signature_bytes.hex()
+    signed = _rove_sign_manifest(manifest, private_key_pem)
+    return signed.signature
 
 
-def verify_manifest(manifest: RuntimeManifest, public_key_pem: Optional[str] = None) -> bool:
+def verify_manifest(
+    manifest: WheelhouseManifest,
+    public_key_pem: Optional[str] = None,
+) -> bool:
     """Verifica la firma del manifest contra una clave pública Ed25519.
 
-    Args:
-        manifest: manifest a verificar; usa su propio ``signature`` field.
-        public_key_pem: PEM de la clave pública. Si es ``None``, usa
-            :func:`get_runtime_public_key_pem`.
+    Contrato preservado: nunca re-raisea — un fallo de verificación (firma
+    inválida, PEM corrupto, clave no configurada) es siempre ``False``.
 
-    Returns:
-        ``True`` si la firma es válida, ``False`` en cualquier otro caso.
-        Nunca re-raisea — un fallo de verificación es siempre ``False``,
-        nunca una excepción (el caller suele tratarlo como booleano).
+    Rove's :func:`rove.signing.ed25519.verify_manifest` en cambio *raisea*
+    :class:`RuntimeSignatureError` cuando no hay ninguna trusted key en su
+    set (env var ``ROVE_TRUSTED_PUBKEYS`` + ``~/.config/rove/trusted_keys/``
+    + ``additional_keys``). Como GIMO siempre proveé al menos la clave
+    embebida via ``get_runtime_public_key_pem``, la rama "no hay clave"
+    sólo se dispara si el usuario explícitamente pasa un PEM vacío — en
+    cuyo caso emitimos warning y devolvemos ``False``.
     """
     pem = public_key_pem if public_key_pem is not None else get_runtime_public_key_pem()
     if not pem.strip():
@@ -123,21 +109,9 @@ def verify_manifest(manifest: RuntimeManifest, public_key_pem: Optional[str] = N
         return False
 
     try:
-        pub = _load_public_key(pem)
+        return _rove_verify_manifest(manifest, additional_keys=(pem,))
     except RuntimeSignatureError as exc:
-        logger.warning("public key load failed: %s", exc)
-        return False
-
-    try:
-        signature_bytes = bytes.fromhex(manifest.signature)
-    except ValueError:
-        logger.warning("manifest signature is not valid hex")
-        return False
-
-    try:
-        pub.verify(signature_bytes, manifest.signing_payload())
-        return True
-    except InvalidSignature:
+        logger.warning("runtime verification rejected manifest: %s", exc)
         return False
     except Exception as exc:  # defensivo — cualquier error de crypto = rechazo
         logger.warning("runtime verification raised unexpected error: %s", exc)
@@ -145,24 +119,21 @@ def verify_manifest(manifest: RuntimeManifest, public_key_pem: Optional[str] = N
 
 
 def sha256_file(path: str, chunk_size: int = 1024 * 1024) -> str:
-    """SHA-256 hex lowercase de un archivo, streaming en chunks de 1 MiB.
+    """SHA-256 hex lowercase de un archivo, streaming.
 
-    Usado por el productor ``package_core_runtime.py`` para computar
-    ``tarball_sha256`` y por consumers que validan integridad de un payload
-    descargado de un peer.
-
-    Args:
-        path: ruta absoluta al archivo.
-        chunk_size: tamaño del buffer de lectura (default 1 MiB).
-
-    Returns:
-        hash SHA-256 como hex string lowercase de 64 chars.
+    Delega en :func:`rove.signing.ed25519.sha256_file` pero preserva el
+    chunk size histórico de GIMO (1 MiB) — rove por defecto usa 64 KiB,
+    aceptable para archivos pequeños pero subóptimo para tarballs de
+    50 MB+ donde 1 MiB reduce syscalls ~16×.
     """
-    digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        while True:
-            chunk = fh.read(chunk_size)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
+    return _rove_sha256_file(Path(path), chunk_size=chunk_size)
+
+
+__all__ = [
+    "EMBEDDED_RUNTIME_PUBLIC_KEY",
+    "RuntimeSignatureError",
+    "get_runtime_public_key_pem",
+    "sha256_file",
+    "sign_manifest",
+    "verify_manifest",
+]

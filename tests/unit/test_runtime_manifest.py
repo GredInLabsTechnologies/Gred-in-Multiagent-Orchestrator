@@ -24,6 +24,7 @@ SIG_VALID = "b" * 128
 def _base_manifest(**overrides):
     """Factory con defaults válidos — los tests sólo overriden lo que prueban."""
     fields = dict(
+        project_name="gimo-core",
         runtime_version="0.1.0",
         target=RuntimeTarget.android_arm64,
         compression=RuntimeCompression.xz,
@@ -32,7 +33,7 @@ def _base_manifest(**overrides):
         compressed_size_bytes=13_500_000,
         uncompressed_size_bytes=47_200_000,
         python_rel_path="python/bin/python3.11",
-        repo_root_rel_path="repo",
+        project_root_rel_path="repo",
         python_path_entries=["repo", "site-packages"],
         files=["python/bin/python3.11", "site-packages/fastapi/__init__.py"],
         extra_env={"PYTHONDONTWRITEBYTECODE": "1"},
@@ -121,10 +122,10 @@ class TestRuntimeManifestPaths:
     def test_relative_paths_accepted(self):
         m = _base_manifest(
             python_rel_path="python/bin/python3.11",
-            repo_root_rel_path="repo",
+            project_root_rel_path="repo",
         )
         assert m.python_rel_path == "python/bin/python3.11"
-        assert m.repo_root_rel_path == "repo"
+        assert m.project_root_rel_path == "repo"
 
     def test_leading_slash_stripped(self):
         m = _base_manifest(python_rel_path="/python/bin/python3.11")
@@ -137,14 +138,25 @@ class TestRuntimeManifestPaths:
 
 class TestRuntimeManifestSigningPayload:
     def test_signing_payload_is_stable(self):
-        """El payload firmable es determinista y lenguaje-agnóstico."""
+        """El payload firmable es determinista y lenguaje-agnóstico.
+
+        Rove 1.0.0 añadió ``project_name`` como cuarto componente para
+        prevenir cross-project confusion attacks (mismo sha+target+version
+        re-etiquetado como otro proyecto). Formato canónico:
+        ``<sha256>|<target>|<runtime_version>|<project_name>``.
+        """
         m = _base_manifest(
+            project_name="gimo-core",
             tarball_sha256="c" * 64,
             target=RuntimeTarget.android_arm64,
             runtime_version="1.2.3",
         )
         payload = m.signing_payload()
-        assert payload == b"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc|android-arm64|1.2.3"
+        expected = (
+            b"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            b"|android-arm64|1.2.3|gimo-core"
+        )
+        assert payload == expected
 
     def test_signing_payload_changes_with_fields(self):
         """Cambiar cualquier campo firmado altera el payload."""
@@ -152,19 +164,22 @@ class TestRuntimeManifestSigningPayload:
             tarball_sha256="1" * 64,
             target=RuntimeTarget.android_arm64,
             runtime_version="1.0.0",
+            project_name="gimo-core",
         )
         diff_hash = base.model_copy(update={"tarball_sha256": "2" * 64})
         diff_target = base.model_copy(update={"target": RuntimeTarget.windows_x86_64})
         diff_version = base.model_copy(update={"runtime_version": "1.0.1"})
+        diff_project = base.model_copy(update={"project_name": "other-project"})
 
         payloads = {
             base.signing_payload(),
             diff_hash.signing_payload(),
             diff_target.signing_payload(),
             diff_version.signing_payload(),
+            diff_project.signing_payload(),
         }
-        # 4 distintos — ningún par colisiona
-        assert len(payloads) == 4
+        # 5 distintos — ningún par colisiona (project_name rompe cross-project confusion)
+        assert len(payloads) == 5
 
 
 class TestRuntimeManifestSizeSanity:

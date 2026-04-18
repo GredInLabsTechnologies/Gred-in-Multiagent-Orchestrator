@@ -32,9 +32,17 @@ def pcr():
 
 
 def test_standalone_assets_cover_all_enum_values(pcr):
-    """Every RuntimeTarget publicly advertised must have a standalone asset."""
+    """Every concrete RuntimeTarget must have a standalone asset.
+
+    Nota: rove 1.0.0 introduce ``Target.host`` como sentinel que debe
+    resolverse a un target concreto antes de construir el manifest
+    (ver rove.manifest.WheelhouseManifest docstring). No requiere mapping
+    de python-build-standalone porque nunca llega al productor cross-compile.
+    """
     from tools.gimo_server.models.runtime import RuntimeTarget
     for target in RuntimeTarget:
+        if target.value == "host":
+            continue
         assert target.value in pcr._STANDALONE_ASSETS, (
             f"target {target.value} lacks python-build-standalone asset mapping"
         )
@@ -43,6 +51,8 @@ def test_standalone_assets_cover_all_enum_values(pcr):
 def test_pip_platform_tags_cover_all_enum_values(pcr):
     from tools.gimo_server.models.runtime import RuntimeTarget
     for target in RuntimeTarget:
+        if target.value == "host":
+            continue  # sentinel de rove; se resuelve antes del productor
         assert target.value in pcr._PIP_PLATFORM_TAGS, (
             f"target {target.value} lacks pip --platform tag mapping"
         )

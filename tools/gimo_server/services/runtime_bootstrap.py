@@ -250,7 +250,7 @@ def ensure_extracted(
             target_dir, manifest.runtime_version,
         )
         python_binary = target_dir / manifest.python_rel_path
-        repo_root = target_dir / manifest.repo_root_rel_path
+        repo_root = target_dir / manifest.project_root_rel_path
         if python_binary.exists() and repo_root.exists():
             # BUGS_LATENTES §H8: probe pre-exec incluso en la rama idempotente
             # — un bundle que fue válido en un host puede ser inválido ahora
@@ -299,7 +299,7 @@ def ensure_extracted(
     (target_dir / _EXTRACTED_MARKER).write_text(manifest.runtime_version, encoding="utf-8")
 
     python_binary = target_dir / manifest.python_rel_path
-    repo_root = target_dir / manifest.repo_root_rel_path
+    repo_root = target_dir / manifest.project_root_rel_path
     if not python_binary.exists() or not repo_root.exists():
         raise RuntimeBootstrapError(
             f"bundle layout invalid after extraction: "

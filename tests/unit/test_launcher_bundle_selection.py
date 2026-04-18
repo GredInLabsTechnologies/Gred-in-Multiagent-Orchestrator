@@ -51,6 +51,7 @@ def _make_bundle(assets_dir: Path, priv_pem: str) -> None:
     uncompressed = sum(p.stat().st_size for p in staging.rglob("*") if p.is_file())
     compressed = tarball_path.stat().st_size
     manifest = RuntimeManifest(
+        project_name="gimo-core",
         runtime_version="0.1.0-launcher",
         target=RuntimeTarget.linux_x86_64,
         compression=RuntimeCompression.xz,
@@ -59,7 +60,7 @@ def _make_bundle(assets_dir: Path, priv_pem: str) -> None:
         compressed_size_bytes=compressed,
         uncompressed_size_bytes=uncompressed,
         python_rel_path="python/bin/python",
-        repo_root_rel_path="repo",
+        project_root_rel_path="repo",
         python_path_entries=["repo"],
         files=["python/bin/python", "repo/marker.txt"],
         extra_env={},

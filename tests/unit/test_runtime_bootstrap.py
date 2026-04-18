@@ -105,6 +105,7 @@ def _make_bundle(
     compressed = tarball_path.stat().st_size
 
     manifest = RuntimeManifest(
+        project_name="gimo-core",
         runtime_version=runtime_version,
         target=RuntimeTarget.linux_x86_64,  # cualquier target; no se valida aqui
         compression=compression,
@@ -113,7 +114,7 @@ def _make_bundle(
         compressed_size_bytes=compressed,
         uncompressed_size_bytes=uncompressed,
         python_rel_path="python/bin/python",
-        repo_root_rel_path="repo",
+        project_root_rel_path="repo",
         python_path_entries=["repo"],
         files=["python/bin/python", "repo/marker.txt"],
         extra_env={},

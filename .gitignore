@@ -98,6 +98,8 @@ tests/metrics/*.md
 # Vendor dependencies
 vendor/gics
 *.tar.gz
+# Rove wheel vendorizado — sdist se mantiene en git para reproducibilidad del build
+!vendor/rove/*.tar.gz
 
 # License system — archivos sensibles (nunca deben subirse al repo)
 private_key.pem

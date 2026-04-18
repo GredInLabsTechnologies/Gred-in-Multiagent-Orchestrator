@@ -53,6 +53,12 @@ pyasn1>=0.6.2  # Security fix CVE-2026-23490
 # Mesh LAN Discovery (opt-in via ORCH_MDNS_ENABLED=true)
 zeroconf>=0.132.0           # mDNS service advertisement for Core discovery
 
+# Runtime Packaging (signed wheelhouse forge)
+# Vendored from https://github.com/GredInLabsTechnologies/rove/releases/tag/v1.0.0
+# Replaces hand-rolled runtime_bootstrap + runtime_signature + package_core_runtime
+./vendor/rove/rove_toolkit-1.0.0-py3-none-any.whl
+zstandard>=0.22             # zstd bundle compression (used by rove)
+
 # MCP Support (for App façade and bridge)
 fastmcp>=3.1.0              # MCP server implementation
 mcp>=1.26.0                 # MCP protocol types

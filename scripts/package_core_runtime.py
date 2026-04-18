@@ -592,6 +592,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         compressed_bytes = tarball_path.stat().st_size
 
         manifest = RuntimeManifest(
+            project_name="gimo-core",
             runtime_version=args.runtime_version,
             target=target,
             compression=compression,
@@ -600,7 +601,7 @@ def cmd_build(args: argparse.Namespace) -> int:
             compressed_size_bytes=compressed_bytes,
             uncompressed_size_bytes=uncompressed_bytes,
             python_rel_path=f"python/{python_rel}",
-            repo_root_rel_path="repo",
+            project_root_rel_path="repo",
             python_path_entries=["repo", "site-packages"],
             files=files,
             extra_env={"PYTHONDONTWRITEBYTECODE": "1"},

@@ -46,6 +46,7 @@ def keypair_pem() -> tuple[str, str]:
 def unsigned_manifest() -> RuntimeManifest:
     """Manifest válido en schema pero con firma placeholder (no verificable)."""
     return RuntimeManifest(
+        project_name="gimo-core",
         runtime_version="0.1.0",
         target=RuntimeTarget.android_arm64,
         compression=RuntimeCompression.xz,
@@ -54,7 +55,7 @@ def unsigned_manifest() -> RuntimeManifest:
         compressed_size_bytes=13_000_000,
         uncompressed_size_bytes=45_000_000,
         python_rel_path="python/bin/python3.11",
-        repo_root_rel_path="repo",
+        project_root_rel_path="repo",
         python_path_entries=["repo", "site-packages"],
         files=["python/bin/python3.11"],
         extra_env={},
