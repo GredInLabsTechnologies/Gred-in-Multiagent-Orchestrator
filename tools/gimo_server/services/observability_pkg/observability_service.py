@@ -18,7 +18,7 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader, Cons
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider, Span
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
 from ...config import OPS_DATA_DIR
 from ..run_lifecycle import is_active_run_status

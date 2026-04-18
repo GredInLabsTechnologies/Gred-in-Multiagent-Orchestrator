@@ -25,9 +25,15 @@ PyYAML>=6.0.2
 textual>=0.83.0
 
 # Observability (OpenTelemetry)
+# Protocolo HTTP en vez de gRPC: evita la dependencia en `grpcio` (~20 min
+# compile desde sdist en Android/Termux y no hay wheels aarch64-linux-android
+# pre-built). El wire protocol HTTP/protobuf es semánticamente equivalente
+# al de gRPC para OTel — mismo data, distinto transporte. El endpoint sigue
+# configurándose vía OTEL_EXPORTER_OTLP_ENDPOINT env var pero debe apuntar
+# al puerto HTTP (4318) en vez del gRPC (4317).
 opentelemetry-api==1.27.0
 opentelemetry-sdk==1.27.0
-opentelemetry-exporter-otlp==1.27.0
+opentelemetry-exporter-otlp-proto-http==1.27.0
 opentelemetry-instrumentation-fastapi==0.48b0
 
 # Multipart Form Data (for file uploads)
@@ -54,9 +60,11 @@ pyasn1>=0.6.2  # Security fix CVE-2026-23490
 zeroconf>=0.132.0           # mDNS service advertisement for Core discovery
 
 # Runtime Packaging (signed wheelhouse forge)
-# Vendored from https://github.com/GredInLabsTechnologies/rove/releases/tag/v1.0.0
-# Replaces hand-rolled runtime_bootstrap + runtime_signature + package_core_runtime
-./vendor/rove/rove_toolkit-1.0.0-py3-none-any.whl
+# Base: github.com/GredInLabsTechnologies/rove @ v1.0.0 + patch local 1.0.1
+# añadiendo target `android-x86_64` — requerido para APK agnóstico (Chromebook
+# ARC, tablets Android x86, emulator testing). Patch source: /tmp/rove-src
+# (branch local, no upstream todavía).
+./vendor/rove/rove_toolkit-1.0.1-py3-none-any.whl
 zstandard>=0.22             # zstd bundle compression (used by rove)
 
 # MCP Support (for App façade and bridge)

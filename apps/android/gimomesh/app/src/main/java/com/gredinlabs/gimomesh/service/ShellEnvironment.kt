@@ -1,6 +1,7 @@
 package com.gredinlabs.gimomesh.service
 
 import android.content.Context
+import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -10,6 +11,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -224,23 +226,47 @@ class ShellEnvironment(private val context: Context) {
         return target.exists() && target.length() > 0L
     }
 
+    /**
+     * ABI del device mapped al path asset que contiene el wheelhouse rove
+     * correspondiente. La APK multi-ABI empaqueta un directorio por arch:
+     *   assets/runtime/arm64-v8a/       (android-arm64 wheelhouse)
+     *   assets/runtime/x86_64/          (android-x86_64 wheelhouse)
+     *   assets/runtime/armeabi-v7a/     (android-armv7 wheelhouse)
+     *
+     * `Build.SUPPORTED_ABIS` devuelve ABIs soportadas en preferencia descending.
+     * El primer match con nuestro catálogo gana; si ninguno match, retorna null
+     * (device no soportado — el consumer mostrará UI apropiada).
+     */
+    private fun resolveRuntimeAbi(): String? {
+        val supported = Build.SUPPORTED_ABIS.orEmpty()
+        val available = setOf("arm64-v8a", "x86_64", "armeabi-v7a")
+        return supported.firstOrNull { it in available }
+    }
+
     private fun prepareEmbeddedCoreRuntime(): EmbeddedCoreRuntime? {
-        val manifest = readRuntimeManifest() ?: return null
-        for (relativePath in manifest.files.distinct()) {
-            val normalized = relativePath.trim().removePrefix("/")
-            if (normalized.isBlank()) continue
-            val target = File(runtimeDir, normalized)
-            target.parentFile?.mkdirs()
-            extractAsset("runtime/$normalized", target)
+        val abi = resolveRuntimeAbi() ?: return null
+        val manifest = readRuntimeManifest(abi) ?: return null
+
+        // Copy the signed tarball from assets to internal storage. Extraction
+        // to usable tree is responsibility del consumer (Termux bootstrap,
+        // o `rove` CLI embebido en el futuro) — Kotlin no descomprime xz.
+        val tarballAsset = "runtime/$abi/${manifest.tarballName}"
+        val tarballDest = File(runtimeDir, manifest.tarballName)
+        runtimeDir.mkdirs()
+        if (!tarballDest.exists() || tarballDest.length() != manifest.compressedSizeBytes) {
+            try {
+                extractAsset(tarballAsset, tarballDest)
+            } catch (ex: IOException) {
+                return null
+            }
         }
 
+        // After tarball is in filesystem, ShellEnvironment.isCoreRuntimeReady
+        // signals "bundle disponible para este ABI". El runner externo lo
+        // consume: Termux side carga wheels via `pip install --no-index
+        // --find-links=<tarball>`, runtime_upgrader lo sirve peer-to-peer.
         val pythonBinary = File(runtimeDir, manifest.pythonRelPath)
         val repoRoot = File(runtimeDir, manifest.projectRootRelPath)
-        if (!pythonBinary.exists() || !repoRoot.exists()) {
-            return null
-        }
-
-        pythonBinary.setExecutable(true, false)
         val pythonPath = manifest.pythonPathEntries
             .map { File(runtimeDir, it).absolutePath }
             .filter { it.isNotBlank() }
@@ -255,9 +281,10 @@ class ShellEnvironment(private val context: Context) {
         )
     }
 
-    private fun readRuntimeManifest(): EmbeddedCoreRuntimeManifest? {
+    /** Parse rove manifest for the ABI-scoped bundle. */
+    private fun readRuntimeManifest(abi: String): EmbeddedCoreRuntimeManifest? {
         return try {
-            val raw = context.assets.open("runtime/gimo-core-runtime.json")
+            val raw = context.assets.open("runtime/$abi/gimo-core-runtime.manifest.json")
                 .bufferedReader()
                 .use { it.readText() }
             runtimeJson.decodeFromString<EmbeddedCoreRuntimeManifest>(raw)
@@ -284,25 +311,36 @@ class ShellEnvironment(private val context: Context) {
 }
 
 /**
- * Espejo Kotlin del subset del [rove.manifest.WheelhouseManifest] (rove 1.0.0)
- * que el runtime Android necesita a extract-time.
+ * Espejo Kotlin del subset del [rove.manifest.WheelhouseManifest] (rove 1.0.1)
+ * que el runtime Android necesita para localizar y extraer el wheelhouse.
  *
- * NOTA — el campo `repo_root_rel_path` fue renombrado a `project_root_rel_path`
- * cuando GIMO migró al schema canónico de rove (2026-04-18). Tolerar ambos
- * nombres sería una regresión de seguridad (dos fuentes de verdad sobre qué
- * path ejecutar), así que sólo se acepta el nuevo nombre — el packaging step
- * (`scripts/package_core_runtime.py`) emite sólo este nombre tras la migración.
+ * La APK empaqueta un bundle rove por ABI (arm64-v8a, x86_64, armeabi-v7a)
+ * bajo `assets/runtime/<abi>/`. Cada bundle tiene:
+ *   - ``gimo-core-runtime.tar.xz`` — wheelhouse firmado
+ *   - ``gimo-core-runtime.manifest.json`` — este schema, firmado
  *
- * Campos ignorados del manifest canónico (project_name, tarball_sha256,
- * signature, etc.) son redundantes en Android porque la confianza se deriva
- * del signing del APK, no de verificación Ed25519 in-device. Si en el futuro
- * se añade verificación peer-to-peer de bundles descargados, el signing
- * payload canónico es 4-tupla `<sha>|<target>|<runtime_version>|<project_name>`
- * (ver `rove.manifest.WheelhouseManifest.signing_payload()`).
+ * Campos que leemos (subset del WheelhouseManifest completo):
+ *   - tarballName / compressedSizeBytes — para verificar integridad al copy
+ *   - tarballSha256 / signature — para verificación Ed25519 si se añade
+ *     verificación in-device en el futuro
+ *   - pythonRelPath / projectRootRelPath / pythonPathEntries — paths dentro
+ *     del wheelhouse extraído (usados por el runner/Termux al arrancar Core)
+ *   - extraEnv — env vars opcionales para el proceso Core
+ *
+ * Payload firmado por rove: 4-tupla canónica
+ * ``<tarball_sha256>|<target>|<runtime_version>|<project_name>`` en UTF-8.
+ * Si Android implementa verificación Ed25519 local, derivar el payload con
+ * los fields de este data class.
  */
 @Serializable
 data class EmbeddedCoreRuntimeManifest(
-    val files: List<String> = emptyList(),
+    @SerialName("project_name") val projectName: String = "gimo-core",
+    @SerialName("runtime_version") val runtimeVersion: String = "",
+    val target: String = "",
+    @SerialName("tarball_name") val tarballName: String,
+    @SerialName("tarball_sha256") val tarballSha256: String = "",
+    @SerialName("compressed_size_bytes") val compressedSizeBytes: Long = 0L,
+    val signature: String = "",
     @SerialName("python_rel_path") val pythonRelPath: String,
     @SerialName("project_root_rel_path") val projectRootRelPath: String,
     @SerialName("python_path_entries") val pythonPathEntries: List<String> = emptyList(),

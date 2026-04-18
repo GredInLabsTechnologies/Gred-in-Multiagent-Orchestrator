@@ -7,7 +7,8 @@
       "version_spec": ">=6.0.0",
       "targets": [
         "android-arm64",
-        "android-armv7"
+        "android-armv7",
+        "android-x86_64"
       ],
       "kind": "patch",
       "path": "patches/psutil/android-platform-allow.patch",
@@ -20,7 +21,8 @@
       "version_spec": ">=1.10",
       "targets": [
         "android-arm64",
-        "android-armv7"
+        "android-armv7",
+        "android-x86_64"
       ],
       "kind": "env",
       "path": "patches/maturin/android-api-level.env",
@@ -33,7 +35,8 @@
       "version_spec": ">=43",
       "targets": [
         "android-arm64",
-        "android-armv7"
+        "android-armv7",
+        "android-x86_64"
       ],
       "kind": "toml",
       "path": "patches/cryptography/pkg-fallback.toml",

@@ -62,20 +62,32 @@ android {
 }
 
 // -----------------------------------------------------------------------------
-// Runtime Packaging — Plan E2E_ENGINEERING_PLAN_20260416_RUNTIME_PACKAGING §7
+// Runtime Packaging — Rev 2 multi-ABI (post-rove 2026-04-18)
 // -----------------------------------------------------------------------------
 //
-// El Core GIMO se empaqueta como bundle Ed25519-firmado (tarball XZ + manifest
-// JSON + .sig) dentro de src/main/assets/runtime/. La APK se mantiene liviana
-// porque el Python host no se incluye en repo: el productor (scripts/
-// package_core_runtime.py) lo genera en CI con python-build-standalone y
-// lo deja en runtime-assets/ a la raíz del repo.
+// La APK agnóstica por ABI empaqueta un wheelhouse rove por cada arch Android
+// soportada (arm64-v8a, x86_64, armeabi-v7a). En runtime, ShellEnvironment
+// lee `Build.SUPPORTED_ABIS[0]` y extrae el bundle correspondiente.
 //
-// Esta tarea copia ese bundle pre-construido a los assets de la APK. No
-// reconstruye — si runtime-assets/ está vacío, falla con mensaje accionable.
+// Productor upstream: rove build (via scripts/build_rove_wheelhouse.py) emite
+// a `dist/gimo-core-android-<arch>-<version>.tar.xz` + `.manifest.json`.
+// El gradle los copia a `src/main/assets/runtime/<android_abi>/` donde
+// `<android_abi>` es el nombre NDK (arm64-v8a, x86_64, armeabi-v7a).
+//
+// Mapping rove-target → Android ABI:
+//   android-arm64  → arm64-v8a
+//   android-x86_64 → x86_64
+//   android-armv7  → armeabi-v7a
 val repoRoot: File = rootDir.parentFile.parentFile.parentFile  // apps/android/gimomesh -> repo root
-val runtimeAssetsDir: File = file("${repoRoot}/runtime-assets")
+val roveDistDir: File = file("${repoRoot}/dist")
 val apkRuntimeDir: File = file("src/main/assets/runtime")
+val abiMap: Map<String, String> = mapOf(
+    "android-arm64"  to "arm64-v8a",
+    "android-x86_64" to "x86_64",
+    "android-armv7"  to "armeabi-v7a",
+)
+// Legacy runtime-assets/ (pre-rove, single-ABI) — conservado para fallback.
+val legacyRuntimeAssetsDir: File = file("${repoRoot}/runtime-assets")
 
 // Plan CROSS_COMPILE §Change 4 — Download del bundle desde release asset de CI.
 // Si runtime-assets/ está vacío y el env var GIMO_RUNTIME_BUNDLE_URL está set,
@@ -94,15 +106,15 @@ val fetchRuntimeBundle = tasks.register("fetchRuntimeBundle") {
             logger.info("GIMO_RUNTIME_BUNDLE_URL no set — skipping fetch (usa productor local)")
             return@doLast
         }
-        val manifest = File(runtimeAssetsDir, "gimo-core-runtime.json")
+        val manifest = File(legacyRuntimeAssetsDir, "gimo-core-runtime.json")
         if (manifest.exists() && manifest.length() > 0) {
             logger.info("runtime-assets/ ya tiene manifest; skip fetch")
             return@doLast
         }
-        runtimeAssetsDir.mkdirs()
+        legacyRuntimeAssetsDir.mkdirs()
         val suffixes = listOf("json", "tar.xz", "sig")
         suffixes.forEach { suffix ->
-            val dest = File(runtimeAssetsDir, "gimo-core-runtime.$suffix")
+            val dest = File(legacyRuntimeAssetsDir, "gimo-core-runtime.$suffix")
             val url = URI.create("$baseUrl/gimo-core-runtime.$suffix").toURL()
             logger.lifecycle("fetching $url -> $dest")
             url.openStream().use { input ->
@@ -112,41 +124,69 @@ val fetchRuntimeBundle = tasks.register("fetchRuntimeBundle") {
     }
 }
 
-val packageCoreRuntime = tasks.register<Copy>("packageCoreRuntime") {
-    description = "Copia el bundle GIMO Core (producido por scripts/package_core_runtime.py) a src/main/assets/runtime/."
+val packageCoreRuntime = tasks.register("packageCoreRuntime") {
+    description = "Copia los wheelhouses rove (uno por ABI Android) a src/main/assets/runtime/<abi>/."
     group = "gimo"
     dependsOn(fetchRuntimeBundle)
 
-    // El gradle no invoca el productor por sí mismo — CI/operador lo debe correr
-    // antes. Así separamos toolchain Python (CI matrix) del build Android.
     doFirst {
-        val manifest = File(runtimeAssetsDir, "gimo-core-runtime.json")
-        if (!manifest.exists()) {
+        // 1. Descubrir qué targets rove tienen bundle en dist/
+        if (!roveDistDir.exists()) {
             throw GradleException(
-                "runtime-assets/gimo-core-runtime.json no existe.\n" +
-                "Opciones para producirlo:\n" +
-                "  (a) Local — cross-compile real:\n" +
-                "      python scripts/package_core_runtime.py build \\\n" +
-                "        --target android-arm64 --python-source standalone \\\n" +
-                "        --compression xz --runtime-version <ver> \\\n" +
-                "        --signing-key secrets/runtime-signing.pem \\\n" +
-                "        --output runtime-assets/\n" +
-                "  (b) CI — matrix runtime-packaging produce artifact\n" +
-                "      gimo-core-runtime-android-arm64; descarga y extrae a\n" +
-                "      runtime-assets/ (o set GIMO_RUNTIME_BUNDLE_URL)."
+                "dist/ no existe. Producir wheelhouses rove antes del build:\n" +
+                "  python scripts/build_rove_wheelhouse.py --target android-arm64\n" +
+                "  python scripts/build_rove_wheelhouse.py --target android-x86_64\n" +
+                "  python scripts/build_rove_wheelhouse.py --target android-armv7  # opcional\n" +
+                "La APK agnostica por ABI requiere al menos arm64 + x86_64 para cubrir\n" +
+                "hardware real (S10, Pixel, etc.) + emuladores Google Play."
             )
         }
-    }
+        val found = mutableListOf<String>()
+        apkRuntimeDir.deleteRecursively()
+        apkRuntimeDir.mkdirs()
 
-    from(runtimeAssetsDir) {
-        include("gimo-core-runtime.json")
-        include("gimo-core-runtime.tar.xz")
-        include("gimo-core-runtime.sig")
-        // Plan CROSS_COMPILE §Change 5 — trusted pubkey del productor, usado
-        // por runtime_bootstrap para validar firma antes de extraer.
-        include("trusted-pubkey.pem")
+        for ((roveTarget, androidAbi) in abiMap) {
+            val bundleFile = roveDistDir.listFiles()
+                ?.firstOrNull { it.name.startsWith("gimo-core-$roveTarget-") && it.name.endsWith(".tar.xz") }
+            if (bundleFile == null) {
+                logger.lifecycle("  skip $roveTarget (no bundle in dist/)")
+                continue
+            }
+            val manifestFile = File(roveDistDir, "${bundleFile.name}.manifest.json")
+            if (!manifestFile.exists()) {
+                throw GradleException(
+                    "Bundle ${bundleFile.name} no tiene manifest firmado adjacent " +
+                    "(${manifestFile.name}). Regenerar con build_rove_wheelhouse.py."
+                )
+            }
+            val targetDir = File(apkRuntimeDir, androidAbi)
+            targetDir.mkdirs()
+            bundleFile.copyTo(File(targetDir, "gimo-core-runtime.tar.xz"), overwrite = true)
+            manifestFile.copyTo(File(targetDir, "gimo-core-runtime.manifest.json"), overwrite = true)
+            logger.lifecycle("  $roveTarget → assets/runtime/$androidAbi/ (${bundleFile.length() / 1024 / 1024} MiB)")
+            found.add(androidAbi)
+        }
+
+        if (found.isEmpty()) {
+            throw GradleException(
+                "No rove bundles found in dist/ for any Android ABI " +
+                "(${abiMap.keys.joinToString(", ")}). Produce them with " +
+                "scripts/build_rove_wheelhouse.py --target <android-*>."
+            )
+        }
+
+        // 2. Trusted pubkey (una sola, compartida por todos los targets — la
+        //    firma es por-bundle pero usa la misma keypair del productor).
+        val trustedPubkey = File(legacyRuntimeAssetsDir, "trusted-pubkey.pem")
+        if (trustedPubkey.exists()) {
+            trustedPubkey.copyTo(File(apkRuntimeDir, "trusted-pubkey.pem"), overwrite = true)
+        } else {
+            logger.warn("trusted-pubkey.pem no encontrado en runtime-assets/; el " +
+                       "verificador in-device caerá al EMBEDDED_RUNTIME_PUBLIC_KEY del código.")
+        }
+
+        logger.lifecycle("runtime assets packaged for ABIs: ${found.joinToString(", ")}")
     }
-    into(apkRuntimeDir)
 }
 
 // Wire antes de mergeAssets — todas las variantes (Debug/Release).
