@@ -134,7 +134,10 @@ S10 running GIMO Core (3W)
 
 ### 2.4 Runtime Packaging (Core portable)
 
-> **Status**: MVP Rev 0 — plan `E2E_ENGINEERING_PLAN_20260416_RUNTIME_PACKAGING`.
+> **Status**: Rev 1 — migrado a `rove-toolkit` 1.0.0 (2026-04-18). El schema
+> canónico vive ahora en `rove.manifest.WheelhouseManifest`; GIMO consume el
+> módulo vendorizado en `vendor/rove/` y shim-ea la API histórica en
+> `tools/gimo_server/models/runtime.py` + `security/runtime_signature.py`.
 
 GIMO Core se distribuye como un **bundle portable** firmado (manifest JSON +
 tarball XZ + firma Ed25519) para que Android, Windows, Linux y macOS
@@ -147,15 +150,33 @@ desktop, SBC embebidos — sin reinstalar.
 | Fichero | Contenido | Tamaño típico |
 | --- | --- | --- |
 | `gimo-core-runtime.tar.xz` | CPython + stdlib + wheels + tools/gimo_server + gimo_cli + data | ~40–60 MiB |
-| `gimo-core-runtime.json` | `RuntimeManifest` (versión, target, sha256, firma) | <4 KiB |
+| `gimo-core-runtime.json` | `WheelhouseManifest` (versión, target, sha256, firma) | <4 KiB |
 | `gimo-core-runtime.sig` | Firma Ed25519 hex (también en el manifest) | 128 B |
 
-**Campos del manifest** (`tools/gimo_server/models/runtime.py`): `runtime_version`,
-`target` (enum `{linux_x86_64, linux_arm64, darwin_x86_64, darwin_arm64,
-windows_x86_64, android_arm64}`), `compression` (`xz`/`zstd`/`none`),
-`tarball_sha256`, `compressed_size_bytes`, `uncompressed_size_bytes`,
-`python_rel_path`, `repo_root_rel_path`, `python_path_entries`, `files`,
-`extra_env`, `signature`.
+**Campos del manifest** (`rove.manifest.WheelhouseManifest`, shim-eado como
+`RuntimeManifest`): `project_name` (required; GIMO usa `"gimo-core"`),
+`runtime_version`, `target` (enum rove `{linux-x86_64, linux-arm64,
+darwin-x86_64, darwin-arm64, windows-x86_64, android-arm64, android-armv7,
+host}`), `compression` (`xz`/`zstd`/`none`), `tarball_sha256`,
+`compressed_size_bytes`, `uncompressed_size_bytes`, `python_rel_path`,
+`project_root_rel_path`, `wheels_rel_path` (opcional), `python_path_entries`,
+`files`, `extra_env`, `patches_applied` (opcional), `signature`.
+
+**Wire-protocol de la firma** — Ed25519 sobre una 4-tupla canónica
+`<tarball_sha256>|<target>|<runtime_version>|<project_name>` en UTF-8
+(ver `WheelhouseManifest.signing_payload()`). El campo `project_name`
+previene *cross-project confusion attacks*: sin él, una clave que firma
+varios proyectos dejaría re-etiquetar un bundle del proyecto A como
+proyecto B con la misma firma válida. Consumers en otros lenguajes
+(Kotlin/Rust) re-derivan el payload sin depender de un serializador JSON
+específico.
+
+**Patch registry** — `vendor/rove-patches/` contiene patches opt-in para
+builds cross-compile de deps problemáticas en targets Android (hoy:
+`psutil`, `maturin`, `cryptography`). El productor los resuelve vía
+`rove.patches.loader.resolve_patches(target=…)` y aplica env+toml durante
+`_install_wheels_cross`. Patches `kind=patch` (unified diff) se reportan
+pero no se aplican con `--only-binary :all:` (requieren sdist unpacking).
 
 **Ciclo de vida** (canónico, un solo flujo para todas las plataformas):
 
