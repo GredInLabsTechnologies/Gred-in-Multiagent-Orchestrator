@@ -52,6 +52,16 @@ from tools.gimo_server.security.runtime_signature import (  # noqa: E402
     sha256_file,
     sign_manifest,
 )
+from rove.patches.loader import (  # noqa: E402
+    PatchLoadError,
+    load_patch_set,
+    resolve_patches,
+)
+from rove.builder.patches import (  # noqa: E402
+    PatchApplyError,
+    apply_env_patches,
+    read_toml_overrides,
+)
 
 logger = logging.getLogger("package_core_runtime")
 logging.basicConfig(
@@ -251,6 +261,102 @@ def _fetch_standalone_python(
     return exe_rel
 
 
+_ROVE_PATCHES_DIR = _REPO_ROOT / "vendor" / "rove-patches"
+
+
+def _parse_package_names(requirements: Path) -> List[str]:
+    """Extrae los nombres bare de packages de requirements.txt.
+
+    ``rove.patches.loader.resolve_patches`` filtra por ``package`` bare
+    (``"psutil"``), no por specifier strings (``"psutil==6.0.0"``). Este
+    parser colapsa requirements.txt a los nombres — ignora comments,
+    extras, URLs directas, y referencias a archivos locales.
+    """
+    pkgs: List[str] = []
+    if not requirements.exists():
+        return pkgs
+    for raw in requirements.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("-") or line.startswith("./") or line.startswith("http"):
+            # -r, --constraint, archivos locales, URLs directas: skip
+            continue
+        # Bare package name — corta en la primera ocurrencia de extras/specifier
+        for sep in ["[", "=", "<", ">", "!", "~", ";", " "]:
+            idx = line.find(sep)
+            if idx >= 0:
+                line = line[:idx]
+        name = line.strip().lower()
+        if name:
+            pkgs.append(name)
+    return pkgs
+
+
+def _apply_rove_patches(
+    *,
+    target: RuntimeTarget,
+    packages: List[str],
+) -> dict:
+    """Resuelve + aplica los patches de ``vendor/rove-patches/`` para el target.
+
+    Retorna un dict con:
+        * ``env`` — env vars a inyectar en la subprocess de pip (para packages
+          que sí compilan — no-op si ``--only-binary :all:`` evita compile).
+        * ``toml_overrides`` — lista de dicts TOML parseados (informativos;
+          el consumidor los interpreta, ej. constraints adicionales).
+        * ``applicable_diffs`` — ids de unified-diff patches que aplicarían
+          a este target. Con ``--only-binary :all:`` no se aplican (no hay
+          sdist unpacking); se reportan para trazabilidad.
+
+    Si ``vendor/rove-patches/`` no existe o está vacío, retorna dict vacío
+    sin fallar — rove-patches es opt-in para targets Android, no requisito.
+    """
+    out = {"env": {}, "toml_overrides": [], "applicable_diffs": []}
+    if not _ROVE_PATCHES_DIR.exists():
+        logger.info("rove-patches no vendorizado — skipping patch resolution")
+        return out
+
+    try:
+        patch_set = load_patch_set(_ROVE_PATCHES_DIR)
+    except PatchLoadError as exc:
+        logger.warning("rove-patches load failed: %s — continuando sin patches", exc)
+        return out
+
+    try:
+        # resolve_patches acepta rove.manifest.Target; RuntimeTarget ES ese enum
+        # (ver tools/gimo_server/models/runtime.py shim).
+        matches = resolve_patches(patch_set, packages=packages, target=target)
+    except Exception as exc:  # InvalidSpecifier, etc. — defensivo
+        logger.warning("rove-patches resolve failed: %s", exc)
+        return out
+
+    if not matches:
+        logger.info("rove-patches: 0 applicable para target=%s", target.value)
+        return out
+
+    logger.info(
+        "rove-patches: %d applicable para target=%s", len(matches), target.value
+    )
+    for entry in matches:
+        logger.info("  - %s (%s): %s", entry.id, entry.kind.value, entry.description)
+
+    try:
+        out["env"] = apply_env_patches(matches, _ROVE_PATCHES_DIR)
+    except PatchApplyError as exc:
+        logger.warning("env patch apply failed: %s", exc)
+
+    try:
+        out["toml_overrides"] = read_toml_overrides(matches, _ROVE_PATCHES_DIR)
+    except PatchApplyError as exc:
+        logger.warning("toml patch read failed: %s", exc)
+
+    out["applicable_diffs"] = [
+        e.id for e in matches if e.kind.value == "patch"
+    ]
+    return out
+
+
 def _install_wheels_cross(
     requirements: Path,
     site_packages: Path,
@@ -264,12 +370,31 @@ def _install_wheels_cross(
     *deliberado*: un cross-compile silencioso (sin wheels nativas) produciría
     un bundle que colapsa en runtime con ``ModuleNotFoundError`` sobre módulos
     C no presentes.
+
+    Integra ``rove-patches`` (vendorizado en ``vendor/rove-patches/``): env
+    patches se inyectan a la subprocess de pip para guiar builds de sdist
+    (no-op cuando ``--only-binary :all:`` evita los compiles). Unified-diff
+    patches se reportan pero no se aplican (requieren sdist unpacking, out of
+    scope para wheel-only installs).
     """
     logger.info(
         "installing wheels (cross) for target=%s python=%s → %s",
         target.value, python_version, site_packages,
     )
     site_packages.mkdir(parents=True, exist_ok=True)
+
+    patch_result = _apply_rove_patches(
+        target=target,
+        packages=_parse_package_names(requirements),
+    )
+    if patch_result["applicable_diffs"]:
+        logger.warning(
+            "rove-patches: %d unified-diff patches NO aplican con --only-binary "
+            "(packages: %s). Se reportan para trazabilidad; habilitar sdist "
+            "compile relajaría esta restricción.",
+            len(patch_result["applicable_diffs"]),
+            ", ".join(patch_result["applicable_diffs"]),
+        )
 
     # pip cross-install flags — NO pasamos `--implementation` / `--abi` porque
     # eso excluye wheels pure-Python (`py3-none-any`), y muchas deps GIMO
@@ -287,7 +412,12 @@ def _install_wheels_cross(
     for tag in _pip_platform_for(target):
         args.extend(["--platform", tag])
     args.extend(["--requirement", str(requirements)])
-    subprocess.run(args, check=True)
+
+    # Merge env patches (ANDROID_API_LEVEL, etc.) en el env de la subprocess.
+    # Son no-op si pip sólo baja wheels, pero viajan por si hay sdist compile.
+    env = os.environ.copy()
+    env.update(patch_result["env"])
+    subprocess.run(args, check=True, env=env)
 
 
 # --------------------------------------------------------------------- helpers

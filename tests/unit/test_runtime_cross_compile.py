@@ -71,9 +71,10 @@ def test_install_wheels_cross_builds_expected_pip_args(pcr, tmp_path):
 
     captured = {}
 
-    def fake_run(args, check=True):
+    def fake_run(args, check=True, env=None):
         captured["args"] = args
         captured["check"] = check
+        captured["env"] = env
         return MagicMock()
 
     with patch.object(pcr.subprocess, "run", side_effect=fake_run):
@@ -160,3 +161,68 @@ def argparse_sub_action():
     """Return the argparse ``_SubParsersAction`` type (varies by Python version)."""
     import argparse
     return argparse._SubParsersAction
+
+
+class TestRovePatchesIntegration:
+    """rove-patches (vendor/rove-patches/) wiring into _install_wheels_cross.
+
+    Migración a rove 1.0.0 (2026-04-18). Los patches son opt-in por target:
+    sólo android-arm64 / android-armv7 tienen entries en el snapshot actual.
+    Este test valida que el pipeline:
+      * Resuelve patches correctamente para targets Android (devuelve env vars).
+      * No aplica patches a desktop targets (Windows/Linux/macOS devuelven 0).
+      * Parsea requirements.txt a bare package names para resolve_patches.
+    """
+
+    def test_parse_package_names_strips_specifiers(self, pcr, tmp_path):
+        req = tmp_path / "requirements.txt"
+        req.write_text(
+            "# comment — ignored\n"
+            "cryptography>=43.0.0       # inline comment\n"
+            "psutil>=6.0.0\n"
+            "fastapi[all]>=0.128.0\n"
+            "-r nested.txt\n"
+            "./vendor/rove/rove_toolkit-1.0.0-py3-none-any.whl\n"
+            "https://example.com/pkg.whl\n"
+            "\n",
+            encoding="utf-8",
+        )
+        names = pcr._parse_package_names(req)
+        assert names == ["cryptography", "psutil", "fastapi"]
+
+    def test_resolve_patches_android_arm64_returns_env_and_diff(self, pcr):
+        from tools.gimo_server.models.runtime import RuntimeTarget
+
+        result = pcr._apply_rove_patches(
+            target=RuntimeTarget.android_arm64,
+            packages=["psutil", "maturin", "cryptography", "fastapi"],
+        )
+        # env patches: maturin/android-api-level expone ANDROID_API_LEVEL + ANDROID_PLATFORM
+        assert result["env"].get("ANDROID_API_LEVEL") == "24"
+        assert result["env"].get("ANDROID_PLATFORM") == "android-24"
+        # toml patches: cryptography/pkg-fallback
+        assert len(result["toml_overrides"]) == 1
+        # unified-diff patches: reportados pero no aplicados (--only-binary :all:)
+        assert "psutil/android-platform-allow" in result["applicable_diffs"]
+
+    def test_resolve_patches_windows_returns_nothing(self, pcr):
+        from tools.gimo_server.models.runtime import RuntimeTarget
+
+        result = pcr._apply_rove_patches(
+            target=RuntimeTarget.windows_x86_64,
+            packages=["psutil", "maturin", "cryptography"],
+        )
+        assert result["env"] == {}
+        assert result["toml_overrides"] == []
+        assert result["applicable_diffs"] == []
+
+    def test_resolve_patches_missing_package_skipped(self, pcr):
+        from tools.gimo_server.models.runtime import RuntimeTarget
+
+        # Ningún package del set afectado por rove-patches está en requirements
+        result = pcr._apply_rove_patches(
+            target=RuntimeTarget.android_arm64,
+            packages=["fastapi", "starlette"],
+        )
+        assert result["env"] == {}
+        assert result["applicable_diffs"] == []
