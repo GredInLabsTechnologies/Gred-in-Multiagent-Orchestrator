@@ -5,12 +5,15 @@
 #   El bundle standalone (python-build-standalone) es glibc-linked y NO corre
 #   en Android Bionic. En lugar de ese bundle, Termux provee Python nativo
 #   compilado contra Bionic via `pkg install python`. Este script:
-#     1. Instala Python + deps vía pkg
+#     1. Instala Python + deps vía pkg (pre-built Termux wheels para
+#        cryptography/psutil/pillow/numpy — evita compiles de ~15 min)
 #     2. Extrae un tarball del repo GIMO Core (producido con
 #        scripts/push_repo_to_termux.cmd desde el host)
-#     3. pip install -r requirements.txt (wheels aarch64 + compiles si
-#        alguno no tiene wheel)
-#     4. Arranca `python -m tools.gimo_server.main --role server`
+#     3. pip install -r requirements.txt — incluye rove-toolkit desde
+#        vendor/rove/ (wheelhouse forge para peer-to-peer upgrades). Con
+#        --prefer-binary tira de wheels aarch64; resto compila si no hay.
+#     4. Verifica que rove es importable (auto-check del distribution layer)
+#     5. Arranca `python -m tools.gimo_server.main --role server`
 #
 # Uso (en Termux, tras adb push a /sdcard):
 #   termux-setup-storage          # una vez, concede acceso al almacenamiento
@@ -76,8 +79,14 @@ if [ -z "${SKIP_PKG_INSTALL:-}" ]; then
     step "Updating Termux package index..."
     pkg update -y >/dev/null 2>&1 || warn "pkg update devolvió warnings (ignorable)"
 
-    step "Installing python + git + build tools (~50 MB, ~1 min primera vez)..."
+    step "Installing python + git + pre-built wheels (~100 MB)..."
+    # Pre-built Termux wheels evitan compilar binarios pesados:
+    #   python-cryptography → skip Rust 15+ min build
+    #   python-psutil       → setup.py rechaza explícitamente Android
+    #   python-pillow/numpy → skip C extensions
+    # rust se mantiene como fallback si pydantic-core no encuentra wheel.
     pkg install -y python python-pip git clang make libffi openssl rust \
+        python-cryptography python-psutil python-pillow python-numpy \
         binutils cmake pkg-config >/dev/null 2>&1 || \
         fail "pkg install falló - revisa conectividad y espacio en disco"
 
@@ -118,13 +127,27 @@ fi
 
 MARKER="$HOME/.gimo-deps-installed"
 if [ ! -f "$MARKER" ] || [ "requirements.txt" -nt "$MARKER" ]; then
-    step "Installing Python deps (~2-5 min primera vez, compila cryptography/pydantic-core si no hay wheel aarch64)..."
+    step "Installing Python deps (--prefer-binary, cryptography ya provisto via pkg)..."
     pip install --upgrade pip wheel setuptools >/dev/null 2>&1
-    pip install -r requirements.txt || fail "pip install falló"
+    # --prefer-binary fuerza wheels primero. cryptography/pillow/numpy ya están
+    # via pkg (system site-packages) y satisfacen los requirements.
+    # requirements.txt incluye ./vendor/rove/rove_toolkit-1.0.0-py3-none-any.whl
+    # — pip lo resuelve relativo a $REPO_DIR donde ya estamos via `cd`.
+    pip install --prefer-binary -r requirements.txt || fail "pip install falló"
     touch "$MARKER"
 else
     step "Deps cache hit (marker present). Delete $MARKER para reinstalar."
 fi
+
+# ─── Step 3b: Verify rove wheelhouse forge ────────────────────────────────
+# Rove provee peer-to-peer distribution + verificación Ed25519 para runtime
+# upgrades. Si falla el import, el Core arranca pero `runtime_upgrader`
+# y endpoints `/ops/mesh/runtime-*` no funcionan. Fail-fast aquí.
+if ! python -c "import rove.manifest, rove.signing.ed25519" 2>/dev/null; then
+    fail "rove-toolkit no importa tras pip install — revisa vendor/rove/ \
+y que el wheel esté incluido en el tarball del repo."
+fi
+step "rove-toolkit $(python -c 'import rove; print(getattr(rove, \"__version__\", \"1.0.0\"))') ready"
 
 # ─── Step 4: Resolve ORCH_TOKEN ──────────────────────────────────────────
 TOKEN="${ORCH_TOKEN:-}"

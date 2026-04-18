@@ -68,6 +68,8 @@ REM .orch_token que viaja por canal separado.
     gimo_cli ^
     gimo.py ^
     requirements.txt ^
+    vendor\__init__.py ^
+    vendor\rove ^
     docs\SECURITY.md
 
 if errorlevel 1 (
