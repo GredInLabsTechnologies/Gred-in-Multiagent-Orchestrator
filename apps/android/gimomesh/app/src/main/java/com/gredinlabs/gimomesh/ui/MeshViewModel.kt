@@ -83,7 +83,14 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
                         coreUrl = resolveDisplayCoreUrl(settings),
                         deviceId = resolveDeviceId(settings),
                         deviceName = resolveDeviceName(settings),
-                        modelLoaded = state.modelLoaded.ifBlank { settings.model },
+                        // G13 fix: settings.model is the source of truth. The
+                        // previous `.ifBlank` guard froze the default placeholder
+                        // "qwen2.5:3b" into state.modelLoaded at boot and the
+                        // observer never updated it when the wizard finished a
+                        // download and persisted the real model id. Server-
+                        // authoritative updates come from applyAuthoritativeDeviceState,
+                        // which layers on top and wins when the server has a value.
+                        modelLoaded = settings.model,
                         inferenceRunning = settings.inferenceRunning,
                         inferenceAutoStartAllowed = settings.inferenceAutoStartAllowed,
                         inferencePort = settings.inferencePort,

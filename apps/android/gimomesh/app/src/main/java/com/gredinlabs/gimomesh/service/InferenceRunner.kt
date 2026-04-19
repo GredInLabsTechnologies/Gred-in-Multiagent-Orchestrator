@@ -33,6 +33,7 @@ class InferenceRunner(
 
     private var serverProcess: Process? = null
     private var healthJob: Job? = null
+    private var outputDrainJob: Job? = null
 
     private val healthClient = OkHttpClient.Builder()
         .connectTimeout(2, TimeUnit.SECONDS)
@@ -83,6 +84,15 @@ class InferenceRunner(
                 .start()
 
             serverProcess = process
+
+            // G19 fix: drain the merged stdout/stderr stream off-thread so
+            // the 64KB pipe buffer never fills. If `--log-disable` fails or
+            // the model emits prelim logs (which llama-server does during
+            // gguf load), the process would block otherwise and the health
+            // wait would time out misleadingly. We keep the first 100 lines
+            // in terminalBuffer for model-load diagnostics.
+            startOutputDrain(process)
+
             val ready = waitForHealth(port, timeoutMs = 60_000)
             if (!ready) {
                 stop()
@@ -109,9 +119,36 @@ class InferenceRunner(
     fun stop() {
         healthJob?.cancel()
         healthJob = null
+        outputDrainJob?.cancel()
+        outputDrainJob = null
         serverProcess?.destroyForcibly()
         serverProcess = null
         _status.value = Status.STOPPED
+    }
+
+    /**
+     * G19: read the merged stdout/stderr off-thread so the 64KB pipe buffer
+     * never fills. The first ~100 lines are tagged at INFO in logcat for
+     * model-load diagnostics; after that, we just drain to /dev/null.
+     */
+    private fun startOutputDrain(process: Process) {
+        outputDrainJob?.cancel()
+        outputDrainJob = runnerScope.launch {
+            try {
+                process.inputStream.bufferedReader().use { reader ->
+                    var count = 0
+                    while (isActive) {
+                        val line = reader.readLine() ?: break
+                        if (count < 100) {
+                            Log.i(TAG, "llama-server: $line")
+                        }
+                        count++
+                    }
+                }
+            } catch (_: Exception) {
+                // Stream closed — expected when process exits.
+            }
+        }
     }
 
     suspend fun isHealthy(port: Int = 8080): Boolean = withContext(Dispatchers.IO) {
@@ -127,14 +164,15 @@ class InferenceRunner(
         }
     }
 
+    /**
+     * Legacy API kept for callers that expect to pull lines on demand. With
+     * G19 the stdout is drained automatically in startOutputDrain — this
+     * method is a no-op when the drain is active, because both would compete
+     * for the same stream. Left in place so external callers still compile.
+     */
+    @Suppress("UNUSED_PARAMETER")
     suspend fun readOutput(onLine: (String) -> Unit) = withContext(Dispatchers.IO) {
-        serverProcess?.inputStream?.bufferedReader()?.use { reader ->
-            try {
-                reader.forEachLine(onLine)
-            } catch (_: Exception) {
-                // Process terminated or stream closed.
-            }
-        }
+        // Intentionally empty; see startOutputDrain.
     }
 
     private suspend fun waitForHealth(port: Int, timeoutMs: Long): Boolean {

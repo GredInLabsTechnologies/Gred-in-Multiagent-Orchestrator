@@ -28,6 +28,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.gredinlabs.gimomesh.data.store.SettingsStore
@@ -208,6 +212,14 @@ private fun NavItem(
                 indication = null,
                 onClick = onClick,
             )
+            // G11 fix: expose the tab to accessibility (TalkBack + automated
+            // UI test tools that walk the semantics tree). Previously the
+            // whole bottom nav was invisible to mobile-mcp list_elements.
+            .semantics(mergeDescendants = true) {
+                this.role = androidx.compose.ui.semantics.Role.Tab
+                this.contentDescription = "$label tab${if (isSelected) " (selected)" else ""}"
+                this.selected = isSelected
+            }
             .padding(horizontal = 14.dp, vertical = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

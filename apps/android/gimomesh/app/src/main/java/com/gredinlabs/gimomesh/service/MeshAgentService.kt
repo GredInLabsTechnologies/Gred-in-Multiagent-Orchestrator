@@ -328,8 +328,23 @@ class MeshAgentService : Service() {
             modelPath = modelFile.absolutePath,
             port = settings.inferencePort,
             threads = settings.threads,
-            contextSize = settings.contextSize,
+            contextSize = resolveContextSize(settings),
         )
+    }
+
+    /**
+     * G20 fix: pick a context size appropriate for the loaded model instead
+     * of the hardcoded 2048. Coder/code models get 8K (they benefit from
+     * seeing larger code blocks in one prompt). Everything else falls back
+     * to settings.contextSize so power users can still tune it.
+     */
+    private fun resolveContextSize(settings: SettingsStore.Settings): Int {
+        val name = settings.model.lowercase()
+        return when {
+            "coder" in name || "code" in name -> 8192
+            "7b" in name || "8b" in name      -> 4096
+            else                               -> settings.contextSize
+        }
     }
 
     private suspend fun currentSafety(): SafetyResult {
@@ -351,6 +366,13 @@ class MeshAgentService : Service() {
      * the auto-start consent flag — the tap *is* the consent for this moment.
      */
     private suspend fun requestStartInferenceNow() {
+        // G21: dedup concurrent starts. If a start is already in progress
+        // (STARTING) or running, no-op. Prevents frenetic tap storms from
+        // calling stop() and re-launching the process mid-boot.
+        if (inferenceRunner.status.value == InferenceRunner.Status.STARTING) {
+            terminalBuffer.append(LogSource.INFER, "start ignored: already starting", LogLevel.DEBUG)
+            return
+        }
         val settings = settingsStore.settings.first()
         if (!allowsInference(settings)) {
             terminalBuffer.append(LogSource.INFER, "start refused: device mode does not allow inference", LogLevel.WARN)
@@ -390,7 +412,7 @@ class MeshAgentService : Service() {
             modelPath = modelFile.absolutePath,
             port = settings.inferencePort,
             threads = settings.threads,
-            contextSize = settings.contextSize,
+            contextSize = resolveContextSize(settings),
         )
     }
 

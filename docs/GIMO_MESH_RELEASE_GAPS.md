@@ -56,14 +56,18 @@ Ordenado por criticidad descendente dentro de cada sección.
 - **Estado**: binary compilado y puesto en `assets/bin/`. Después de G1, irá
   a `jniLibs/arm64-v8a/`.
 
-### G3. ABIs no cubiertas: armv7 y x86_64
-- **Síntoma**: actualmente solo cross-compilamos arm64-v8a. Devices armv7
-  (Samsung Galaxy S8 y anteriores) no pueden arrancar inferencia. Emuladores
-  x86_64 tampoco.
-- **Fix**: replicar el build para `armeabi-v7a` (API 28) y `x86_64` (API 28).
-  La APK multi-ABI incrementará ~45 MB en total.
-- **Prioridad**: media — el 70% del parque Android arm64 cubre el uso real;
-  armv7 puede quedar como follow-up "legacy support".
+### G3. ~~ABIs no cubiertas: armv7 y x86_64~~ — **x86_64 FIXED 2026-04-20, armv7 deferred**
+- **Fix aplicado (x86_64)**: cross-compilado llama-server para x86_64 API
+  28 con NDK 27.2 + cmake + ninja. Binary stripped: 17 MB. Empaquetado
+  en `jniLibs/x86_64/libllama-server.so`. APK pasó de 93 MB a 102 MB.
+  Emulator Android 16 API 36 ahora puede arrancar inferencia nativa.
+  busybox no se empaqueta en x86_64 (no hay binary EXALAB válido), pero
+  el emulator tiene toybox en `/system/bin/` que cubre los applets que
+  necesitamos — `ShellEnvironment.buildEnvironment()` ya prioriza
+  `/system/bin` en PATH, así que utility shell_exec funciona sin cambios.
+- **armv7 diferido**: el 70% del parque Android es arm64 en 2026. S8 y
+  anteriores quedarán sin inferencia local — pueden seguir siendo
+  utility nodes vía toybox del sistema.
 
 ---
 
@@ -134,35 +138,40 @@ Ordenado por criticidad descendente dentro de cada sección.
 
 ## FRICCIONES (calidad de vida)
 
-### G10. Compilación debug-not-stripped → APK 156 MB → 16 MB stripped
-- **Síntoma**: el binary con `debug_info` ocupa 156 MB. El Gradle packaging
-  no stripea `.so` de jniLibs por default en algunos setups.
-- **Fix aplicado**: `llvm-strip --strip-all` manual post-build. Automatizar
-  en el script de cross-compile o via Gradle task `stripDebugSymbols`.
+### G10. ~~Compilación debug-not-stripped~~ — **FIXED 2026-04-20**
+- **Fix aplicado**: `scripts/build_gimomesh_natives.sh` orquesta
+  cmake + ninja + strip para todas las ABIs definidas en `ABIS`
+  (default `arm64-v8a x86_64`). Uso:
+  ```
+  NDK=/path/to/ndk ./scripts/build_gimomesh_natives.sh
+  ```
+  Re-runnable, idempotente por ABI. Detecta host (windows-x86_64,
+  linux-x86_64, darwin-arm64) y usa el `llvm-strip` adecuado. Placea
+  el binary stripped en `jniLibs/<abi>/libllama-server.so`.
 
-### G11. Bottom nav no está en el accessibility tree
-- **Síntoma**: `mobile_list_elements_on_screen` no reporta los 4 tabs del
-  bottom nav. Para un tester automatizado o screen reader, los tabs son
-  invisibles.
-- **Causa raíz**: los Compose `NavItem` no tienen `contentDescription` ni
-  `Modifier.semantics`.
-- **Fix**: añadir `Modifier.semantics { role = Role.Tab }` a cada NavItem
-  + contentDescription visible.
+### G11. ~~Bottom nav no está en el accessibility tree~~ — **FIXED 2026-04-20**
+- **Fix aplicado**: `NavItem` ahora lleva `Modifier.semantics(mergeDescendants=true)`
+  con `role=Tab`, `selected` y `contentDescription="$label tab (selected)"`.
+  TalkBack + automated test tools walking the semantics tree ahora ven los
+  4 tabs (DASH/TERM/AGENT/CONFIG).
 
-### G12. KillSwitch long-press mal descubrible
-- **Síntoma**: el único feedback durante el hold-2s es un progress ring.
-  Sin práctica previa, el user asume que es un botón normal que no responde.
-- **Fix**: añadir vibration al onPress + haptic tick al llegar a 50%/100%.
-  O reemplazar por slide-to-confirm más estándar.
+### G12. ~~KillSwitch long-press mal descubrible~~ — **FIXED 2026-04-20**
+- **Fix aplicado**: `KillSwitch` ahora hace `HapticFeedbackType.LongPress`
+  en `onPress` (reconocimiento inmediato: "tu toque fue detectado") y
+  otro al `onLongPress` (confirmación: "hoy cruzaste el umbral"). El user
+  ya no lo confunde con un botón que no responde.
 
-### G13. Nombre del modelo en dashboard muestra "qwen2.5:3b" (placeholder) hasta primera interacción
-- **Síntoma**: tras enrollment, el ModelCard muestra "qwen2.5:3b" (el default
-  de `SettingsStore.Settings`) no el nombre real del modelo descargado
-  ("qwen2.5-coder_3b_q4_k_m") hasta que el user navega por la app.
-- **Causa raíz**: `state.modelLoaded` se queda en el default del settings
-  store; el SetupWizard al terminar descarga debería hacer `settingsStore.updateModel`.
-- **Fix**: auditar la transición `SetupStep.Downloading` → `Done` en
-  SetupWizardScreen para persistir el model id correcto.
+### G13. ~~Model name placeholder en dashboard~~ — **FIXED 2026-04-20**
+- **Análisis**: el wizard ya hacía `settingsStore.updateModel(model.modelId)`
+  al terminar el download (SetupWizardScreen.kt:372). El bug estaba en
+  `MeshViewModel.observeSettings`: el `modelLoaded = state.modelLoaded.ifBlank { settings.model }`
+  congelaba el default placeholder la primera vez y nunca recogía updates
+  posteriores del DataStore.
+- **Fix aplicado**: remover el `.ifBlank` — `settings.model` es la fuente
+  de verdad y el observer recoge los updates en cada emit. Updates
+  autoritativas del server (via `applyAuthoritativeDeviceState`) layer on
+  top cuando llegan. Dashboard ahora muestra el nombre real del modelo
+  descargado desde el primer render post-wizard.
 
 ### G14. Screenshot del wizard completo excede límite de 2000px
 - **Síntoma**: `mobile_take_screenshot` de Claude MCP explotó en la sesión
@@ -170,14 +179,12 @@ Ordenado por criticidad descendente dentro de cada sección.
 - **Fix** (testing only): usar `mobile_list_elements_on_screen` preferentemente,
   o screenshots post-resize si son necesarios.
 
-### G15. Audit log no captura redeem
-- **Síntoma**: `/ops/mesh/audit.jsonl` no tiene entries para
-  `/ops/mesh/onboard/redeem`. Imposible auditar quién enroló qué device.
-- **Causa raíz**: el handler `redeem_onboard_code` omite la llamada a
-  `audit_log(...)`. Es NO-auth por diseño (el código es la credential), pero
-  sigue siendo un evento auditable con IP origen y device_id asignado.
-- **Fix**: añadir `audit_log("OPS", "/ops/mesh/onboard/redeem", device_id,
-  operation="WRITE", actor=f"ip:{client_ip}")`.
+### G15. ~~Audit log no captura redeem~~ — **ALREADY FIXED**
+- **Re-inspección (2026-04-20)**: `mesh_router.py:1115` ya emite
+  `audit_log("OPS", "/ops/mesh/onboard/redeem", f"device={body.device_id}
+  workspace={result.workspace_id}", operation="WRITE",
+  actor=f"onboard:{body.device_id}")`. El gap estaba desactualizado —
+  fue arreglado en alguna sesión previa, nunca taché la entrada.
 
 ### G16. Binarios `busybox` siguen siendo 0-byte placeholder
 - **Síntoma**: utility tasks fail. `assets/bin/busybox` = 0 bytes → shell
@@ -186,11 +193,12 @@ Ordenado por criticidad descendente dentro de cada sección.
   empaquetar un static build pre-hecho. Menos crítico porque solo afecta
   utility mode, no inference.
 
-### G17. Token de admin vive en `.gimo_credentials` pero `.orch_token` apunta al operator
-- **Síntoma**: quien hace debugging via curl con `.orch_token` obtiene 403
-  en endpoints admin (ej. `/ops/mesh/onboard/code`) porque es operator token.
-- **Fix**: documentar en README la jerarquía, o añadir helper CLI que
-  imprima el admin token (con confirmación explícita del user).
+### G17. ~~Token hierarchy no documentada~~ — **FIXED 2026-04-20**
+- **Fix aplicado**: nueva sección "Jerarquía de tokens (auth)" en
+  `README.md` con una tabla admin/operator/actions, el one-liner para
+  extraer el admin token de `.gimo_credentials`, y un recordatorio de
+  que `.orch_token` root es operator (no admin). Incluye heads-up sobre
+  el 403 típico cuando se usa el token erróneo.
 
 ---
 
@@ -202,26 +210,28 @@ Ordenado por criticidad descendente dentro de cada sección.
 - **Fix aplicado** (temporal, debug): logs con `Log.i/e` + stacktrace. Dejar
   al menos el `Log.e(TAG, "start() failed", e)` en producción.
 
-### G19. Redirect de error stream en InferenceRunner bloqueante
-- **Síntoma potencial**: `redirectErrorStream(true)` + nadie lee el
-  inputStream → si `--log-disable` falla y llama-server escribe mucho stdout,
-  el pipe buffer (64KB) se llena y llama-server se bloquea.
-- **Fix**: lanzar una coroutine que drene `inputStream` y la dirija al
-  terminalBuffer con `LogSource.INFER`. Adicionalmente: los primeros ~100
-  lines son útiles para diagnosticar fallos de modelo.
+### G19. ~~Redirect error stream bloqueante~~ — **FIXED 2026-04-20**
+- **Fix aplicado**: nuevo `startOutputDrain(process)` en `InferenceRunner`
+  que lanza un `outputDrainJob` en `runnerScope` (Dispatchers.IO) que
+  itera `BufferedReader.readLine()` hasta EOF. Las primeras 100 líneas
+  van a logcat con tag `InferenceRunner: llama-server:` para diagnóstico
+  de carga de modelo; el resto se drena silenciosamente. `stop()` cancela
+  el drain job. El viejo `readOutput` queda como no-op stub para compat.
 
-### G20. Contexto reducido `2048` no diferencia por modelo
-- **Síntoma**: `settings.contextSize = 2048` es hardcoded. Modelos de código
-  se benefician de 8K+. Modelos chat 4K es suficiente.
-- **Fix**: leer context size del manifest del modelo o config server-side
-  cuando approve el device.
+### G20. ~~Context size 2048 hardcoded~~ — **FIXED 2026-04-20**
+- **Fix aplicado**: `MeshAgentService.resolveContextSize(settings)` con
+  heurística por nombre de modelo: `coder`/`code` → 8192 (code models
+  se benefician de contexto grande), `7b`/`8b` → 4096 (modelos medios),
+  else → `settings.contextSize` (power users pueden sobrescribir).
+  Aplicado en ambos paths de start: auto-start en `syncInferenceRuntime`
+  y user-triggered en `requestStartInferenceNow`.
 
-### G21. No hay rate limiting en taps de START
-- **Síntoma potencial**: si el user hace tap frenético, se disparan N
-  `ACTION_START_INFERENCE` consecutivos. El primer `stop()` en `InferenceRunner`
-  puede matar el process que el segundo intent intenta crear.
-- **Fix**: debounce 500ms en el ModelCard onClick, o gate en el service
-  que ignore el intent si ya hay una `STARTING` en vuelo.
+### G21. ~~No rate limiting en taps de START~~ — **FIXED 2026-04-20**
+- **Fix aplicado**: `MeshAgentService.requestStartInferenceNow` ahora
+  hace early-return si `InferenceRunner.status.value == STARTING`. Taps
+  frenéticos no re-disparan el stop() que mataría el process en plena
+  carga — el segundo intent encuentra "already starting" y se ignora.
+  El status RUNNING ya tenía guard explícito desde antes.
 
 ### G23. ~~Recovery from `thermal_lockout` no transiciona~~ — **FIXED 2026-04-20**
 - **Fix aplicado**: `MeshRegistry.process_heartbeat` reordenado. Thermal

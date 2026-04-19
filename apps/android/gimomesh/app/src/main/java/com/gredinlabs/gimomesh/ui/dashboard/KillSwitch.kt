@@ -12,7 +12,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import com.gredinlabs.gimomesh.ui.components.GimoIcons
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -28,6 +30,7 @@ fun KillSwitch(
 ) {
     var isHolding by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(10.dp)
+    val haptic = LocalHapticFeedback.current
 
     val borderColor = if (isMeshRunning) GimoAccents.alert.copy(alpha = 0.3f)
         else GimoAccents.trust.copy(alpha = 0.3f)
@@ -54,11 +57,19 @@ fun KillSwitch(
                 .pointerInput(isMeshRunning) {
                     detectTapGestures(
                         onPress = {
+                            // G12: haptic acknowledgement on press so the user
+                            // knows the long-press is being registered. Prevents
+                            // the "button that doesn't respond" misread on first
+                            // contact; real feedback starts immediately.
                             isHolding = true
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             tryAwaitRelease()
                             isHolding = false
                         },
                         onLongPress = {
+                            // Confirmation haptic at the 2s threshold — the user
+                            // feels the click-through moment.
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onToggle()
                         },
                     )

@@ -87,6 +87,29 @@ cd apps/web && npm run dev
 
 Para variables de GIMO Web (Firebase, Stripe, licencias), ver `apps/web/.env.example`.
 
+### Jerarquía de tokens (auth)
+
+GIMO genera tres tokens con roles diferentes, no uno solo. Viven en
+`tools/gimo_server/.gimo_credentials` (YAML):
+
+| Rol | Uso | Permite |
+|---|---|---|
+| `admin` | Owner local (CLI personal, admin UI) | Todo, incluyendo `POST /ops/mesh/onboard/code`, approve/refuse devices, prune, license ops |
+| `operator` | CLI daily-ops, terminales compartidos | Operaciones read + mutaciones en runs/drafts/mesh-heartbeat. NO admin endpoints |
+| `actions` | CI, webhooks, integrations | Solo GET en endpoints read-only allowlisted |
+
+El archivo `.orch_token` en la raíz del repo contiene el token **operator**
+por compatibilidad histórica (no el admin). Si haces debugging via curl y
+recibes `403 "admin role or higher required"`, significa que usaste el
+operator y deberías usar el admin. Lee el admin desde
+`.gimo_credentials`:
+
+```bash
+grep '^admin:' tools/gimo_server/.gimo_credentials | sed 's/admin: "\(.*\)"/\1/'
+```
+
+Nunca comitees estos tokens. `.gimo_credentials` está en `.gitignore`.
+
 ### ChatGPT Developer Mode
 
 El surface oficial para ChatGPT Apps sigue siendo `/mcp/app`.
