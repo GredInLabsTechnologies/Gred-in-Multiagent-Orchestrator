@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
-from ..config import get_settings
+from ..config import ALLOWLIST_REQUIRE, get_settings
+from ..security import get_active_repo_dir, get_allowed_paths
 from ..version import __version__
 from .economy.budget_forecast_service import BudgetForecastService
 from .conversation_service import ConversationService
+from .file_service import FileService
 from .git_service import GitService
 from .notice_policy_service import NoticePolicyService
 from .ops import OpsService
 from .providers.service_impl import ProviderService
 from .run_lifecycle import is_active_run_status, is_terminal_run_status
 from .storage_service import StorageService
+from .system_service import SystemService
 
 logger = logging.getLogger("orchestrator.services.operator_status")
 
@@ -22,11 +26,31 @@ class OperatorStatusService:
 
     @classmethod
     def _repo_root(cls, workspace_override: str | None = None) -> Path:
-        if workspace_override:
-            p = Path(workspace_override)
-            if p.is_dir():
-                return p
         settings = get_settings()
+        if workspace_override:
+            # Only accept the override if it resolves to an existing, registered
+            # repository directory. We validate against the repo registry to
+            # prevent path traversal via the X-Gimo-Workspace header
+            # (pythonsecurity:S2083/S6549).
+            try:
+                candidate = Path(workspace_override).resolve(strict=True)
+            except (OSError, ValueError):
+                candidate = None
+            if candidate is not None and candidate.is_dir():
+                try:
+                    from ..security import load_repo_registry
+
+                    registry = load_repo_registry() or {}
+                    registered = {
+                        Path(r).resolve() for r in (registry.get("repos") or [])
+                        if isinstance(r, str)
+                    }
+                except Exception:
+                    registered = set()
+                if candidate in registered:
+                    return candidate
+                # Fall through to the configured repo_root_dir — do not trust
+                # an unregistered workspace override.
         return Path(settings.repo_root_dir)
 
     @classmethod
@@ -104,18 +128,59 @@ class OperatorStatusService:
         return remaining_pct, ("ok" if remaining_pct > 20.0 else "low"), budget_spend, budget_limit
 
     @classmethod
-    def get_status_snapshot(cls, workspace_override: str | None = None) -> dict[str, Any]:
+    def _ui_status_snapshot(
+        cls,
+        app_start_time: float | None = None,
+    ) -> dict[str, Any]:
+        snapshot: dict[str, Any] = {
+            "allowlist_count": 0,
+            "last_audit_line": None,
+            "service_status": "UNKNOWN",
+        }
+
+        if isinstance(app_start_time, (int, float)) and app_start_time > 0:
+            snapshot["uptime_seconds"] = max(0.0, time.time() - float(app_start_time))
+
+        try:
+            base_dir = get_active_repo_dir()
+            allowed_paths = get_allowed_paths(base_dir) if ALLOWLIST_REQUIRE else set()
+            snapshot["allowlist_count"] = len(allowed_paths)
+        except Exception:
+            logger.warning("Failed to get allowlist snapshot", exc_info=True)
+
+        try:
+            audit_lines = FileService.tail_audit_lines(limit=1)
+            snapshot["last_audit_line"] = audit_lines[-1] if audit_lines else None
+        except Exception:
+            logger.warning("Failed to get audit snapshot", exc_info=True)
+
+        try:
+            snapshot["service_status"] = SystemService.get_status()
+        except Exception:
+            logger.warning("Failed to get service status snapshot", exc_info=True)
+
+        return snapshot
+
+    @classmethod
+    def get_status_snapshot(
+        cls,
+        workspace_override: str | None = None,
+        app_start_time: float | None = None,
+    ) -> dict[str, Any]:
         """Return the canonical backend-authored operator status snapshot.
 
         Args:
             workspace_override: If set (from X-Gimo-Workspace header), use this
                 path instead of the server's own repo_root_dir for git operations.
+            app_start_time: If set from the FastAPI app state, include request-scoped
+                uptime in the canonical snapshot.
         """
         # Base snapshot (always present)
         snapshot: dict[str, Any] = {
             "backend_status": "ok",
             "backend_version": __version__,
         }
+        snapshot.update(cls._ui_status_snapshot(app_start_time=app_start_time))
 
         # Git snapshot (optional, fail-safe)
         try:

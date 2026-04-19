@@ -14,15 +14,6 @@ from ...ops_models import (
 )
 from ..providers.service import ProviderService
 from ..providers.auth_service import ProviderAuthService
-from ..ops import OpsService
-from .._subprocess_util import popen_compat
-from ..providers.catalog_ollama_helpers import (
-    ensure_ollama_ready as _ensure_ollama_ready_helper,
-    ollama_health as _ollama_health_helper,
-    ollama_list_installed as _ollama_list_installed_helper,
-)
-from ..providers.metadata import OPENAI_COMPAT_CATALOG_TYPES, REMOTE_MODELS_BASE_URLS
-from ...security import audit_log
 
 
 # Recommended Ollama models for local agentic code workloads.

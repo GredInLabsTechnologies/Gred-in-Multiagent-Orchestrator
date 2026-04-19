@@ -21,7 +21,7 @@ describe('useAuditLog', () => {
             expect(result.current.rawLogs).toEqual(mockLogs)
         })
         expect(fetch).toHaveBeenCalledWith(
-            expect.stringContaining('/ui/audit?limit=200'),
+            expect.stringContaining('/ops/audit/tail?limit=200'),
             expect.any(Object)
         )
     })
@@ -44,7 +44,7 @@ describe('useAuditLog', () => {
 
         await waitFor(() => {
             expect(fetch).toHaveBeenCalledWith(
-                expect.stringContaining('/ui/audit?limit=50'),
+                expect.stringContaining('/ops/audit/tail?limit=50'),
                 expect.any(Object)
             )
         })

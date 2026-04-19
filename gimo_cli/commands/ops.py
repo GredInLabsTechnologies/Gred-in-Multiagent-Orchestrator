@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from typing import Any
 
@@ -12,7 +11,7 @@ from rich.table import Table
 
 from gimo_cli import app, console
 from gimo_cli.api import api_request
-from gimo_cli.config import YAML_AVAILABLE, yaml, load_config, project_root, save_config
+from gimo_cli.config import YAML_AVAILABLE, yaml, load_config, save_config
 from gimo_cli.stream import emit_output, git_command
 
 
@@ -209,7 +208,7 @@ def audit(
     endpoints = {
         "alerts": ("/ops/observability/alerts", None),
         "dependencies": ("/ops/system/dependencies", None),
-        "audit_tail": ("/ui/audit", {"limit": 20}),
+        "audit_tail": ("/ops/audit/tail", {"limit": 20}),
     }
     result: dict[str, Any] = {}
 

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GIMO Mesh</string>
+
+    <!--
+      Model recommendation card strings (SetupWizardScreen.ModelCard).
+      Consumed by the recommendation engine UI — each device on the mesh
+      sees these after the onboarding wizard resolves available models.
+      Spanish translations live in values-es/strings.xml.
+    -->
+    <string name="rec_badge_recommended">RECOMMENDED</string>
+    <string name="rec_device_load">Device load</string>
+    <string name="rec_ram_format">%1$s / %2$s GB RAM</string>
+    <string name="rec_stat_speed">speed</string>
+    <string name="rec_stat_battery">battery</string>
+    <string name="rec_stat_mode">mode</string>
+    <string name="rec_run_at_your_own_risk">Run at your own risk</string>
+
+    <!-- Fit levels — acronyms. Keep short: shown in pill badges. -->
+    <string name="rec_fit_optimal">OPTIMAL</string>
+    <string name="rec_fit_comfortable">COMFORTABLE</string>
+    <string name="rec_fit_tight">TIGHT</string>
+    <string name="rec_fit_overload">OVERLOAD</string>
+</resources>

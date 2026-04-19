@@ -48,16 +48,16 @@ handover:
   repo_multi_select:
     enabled: true
     endpoints:
-      list: "/ui/repos"
-      active: "/ui/repos/active"
-      select: "/ui/repos/select"
-      vitaminize: "/ui/repos/vitaminize"
+      list: "/ops/repos"
+      active: "/ops/repos/active"
+      select: "/ops/repos/select"
+      vitaminize: "/ops/repos/vitaminize"
     vitaminize_package:
       - "tools/gimo_server"
       - "tools/orchestrator_dashboard"
       - "scripts/ops/start_orch.cmd"
       - "scripts/ops/launch_orchestrator.ps1"
-    open_repo_endpoint: "/ui/repos/open"
+    open_repo_endpoint: "/ops/repos/open"
     install_script: "scripts/ops/vitaminize_repo.ps1"
   cloudflare_tunnel:
     steps:

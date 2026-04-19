@@ -56,5 +56,7 @@ from gimo_cli.commands import threads  # noqa: E402,F401
 from gimo_cli.commands import observe  # noqa: E402,F401
 from gimo_cli.commands import server  # noqa: E402,F401
 from gimo_cli.commands import surface  # noqa: E402,F401
+from gimo_cli.commands import discover  # noqa: E402,F401
+from gimo_cli.commands import runtime  # noqa: E402,F401
 
 __all__ = ["app", "console"]

@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
@@ -11,14 +12,23 @@ from ._base import _utcnow, _json_dump
 
 logger = logging.getLogger("orchestrator.ops")
 
+# Strict identifier pattern for the filename-visible portion of a lock key.
+# The full scope/resource is still included in the hash digest, so the
+# sanitized prefix is just a human hint.
+_SAFE_SCOPE_RE = re.compile(r"[^a-z0-9_-]+")
+
 
 class LockMixin:
     """Merge lock acquire / release / heartbeat / recovery."""
 
     @classmethod
     def _execution_lock_path(cls, scope: str, resource_id: str) -> Any:
-        safe_scope = str(scope or "execution").strip().lower().replace(" ", "_")
-        lock_key = f"{safe_scope}:{resource_id or 'default'}"
+        raw_scope = str(scope or "execution").strip().lower()
+        # Strip anything outside [a-z0-9_-] so ``scope`` cannot introduce
+        # path separators or traversal components (S2083/S6549).
+        safe_scope = _SAFE_SCOPE_RE.sub("_", raw_scope) or "execution"
+        safe_scope = safe_scope[:32]
+        lock_key = f"{raw_scope}:{resource_id or 'default'}"
         digest = hashlib.sha256(lock_key.encode("utf-8", errors="ignore")).hexdigest()[:24]
         return cls.LOCKS_DIR / f"{safe_scope}_{digest}.json"
 

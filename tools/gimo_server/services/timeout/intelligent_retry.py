@@ -17,12 +17,10 @@ logger = logging.getLogger("orchestrator.services.timeout.intelligent_retry")
 
 class ProviderDegradedError(Exception):
     """Raised when provider is collectively degraded (no retry)."""
-    pass
 
 
 class MaxRetriesExceededError(Exception):
     """Raised when max retries exceeded."""
-    pass
 
 
 class ExponentialBackoff:
@@ -159,7 +157,7 @@ class IntelligentRetry:
                 )
                 raise
 
-            except TimeoutError as exc:
+            except TimeoutError:
                 # Timeout → record failure and check collective intelligence
                 self.circuit_breaker.record_failure()
                 attempt += 1

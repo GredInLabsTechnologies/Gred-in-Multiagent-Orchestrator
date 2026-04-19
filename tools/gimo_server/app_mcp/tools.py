@@ -6,9 +6,9 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from tools.gimo_server.config import APP_MCP_ALLOWED_PROFILES
+from tools.gimo_server.services.app_draft_service import AppDraftService
 from tools.gimo_server.services.app_session_service import AppSessionService
 from tools.gimo_server.services.context_request_service import ContextRequestService
-from tools.gimo_server.services.draft_validation_service import DraftValidationService
 from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.workspace.repo_recon_service import RepoReconService
 from tools.gimo_server.services.review_merge_service import ReviewMergeService
@@ -291,8 +291,8 @@ def register_tools(mcp: FastMCP, *, profile: str = "safe") -> None:
             "allowed_paths": allowed_paths or [],
         }
         try:
-            result = DraftValidationService.validate_draft(session_id, payload)
-            return {"status": "ok", **result}
+            result = AppDraftService.create_validated_draft(session_id, payload)
+            return {"status": "ok", **result.model_dump()}
         except Exception as exc:
             return {"status": "error", "msg": str(exc)}
 

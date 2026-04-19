@@ -89,7 +89,7 @@ def e2e_env(ops_dir):
     - active_policy: lista [fn] para cambiar la policy en caliente
     """
     from tools.gimo_server.routers.ops import run_router
-    from tools.gimo_server.services import provider_service_impl
+    from tools.gimo_server.services.providers import service_impl as provider_service_impl
     from tools.gimo_server.services import runtime_policy_service as rps_mod
     from tools.gimo_server.services.execution import run_worker as rw_mod
     from tools.gimo_server.resilience import SupervisedTask

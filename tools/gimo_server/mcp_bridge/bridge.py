@@ -4,6 +4,8 @@ import httpx
 import logging
 from pathlib import Path
 
+from tools.gimo_server.security.safe_log import sanitize_for_log
+
 logger = logging.getLogger("mcp_bridge")
 
 MAX_PROXY_RETRIES = 2
@@ -114,7 +116,7 @@ async def proxy_to_api(method: str, path: str, **kwargs) -> str:
             except httpx.ConnectError:
                 continue
             except Exception as retry_err:
-                logger.error(f"Bridge retry error: {retry_err}")
+                logger.error("Bridge retry error: %s", sanitize_for_log(retry_err))
                 break
 
         return (
@@ -122,5 +124,5 @@ async def proxy_to_api(method: str, path: str, **kwargs) -> str:
             f"Please ensure it is running on {BACKEND_URL} or use the 'gimo_start_engine' tool."
         )
     except Exception as e:
-        logger.error(f"Bridge proxy error: {e}")
+        logger.error("Bridge proxy error: %s", sanitize_for_log(e))
         return f"❌ Bridge Error: {e}"

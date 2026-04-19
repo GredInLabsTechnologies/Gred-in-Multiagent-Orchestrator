@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, Dict
 from ..contracts import FileTaskSpec, StageInput, StageOutput, ExecutionStage
 from ..tools.executor import ToolExecutor
-from ...services.runtime_policy_service import RuntimePolicyService
 
 logger = logging.getLogger(__name__)
 
@@ -165,5 +164,4 @@ class FileWrite(ExecutionStage):
 
     async def rollback(self, input: StageInput) -> None:
         """File write rollback requires git checkpointing (Phase 3)."""
-        pass
 

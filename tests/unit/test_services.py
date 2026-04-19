@@ -113,7 +113,23 @@ class TestSystemService:
     def test_status_headless(self):
         with patch.dict(os.environ, {"ORCH_HEADLESS": "true"}):
             from tools.gimo_server.services.system_service import SystemService
-            assert SystemService.get_status() == "RUNNING (MOCK)"
+            assert SystemService.get_status() == "RUNNING"
+
+    @pytest.mark.parametrize(
+        ("raw_status", "expected"),
+        [
+            ("4 RUNNING", "RUNNING"),
+            ("2 START_PENDING", "STARTING"),
+            ("3 STOP_PENDING", "STOPPING"),
+            ("7 PAUSED", "STOPPED"),
+            ("RUNNING (MOCK)", "RUNNING"),
+            ("unexpected-state", "UNKNOWN"),
+        ],
+    )
+    def test_normalize_status(self, raw_status, expected):
+        from tools.gimo_server.services.system_service import SystemService
+
+        assert SystemService.normalize_status(raw_status) == expected
 
     def test_restart_success(self):
         with patch("subprocess.run") as mock_run:

@@ -78,13 +78,13 @@ class Pipeline:
             
             if output.status == "fail" and self.config.stop_on_failure:
                 # Trigger rollback for all completed stages in reverse order
-                logger.warning(f"Pipeline failed at stage {stage.name}. Triggering rollback.")
+                logger.warning("Pipeline failed at stage %s. Triggering rollback.", stage.name)
                 rollback_errors: list[tuple[str, Exception]] = []
                 for completed_stage, completed_input in reversed(execution_history):
                     try:
                         await completed_stage.rollback(completed_input)
                     except Exception as rb_err:
-                        logger.error(f"Error during rollback of {completed_stage.name}: {rb_err}")
+                        logger.error("Error during rollback of %s: %s", completed_stage.name, rb_err)
                         rollback_errors.append((completed_stage.name, rb_err))
                 if rollback_errors:
                     output.artifacts["rollback_status"] = "partial"

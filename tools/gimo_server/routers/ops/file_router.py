@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
@@ -21,10 +21,10 @@ router = APIRouter(prefix="/ops/files", tags=["files"])
 @router.get("/tree")
 async def get_tree(
     request: Request,
+    auth: Annotated[AuthContext, Depends(require_read)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     path: str = ".",
     max_depth: int = Query(3, le=6),
-    auth: AuthContext = Depends(require_read),
-    _rl: None = Depends(check_rate_limit),
 ):
     base_dir = get_workspace_from_request(request)
     target = validate_path(path, base_dir)
@@ -51,10 +51,10 @@ async def get_tree(
 def get_file_content(
     request: Request,
     path: str,
+    auth: Annotated[AuthContext, Depends(require_read)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     start_line: int = Query(1, ge=1),
     end_line: int = Query(MAX_LINES, ge=1),
-    auth: AuthContext = Depends(require_read),
-    _rl: None = Depends(check_rate_limit),
 ):
     base_dir = get_workspace_from_request(request)
     target = validate_path(path, base_dir)
@@ -73,10 +73,10 @@ def get_file_content(
 @router.get("/search")
 async def search_files(
     request: Request,
+    auth: Annotated[AuthContext, Depends(require_read)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     q: str = Query(..., min_length=3, max_length=128),
     ext: Optional[str] = None,
-    auth: AuthContext = Depends(require_read),
-    _rl: None = Depends(check_rate_limit),
 ):
     base_dir = get_workspace_from_request(request)
     loop = asyncio.get_running_loop()
@@ -87,10 +87,10 @@ async def search_files(
 @router.get("/diff", response_class=PlainTextResponse)
 def get_diff(
     request: Request,
+    auth: Annotated[AuthContext, Depends(require_read)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     base: str = "main",
     head: str = "HEAD",
-    auth: AuthContext = Depends(require_read),
-    _rl: None = Depends(check_rate_limit),
 ):
     from ...config import MAX_BYTES
     from ...security import redact_sensitive_data

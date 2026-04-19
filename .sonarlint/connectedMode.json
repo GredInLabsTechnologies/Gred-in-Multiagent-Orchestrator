@@ -1,5 +1,5 @@
 {
-    "sonarCloudOrganization": "shiloren",
-    "projectKey": "Shiloren_gred_orchestrator",
+    "sonarCloudOrganization": "gredinlabstechnologies",
+    "projectKey": "GredInLabsTechnologies_Gred-in-Multiagent-Orchestrator",
     "region": "EU"
 }

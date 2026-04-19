@@ -19,8 +19,6 @@ _middlewares_module = _importlib_util.module_from_spec(_middlewares_spec)
 _middlewares_spec.loader.exec_module(_middlewares_module)
 register_middlewares = _middlewares_module.register_middlewares
 from tools.gimo_server.routers.core_router import router as core_router
-from tools.gimo_server.routers.legacy_ui_router import router as legacy_ui_router
-from tools.gimo_server.routers.redirects import router as redirects_router
 from tools.gimo_server.version import __version__
 from tools.gimo_server.services.snapshot_service import SnapshotService
 from tools.gimo_server.services.gics_service import GicsService
@@ -32,6 +30,11 @@ from tools.gimo_server.routers.auth_router import router as auth_router
 
 # Configure logging with dynamic level from env
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
+# Defense-in-depth: universal CR/LF/tab scrubber on every root handler so
+# user-controlled interpolation cannot forge log lines (CWE-117 / S5145).
+# Call-sites should still prefer %s formatting; this is the safety net.
+from tools.gimo_server.security.safe_log import install_log_sanitizer
+install_log_sanitizer()
 logger = logging.getLogger("orchestrator")
 if DEBUG:
     logger.info("DEBUG mode enabled (LOG_LEVEL=%s)", LOG_LEVEL)
@@ -116,10 +119,72 @@ async def _notify_sessions_for_run(run, sessions, logger, ops_service):
                 messages=[{"role": "user", "content": {"type": "text", "text": msg}}],
                 maxTokens=500,
             )
-            logger.info(f"Pushed Handover Sampling request for {run.id} to client via MCP")
+            logger.info("Pushed Handover Sampling request for %s to client via MCP", run.id)
         except Exception as e:
-            logger.error(f"Failed to push Sampling to MCP client: {e}")
+            logger.error("Failed to push Sampling to MCP client: %s", e)
             ops_service.append_log(run.id, level="WARN", msg="MCP handover blocked: no session available")
+
+async def _mesh_heartbeat_timeout_loop(app):
+    """Expire mesh devices that haven't sent a heartbeat recently."""
+    import asyncio
+    import logging
+    logger = logging.getLogger("orchestrator")
+    while True:
+        try:
+            await asyncio.sleep(15)
+            registry = getattr(app.state, "mesh_registry", None)
+            if registry is None:
+                continue
+            expired = registry.expire_stale_devices(timeout_seconds=90.0)
+            if expired:
+                logger.info("Mesh heartbeat timeout: expired %s", expired)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Mesh heartbeat timeout loop error: %s", exc)
+
+
+async def _mdns_signals_refresh_loop(app):
+    """rev 2 Cambio 11 — refresh mDNS TXT record every 60s with live routing signals.
+
+    Reads the bootstrapped host device from the mesh registry and pushes health /
+    mode / load to the advertiser so LAN peers see fresh routing metadata without
+    having to query `/ops/mesh/*`. Best-effort: any error is swallowed.
+    """
+    import asyncio
+    import logging
+    logger = logging.getLogger("orchestrator.mesh.mdns")
+    while True:
+        try:
+            await asyncio.sleep(60)
+            advertiser = getattr(app.state, "mdns_advertiser", None)
+            if advertiser is None or not getattr(advertiser, "is_running", False):
+                continue
+            host = getattr(app.state, "mesh_host_device", None)
+            registry = getattr(app.state, "mesh_registry", None)
+            if host is None or registry is None:
+                continue
+            # Prefer the live device snapshot from the registry (updated by heartbeats
+            # and the bootstrapped host self-heartbeat), fall back to the bootstrap record.
+            live = registry.get_device(host.device_id) or host
+            try:
+                from tools.gimo_server.services.hardware_monitor_service import HardwareMonitorService
+                snap = HardwareMonitorService.get_instance().get_snapshot()
+                load_pct = max(
+                    getattr(snap, "cpu_percent", 0.0) or 0.0,
+                    getattr(snap, "ram_percent", 0.0) or 0.0,
+                ) / 100.0
+            except Exception:
+                load_pct = 0.0
+            advertiser.update_signals(
+                health=int(getattr(live, "health_score", 100) or 100),
+                mode=getattr(live.device_mode, "value", "inference"),
+                load=load_pct,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.debug("mDNS refresh loop error: %s", exc)
 
 async def _mcp_sampling_loop():
     """
@@ -150,9 +215,12 @@ async def _mcp_sampling_loop():
             logger.warning("MCP sampling loop error: %s", exc)
 
 async def _shutdown_services(logger, app, hw_monitor, run_worker, tasks):
+    # Cleanup path: we deliberately swallow CancelledError for each subsystem so that
+    # a second cancel signal mid-shutdown doesn't leave later services un-stopped.
+    # This is the canonical lifespan teardown — no outer awaiter observes cancellation here.
     try:
         await hw_monitor.stop_monitoring()
-    except asyncio.CancelledError as exc:
+    except asyncio.CancelledError as exc:  # NOSONAR: S7497 — intentional cleanup continuation
         logger.debug("Hardware monitor shutdown cancelled: %s", exc)
     except Exception as exc:
         logger.debug("Hardware monitor shutdown warning: %s", exc)
@@ -165,7 +233,7 @@ async def _shutdown_services(logger, app, hw_monitor, run_worker, tasks):
 
     try:
         await run_worker.stop()
-    except asyncio.CancelledError as exc:
+    except asyncio.CancelledError as exc:  # NOSONAR: S7497 — intentional cleanup continuation
         logger.debug("Run worker shutdown cancelled: %s", exc)
     except Exception as exc:
         logger.debug("Run worker shutdown warning: %s", exc)
@@ -184,7 +252,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting GIMO Orchestrator...")
 
     if not BASE_DIR.exists():
-        logger.error(f"BASE_DIR {BASE_DIR} does not exist!")
+        logger.error("BASE_DIR %s does not exist!", BASE_DIR)
         raise RuntimeError(f"BASE_DIR {BASE_DIR} does not exist!")
 
     app.state.start_time = time.time()
@@ -263,7 +331,9 @@ async def lifespan(app: FastAPI):
     app.state.license_guard = _guard
     # Re-validate in background every 24h
     import asyncio as _asyncio
-    _asyncio.create_task(_guard.periodic_recheck())
+    _license_recheck_task = _asyncio.create_task(_guard.periodic_recheck())
+    # Keep strong reference on app.state to prevent premature GC of the background task.
+    app.state.license_recheck_task = _license_recheck_task
     # ──────────────────────────────────────────────────────────────────
 
     async with AsyncExitStack() as app_mcp_exit_stack:
@@ -330,6 +400,8 @@ async def lifespan(app: FastAPI):
         integrity_task = asyncio.create_task(_integrity_recheck_loop(settings))
 
         mcp_sampling_task = asyncio.create_task(_mcp_sampling_loop())
+        mesh_timeout_task = asyncio.create_task(_mesh_heartbeat_timeout_loop(app))
+        mdns_refresh_task = asyncio.create_task(_mdns_signals_refresh_loop(app))
 
         # Startup reconcile + rotation for runtime consistency
         try:
@@ -447,6 +519,74 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("ExecutionAuthority init warning: %s", exc)
 
+        # Initialize Mesh Registry (lazy — dirs created only when mesh_enabled)
+        try:
+            from tools.gimo_server.services.mesh.registry import MeshRegistry
+            from tools.gimo_server.services.mesh.host_bootstrap import AndroidHostBootstrapService
+            app.state.mesh_registry = MeshRegistry()
+            app.state.mesh_host_device = AndroidHostBootstrapService(
+                app.state.mesh_registry
+            ).bootstrap_from_env()
+            logger.info("Mesh registry initialized")
+        except Exception as exc:
+            logger.warning("Mesh registry init warning: %s", exc)
+
+        # mDNS advertiser — auto-enabled when host bootstrap publishes device_mode=server
+        # (single lever: `gimo --role server` or GIMO_MESH_HOST_DEVICE_MODE=server). Admin
+        # can still opt-in explicitly via ORCH_MDNS_ENABLED=true for clients that want to
+        # broadcast under another mode.
+        _mdns_explicit = _os.environ.get("ORCH_MDNS_ENABLED", "false").lower() == "true"
+        _host_dev = getattr(app.state, "mesh_host_device", None)
+        _mdns_auto = False
+        try:
+            from tools.gimo_server.models.mesh import DeviceMode as _DeviceMode
+            _mdns_auto = (
+                _host_dev is not None
+                and getattr(_host_dev, "device_mode", None) == _DeviceMode.server
+            )
+        except Exception:
+            pass
+        if _mdns_explicit or _mdns_auto:
+            try:
+                from tools.gimo_server.services.mesh.mdns_advertiser import MdnsAdvertiser
+                _mdns_port = int(_os.environ.get("ORCH_PORT", "9325"))
+                _mdns_token = _os.environ.get("ORCH_TOKEN", "")
+                # Plan 2026-04-16 Change 5: read bundle version if available
+                _runtime_version = ""
+                try:
+                    from pathlib import Path as _RPath
+                    _assets_override = _os.environ.get("ORCH_RUNTIME_ASSETS_DIR", "").strip()
+                    if _assets_override:
+                        _manifest_path = _RPath(_assets_override) / "gimo-core-runtime.json"
+                    else:
+                        _manifest_path = _RPath(__file__).resolve().parents[2] / "runtime-assets" / "gimo-core-runtime.json"
+                    if _manifest_path.exists():
+                        import json as _json
+                        _runtime_version = _json.loads(_manifest_path.read_text(encoding="utf-8")).get("runtime_version", "")
+                except Exception:
+                    logger.debug("mDNS runtime_version probe failed", exc_info=True)
+                advertiser = MdnsAdvertiser(
+                    port=_mdns_port, token=_mdns_token, runtime_version=_runtime_version,
+                )
+                advertiser.start()
+                # Seed TXT record with initial routing signals from the bootstrapped host
+                if _host_dev is not None:
+                    try:
+                        advertiser.update_signals(
+                            health=int(getattr(_host_dev, "health_score", 100) or 100),
+                            mode=getattr(_host_dev.device_mode, "value", "inference"),
+                            load=0.0,
+                        )
+                    except Exception:
+                        logger.debug("mDNS initial update_signals failed", exc_info=True)
+                app.state.mdns_advertiser = advertiser
+                if _mdns_auto and not _mdns_explicit:
+                    logger.info(
+                        "mDNS auto-enabled because host bootstrap published device_mode=server"
+                    )
+            except Exception as exc:
+                logger.warning("mDNS advertiser init warning: %s", exc)
+
         # F8.1: Seed initial preset telemetry for adaptive routing
         try:
             from tools.gimo_server.services.preset_telemetry_service import PresetTelemetryService
@@ -469,10 +609,17 @@ async def lifespan(app: FastAPI):
         # Drain any externally-registered supervised tasks (R17 Cluster A)
         await SupervisedTask.drain(timeout=10.0)
 
+        # Shutdown mDNS advertiser
+        if hasattr(app.state, "mdns_advertiser"):
+            try:
+                app.state.mdns_advertiser.stop()
+            except Exception:
+                pass
+
         # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
         logger.info("Shutting down GIMO Orchestrator...")
         try:
-            tasks = [cleanup_task, threat_cleanup_task, ops_cleanup_task, mcp_sampling_task, integrity_task]
+            tasks = [cleanup_task, threat_cleanup_task, ops_cleanup_task, mcp_sampling_task, integrity_task, mesh_timeout_task, mdns_refresh_task]
             await _shutdown_services(logger, app, hw_monitor, run_worker, tasks)
             if hasattr(app.state, "run_worker"):
                 delattr(app.state, "run_worker")
@@ -484,7 +631,7 @@ async def lifespan(app: FastAPI):
                 pass
         except Exception as exc:
             logger.debug("Lifespan shutdown suppressed exception: %s", exc)
-        except asyncio.CancelledError as exc:
+        except asyncio.CancelledError as exc:  # NOSONAR: S7497 — lifespan teardown path; suppress to keep TestClient happy
             logger.debug("Lifespan shutdown cancelled: %s", exc)
 
 
@@ -609,7 +756,7 @@ def _register_core_routes(app: FastAPI, settings):
             else:
                 os.kill(pid, signal.SIGINT)
 
-        asyncio.get_event_loop().create_task(_trigger_graceful_shutdown())
+        asyncio.create_task(_trigger_graceful_shutdown())
         return JSONResponse({"status": "shutting_down", "pid": pid})
 
     @app.get("/ops/openapi")
@@ -635,7 +782,7 @@ def _register_core_routes(app: FastAPI, settings):
         connections are closed with 4401.
         """
         from tools.gimo_server.services.notification_service import NotificationService
-        from tools.gimo_server.security.auth import session_store, SESSION_COOKIE_NAME
+        from tools.gimo_server.security.auth import session_store
         from tools.gimo_server.config import TOKENS
         import asyncio
 
@@ -783,12 +930,10 @@ def create_app() -> FastAPI:
             app.mount("/mcp", legacy_mcp.sse_app())
             logger.info("General MCP Bridge mounted at /mcp [LEGACY]")
     except Exception as e:
-        logger.error(f"Failed to mount FastMCP Server: {e}")
+        logger.error("Failed to mount FastMCP Server: %s", e)
 
     # Register all API routes
     app.include_router(core_router)
-    app.include_router(legacy_ui_router)
-    app.include_router(redirects_router)
     app.include_router(auth_router)
     app.include_router(ops_router)
 
@@ -800,6 +945,8 @@ def create_app() -> FastAPI:
     from tools.gimo_server.routers.ops.service_router import router as svc_router
     from tools.gimo_server.routers.ops.ide_context_router import router as ide_context_router
     from tools.gimo_server.routers.ops.checkpoint_router import router as checkpoint_router
+    from tools.gimo_server.routers.ops.mesh_router import router as mesh_router
+    from tools.gimo_server.routers.ops.gics_patterns_router import router as gics_patterns_router
     app.include_router(file_router)
     app.include_router(repo_router)
     app.include_router(graph_router)
@@ -807,6 +954,8 @@ def create_app() -> FastAPI:
     app.include_router(svc_router)
     app.include_router(ide_context_router)
     app.include_router(checkpoint_router)
+    app.include_router(mesh_router)
+    app.include_router(gics_patterns_router)
 
     mount_static(app)
 
@@ -815,16 +964,65 @@ def create_app() -> FastAPI:
 app = create_app()
 
 if __name__ == "__main__":
+    import argparse
+    import os as _os_cli
     import uvicorn
 
-    # Canonical default port for the orchestrator service.
-    # Can be overridden for advanced setups via ORCH_PORT.
-    port = int(__import__("os").environ.get("ORCH_PORT", "9325"))
+    # rev 2: --role {client|server} palanca única para server mode.
+    # server ⇒ bind LAN (0.0.0.0) + mDNS auto-enable + bootstrap env hint.
+    parser = argparse.ArgumentParser(
+        prog="gimo-core",
+        description="GIMO Core — multi-agent orchestrator",
+    )
+    parser.add_argument(
+        "--role",
+        choices=("client", "server"),
+        default=_os_cli.environ.get("ORCH_ROLE", "client"),
+        help="client (default, bind 127.0.0.1) | server (bind 0.0.0.0, advertise mDNS)",
+    )
+    parser.add_argument(
+        "--mesh-host-id",
+        default=_os_cli.environ.get("GIMO_MESH_HOST_DEVICE_ID", ""),
+        help="Bootstrap device_id when running as mesh host (implies --role server if set)",
+    )
+    parser.add_argument(
+        "--mesh-host-class",
+        default=_os_cli.environ.get("GIMO_MESH_HOST_DEVICE_CLASS", "desktop"),
+        help="Device class for bootstrap (desktop/laptop/smartphone/tablet)",
+    )
+    args, _unknown = parser.parse_known_args()
 
+    # Canonical default port for the orchestrator service.
+    port = int(_os_cli.environ.get("ORCH_PORT", "9325"))
+
+    # rev 2: --role server overrides the bind default to 0.0.0.0 unless
+    # ORCH_HOST is explicitly set. Emits WARN so the operator sees LAN exposure.
+    explicit_host = _os_cli.environ.get("ORCH_HOST")
+    if args.role == "server":
+        host = explicit_host or "0.0.0.0"
+        # Propagate bootstrap env vars so the lifespan sees the intent
+        if args.mesh_host_id and not _os_cli.environ.get("GIMO_MESH_HOST_ENABLED"):
+            _os_cli.environ["GIMO_MESH_HOST_ENABLED"] = "true"
+            _os_cli.environ["GIMO_MESH_HOST_DEVICE_ID"] = args.mesh_host_id
+            _os_cli.environ.setdefault("GIMO_MESH_HOST_DEVICE_MODE", "server")
+            _os_cli.environ.setdefault("GIMO_MESH_HOST_DEVICE_CLASS", args.mesh_host_class)
+        logger.warning(
+            "GIMO Core starting in SERVER role — binding %s:%d (LAN-visible). "
+            "Bearer token remains required for all endpoints.",
+            host, port,
+        )
+    else:
+        host = explicit_host or "127.0.0.1"
+
+    # Auto-reload NUNCA en server mode: watchfiles detecta escrituras a
+    # .orch_data/ (registry, thermal events, audit) y reinicia el proceso
+    # mid-heartbeat. En client/dev mode está bien porque el volumen de
+    # writes es menor.
+    _reload = DEBUG and args.role != "server"
     uvicorn.run(
         "tools.gimo_server.main:app",
-        host="127.0.0.1",  # nosec B104 - CLI entrypoint for local/dev use
+        host=host,
         port=port,
-        reload=DEBUG,
+        reload=_reload,
         log_level=LOG_LEVEL.lower(),
     )

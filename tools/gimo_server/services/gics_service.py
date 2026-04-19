@@ -298,7 +298,6 @@ class GicsService:
 
     def flush(self) -> Any:
         """No-op shim kept for backward compat — daemon auto-flushes."""
-        pass
 
     # ── 1.3.4 bulk & summary primitives ──────────────────────────────────────
 
@@ -368,6 +367,14 @@ class GicsService:
         p = str(provider_type or "unknown").strip().lower().replace(" ", "_")
         m = str(model_id or "unknown").strip().lower().replace(" ", "_")
         return f"ops:model_score:{p}:{m}"
+
+    @staticmethod
+    def _task_key(provider_type: str, model_id: str, task_type: str) -> str:
+        """Key for per-task-type performance tracking (GIMO Mesh)."""
+        p = str(provider_type or "unknown").strip().lower().replace(" ", "_")
+        m = str(model_id or "unknown").strip().lower().replace(" ", "_")
+        t = str(task_type or "general").strip().lower().replace(" ", "_")
+        return f"ops:task_pattern:{p}:{m}:{t}"
 
     def seed_model_prior(
         self,
@@ -474,6 +481,20 @@ class GicsService:
                 "updated_at": int(time.time()),
             }
             self.put(key, {**fields, **outcome})
+
+            # ── Per-task-type tracking for GIMO Mesh ─────────────────────
+            # Only record when task_type is explicitly classified (not "general")
+            # to avoid polluting the pattern store with unclassified tasks.
+            if task_type and task_type != "general":
+                self._record_task_pattern(
+                    provider_type=provider_type,
+                    model_id=model_id,
+                    task_type=task_type,
+                    success=success,
+                    latency_ms=latency_ms,
+                    cost_usd=cost_usd,
+                )
+
             return {**fields, **outcome}
 
     def get_model_reliability(
@@ -484,3 +505,139 @@ class GicsService:
         if not result:
             return None
         return dict(result.get("fields") or {})
+
+    # ── Per-task-type tracking (GIMO Mesh) ────────────────────────────────────
+
+    def _record_task_pattern(
+        self,
+        *,
+        provider_type: str,
+        model_id: str,
+        task_type: str,
+        success: bool,
+        latency_ms: Optional[float] = None,
+        cost_usd: Optional[float] = None,
+    ) -> None:
+        """Record a per-task-type outcome alongside the general model outcome.
+
+        Called internally by record_model_outcome() when task_type != "general".
+        Must be called with the parent model key lock already held.
+        """
+        task_key = self._task_key(provider_type, model_id, task_type)
+        try:
+            existing = self.get(task_key)
+            fields = dict((existing or {}).get("fields") or {})
+
+            samples = int(fields.get("samples", 0) or 0) + 1
+            successes = int(fields.get("successes", 0) or 0) + (1 if success else 0)
+            failures = int(fields.get("failures", 0) or 0) + (0 if success else 1)
+            failure_streak = 0 if success else int(fields.get("failure_streak", 0) or 0) + 1
+
+            prev_latency = float(fields.get("avg_latency_ms", 0.0) or 0.0)
+            prev_cost = float(fields.get("avg_cost_usd", 0.0) or 0.0)
+            new_latency = float(latency_ms or 0.0)
+            new_cost = float(cost_usd or 0.0)
+            avg_latency = ((prev_latency * (samples - 1)) + new_latency) / max(1, samples)
+            avg_cost = ((prev_cost * (samples - 1)) + new_cost) / max(1, samples)
+
+            success_rate = successes / max(1, samples)
+            prior_score = float(fields.get("score", 0.5) or 0.5)
+            blended_score = max(0.0, min(1.0, (prior_score * 0.2) + (success_rate * 0.8)))
+            anomaly = failure_streak >= 3
+
+            task_outcome = {
+                "provider_type": provider_type,
+                "model_id": model_id,
+                "task_type": task_type,
+                "score": blended_score,
+                "samples": samples,
+                "successes": successes,
+                "failures": failures,
+                "failure_streak": failure_streak,
+                "avg_latency_ms": avg_latency,
+                "avg_cost_usd": avg_cost,
+                "anomaly": anomaly,
+                "updated_at": int(time.time()),
+            }
+            self.put(task_key, {**fields, **task_outcome})
+        except Exception as exc:
+            logger.warning("GICS per-task tracking for %s failed: %s", task_key, exc)
+
+    def query_task_pattern(
+        self,
+        *,
+        task_type: str,
+        model_id: str = "",
+    ) -> Dict[str, Any]:
+        """Query GICS for performance data on a specific task type.
+
+        If model_id is provided, returns data for that specific model+task combo.
+        If model_id is empty, returns data for all models that have executed this task type.
+        """
+        task_type_norm = str(task_type or "").strip().lower().replace(" ", "_")
+        if not task_type_norm:
+            return {"task_type": task_type, "models": [], "error": "empty task_type"}
+
+        # Single model query
+        if model_id:
+            try:
+                entries = self.scan(prefix="ops:task_pattern:")
+                model_norm = str(model_id).strip().lower().replace(" ", "_")
+                for entry in entries:
+                    f = dict(entry.get("fields") or {})
+                    entry_task = str(f.get("task_type", "")).strip().lower().replace(" ", "_")
+                    entry_model = str(f.get("model_id", "")).strip().lower().replace(" ", "_")
+                    if entry_task == task_type_norm and entry_model == model_norm:
+                        return {
+                            "task_type": task_type_norm,
+                            "model_id": model_id,
+                            "data": f,
+                        }
+            except Exception as exc:
+                logger.error("GICS query_task_pattern(%s, %s) failed: %s", task_type, model_id, exc)
+                return {"task_type": task_type_norm, "model_id": model_id, "data": None, "error": str(exc)}
+            return {"task_type": task_type_norm, "model_id": model_id, "data": None}
+
+        # All models for a task type
+        try:
+            entries = self.scan(prefix="ops:task_pattern:")
+            models: List[Dict[str, Any]] = []
+            for entry in entries:
+                f = dict(entry.get("fields") or {})
+                entry_task = str(f.get("task_type", "")).strip().lower().replace(" ", "_")
+                if entry_task == task_type_norm:
+                    models.append(f)
+            # Sort by score descending so best performers are first
+            models.sort(key=lambda m: float(m.get("score", 0.0) or 0.0), reverse=True)
+            return {"task_type": task_type_norm, "models": models}
+        except Exception as exc:
+            logger.error("GICS query_task_pattern(%s) failed: %s", task_type, exc)
+            return {"task_type": task_type_norm, "models": [], "error": str(exc)}
+
+    def get_task_patterns(self) -> List[Dict[str, Any]]:
+        """Return all known task patterns with their model performance data.
+
+        Groups entries by task_type, each containing the list of models
+        and their performance metrics for that task type.
+        """
+        try:
+            entries = self.scan(prefix="ops:task_pattern:")
+            # Group by task_type
+            by_task: Dict[str, List[Dict[str, Any]]] = {}
+            for entry in entries:
+                f = dict(entry.get("fields") or {})
+                task = str(f.get("task_type", "unknown")).strip().lower().replace(" ", "_")
+                by_task.setdefault(task, []).append(f)
+
+            patterns: List[Dict[str, Any]] = []
+            for task_type, models in sorted(by_task.items()):
+                models.sort(key=lambda m: float(m.get("score", 0.0) or 0.0), reverse=True)
+                patterns.append({
+                    "task_type": task_type,
+                    "model_count": len(models),
+                    "models": models,
+                })
+            return patterns
+        except Exception as exc:
+            logger.error("GICS get_task_patterns() failed: %s", exc)
+            return []

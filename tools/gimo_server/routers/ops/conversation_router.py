@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import List, Optional, Annotated
@@ -15,6 +16,9 @@ from .common import _require_role
 from ...services.thread_session_service import ThreadSessionService
 
 router = APIRouter(prefix="/threads", tags=["conversation"])
+
+# Strong refs for fire-and-forget plan executions (prevents premature GC).
+_PLAN_EXECUTION_TASKS: set[asyncio.Task] = set()
 
 
 class ChatMessageBody(BaseModel):
@@ -360,8 +364,9 @@ async def respond_to_plan(
                 raise HTTPException(status_code=404, detail="Thread not found")
 
             # Execute plan in background
-            import asyncio
-            asyncio.create_task(CustomPlanService.execute_plan(plan.id))
+            _exec_task = asyncio.create_task(CustomPlanService.execute_plan(plan.id))
+            _PLAN_EXECUTION_TASKS.add(_exec_task)
+            _exec_task.add_done_callback(_PLAN_EXECUTION_TASKS.discard)
 
             return {
                 "status": "approved",

@@ -5,13 +5,12 @@ Validates Pydantic models at runtime to catch schema violations and inconsistenc
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 
 from pydantic import BaseModel, ValidationError
 
 if TYPE_CHECKING:
     from ..models.plan import PlanNode
-    from ..models.agent_routing import RoutingDecision
 
 logger = logging.getLogger("orchestrator.contract_validator")
 

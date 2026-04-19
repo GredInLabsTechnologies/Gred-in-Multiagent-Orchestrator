@@ -4,14 +4,13 @@ import asyncio
 import json as _json
 import logging
 import shutil
-from typing import List, Tuple
+from typing import List
 
 from ...ops_models import (
     NormalizedModelInfo,
     ProviderValidateResponse,
 )
 from ._base import (
-    ProviderCatalogBase,
     _run_sync,
     _fallback_models_for,
 )
@@ -25,7 +24,7 @@ async def _fetch_claude_cli_models() -> List[NormalizedModelInfo]:
     Runs from the server process (no CLAUDECODE guard) using run_in_executor
     so it doesn't block the event loop.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         rc, output = await asyncio.wait_for(
             loop.run_in_executor(None, _run_sync, ["claude", "api", "get", "/v1/models"]),

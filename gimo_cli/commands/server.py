@@ -264,6 +264,54 @@ def _wait_for_port_free(port: int, timeout_seconds: float = 15.0) -> bool:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _resolve_launcher_python(
+    proj_root, env: dict
+) -> tuple[str, "str | None", str]:
+    """Decide which Python interpreter to use for the server.
+
+    Plan 2026-04-16 Change 6: if a runtime bundle is present next to the launcher,
+    extract it lazily and boot through the bundled Python. This makes the desktop
+    path symmetric with Android (both consume the same signed bundle).
+
+    Returns a tuple ``(python_exe, pythonpath_extra, provenance)`` where
+    ``provenance`` is ``"bundle"`` or ``"host"`` for audit logs.
+    """
+    from pathlib import Path as _P
+    assets_override = env.get("ORCH_RUNTIME_ASSETS_DIR", "").strip()
+    assets_dir = _P(assets_override) if assets_override else _P(proj_root) / "runtime-assets"
+    manifest_path = assets_dir / "gimo-core-runtime.json"
+    if not manifest_path.exists():
+        return sys.executable, None, "host"
+
+    # Bundle present — extract lazily and launch through it
+    try:
+        from tools.gimo_server.services.runtime_bootstrap import (
+            RuntimeBootstrapError,
+            ensure_extracted,
+        )
+        target_dir = _P(env.get("ORCH_RUNTIME_DIR", "") or (_P(proj_root) / "runtime"))
+        pub_pem = env.get("ORCH_RUNTIME_PUBLIC_KEY", "")
+        allow_unsigned = env.get("ORCH_RUNTIME_ALLOW_UNSIGNED", "").lower() in {"1", "true", "yes"}
+        # BUGS_LATENTES §H8: escape hatch para tests / bundles sintéticos en
+        # hosts cross-ABI. En producción siempre False para que el probe
+        # atrape ABI mismatch temprano.
+        skip_probe = env.get("ORCH_RUNTIME_SKIP_EXEC_PROBE", "").lower() in {"1", "true", "yes"}
+        result = ensure_extracted(
+            assets_dir, target_dir,
+            public_key_pem=pub_pem or None,
+            allow_unsigned=allow_unsigned,
+            skip_exec_probe=skip_probe,
+        )
+        return str(result.python_binary), str(result.repo_root), "bundle"
+    except (RuntimeBootstrapError, Exception) as exc:
+        # Fallback to host interpreter — but make the reason loud in the console.
+        console.print(
+            f"[yellow][!] Runtime bundle found but bootstrap failed: {exc}[/yellow]"
+        )
+        console.print("[dim]Falling back to host Python.[/dim]")
+        return sys.executable, None, "host"
+
+
 def start_server(host: str = DEFAULT_SERVER_HOST, port: int = DEFAULT_SERVER_PORT) -> bool:
     """Start the GIMO server in the background. Returns True on success."""
     url = _server_url(host, port)
@@ -282,8 +330,17 @@ def start_server(host: str = DEFAULT_SERVER_HOST, port: int = DEFAULT_SERVER_POR
     env = os.environ.copy()
     env["ORCH_PORT"] = str(port)
 
+    # Plan 2026-04-16 Change 6: bundle-aware interpreter selection
+    python_exe, pythonpath_extra, provenance = _resolve_launcher_python(proj_root, env)
+    if pythonpath_extra:
+        existing = env.get("PYTHONPATH", "")
+        sep = ";" if sys.platform == "win32" else ":"
+        env["PYTHONPATH"] = pythonpath_extra if not existing else f"{pythonpath_extra}{sep}{existing}"
+    if provenance == "bundle":
+        console.print("[dim][OK] Booting through runtime bundle[/dim]")
+
     uvicorn_cmd = [
-        sys.executable,
+        python_exe,
         "-m",
         "uvicorn",
         "tools.gimo_server.main:app",

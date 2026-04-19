@@ -6,11 +6,12 @@ Endpoints for resuming operations from checkpoints.
 
 from __future__ import annotations
 import logging
-from typing import Annotated, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Body
+from typing import Annotated
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
+from tools.gimo_server.security.safe_log import sanitize_for_log
 from tools.gimo_server.services.checkpoint_service import CheckpointService
 from tools.gimo_server.services.ops import OpsService
 from .common import _require_role, _actor_label
@@ -174,7 +175,9 @@ async def resume_from_checkpoint(
 
     logger.info(
         "Resuming %s operation %s from checkpoint %s",
-        operation, operation_id, checkpoint_id
+        sanitize_for_log(operation),
+        sanitize_for_log(operation_id),
+        sanitize_for_log(checkpoint_id),
     )
 
     # Resume based on operation type
@@ -225,11 +228,12 @@ async def _resume_plan_generation(
     # Extract state
     stage = state.get("stage")
     completed_tasks = state.get("completed_tasks", [])
-    partial_result = state.get("partial_result", {})
+    state.get("partial_result", {})
 
     logger.info(
         "Resuming plan generation: stage=%s, completed_tasks=%d",
-        stage, len(completed_tasks)
+        sanitize_for_log(stage),
+        len(completed_tasks),
     )
 
     raise HTTPException(
@@ -248,7 +252,7 @@ async def _resume_run_execution(
     """Resume run execution from checkpoint state."""
     stage = state.get("stage")
 
-    logger.info("Resuming run execution: stage=%s", stage)
+    logger.info("Resuming run execution: stage=%s", sanitize_for_log(stage))
 
     raise HTTPException(
         status_code=501,

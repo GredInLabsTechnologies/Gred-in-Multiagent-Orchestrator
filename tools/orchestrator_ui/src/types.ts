@@ -878,3 +878,61 @@ export interface CreateCustomPlanRequest {
     nodes: CustomPlanNode[];
     edges: CustomPlanEdge[];
 }
+
+// ── GIMO Mesh types ─────────────────────────────────────────
+
+export type DeviceMode = 'inference' | 'utility' | 'server' | 'hybrid';
+export type ConnectionState = 'offline' | 'discoverable' | 'pending_approval' | 'approved' | 'refused' | 'connected' | 'reconnecting' | 'thermal_lockout';
+export type OperationalState = 'idle' | 'busy' | 'paused' | 'draining' | 'disabled' | 'error' | 'locked_out';
+
+export interface MeshDevice {
+    device_id: string;
+    name: string;
+    device_mode: DeviceMode;
+    connection_state: ConnectionState;
+    operational_state: OperationalState;
+    core_enabled: boolean;
+    local_allow_core_control: boolean;
+    local_allow_task_execution: boolean;
+    device_class: string;
+    soc_model: string;
+    soc_vendor: string;
+    max_model_params_b: number;
+    model_loaded: string;
+    last_heartbeat: string | null;
+    enrolled_at: string | null;
+    health_score: number;
+    battery_percent: number;
+    battery_charging: boolean;
+    battery_temp_c: number;
+    cpu_percent: number;
+    ram_percent: number;
+    cpu_temp_c: number;
+    gpu_temp_c: number;
+    thermal_throttled: boolean;
+    thermal_locked_out: boolean;
+    active_task_id: string;
+}
+
+export interface MeshStatus {
+    mesh_enabled: boolean;
+    device_count: number;
+    devices_by_mode: Record<string, number>;
+    devices_connected: number;
+}
+
+export interface ThermalProfile {
+    device_id: string;
+    total_events: number;
+    warnings: number;
+    throttles: number;
+    lockouts: number;
+    avg_time_to_throttle_min: number;
+    avg_time_to_lockout_min: number;
+    worst_cpu_temp: number;
+    worst_gpu_temp: number;
+    worst_battery_temp: number;
+    last_event_at: string;
+    recommended_duty_cycle_min: number;
+    health_score: number;
+}

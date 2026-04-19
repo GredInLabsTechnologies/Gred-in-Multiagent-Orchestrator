@@ -108,6 +108,10 @@ EXECUTION_POLICIES: Dict[ExecutionPolicyName, ExecutionPolicyProfile] = {
     ),
 }
 
+# DEPRECATED: legacy compatibility map for callers that still persisted mood as a
+# policy carrier. Owner: @Shiloren. Canonical replacement: explicit
+# execution_policy on routing/profile contracts. Sunset criterion: zero runtime
+# callers outside compatibility shims.
 LEGACY_MOOD_TO_POLICY: Dict[str, ExecutionPolicyName] = {
     "neutral": "workspace_safe",
     "forensic": "docs_research",
@@ -140,7 +144,7 @@ class ExecutionPolicyService:
     def resolve_policy_name(cls, *, execution_policy: str | None = None, legacy_mood: str | None = None) -> ExecutionPolicyName:
         if execution_policy:
             return cls.canonical_policy_name(execution_policy)
-        return cls.policy_name_from_legacy_mood(legacy_mood)
+        return "workspace_safe"
 
     @classmethod
     def resolve_policy(cls, *, execution_policy: str | None = None, legacy_mood: str | None = None) -> ExecutionPolicyProfile:

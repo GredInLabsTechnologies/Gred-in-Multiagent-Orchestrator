@@ -4,9 +4,9 @@ import logging
 import os
 from typing import Any, Dict
 
-logger = logging.getLogger("orchestrator.services.cost")
+from ...utils.debug_mode import is_debug_mode
 
-_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
+logger = logging.getLogger("orchestrator.services.cost")
 
 
 class CostService:
@@ -34,10 +34,10 @@ class CostService:
                     cls.PRICING_REGISTRY = json.load(f)
                     cls._PRICING_LOADED = True
             else:
-                logger.warning(f"Pricing file not found at {pricing_path}, using defaults.")
+                logger.warning("Pricing file not found at %s, using defaults.", pricing_path)
                 cls.PRICING_REGISTRY = {"local": {"input": 0.0, "output": 0.0}}
         except Exception as e:
-            logger.error(f"Failed to load pricing database: {e}")
+            logger.error("Failed to load pricing database: %s", e)
             cls.PRICING_REGISTRY = {"local": {"input": 0.0, "output": 0.0}}
     
     # Extended mapping for common aliases to canonical keys in pricing registry
@@ -177,7 +177,7 @@ class CostService:
         input_cost = (input_tokens / 1_000_000) * pricing["input"]
         output_cost = (output_tokens / 1_000_000) * pricing["output"]
         cost = round(input_cost + output_cost, 6)
-        if _DEBUG_MODE:
+        if is_debug_mode():
             logger.debug("[CostService] DEBUG MODE — cost $%.6f for %s (not tracked against budget)", cost, model)
         return cost
 

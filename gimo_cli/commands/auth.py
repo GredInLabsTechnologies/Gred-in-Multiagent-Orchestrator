@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import time
 
 import httpx
 import typer
-from rich.panel import Panel
 
 from gimo_cli import app, console
 from gimo_cli.api import api_request, resolve_server_url, resolve_token
@@ -313,7 +311,7 @@ def doctor() -> None:
 
         if payload:
             plan = payload.get("plan", "unknown")
-            uid = payload.get("uid", "")
+            payload.get("uid", "")
             exp = payload.get("exp", 0)
             days_left = max(0, int((exp - time.time()) / 86400)) if exp else 0
             console.print(

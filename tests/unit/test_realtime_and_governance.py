@@ -375,9 +375,7 @@ def test_phase1_mcp_alias_tools_are_registered():
 
 UI_SOURCE_ROOT = Path(__file__).resolve().parents[1] / "tools" / "orchestrator_ui" / "src"
 FETCH_PATTERN = re.compile(r"fetch\(\s*`\$\{API_BASE\}([^`]+)`")
-IGNORED_DYNAMIC_PATHS = {
-    "/ui/service/{param}",
-}
+IGNORED_DYNAMIC_PATHS: set[str] = set()
 
 
 def _normalize_frontend_path(raw: str) -> str:

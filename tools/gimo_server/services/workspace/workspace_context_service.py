@@ -31,7 +31,6 @@ class WorkspaceContextService:
             file_path: Path del archivo afectado
             metadata: Metadata adicional del evento
         """
-        from ..gics_service import GicsService
 
         event = {
             "event_type": event_type,
@@ -41,7 +40,6 @@ class WorkspaceContextService:
         }
 
         # Persist en GICS (append to list)
-        key = f"ops:workspace:session:{session_id}:events"
         existing_events = cls._retrieve_events_from_gics(session_id) or []
         existing_events.append(event)
 
@@ -173,7 +171,6 @@ class WorkspaceContextService:
                 "last_activity_at": float,
             }
         """
-        from ..gics_service import GicsService
         from ..context_analysis_service import ContextAnalysisService
 
         # Get recent files

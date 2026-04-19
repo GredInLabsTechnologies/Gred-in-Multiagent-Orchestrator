@@ -3,7 +3,7 @@
 P9: Permite a IDEs (VS Code, JetBrains) reportar eventos de workspace y obtener
 análisis de context para routing adaptativo.
 """
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 

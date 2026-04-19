@@ -1,0 +1,22 @@
+# cryptography on Android-aarch64 has no PyPI wheel that matches Termux's
+# bionic libc. Compiling the Rust backend takes 15+ min on a Snapdragon 855.
+#
+# The pragmatic fix: tell pip to prefer any available binary (which on
+# Termux means the system-installed `python-cryptography` apt package
+# pre-built against bionic), and fall back to source only if no wheel
+# satisfies. Consumers should ALSO ensure `pkg install python-cryptography`
+# was run on the target device before attempting the install.
+#
+# This TOML is consumed by Rove's pip_runner — keys map to PipRunOptions.
+[pip]
+prefer_binary = true
+
+[pip.extra_args]
+# Force pip to refuse source-only builds for cryptography specifically;
+# this surfaces the missing-wheel case loudly instead of silently kicking
+# off a multi-minute Rust compile.
+"--only-binary" = "cryptography"
+
+[advisory]
+recommended_pkg_install = ["python-cryptography"]
+fallback_strategy = "loud-fail"

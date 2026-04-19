@@ -7,6 +7,8 @@ logger = logging.getLogger("ops.run_router")
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from tools.gimo_server.security import audit_log, check_rate_limit, verify_token
 from tools.gimo_server.security.auth import AuthContext
+from tools.gimo_server.security.path_safety import PathTraversalError, safe_join
+from tools.gimo_server.security.safe_log import sanitize_for_log
 from tools.gimo_server.ops_models import (
     ActionDraft,
     OpsApproved, OpsApproveResponse, OpsRun, OpsCreateRunRequest, OpsResumeRunRequest,
@@ -38,7 +40,11 @@ def _spawn_run(request: Request, run_id: str, composition: str | None = None) ->
         try:
             OpsService.update_run_status(run_id, "error", msg=f"Execution failed: {str(exc)[:200]}")
         except Exception as status_exc:
-            logger.error("on_failure handler error for run %s: %s", run_id, status_exc)
+            logger.error(
+                "on_failure handler error for run %s: %s",
+                sanitize_for_log(run_id),
+                status_exc,
+            )
 
     if supervisor:
         task = supervisor.spawn(
@@ -205,13 +211,21 @@ async def approve_draft(
                     _spawn_run(request, run.id, composition=composition)
                     run = OpsService.update_run_status(run.id, "running", msg="Execution started via draft approval auto-run")
                 except Exception as exc:
-                    logger.error("Spawn failed for draft %s, falling back to worker: %s", draft_id, exc)
+                    logger.error(
+                        "Spawn failed for draft %s, falling back to worker: %s",
+                        sanitize_for_log(draft_id),
+                        exc,
+                    )
                     try:
                         worker = getattr(request.app.state, "run_worker", None)
                         if worker is not None:
                             worker.notify()
                     except Exception as wk_exc:
-                        logger.error("Worker fallback also failed for draft %s: %s", draft_id, wk_exc)
+                        logger.error(
+                            "Worker fallback also failed for draft %s: %s",
+                            sanitize_for_log(draft_id),
+                            wk_exc,
+                        )
             else:
                 _spawn_run(request, run.id, composition=composition)
             
@@ -225,7 +239,11 @@ async def approve_draft(
             else:
                 pass
         except Exception as exc:
-            logger.error("Auto-run creation failed for draft %s: %s", draft_id, exc)
+            logger.error(
+                "Auto-run creation failed for draft %s: %s",
+                sanitize_for_log(draft_id),
+                exc,
+            )
 
     return OpsApproveResponse(approved=approved, run=run)
 
@@ -389,9 +407,14 @@ async def get_run_events(
 
     async def _generate():
         # 1. Stage-level events from the run journal (structured pipeline telemetry)
-        journal_path = OpsService.OPS_DIR / "run_journals" / f"{run_id}.jsonl"
+        try:
+            journal_path = safe_join(
+                OpsService.OPS_DIR / "run_journals", f"{run_id}.jsonl"
+            )
+        except PathTraversalError:
+            journal_path = None
         journal_events: list[dict] = []
-        if journal_path.exists():
+        if journal_path is not None and journal_path.exists():
             try:
                 for line in journal_path.read_text(encoding="utf-8", errors="ignore").splitlines():
                     line = line.strip()
@@ -453,7 +476,12 @@ async def replay_run(
     if not run:
         raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
 
-    journal_path = str((OpsService.OPS_DIR / "run_journals" / f"{run_id}.jsonl"))
+    try:
+        journal_path = str(
+            safe_join(OpsService.OPS_DIR / "run_journals", f"{run_id}.jsonl")
+        )
+    except PathTraversalError:
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
     journal = RunJournal(storage_path=journal_path)
     journal.load()
     replay = ReplayEngine(journal)
@@ -505,13 +533,21 @@ async def rerun(
             _spawn_run(request, run.id)
             run = OpsService.update_run_status(run.id, "running", msg="Execution started via /ops/runs/{run_id}/rerun")
         except Exception as exc:
-            logger.error("Rerun spawn failed for run %s, falling back to worker: %s", run_id, exc)
+            logger.error(
+                "Rerun spawn failed for run %s, falling back to worker: %s",
+                sanitize_for_log(run_id),
+                exc,
+            )
             try:
                 worker = getattr(request.app.state, "run_worker", None)
                 if worker is not None:
                     worker.notify()
             except Exception as wk_exc:
-                logger.error("Rerun worker fallback also failed for run %s: %s", run_id, wk_exc)
+                logger.error(
+                    "Rerun worker fallback also failed for run %s: %s",
+                    sanitize_for_log(run_id),
+                    wk_exc,
+                )
 
     audit_log("OPS", f"/ops/runs/{run_id}/rerun", run.id, operation="WRITE", actor=_actor_label(auth))
     return run

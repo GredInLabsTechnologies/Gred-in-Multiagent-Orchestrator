@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=390, initial-scale=1.0">
+<title>GIMO Mesh — Hybrid Capabilities</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Inter:wght@400;500;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #080C14;
+    color: #E8ECF4;
+    font-family: 'Inter', sans-serif;
+    padding: 16px 14px;
+    max-width: 390px;
+    margin: 0 auto;
+    min-height: 100vh;
+  }
+
+  .section-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 7.5px;
+    font-weight: 500;
+    letter-spacing: 1.2px;
+    color: #5A6A7C;
+    text-transform: uppercase;
+    padding: 0 2px 5px;
+    transition: all 0.4s ease;
+  }
+
+  .section-title.hybrid-active {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    background: linear-gradient(90deg, #5A9F8F, #22C55E);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .card {
+    background: #0C1222;
+    border: 1px solid #1E2A3E;
+    border-radius: 8px;
+    padding: 12px;
+    transition: border-color 0.4s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card.hybrid-active {
+    border-color: rgba(90, 159, 143, 0.3);
+  }
+
+  /* Hybrid glow effect on the card */
+  .card.hybrid-active::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 10%, #5A9F8F, #3ECF8E, #22C55E, transparent 90%);
+    opacity: 0.6;
+  }
+
+  .pills-container {
+    position: relative;
+    display: flex;
+    gap: 8px;
+  }
+
+  /* Connecting line SVG overlay */
+  .connect-line {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .pill {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 11px 4px;
+    border-radius: 10px;
+    border: 1px solid #1E2A3E;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    z-index: 2;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .pill:hover {
+    background: rgba(255,255,255,0.02);
+  }
+
+  .pill .icon {
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+  }
+
+  .pill .icon svg {
+    width: 100%;
+    height: 100%;
+    transition: all 0.3s ease;
+  }
+
+  .pill .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    font-weight: 400;
+    letter-spacing: 0.3px;
+    color: #5A6A7C;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+  }
+
+  /* ── Active states ── */
+  .pill.active-auto {
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.5);
+  }
+  .pill.active-auto .icon svg { color: #3B82F6; }
+  .pill.active-auto .label { color: #3B82F6; font-weight: 500; }
+
+  .pill.active-inference {
+    background: rgba(90, 159, 143, 0.12);
+    border-color: rgba(90, 159, 143, 0.5);
+  }
+  .pill.active-inference .icon svg { color: #5A9F8F; }
+  .pill.active-inference .label { color: #5A9F8F; font-weight: 500; }
+
+  .pill.active-utility {
+    background: rgba(96, 165, 250, 0.12);
+    border-color: rgba(96, 165, 250, 0.5);
+  }
+  .pill.active-utility .icon svg { color: #60A5FA; }
+  .pill.active-utility .label { color: #60A5FA; font-weight: 500; }
+
+  .pill.active-serve {
+    background: rgba(148, 163, 184, 0.12);
+    border-color: rgba(148, 163, 184, 0.5);
+  }
+  .pill.active-serve .icon svg { color: #94A3B8; }
+  .pill.active-serve .label { color: #94A3B8; font-weight: 500; }
+
+  /* Dimmed when auto is active */
+  .pill.dimmed {
+    opacity: 0.25;
+    pointer-events: auto;
+  }
+
+  /* ── Status hint ── */
+  .status-hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.3px;
+    color: #5A6A7C;
+    margin-top: 10px;
+    padding: 0 2px;
+    transition: all 0.3s ease;
+    min-height: 14px;
+  }
+
+  .status-hint.auto { color: rgba(59, 130, 246, 0.7); }
+  .status-hint.hybrid { color: rgba(90, 159, 143, 0.8); }
+
+  /* ── Demo controls ── */
+  .demo-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #5A6A7C;
+    margin-top: 40px;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+  }
+
+  .demo-states {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .demo-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #1E2A3E;
+    background: #0C1222;
+    color: #7D8A99;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .demo-btn:hover { border-color: #3B82F6; color: #E8ECF4; }
+  .demo-btn.active-demo { border-color: #3B82F6; background: rgba(59,130,246,0.1); color: #3B82F6; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="section-title" id="sectionTitle">HYBRID CAPABILITIES</div>
+
+  <div class="card" id="card">
+    <div class="pills-container" id="pillsContainer">
+      <!-- Connecting line (SVG) -->
+      <svg class="connect-line" id="connectLine">
+        <defs>
+          <linearGradient id="hybridGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#5A9F8F" />
+            <stop offset="50%" stop-color="#3ECF8E" />
+            <stop offset="100%" stop-color="#22C55E" />
+          </linearGradient>
+          <linearGradient id="hybridGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#5A9F8F" stop-opacity="0.15" />
+            <stop offset="100%" stop-color="#22C55E" stop-opacity="0.15" />
+          </linearGradient>
+        </defs>
+        <line id="glowLine" stroke="url(#hybridGlow)" stroke-width="10" stroke-linecap="round" style="display:none" />
+        <line id="mainLine" stroke="url(#hybridGrad)" stroke-width="2" stroke-linecap="round" style="display:none" />
+        <g id="junctionDots"></g>
+      </svg>
+
+      <!-- Auto pill -->
+      <div class="pill active-auto" id="pill-auto" onclick="togglePill('auto')">
+        <div class="icon">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <path d="M 9 3 A 6 6 0 0 1 15.2 11.5" />
+            <polygon points="14,5 16.5,7.5 13.5,7.5" fill="currentColor" stroke="none" />
+            <polygon points="4,13 1.5,10.5 4.5,10.5" fill="currentColor" stroke="none" />
+            <path d="M 9 15 A 6 6 0 0 1 2.8 6.5" />
+          </svg>
+        </div>
+        <span class="label">Auto</span>
+      </div>
+
+      <!-- Inference pill -->
+      <div class="pill dimmed" id="pill-inference" onclick="togglePill('inference')">
+        <div class="icon">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <circle cx="9" cy="9" r="7" />
+            <circle cx="9" cy="5" r="1" fill="currentColor" stroke="none" />
+            <circle cx="6" cy="11.5" r="1" fill="currentColor" stroke="none" />
+            <circle cx="12" cy="11.5" r="1" fill="currentColor" stroke="none" />
+            <line x1="9" y1="5" x2="6" y2="11.5" opacity="0.5" />
+            <line x1="6" y1="11.5" x2="12" y2="11.5" opacity="0.5" />
+            <line x1="12" y1="11.5" x2="9" y2="5" opacity="0.5" />
+            <circle cx="9" cy="9" r="1" fill="currentColor" stroke="none" />
+          </svg>
+        </div>
+        <span class="label">Inference</span>
+      </div>
+
+      <!-- Utility pill -->
+      <div class="pill dimmed" id="pill-utility" onclick="togglePill('utility')">
+        <div class="icon">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="4.5" y1="13.5" x2="10.8" y2="7.2" />
+            <path d="M 10 4 A 4 4 0 0 1 14 8" stroke-width="2" fill="none" />
+          </svg>
+        </div>
+        <span class="label">Utility</span>
+      </div>
+
+      <!-- Serve pill -->
+      <div class="pill dimmed" id="pill-serve" onclick="togglePill('serve')">
+        <div class="icon">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4">
+            <rect x="3" y="3" width="12" height="3" rx="1" />
+            <circle cx="13" cy="4.5" r="0.6" fill="currentColor" stroke="none" />
+            <rect x="3" y="7.5" width="12" height="3" rx="1" />
+            <circle cx="13" cy="9" r="0.6" fill="currentColor" stroke="none" />
+            <rect x="3" y="12" width="12" height="3" rx="1" />
+            <circle cx="13" cy="13.5" r="0.6" fill="currentColor" stroke="none" />
+          </svg>
+        </div>
+        <span class="label">Serve</span>
+      </div>
+    </div>
+
+    <div class="status-hint auto" id="statusHint">Auto — Core adjusts capabilities dynamically</div>
+  </div>
+
+  <!-- Demo presets -->
+  <div class="demo-label">DEMO PRESETS</div>
+  <div class="demo-states">
+    <button class="demo-btn active-demo" onclick="setPreset('auto')">Auto</button>
+    <button class="demo-btn" onclick="setPreset('inference-only')">Inference</button>
+    <button class="demo-btn" onclick="setPreset('utility-only')">Utility</button>
+    <button class="demo-btn" onclick="setPreset('inf+util')">Inference + Utility</button>
+    <button class="demo-btn" onclick="setPreset('inf+serve')">Inference + Serve</button>
+    <button class="demo-btn" onclick="setPreset('all')">All Three</button>
+  </div>
+</div>
+
+<script>
+const state = { auto: true, inference: false, utility: false, serve: false };
+const capabilities = ['inference', 'utility', 'serve'];
+const colors = {
+  auto: '#3B82F6',
+  inference: '#5A9F8F',
+  utility: '#60A5FA',
+  serve: '#94A3B8',
+};
+
+function togglePill(name) {
+  if (name === 'auto') {
+    // Auto: exclusive — clears all capabilities
+    state.auto = true;
+    state.inference = false;
+    state.utility = false;
+    state.serve = false;
+  } else {
+    // Capability: toggle it, turn off auto
+    state[name] = !state[name];
+    state.auto = false;
+
+    // If nothing active, fallback to auto
+    const anyActive = capabilities.some(c => state[c]);
+    if (!anyActive) state.auto = true;
+  }
+  render();
+}
+
+function setPreset(preset) {
+  state.auto = false;
+  state.inference = false;
+  state.utility = false;
+  state.serve = false;
+
+  switch(preset) {
+    case 'auto': state.auto = true; break;
+    case 'inference-only': state.inference = true; break;
+    case 'utility-only': state.utility = true; break;
+    case 'inf+util': state.inference = true; state.utility = true; break;
+    case 'inf+serve': state.inference = true; state.serve = true; break;
+    case 'all': state.inference = true; state.utility = true; state.serve = true; break;
+  }
+  render();
+}
+
+function render() {
+  const activeCount = capabilities.filter(c => state[c]).length;
+  const isHybrid = activeCount >= 2;
+
+  // Section title
+  const title = document.getElementById('sectionTitle');
+  if (isHybrid) {
+    title.textContent = 'HYBRID';
+    title.classList.add('hybrid-active');
+  } else {
+    title.textContent = 'HYBRID CAPABILITIES';
+    title.classList.remove('hybrid-active');
+  }
+
+  // Card border
+  const card = document.getElementById('card');
+  card.classList.toggle('hybrid-active', isHybrid);
+
+  // Pills
+  ['auto', ...capabilities].forEach(name => {
+    const pill = document.getElementById(`pill-${name}`);
+    // Clear all active classes
+    pill.className = 'pill';
+
+    if (name === 'auto') {
+      if (state.auto) {
+        pill.classList.add('active-auto');
+      } else if (isHybrid) {
+        pill.classList.add('dimmed');
+      }
+    } else {
+      if (state.auto) {
+        pill.classList.add('dimmed');
+      } else if (state[name]) {
+        pill.classList.add(`active-${name}`);
+      }
+    }
+  });
+
+  // Status hint
+  const hint = document.getElementById('statusHint');
+  if (state.auto) {
+    hint.textContent = 'Auto \u2014 Core adjusts capabilities dynamically';
+    hint.className = 'status-hint auto';
+  } else if (isHybrid) {
+    const parts = capabilities.filter(c => state[c]).map(c => c.charAt(0).toUpperCase() + c.slice(1));
+    hint.textContent = parts.join(' + ');
+    hint.className = 'status-hint hybrid';
+  } else if (activeCount === 1) {
+    const active = capabilities.find(c => state[c]);
+    const descs = {
+      inference: 'Inference \u2014 LLM execution on device',
+      utility: 'Utility \u2014 Lightweight distributed tasks',
+      serve: 'Serve \u2014 Core API / MCP / CLI endpoints',
+    };
+    hint.textContent = descs[active];
+    hint.className = 'status-hint';
+  }
+
+  // Connecting line
+  updateConnectLine(isHybrid);
+}
+
+function updateConnectLine(isHybrid) {
+  const glowLine = document.getElementById('glowLine');
+  const mainLine = document.getElementById('mainLine');
+  const dotsG = document.getElementById('junctionDots');
+  dotsG.innerHTML = '';
+
+  if (!isHybrid) {
+    glowLine.style.display = 'none';
+    mainLine.style.display = 'none';
+    return;
+  }
+
+  // Get active pill centers
+  const container = document.getElementById('pillsContainer');
+  const containerRect = container.getBoundingClientRect();
+  const activePills = capabilities
+    .filter(c => state[c])
+    .map(c => {
+      const pill = document.getElementById(`pill-${c}`);
+      const rect = pill.getBoundingClientRect();
+      return {
+        x: rect.left - containerRect.left + rect.width / 2,
+        y: rect.top - containerRect.top + rect.height * 0.22,
+      };
+    });
+
+  if (activePills.length < 2) return;
+
+  const first = activePills[0];
+  const last = activePills[activePills.length - 1];
+
+  // Update gradient to span correctly
+  const svg = document.getElementById('connectLine');
+  const grad = document.getElementById('hybridGrad');
+  const glowGrad = document.getElementById('hybridGlow');
+
+  // Position lines
+  glowLine.setAttribute('x1', first.x);
+  glowLine.setAttribute('y1', first.y);
+  glowLine.setAttribute('x2', last.x);
+  glowLine.setAttribute('y2', last.y);
+  glowLine.style.display = '';
+
+  mainLine.setAttribute('x1', first.x);
+  mainLine.setAttribute('y1', first.y);
+  mainLine.setAttribute('x2', last.x);
+  mainLine.setAttribute('y2', last.y);
+  mainLine.style.display = '';
+
+  // Junction dots at each active pill
+  activePills.forEach((p, i) => {
+    const t = (last.x - first.x) > 0 ? (p.x - first.x) / (last.x - first.x) : 0;
+    const r = lerp(90, 34, t);
+    const g = lerp(159, 197, t);
+    const b = lerp(143, 94, t);
+    const color = `rgb(${r},${g},${b})`;
+
+    // Glow dot
+    const glow = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    glow.setAttribute('cx', p.x);
+    glow.setAttribute('cy', p.y);
+    glow.setAttribute('r', '6');
+    glow.setAttribute('fill', color);
+    glow.setAttribute('opacity', '0.25');
+    dotsG.appendChild(glow);
+
+    // Core dot
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', p.x);
+    dot.setAttribute('cy', p.y);
+    dot.setAttribute('r', '3');
+    dot.setAttribute('fill', color);
+    dotsG.appendChild(dot);
+  });
+}
+
+function lerp(a, b, t) { return Math.round(a + (b - a) * t); }
+
+// Initial render
+render();
+
+// Re-render on resize (for line positions)
+window.addEventListener('resize', () => render());
+</script>
+</body>
+</html>

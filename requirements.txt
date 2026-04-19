@@ -4,15 +4,15 @@
 # Licensing & Cryptography (GIMO License System)
 cryptography>=43.0.0       # Ed25519 signing/verification, AES-256-GCM cache
 PyJWT[crypto]>=2.9.0       # JWT creation and verification (Ed25519 algorithm)
-httpx>=0.27.0              # Async HTTP client for online license validation
+httpx>=0.28.1              # Async HTTP client; pin aligned with fastmcp>=3.1 (plan CROSS_COMPILE 2026-04-16)
 
 # Core Web Framework
-fastapi>=0.115.0
+fastapi>=0.128.0           # Align with starlette>=0.49 CVE fix (plan CROSS_COMPILE 2026-04-16)
 uvicorn[standard]>=0.34.2
 starlette>=0.49.1  # Security fix CVE-2025-62727
 
 # Data Validation
-pydantic==2.11.2
+pydantic>=2.11.7            # Align with fastmcp>=3.1 (plan CROSS_COMPILE 2026-04-16)
 
 # HTTP Client
 requests==2.33.1
@@ -25,9 +25,15 @@ PyYAML>=6.0.2
 textual>=0.83.0
 
 # Observability (OpenTelemetry)
+# Protocolo HTTP en vez de gRPC: evita la dependencia en `grpcio` (~20 min
+# compile desde sdist en Android/Termux y no hay wheels aarch64-linux-android
+# pre-built). El wire protocol HTTP/protobuf es semánticamente equivalente
+# al de gRPC para OTel — mismo data, distinto transporte. El endpoint sigue
+# configurándose vía OTEL_EXPORTER_OTLP_ENDPOINT env var pero debe apuntar
+# al puerto HTTP (4318) en vez del gRPC (4317).
 opentelemetry-api==1.27.0
 opentelemetry-sdk==1.27.0
-opentelemetry-exporter-otlp==1.27.0
+opentelemetry-exporter-otlp-proto-http==1.27.0
 opentelemetry-instrumentation-fastapi==0.48b0
 
 # Multipart Form Data (for file uploads)
@@ -49,6 +55,17 @@ nvidia-ml-py>=12.0.0 # NVIDIA GPU memory monitoring (replaces deprecated pynvml)
 
 # ASN.1 Support (dependency of cryptography)
 pyasn1>=0.6.2  # Security fix CVE-2026-23490
+
+# Mesh LAN Discovery (opt-in via ORCH_MDNS_ENABLED=true)
+zeroconf>=0.132.0           # mDNS service advertisement for Core discovery
+
+# Runtime Packaging (signed wheelhouse forge)
+# Base: github.com/GredInLabsTechnologies/rove @ v1.0.0 + patch local 1.0.1
+# añadiendo target `android-x86_64` — requerido para APK agnóstico (Chromebook
+# ARC, tablets Android x86, emulator testing). Patch source: /tmp/rove-src
+# (branch local, no upstream todavía).
+./vendor/rove/rove_toolkit-1.0.1-py3-none-any.whl
+zstandard>=0.22             # zstd bundle compression (used by rove)
 
 # MCP Support (for App façade and bridge)
 fastmcp>=3.1.0              # MCP server implementation

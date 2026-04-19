@@ -117,7 +117,8 @@ class FeedbackCollector:
         from ..services.gics_service import GicsService
 
         key = f"ops:user_feedback:{workflow_id}:{node_id}"
-        GicsService.put(
+        gics = GicsService()
+        gics.put(
             key,
             {
                 "workflow_id": workflow_id,
@@ -145,4 +146,5 @@ class FeedbackCollector:
         from ..services.gics_service import GicsService
 
         key = f"ops:user_feedback:{workflow_id}:{node_id}"
-        return GicsService.get(key)
+        gics = GicsService()
+        return gics.get(key)

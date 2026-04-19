@@ -512,10 +512,12 @@ GIMO is being used as the operational substrate for multi-agent execution.
 - All multi-agent execution must traverse SAGP governance (§9).
 - **Multi-Surface Stabilization (Phase 7B)**:
   - Canonical authority is strictly server-side.
-  - Clients (App, CLI, TUI) consume the same backend contracts (`/ops/operator/status`, `/ops/notices`).
-  - Deprecated paths (`/mcp`, path-based repo selection) are marked as legacy and slated for removal.
+  - Clients (App, CLI, TUI) consume the same backend status snapshot (`/ops/operator/status`), including `alerts`.
   - The official App façade is hosted at `/mcp/app`.
-  - The canonical MCP bridge is the **SAGP bridge** at `mcp_bridge/server.py`.
+  - The canonical generic MCP bridge is the **SAGP bridge** at `mcp_bridge/server.py`.
+  - The HTTP mount `/mcp` is a legacy ingress for that generic MCP bridge. It is still a real surface to GIMO Core, but it is not the App façade and must not be treated as a synonym for `/mcp/app`.
+  - The reason for the separate App façade is trust-boundary isolation: ChatGPT Apps is a third-party outer client we do not control, so it must traverse a narrower, more constrained ingress than the generic MCP bridge.
+  - Deprecated paths slated for removal must only be removed when an equivalent canonical ingress exists for the same consumer class; `/mcp/app` is not by itself a replacement for the generic `/mcp` bridge.
 
 ---
 
@@ -624,3 +626,4 @@ El protocolo define como un Primary Agent (e.g., Claude/GPT-4) delega sub-tareas
 | Execution time | ~4s (unit), ~30s (with integration) |
 
 Run: `python -m pytest -m "not integration" -v`
+

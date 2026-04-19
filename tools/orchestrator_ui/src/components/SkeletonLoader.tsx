@@ -5,6 +5,11 @@ interface SkeletonProps {
     lines?: number;
 }
 
+/**
+ * @deprecated 2026-04-15. Use Tailwind pattern: <div className="animate-pulse bg-zinc-700 rounded h-N" />.
+ * Will be removed once no consumers remain. Currently unused (no internal imports detected),
+ * but kept temporarily to avoid breaking any external consumer not yet migrated.
+ */
 export const Skeleton: React.FC<SkeletonProps> = ({ className = '', lines = 1 }) => {
     return (
         <div className="space-y-2">

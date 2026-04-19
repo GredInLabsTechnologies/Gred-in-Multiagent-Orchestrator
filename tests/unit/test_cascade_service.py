@@ -65,13 +65,13 @@ class TestCascadeFirstAttemptSuccess:
         context = {"model": "cheap-model", "task_type": "code"}
 
         with patch(
-            "tools.gimo_server.services.cascade_service.QualityService.analyze_output",
+            "tools.gimo_server.services.economy.cascade_service.QualityService.analyze_output",
             return_value=_quality(80),
         ), patch(
-            "tools.gimo_server.services.cascade_service.ModelInventoryService.get_available_models",
+            "tools.gimo_server.services.economy.cascade_service.ModelInventoryService.get_available_models",
             return_value=FAKE_MODELS,
         ), patch(
-            "tools.gimo_server.services.cascade_service.CostService.calculate_cost",
+            "tools.gimo_server.services.economy.cascade_service.CostService.calculate_cost",
             return_value=0.01,
         ):
             result = await svc.execute_with_cascade("do stuff", context, config)
@@ -100,19 +100,19 @@ class TestCascadeEscalation:
         quality_scores = iter([_quality(30), _quality(85)])
 
         with patch(
-            "tools.gimo_server.services.cascade_service.QualityService.analyze_output",
+            "tools.gimo_server.services.economy.cascade_service.QualityService.analyze_output",
             side_effect=lambda *a, **kw: next(quality_scores),
         ), patch(
-            "tools.gimo_server.services.cascade_service.ModelInventoryService.get_available_models",
+            "tools.gimo_server.services.economy.cascade_service.ModelInventoryService.get_available_models",
             return_value=FAKE_MODELS,
         ), patch(
-            "tools.gimo_server.services.cascade_service.ModelInventoryService.find_model",
+            "tools.gimo_server.services.economy.cascade_service.ModelInventoryService.find_model",
             return_value=_make_model_entry("cheap-model", tier=2),
         ), patch(
-            "tools.gimo_server.services.cascade_service.ModelInventoryService.get_models_for_tier",
+            "tools.gimo_server.services.economy.cascade_service.ModelInventoryService.get_models_for_tier",
             return_value=[_make_model_entry("mid-model", tier=3)],
         ), patch(
-            "tools.gimo_server.services.cascade_service.CostService.calculate_cost",
+            "tools.gimo_server.services.economy.cascade_service.CostService.calculate_cost",
             return_value=0.05,
         ):
             result = await svc.execute_with_cascade("do stuff", context, config)
@@ -161,19 +161,19 @@ class TestCascadeMaxEscalations:
             return entries
 
         with patch(
-            "tools.gimo_server.services.cascade_service.QualityService.analyze_output",
+            "tools.gimo_server.services.economy.cascade_service.QualityService.analyze_output",
             return_value=_quality(40),
         ), patch(
-            "tools.gimo_server.services.cascade_service.ModelInventoryService.get_available_models",
+            "tools.gimo_server.services.economy.cascade_service.ModelInventoryService.get_available_models",
             return_value=FAKE_MODELS,
         ), patch(
-            "tools.gimo_server.services.cascade_service.ModelInventoryService.find_model",
+            "tools.gimo_server.services.economy.cascade_service.ModelInventoryService.find_model",
             side_effect=find_model_side_effect,
         ), patch(
-            "tools.gimo_server.services.cascade_service.ModelInventoryService.get_models_for_tier",
+            "tools.gimo_server.services.economy.cascade_service.ModelInventoryService.get_models_for_tier",
             side_effect=get_tier_side_effect,
         ), patch(
-            "tools.gimo_server.services.cascade_service.CostService.calculate_cost",
+            "tools.gimo_server.services.economy.cascade_service.CostService.calculate_cost",
             return_value=0.05,
         ):
             result = await svc.execute_with_cascade("do stuff", context, config)
@@ -201,19 +201,19 @@ class TestCascadeBudgetLimit:
         node_budget = {"max_cost_usd": 0.60}  # Will exceed after 2nd attempt
 
         with patch(
-            "tools.gimo_server.services.cascade_service.QualityService.analyze_output",
+            "tools.gimo_server.services.economy.cascade_service.QualityService.analyze_output",
             return_value=_quality(30),
         ), patch(
-            "tools.gimo_server.services.cascade_service.ModelInventoryService.get_available_models",
+            "tools.gimo_server.services.economy.cascade_service.ModelInventoryService.get_available_models",
             return_value=FAKE_MODELS,
         ), patch(
-            "tools.gimo_server.services.cascade_service.ModelInventoryService.find_model",
+            "tools.gimo_server.services.economy.cascade_service.ModelInventoryService.find_model",
             return_value=_make_model_entry("cheap-model", tier=2),
         ), patch(
-            "tools.gimo_server.services.cascade_service.ModelInventoryService.get_models_for_tier",
+            "tools.gimo_server.services.economy.cascade_service.ModelInventoryService.get_models_for_tier",
             return_value=[_make_model_entry("mid-model", tier=3)],
         ), patch(
-            "tools.gimo_server.services.cascade_service.CostService.calculate_cost",
+            "tools.gimo_server.services.economy.cascade_service.CostService.calculate_cost",
             return_value=0.05,
         ):
             result = await svc.execute_with_cascade("do stuff", context, config, node_budget=node_budget)

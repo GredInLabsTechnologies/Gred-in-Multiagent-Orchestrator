@@ -2,23 +2,24 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import Depends, HTTPException, Request
 
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.security import verify_token
 
 READ_ONLY_ACTIONS_PATHS = {
-    "/file",
-    "/tree",
-    "/search",
-    "/diff",
     "/status",
     "/health",
     "/health/deep",
-    "/ui/status",
-    "/ui/repos",
-    "/ui/repos/active",
-    "/ui/repos/select",
+    "/ops/files/content",
+    "/ops/files/tree",
+    "/ops/files/search",
+    "/ops/files/diff",
+    "/ops/repos",
+    "/ops/repos/active",
+    "/ops/repos/select",
     "/ops/plan",
     "/ops/drafts",
     "/ops/approved",
@@ -31,10 +32,10 @@ OPERATOR_EXTRA_PREFIXES = (
 )
 
 OPERATOR_EMERGENCY_PATHS = {
-    "/ui/security/events",
-    "/ui/security/resolve",
-    "/ui/repos/revoke",
-    "/ui/audit",
+    "/ops/security/events",
+    "/ops/security/resolve",
+    "/ops/repos/revoke",
+    "/ops/audit/tail",
 }
 
 
@@ -62,7 +63,7 @@ def _is_operator_allowed_path(path: str) -> bool:
 
 
 def require_read_only_access(
-    request: Request, auth: AuthContext = Depends(verify_token)
+    request: Request, auth: Annotated[AuthContext, Depends(verify_token)]
 ) -> AuthContext:
     path = request.url.path
     if auth.role == "actions":

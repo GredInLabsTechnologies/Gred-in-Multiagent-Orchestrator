@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -51,8 +52,8 @@ def _sanitize_path(path_str: str) -> str:
 @router.get("")
 def list_repos(
     request: Request,
-    auth: AuthContext = Depends(require_read),
-    _rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(require_read)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     registry = load_repo_registry()
     seen_paths: set[str] = set()
@@ -72,14 +73,22 @@ def list_repos(
         except Exception:
             continue
 
-    # Include current workspace from header if not already registered
+    # Include current workspace from header if not already registered.
+    # Only accept the header when it maps to an already-registered repo —
+    # otherwise it would let a client inject arbitrary paths into the
+    # listing (S2083/S6549).
     ws_header = request.headers.get("X-Gimo-Workspace", "")
     if ws_header:
         try:
-            ws_resolved = str(Path(ws_header).resolve())
-            if ws_resolved not in seen_paths and Path(ws_resolved).is_dir():
+            ws_candidate = Path(ws_header).resolve()
+            ws_resolved = str(ws_candidate)
+            if (
+                ws_resolved not in seen_paths
+                and ws_candidate.is_dir()
+                and _is_registered_repo_path(ws_candidate)
+            ):
                 seen_paths.add(ws_resolved)
-                verified_repos.append({"name": Path(ws_resolved).name, "path": ws_resolved})
+                verified_repos.append({"name": ws_candidate.name, "path": ws_resolved})
         except Exception:
             pass
 
@@ -94,11 +103,18 @@ def list_repos(
 
 @router.post("/register")
 def register_repo(
+    auth: Annotated[AuthContext, Depends(require_read)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     path: str = Query(...),
-    auth: AuthContext = Depends(require_read),
-    _rl: None = Depends(check_rate_limit),
 ):
-    repo_path = Path(path).resolve()
+    try:
+        repo_path = Path(path).resolve(strict=False)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid repo path")
+    # Constrain the registrable path to the configured REPO_ROOT_DIR to
+    # prevent arbitrary directory injection via the API (S2083/S6549).
+    if not _is_path_within_base(repo_path, REPO_ROOT_DIR):
+        raise HTTPException(status_code=400, detail="Repo outside of allowed base")
     if not repo_path.exists() or not repo_path.is_dir():
         raise HTTPException(status_code=404, detail="Repo not found")
 
@@ -116,8 +132,8 @@ def register_repo(
 
 @router.get("/active")
 def get_active_repo(
-    auth: AuthContext = Depends(require_read),
-    _rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(require_read)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     from fastapi.responses import JSONResponse
 
@@ -144,9 +160,9 @@ def get_active_repo(
 
 @router.post("/open") # [LEGACY/ADMIN_ONLY]
 def open_repo(
+    auth: Annotated[AuthContext, Depends(require_admin)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     path: str = Query(...),
-    auth: AuthContext = Depends(require_admin),
-    _rl: None = Depends(check_rate_limit),
 ):
     """[LEGACY][ADMIN ONLY] Open repo by local filesystem path.
     Canonical client flows must not bind repos via host paths.
@@ -163,10 +179,10 @@ def open_repo(
 
 @router.post("/select") # [LEGACY/ADMIN_ONLY]
 def select_repo(
+    auth: Annotated[AuthContext, Depends(require_admin)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     path: str = Query(...),
     request: Request = None,
-    auth: AuthContext = Depends(require_admin),
-    _rl: None = Depends(check_rate_limit),
 ):
     """[LEGACY][ADMIN ONLY] Select active repo by local filesystem path.
     Canonical client flows must not bind repos via host paths.
@@ -208,8 +224,8 @@ def select_repo(
 @router.post("/revoke")
 def revoke_override(
     request: Request,
-    auth: AuthContext = Depends(require_operator),
-    _rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(require_operator)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     if_match_etag = request.headers.get("if-match")
     try:
@@ -227,9 +243,9 @@ def revoke_override(
 
 @router.post("/vitaminize", response_model=VitaminizeResponse)
 def vitaminize_repo(
+    auth: Annotated[AuthContext, Depends(require_read)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
     path: str = Query(...),
-    auth: AuthContext = Depends(require_read),
-    _rl: None = Depends(check_rate_limit),
 ):
     repo_path = Path(path).resolve()
     if not _is_path_within_base(repo_path, REPO_ROOT_DIR) and not _is_registered_repo_path(repo_path):

@@ -34,7 +34,7 @@ async def threat_level_middleware(
 ) -> Response:
     """Adaptive security middleware based on threat levels."""
     # Always allow root, health, auth, and resolve endpoints
-    if request.url.path in ["/", "/health", "/ops/shutdown", "/ui/security/resolve"] or request.url.path.startswith("/auth/"):
+    if request.url.path in ["/", "/health", "/ops/shutdown", "/ops/security/resolve"] or request.url.path.startswith("/auth/"):
         return await call_next(request)
 
     from tools.gimo_server.security import threat_engine

@@ -21,7 +21,6 @@ class CostStorage:
 
     def ensure_tables(self):
         """No-op: using GICS."""
-        pass
 
     def save_cost_event(self, event: CostEvent) -> None:
         """Save a cost event to storage."""
@@ -31,7 +30,7 @@ class CostStorage:
             key = f"ce:{event.workflow_id}:{event.node_id}:{int(event.timestamp.timestamp())}:{event.id}"
             self.gics.put(key, event.model_dump())
         except Exception as e:
-            logger.error(f"Failed to save cost event {event.id}: {e}")
+            logger.error("Failed to save cost event %s: %s", event.id, e)
 
     def _fetch_events(self, days: Optional[int] = 30, hours: Optional[int] = None) -> List[Dict[str, Any]]:
         if not self.gics:
@@ -67,7 +66,7 @@ class CostStorage:
                         logger.warning("Dropped cost event with unparseable timestamp: %s", ts_val)
             return events
         except Exception as e:
-            logger.error(f"Failed to fetch cost events: {e}")
+            logger.error("Failed to fetch cost events: %s", e)
             return []
 
     def get_provider_spend(self, provider: str, days: int = 30) -> float:

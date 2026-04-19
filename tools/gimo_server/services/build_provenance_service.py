@@ -59,7 +59,7 @@ _GIT_SHA: str = _resolve_git_sha()
 
 
 def _module_freshness() -> dict[str, Any]:
-    root = Path(__file__).resolve().parents[2]  # tools/gimo_server
+    Path(__file__).resolve().parents[2]  # tools/gimo_server
     worst_drift: float = 0.0
     drifted: list[dict[str, Any]] = []
     checked = 0

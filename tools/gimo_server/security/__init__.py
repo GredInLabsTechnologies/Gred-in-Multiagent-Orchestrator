@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+# Fixed path derived from ``__file__`` and a literal filename — no user-
+# controlled segment. Sonar S2083/S6549 reports here are false positives.
 SECURITY_DB_PATH = Path(__file__).parent.parent / "security_db.json"
 
 from .common import load_json_db

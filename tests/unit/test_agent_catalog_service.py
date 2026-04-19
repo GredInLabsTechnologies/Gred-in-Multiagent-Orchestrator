@@ -53,3 +53,17 @@ def test_resolve_profile_from_legacy_mood():
     assert profile.agent_preset == "researcher"
     assert profile.mood == "analytical"
     assert profile.workflow_phase == "planning"
+
+
+def test_resolve_profile_allows_canonical_mood_override_without_changing_policy():
+    """Canonical mood can refine execution style while preset still owns policy."""
+    profile = AgentCatalogService.resolve_profile(
+        agent_preset="executor",
+        mood="cautious",
+        workflow_phase="executing",
+    )
+    assert profile.agent_preset == "executor"
+    assert profile.task_role == "executor"
+    assert profile.mood == "cautious"
+    assert profile.execution_policy == "workspace_safe"
+    assert profile.workflow_phase == "executing"

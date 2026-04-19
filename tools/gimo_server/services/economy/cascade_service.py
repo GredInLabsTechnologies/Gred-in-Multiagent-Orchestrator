@@ -74,7 +74,7 @@ class CascadeService:
                     "success": quality.score >= cascade_config.quality_threshold,
                 })
 
-                final_output = output
+                final_output = output.copy()
                 final_output["quality_rating"] = quality.model_dump()
                 final_output["cascade_level"] = attempts - 1
 

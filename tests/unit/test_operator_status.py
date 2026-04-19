@@ -103,3 +103,35 @@ def test_operator_status_snapshot_partial_on_git_failure(monkeypatch):
     assert isinstance(snapshot, dict)
     # Git fields should be absent or None since they failed
     assert snapshot.get("branch") is None
+
+
+def test_operator_status_snapshot_includes_canonical_ui_fields(monkeypatch):
+    from tools.gimo_server.services.file_service import FileService
+    from tools.gimo_server.services.system_service import SystemService
+
+    monkeypatch.setattr(
+        "tools.gimo_server.services.operator_status_service.get_active_repo_dir",
+        lambda: Path.cwd(),
+    )
+    monkeypatch.setattr(
+        "tools.gimo_server.services.operator_status_service.get_allowed_paths",
+        lambda _base_dir: {Path.cwd() / "a.py", Path.cwd() / "b.py"},
+    )
+    monkeypatch.setattr(FileService, "tail_audit_lines", lambda limit=1: ["audit line"])
+    monkeypatch.setattr(SystemService, "get_status", lambda: "RUNNING")
+    monkeypatch.setattr(
+        "tools.gimo_server.services.operator_status_service.ALLOWLIST_REQUIRE",
+        True,
+    )
+    monkeypatch.setattr(
+        "tools.gimo_server.services.operator_status_service.time.time",
+        lambda: 150.0,
+    )
+
+    snapshot = OperatorStatusService.get_status_snapshot(app_start_time=100.0)
+
+    assert snapshot["backend_version"]
+    assert snapshot["uptime_seconds"] == 50.0
+    assert snapshot["allowlist_count"] == 2
+    assert snapshot["last_audit_line"] == "audit line"
+    assert snapshot["service_status"] == "RUNNING"

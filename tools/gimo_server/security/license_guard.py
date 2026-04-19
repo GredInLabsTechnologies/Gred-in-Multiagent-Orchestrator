@@ -270,7 +270,7 @@ class LicenseGuard:
                 else:
                     logger.debug("LICENSE: Periodic recheck OK")
             except asyncio.CancelledError:
-                break
+                raise
             except Exception as e:
                 logger.debug("LICENSE: Periodic recheck skipped (offline): %s", e)
 

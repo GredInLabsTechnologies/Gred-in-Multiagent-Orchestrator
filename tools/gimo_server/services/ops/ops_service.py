@@ -27,4 +27,3 @@ class OpsService(
     defined in ``OpsServiceBase``.
     """
 
-    pass

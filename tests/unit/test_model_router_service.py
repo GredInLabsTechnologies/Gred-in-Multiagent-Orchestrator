@@ -27,60 +27,39 @@ class TestModelRouter:
 
     async def test_phase6_forced_local_for_security_change(self):
         await asyncio.sleep(0)
-        PRIMARY = "test-cloud-model"
-        FALLBACK = "test-local-model"
-        FORCED = ["SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"]
         decision = ModelRouterService.resolve_phase6_strategy(
-            primary_model=PRIMARY,
-            fallback_model=FALLBACK,
-            forced_local_intents=FORCED,
             intent_effective="SECURITY_CHANGE",
             path_scope=["tools/gimo_server/security/auth.py"],
             primary_failure_reason="",
         )
-        assert decision.final_model_used == FALLBACK
+        assert decision.final_model_used == ModelRouterService.PHASE6_FALLBACK_MODEL
         assert decision.fallback_used is False
         assert decision.strategy_reason == "forced_local_only"
 
     async def test_phase6_400_never_fallback(self):
         await asyncio.sleep(0)
-        PRIMARY = "test-cloud-model"
-        FALLBACK = "test-local-model"
-        FORCED = ["SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"]
         decision = ModelRouterService.resolve_phase6_strategy(
-            primary_model=PRIMARY,
-            fallback_model=FALLBACK,
-            forced_local_intents=FORCED,
             intent_effective="SAFE_REFACTOR",
             path_scope=["tools/gimo_server/services/ops_service.py"],
             primary_failure_reason="400",
         )
         assert decision.fallback_used is False
-        assert decision.final_model_used == PRIMARY
+        assert decision.final_model_used == ModelRouterService.PHASE6_PRIMARY_MODEL
 
     async def test_phase6_429_uses_fallback(self):
         await asyncio.sleep(0)
-        PRIMARY = "test-cloud-model"
-        FALLBACK = "test-local-model"
-        FORCED = ["SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"]
         decision = ModelRouterService.resolve_phase6_strategy(
-            primary_model=PRIMARY,
-            fallback_model=FALLBACK,
-            forced_local_intents=FORCED,
             intent_effective="SAFE_REFACTOR",
             path_scope=["tools/gimo_server/services/ops_service.py"],
             primary_failure_reason="429",
         )
         assert decision.fallback_used is True
-        assert decision.final_model_used == FALLBACK
+        assert decision.final_model_used == ModelRouterService.PHASE6_FALLBACK_MODEL
         assert decision.final_status == "FALLBACK_MODEL_USED"
 
     async def test_phase6_deterministic_decision(self):
         await asyncio.sleep(0)
         kwargs = {
-            "primary_model": "test-cloud-model",
-            "fallback_model": "test-local-model",
-            "forced_local_intents": ["SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"],
             "intent_effective": "SAFE_REFACTOR",
             "path_scope": ["tools/gimo_server/services/provider_service.py"],
             "primary_failure_reason": "timeout",

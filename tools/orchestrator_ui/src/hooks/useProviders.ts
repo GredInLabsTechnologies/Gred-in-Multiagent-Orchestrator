@@ -13,7 +13,6 @@ import { useProviderCatalog } from './useProviderCatalog';
 
 export const useProviders = () => {
     const [providers, setProviders] = useState<ProviderInfo[]>([]);
-    const [nodes, setNodes] = useState<any>({});
     const [providerCapabilities, setProviderCapabilities] = useState<Record<string, any>>({});
     const [effectiveState, setEffectiveState] = useState<Record<string, any>>({});
     const [roles, setRoles] = useState<ProviderRolesConfig | null>(null);
@@ -85,20 +84,8 @@ export const useProviders = () => {
                     setProviderCapabilities(normalizedCaps);
                 }
             } else {
-                // legacy bridge fallback
-                const legacyRes = await fetchWithRetry(`${API_BASE}/ui/providers`, getRequestInit());
-                if (legacyRes.ok) {
-                    const legacyData = await legacyRes.json();
-                    setProviders(Array.isArray(legacyData) ? legacyData : (legacyData.providers ?? []));
-                }
                 setEffectiveState({});
                 setRoles(null);
-            }
-
-            const nodeRes = await fetchWithRetry(`${API_BASE}/ui/nodes`, getRequestInit());
-            if (nodeRes.ok) {
-                const nodeData = await nodeRes.json();
-                setNodes(nodeData);
             }
         } catch (error) {
             console.error("Failed to load providers", error);
@@ -316,7 +303,6 @@ export const useProviders = () => {
         roles,
         catalogs,
         catalogLoading,
-        nodes,
         loading,
         loadProviders,
         loadCatalog,

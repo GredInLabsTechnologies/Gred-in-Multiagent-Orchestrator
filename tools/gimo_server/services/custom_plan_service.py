@@ -16,8 +16,6 @@ from ..models.plan import (
     CustomPlan,
     PlanEdge,
     PlanNode,
-    PlanNodeBinding,
-    PlanNodeExecutionHints,
     PlanNodePosition,
     UpdatePlanRequest,
 )
@@ -76,6 +74,7 @@ def llm_response_to_plan_nodes(
             descriptor=descriptor,
             constraints=constraints,
             requested_preset=task.get("agent_preset"),
+            requested_mood=task.get("mood"),
             legacy_mood=task.get("legacy_mood"),
         )
         binding_resolution = ProfileBindingService.resolve_binding_decision(
@@ -103,8 +102,6 @@ def llm_response_to_plan_nodes(
         })
 
         # Legacy compat: build routing_summary for backward compatibility
-        routing_summary = routing.summary
-        routing_reason = routing.routing_reason
 
         task_role = routing.profile.task_role
         node_type = {
@@ -135,6 +132,7 @@ def llm_response_to_plan_nodes(
             task_fingerprint=task_fingerprint,
             task_descriptor=descriptor,
             config={
+                "mood": task.get("mood"),
                 "legacy_mood": task.get("legacy_mood"),
                 "agent_rationale": task.get("agent_rationale"),
                 "requested_role": task.get("requested_role"),

@@ -7,7 +7,7 @@ Backend can use this to cancel proactively when approaching timeout.
 
 import logging
 import time
-from fastapi import Request, Response
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 

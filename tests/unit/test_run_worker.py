@@ -1,4 +1,4 @@
-"""Unit tests for tools.gimo_server.services.run_worker.RunWorker.
+"""Unit tests for tools.gimo_server.services.execution.run_worker.RunWorker.
 
 Tests cover lifecycle (start/stop/notify), tick dispatch logic,
 concurrency limits, active-status detection, target-path extraction,

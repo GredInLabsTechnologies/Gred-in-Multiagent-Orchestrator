@@ -1,7 +1,6 @@
 
 from __future__ import annotations
 import asyncio
-import json
 import logging
 from typing import List, Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -378,7 +377,6 @@ async def generate_plan_stream(
     import json, re, time
     from tools.gimo_server.services.timeout.duration_telemetry_service import DurationTelemetryService
     from tools.gimo_server.services.timeout.adaptive_timeout_service import AdaptiveTimeoutService
-    from tools.gimo_server.services.timeout.progress_emitter import ProgressEmitter
 
     _require_role(auth, "operator")
     OpsService.set_gics(getattr(request.app.state, "gics", None))
@@ -507,7 +505,7 @@ async def generate_plan_stream(
                         tick += 1
                         await event_queue.put(("hb", tick))
                 except asyncio.CancelledError:
-                    pass
+                    raise
 
             provider_task = asyncio.create_task(_provider_call())
             heartbeat_task = asyncio.create_task(_heartbeat())
@@ -533,13 +531,13 @@ async def generate_plan_stream(
                 heartbeat_task.cancel()
                 try:
                     await heartbeat_task
-                except (asyncio.CancelledError, Exception):
+                except (asyncio.CancelledError, Exception):  # NOSONAR: S7497 — we own the cancel()
                     pass
                 if not provider_task.done():
                     provider_task.cancel()
                     try:
                         await provider_task
-                    except (asyncio.CancelledError, Exception):
+                    except (asyncio.CancelledError, Exception):  # NOSONAR: S7497 — we own the cancel()
                         pass
 
             if provider_exc is not None:

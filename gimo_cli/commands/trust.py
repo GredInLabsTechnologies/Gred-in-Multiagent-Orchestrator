@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 
 import typer
-from rich.table import Table
 
 from gimo_cli import app, console
 from gimo_cli.api import api_request

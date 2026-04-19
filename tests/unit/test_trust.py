@@ -18,6 +18,17 @@ def _register_test_token():
     config.TOKENS.discard(token)
 
 
+@pytest.fixture(autouse=True)
+def _disable_debug_mode(monkeypatch):
+    """TrustEngine.debug_mode bypasses circuit breaker scoring. These tests
+    exercise real policy decisions, so force the flag off regardless of how
+    the surrounding environment (.env DEBUG=true, CI, etc.) sets it."""
+    monkeypatch.setattr(
+        "tools.gimo_server.services.trust_engine.is_debug_mode",
+        lambda: False,
+    )
+
+
 # ── Stubs & Helper ────────────────────────────────────────
 
 class StubTrustStore:

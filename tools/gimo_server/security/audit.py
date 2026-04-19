@@ -86,4 +86,4 @@ def log_panic(
     _audit_logger.critical(msg)
 
     if traceback_str:
-        _audit_logger.error(f"PANIC_TRACE [{correlation_id}]:\n{traceback_str}")
+        _audit_logger.error("PANIC_TRACE [%s]:\n%s", correlation_id, traceback_str)

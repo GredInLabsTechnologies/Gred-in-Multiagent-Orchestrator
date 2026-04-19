@@ -16,6 +16,7 @@ from .base import (
 )
 from ..services.hitl_gate_service import HitlGateService
 from ..models.agent_routing import RoutingDecisionSummary
+from ..security.safe_log import sanitize_for_log
 
 logger = logging.getLogger("orchestrator.adapters.openai_compatible")
 
@@ -50,16 +51,20 @@ class OpenAICompatibleSession(AgentSession):
         self._decision_log: Dict[str, str] = {}
         self._metrics: Dict[str, Any] = {"tokens_used": 0, "cost_usd": 0.0}
 
-        # F7.1: Derive execution_policy from routing_summary or legacy role_profile
+        # Prefer explicit execution_policy from canonical routing.  Legacy
+        # role_profile survives only as a behavior tag, never as a permission
+        # source of truth.
         if routing_summary:
             from ..services.execution.execution_policy_service import ExecutionPolicyService
             self._execution_policy = ExecutionPolicyService.get_policy(routing_summary.execution_policy)
             self._role_profile = routing_summary.mood  # For legacy compatibility
         elif role_profile:
-            # Backward compatibility: derive from role_profile
             from ..services.execution.execution_policy_service import ExecutionPolicyService
-            policy_name = ExecutionPolicyService.policy_name_from_legacy_mood(role_profile)
-            self._execution_policy = ExecutionPolicyService.get_policy(policy_name)
+            logger.warning(
+                "Legacy role_profile='%s' provided without execution_policy; defaulting to workspace_safe.",
+                role_profile,
+            )
+            self._execution_policy = ExecutionPolicyService.get_policy("workspace_safe")
             self._role_profile = role_profile
         else:
             # Default fallback
@@ -119,7 +124,7 @@ class OpenAICompatibleSession(AgentSession):
                 self._metrics["tokens_used"] += usage.get("total_tokens", 0)
 
         except Exception as e:
-            logger.error(f"OpenAI-compatible LLM error: {e}")
+            logger.error("OpenAI-compatible LLM error: %s", sanitize_for_log(e))
             self.status = AgentStatus.FAILED
             self._metrics["error"] = str(e)
 
@@ -184,7 +189,7 @@ class OpenAICompatibleSession(AgentSession):
             self._background_task = asyncio.create_task(self._process_turn())
             
         except Exception as e:
-            logger.error(f"Tool execution failed: {e}")
+            logger.error("Tool execution failed: %s", e)
             # Send error back to LLM
             self.messages.append({
                 "role": "tool", 

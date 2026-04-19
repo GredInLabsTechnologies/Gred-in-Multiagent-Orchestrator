@@ -1,0 +1,31 @@
+cryptography==46.0.5
+PyJWT[crypto]==2.11.0
+httpx==0.28.1
+fastapi==0.128.0
+uvicorn[standard]==0.34.2
+starlette==0.50.0
+pydantic==2.11.2
+requests==2.32.4
+python-dotenv==1.2.1
+rich==14.3.2
+typer==0.24.0
+PyYAML==6.0.3
+textual==8.1.1
+opentelemetry-api==1.27.0
+opentelemetry-sdk==1.27.0
+opentelemetry-exporter-otlp-proto-http==1.27.0
+opentelemetry-instrumentation-fastapi==0.48b0
+python-multipart==0.0.22
+urllib3==2.6.3
+filelock==3.20.3
+pytest-timeout==2.4.0
+pytest-xdist==3.8.0
+psutil==7.2.2
+nvidia-ml-py==13.590.48
+pyasn1==0.6.2
+zeroconf==0.148.0
+zstandard==0.25.0
+# MCP bridge deps (fastmcp/mcp/sse-starlette) omitidos del wheelhouse por
+# conflicts de resolver con pydantic/fastapi pinned y porque NO son
+# requeridos para mesh server mode. Install separately si se quiere el
+# MCP stdio bridge.

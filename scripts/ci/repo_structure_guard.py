@@ -7,7 +7,6 @@ Exit code 0 = all checks pass
 Exit code 1 = at least one check failed
 """
 
-import os
 import sys
 from pathlib import Path
 
