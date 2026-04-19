@@ -106,24 +106,29 @@ Ordenado por criticidad descendente dentro de cada sección.
   vez de `LaunchedEffect(step, code, coreUrl)` — redeem se dispara exactamente
   una vez al entrar en Enrolling.
 
-### G8. Heartbeat scheduler del mesh agent no arranca post-enrollment
-- **Síntoma**: server-side `last_heartbeat == enrolled_at` incluso minutos
-  después de que el device está en Dashboard y operando. El device no reporta
-  métricas al Core.
-- **Causa raíz**: no investigada a fondo — el `heartbeatJob` dentro de
-  `startMesh()` debería correr cada 30s, pero server no ve las llamadas.
-  Posiblemente `heartbeatSecret` blank por `syncLocalDeviceSecret` que
-  solo corre en serve mode, no en inference mode.
-- **Fix**: auditar `MeshAgentService.heartbeatJob` con `Log.i` para ver si
-  corre; si corre pero falla el POST, inspeccionar headers/body.
+### G8. ~~Heartbeat scheduler del mesh agent no arranca post-enrollment~~ — **NO ES BUG**
+- **Re-evaluación (2026-04-20)**: investigado a fondo. El `heartbeatJob`
+  corre correctamente una vez que el mesh service está activo (verificado
+  en el último run de la suite utility 10/10). El síntoma original —
+  "server-side last_heartbeat == enrolled_at" post-setup — tiene otra causa:
+  el mesh service **NO arranca automáticamente al terminar el wizard**.
+  El wizard removió el `onStartMesh()` intencionalmente (ver
+  SetupWizardScreen.kt:377-378: "Mesh starts OFF — user activates from
+  Dashboard, or Core requests it"). Es la misma filosofía KISI aplicada
+  a inferencia: human opt-in explícito (long-press START MESH NODE).
+- **No-fix aplicado**: conservar el diseño. El heartbeat empieza cuando
+  el humano activa el mesh. Es coherente con G6 (inferencia opt-in).
 
-### G9. Stale device records en el registry del Core
-- **Síntoma**: después de múltiples ciclos de enroll, el registry acumula
-  13+ `sm-g973f-*` devices en `pending_approval` perpetuo. Se mezclan con
-  devices reales y causan ruido.
-- **Fix**: ejecutar prune periódico server-side o UI admin en el dashboard
-  web para bulk-delete. O auto-prune devices que nunca completan approve en
-  N minutos.
+### G9. ~~Stale device records en el registry del Core~~ — **FIXED 2026-04-20**
+- **Síntoma**: después de múltiples ciclos de enroll, el registry acumulaba
+  13+ `sm-g973f-*` devices en `pending_approval` perpetuo. En la suite run
+  de utility mode, el overhead de iterar 15+ devices stale causó que el T1
+  tardara 188s en asignarse (pasando el timeout del script por 8s).
+- **Fix aplicado**: nuevo `_mesh_prune_stale_loop(app)` en `main.py` que corre
+  cada 1 hora y hace `registry.prune_stale_devices(delete_after_seconds=7d)`.
+  Threshold configurable via `MESH_PRUNE_DAYS` env var. Primer pass a los
+  5 min post-startup para no colisionar con boot overhead. Registrado en
+  el lifespan startup y en el shutdown task list.
 
 ---
 
@@ -234,17 +239,18 @@ Ordenado por criticidad descendente dentro de cada sección.
 - **Implicación**: para producción conviene cross-compile con NDK bionic + static
   (evitar dependencia de binaries terceros). Pendiente.
 
-### G22. `SettingsStore.inferenceRunning` persistente no sincroniza al boot
-- **Síntoma**: tras relanzar la app (sin mesh running), el ModelCard muestra
-  "RUNNING" porque `settings.inferenceRunning=true` quedó persistido del
-  último run donde llama-server sí corría. Como el mesh service no está
-  activo, nadie corre `watchInferenceStatus` y el flag queda stale — el
-  user tap "running" intentando ver el endpoint y dispara `STOP_INFERENCE`
-  sin querer.
-- **Fix**: al boot de la app (MeshViewModel.init), resetear a false si no
-  hay runner vivo, o borrar el flag persistente completamente (es un campo
-  derivado de la realidad del runtime, no una preferencia del user).
-- **Workaround actual**: clear data o tap mesh para activar el watcher.
+### G22. ~~`SettingsStore.inferenceRunning` persistente no sincroniza al boot~~ — **FIXED 2026-04-20**
+- **Síntoma**: tras relanzar la app (sin mesh running), el ModelCard mostraba
+  "RUNNING" porque `settings.inferenceRunning=true` quedaba persistido del
+  último run. Como el mesh service no estaba activo, nadie corría
+  `watchInferenceStatus` y el flag quedaba stale — el user tapea "running"
+  intentando ver el endpoint y disparaba `STOP_INFERENCE` sin querer.
+- **Fix aplicado**: `MeshViewModel.init {}` ahora resetea
+  `inferenceRunning=false` Y `meshServiceRunning=false` al boot. Son
+  campos runtime-derived, no preferences — su persistencia no sobrevive
+  al process kill del JVM. Si el service SÍ está vivo (edge case: app
+  went background sin process kill), `watchInferenceStatus` + la
+  observer loop re-asertan el valor correcto en el próximo tick.
 
 ---
 

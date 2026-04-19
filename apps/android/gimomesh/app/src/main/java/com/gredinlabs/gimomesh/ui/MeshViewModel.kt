@@ -51,6 +51,21 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
     private var currentSettings = SettingsStore.Settings()
 
     init {
+        // G22 fix: runtime-derived flags (inferenceRunning, meshServiceRunning)
+        // persisted in DataStore from the last run of the process are stale
+        // the moment the JVM comes up — the service and the llama-server child
+        // don't survive a process kill. If the user had "RUNNING" before the
+        // relaunch, the UI would lie until the service corrected it on its
+        // next observer cycle (which, without a running service, never comes).
+        //
+        // Reset both to false at boot. If the service IS alive (unusual —
+        // app kept in background without process kill), its watchInferenceStatus
+        // and startMesh paths will re-assert the correct value within one
+        // settings-observer tick.
+        viewModelScope.launch {
+            settingsStore.updateInferenceRunning(false)
+            settingsStore.updateMeshServiceRunning(false)
+        }
         observeSettings()
         observeTerminal()
         observeHostRuntime()

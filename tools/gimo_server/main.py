@@ -144,6 +144,43 @@ async def _mesh_heartbeat_timeout_loop(app):
             logger.warning("Mesh heartbeat timeout loop error: %s", exc)
 
 
+async def _mesh_prune_stale_loop(app):
+    """G9 fix: periodically purge devices that have been silent for > 7 days.
+
+    Complements _mesh_heartbeat_timeout_loop (which only flips state to offline).
+    Without prune, a dev environment accumulates hundreds of ghost records over
+    weeks, which slows auto_assign_pending and clutters admin listings. The
+    retention threshold (7 days) is the same used by the manual POST /ops/mesh/prune
+    endpoint; tune via MESH_PRUNE_DAYS env var if needed.
+    """
+    import asyncio
+    import logging
+    import os as _os
+    logger = logging.getLogger("orchestrator")
+    # Run one pass ~5 min after startup so the server is stable before the
+    # first purge. Then every 1 hour.
+    await asyncio.sleep(300)
+    retention_days = max(1, int(_os.environ.get("MESH_PRUNE_DAYS", "7")))
+    while True:
+        try:
+            registry = getattr(app.state, "mesh_registry", None)
+            if registry is not None:
+                pruned = registry.prune_stale_devices(
+                    delete_after_seconds=retention_days * 24 * 3600
+                )
+                if pruned:
+                    logger.info(
+                        "Mesh auto-prune: removed %d stale device(s) older than %dd: %s",
+                        len(pruned), retention_days, pruned,
+                    )
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Mesh auto-prune loop error: %s", exc)
+            await asyncio.sleep(3600)
+
+
 async def _mdns_signals_refresh_loop(app):
     """rev 2 Cambio 11 — refresh mDNS TXT record every 60s with live routing signals.
 
@@ -401,6 +438,7 @@ async def lifespan(app: FastAPI):
 
         mcp_sampling_task = asyncio.create_task(_mcp_sampling_loop())
         mesh_timeout_task = asyncio.create_task(_mesh_heartbeat_timeout_loop(app))
+        mesh_prune_task = asyncio.create_task(_mesh_prune_stale_loop(app))
         mdns_refresh_task = asyncio.create_task(_mdns_signals_refresh_loop(app))
 
         # Startup reconcile + rotation for runtime consistency
@@ -636,7 +674,7 @@ async def lifespan(app: FastAPI):
         # Shutdown: Clean up resources (never propagate cancellation errors to TestClient)
         logger.info("Shutting down GIMO Orchestrator...")
         try:
-            tasks = [cleanup_task, threat_cleanup_task, ops_cleanup_task, mcp_sampling_task, integrity_task, mesh_timeout_task, mdns_refresh_task]
+            tasks = [cleanup_task, threat_cleanup_task, ops_cleanup_task, mcp_sampling_task, integrity_task, mesh_timeout_task, mesh_prune_task, mdns_refresh_task]
             await _shutdown_services(logger, app, hw_monitor, run_worker, tasks)
             if hasattr(app.state, "run_worker"):
                 delattr(app.state, "run_worker")
