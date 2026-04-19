@@ -99,19 +99,27 @@ class ShellEnvironment(private val context: Context) {
     }
 
     /**
-     * Attempts to extract busybox and wire its coreutils symlinks. Returns
-     * `true` only if the shell binary `sh` is present and executable.
+     * Locates busybox (shipped as libbusybox.so in jniLibs). Wires coreutils
+     * symlinks in binDir that point into nativeLibraryDir — execve follows
+     * the symlink and lands on the permitted native dir, bypassing the
+     * Android 10+ untrusted_app exec restriction on filesDir.
+     *
+     * Returns `true` only if the shell binary `sh` is present and executable.
      */
     private fun initShell(): Boolean {
-        val busybox = File(binDir, "busybox")
-        val ok = extractAsset("bin/busybox", busybox)
-        if (!ok) return false
+        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
+        val busybox = File(nativeDir, "libbusybox.so")
+        if (!busybox.exists() || !busybox.canExecute()) return false
 
+        // Symlink busybox under binDir/<command> → nativeDir/libbusybox.so
         val commands = listOf(
-            "sh", "wget", "curl", "ls", "cat", "grep", "sed", "awk",
+            "sh", "wget", "ls", "cat", "grep", "sed", "awk",
             "tar", "gzip", "gunzip", "cp", "mv", "rm", "mkdir",
             "chmod", "kill", "ps", "top", "df", "du", "head", "tail",
             "wc", "sort", "uniq", "find", "xargs", "tee", "nohup",
+            "sha256sum", "md5sum", "sleep", "echo", "printf", "dd",
+            "basename", "dirname", "seq", "stat", "date", "uname",
+            "true", "false", "uptime", "nproc", "free",
         )
         for (command in commands) {
             ensureBusyboxLink(command, busybox)
@@ -312,17 +320,22 @@ class ShellEnvironment(private val context: Context) {
     private fun ensureBusyboxLink(command: String, busybox: File) {
         val target = File(binDir, command)
         if (target.exists()) return
-
-        val process = ProcessBuilder(
-            busybox.absolutePath,
-            "ln",
-            "-sf",
-            busybox.absolutePath,
-            target.absolutePath,
-        )
-            .directory(binDir)
-            .start()
-        process.waitFor(5, TimeUnit.SECONDS)
+        // Use Java NIO to create the symlink — bootstrapping busybox via its
+        // own `ln` applet doesn't work because when invoked as "libbusybox.so"
+        // busybox treats the basename as the applet name ("applet not found").
+        // Symlinks under binDir named after the applet ("sh", "ls", …) DO
+        // resolve to the correct applet when exec'd later, because argv[0] =
+        // the symlink's basename.
+        try {
+            java.nio.file.Files.createSymbolicLink(
+                target.toPath(),
+                busybox.toPath(),
+            )
+        } catch (_: Exception) {
+            // If symlink creation fails (filesystem restriction, pre-existing
+            // file we couldn't stat), fall back silently — caller checks for
+            // target existence afterwards.
+        }
     }
 }
 

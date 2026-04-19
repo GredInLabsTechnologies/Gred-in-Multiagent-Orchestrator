@@ -218,6 +218,22 @@ Ordenado por criticidad descendente dentro de cada sección.
 - **Fix**: debounce 500ms en el ModelCard onClick, o gate en el service
   que ignore el intent si ya hay una `STARTING` en vuelo.
 
+### G22b. busybox invocation via `libbusybox.so` fails with "applet not found"
+- **Síntoma**: cuando el binary se invoca desde `nativeLibraryDir/libbusybox.so`,
+  argv[0]="libbusybox.so" y busybox interpreta el basename como applet name
+  ("libbusybox.so" no es applet → error). El bootstrapping de symlinks via
+  `busybox ln -sf ...` fallaba por esto.
+- **Fix aplicado**: `ShellEnvironment.ensureBusyboxLink` usa `Files.createSymbolicLink`
+  (Java NIO) directamente, evitando el bootstrapping via busybox. Cada symlink
+  en `binDir/<applet>` tiene basename válido → argv[0] resuelve applet.
+
+### G22c. Binary busybox "GNU/Linux" static binary funciona en Android arm64
+- **Observación**: EXALAB/Busybox-static binary (labeled "for GNU/Linux 3.7.0")
+  ejecuta correctamente en Android 15 arm64 porque está statically linked y no
+  depende de libc bionic.
+- **Implicación**: para producción conviene cross-compile con NDK bionic + static
+  (evitar dependencia de binaries terceros). Pendiente.
+
 ### G22. `SettingsStore.inferenceRunning` persistente no sincroniza al boot
 - **Síntoma**: tras relanzar la app (sin mesh running), el ModelCard muestra
   "RUNNING" porque `settings.inferenceRunning=true` quedó persistido del

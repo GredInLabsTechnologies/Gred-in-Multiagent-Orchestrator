@@ -20,16 +20,22 @@ import java.security.MessageDigest
 class TaskExecutor(
     private val filesDir: File,
     private val terminalBuffer: TerminalBuffer,
+    private val shellEnv: ShellEnvironment? = null,
 ) {
     companion object {
-        // Strict allowlist for shell_exec
+        // Strict allowlist for shell_exec — busybox applets safe for reporting
+        // and hashing. No network, no filesystem mutation, no privilege ops.
         private val SHELL_ALLOWLIST = setOf(
-            "ls", "cat", "df", "free", "uname", "date", "echo", "wc", "stat", "uptime",
+            "ls", "cat", "df", "free", "uname", "date", "echo", "wc", "stat",
+            "uptime", "sha256sum", "md5sum", "nproc", "seq", "head", "tail",
+            "sort", "uniq", "printf", "basename", "dirname", "true", "false",
         )
         // Dangerous patterns that reject immediately
         private val SHELL_DENY_PATTERNS = listOf(
-            "|", ";", "&&", "||", "`", "$(", "rm ", "su ", "chmod ", "chown ",
+            ";", "&&", "||", "`", "$(", "rm ", "su ", "chmod ", "chown ",
             "mkfs", "dd ", "reboot", "shutdown",
+            // Note: "|" removed from deny — pipe between allowlisted commands
+            // is safe and a hard requirement for any realistic shell task.
         )
     }
 
@@ -138,14 +144,32 @@ class TaskExecutor(
                 }
             }
 
-            // Security: only allowlisted commands
-            val executable = command.trim().split("\\s+".toRegex()).firstOrNull() ?: ""
-            if (executable !in SHELL_ALLOWLIST) {
-                return@withContext mapOf("error" to "DENIED: '$executable' not in allowlist")
+            // Security: every pipe segment's head executable must be allowlisted.
+            // Splits on "|" only for allowlist validation; the sh subshell
+            // still evaluates the full command including the pipe semantics.
+            val segments = command.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+            for (segment in segments) {
+                val head = segment.split("\\s+".toRegex()).firstOrNull() ?: ""
+                if (head !in SHELL_ALLOWLIST) {
+                    return@withContext mapOf("error" to "DENIED: '$head' not in allowlist")
+                }
             }
 
+            // Resolve sh from the shell environment so the PATH includes binDir
+            // (busybox symlinks). Falls back to /system/bin/sh which lacks the
+            // utility applets but won't crash the executor.
+            val shPath = shellEnv?.getBinaryPath("sh")?.takeIf { it.exists() }?.absolutePath
+                ?: "/system/bin/sh"
+            val env = shellEnv?.buildEnvironment() ?: emptyMap()
             try {
-                val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+                val builder = ProcessBuilder(shPath, "-c", command)
+                    .also { b ->
+                        if (env.isNotEmpty()) {
+                            b.environment().clear()
+                            b.environment().putAll(env)
+                        }
+                    }
+                val process = builder.start()
                 val stdout = process.inputStream.bufferedReader().readText()
                 val stderr = process.errorStream.bufferedReader().readText()
                 val exitCode = process.waitFor()

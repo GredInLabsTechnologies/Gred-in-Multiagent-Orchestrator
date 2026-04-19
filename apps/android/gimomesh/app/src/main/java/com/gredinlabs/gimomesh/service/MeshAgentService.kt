@@ -407,7 +407,7 @@ class MeshAgentService : Service() {
         if (taskPollJob?.isActive == true) return
 
         taskPollJob = scope.launch {
-            val executor = TaskExecutor(filesDir, terminalBuffer)
+            val executor = TaskExecutor(filesDir, terminalBuffer, shell)
             terminalBuffer.append(
                 LogSource.TASK,
                 "task poll loop started - ${TASK_POLL_INTERVAL_MS / 1000}s interval",
