@@ -1,5 +1,11 @@
 # GIMO Mesh — Release Gaps & Frictions
 
+> **2026-04-20 sprint close**: 19 gaps fixed, 3 no-bug, **G27 declared
+> blocker for server mode**. Ver `docs/audits/GIMO_MESH_SPRINT_2026-04-20.md`
+> para el changelog consolidado.
+
+
+
 Inventario de lo que debe resolverse antes de shippear el APK del GIMO Mesh como
 producto de usuario final. Empezó 2026-04-19 durante la sesión de KISI auto-start
 fix + cross-compile llama-server. Cada entrada describe: **qué es**, **por qué
@@ -10,6 +16,50 @@ Ordenado por criticidad descendente dentro de cada sección.
 ---
 
 ## BLOQUEANTES (ship-stoppers)
+
+### G27. Server mode bloqueado: python-build-standalone no corre en Android bionic — **ACTIVE BLOCKER**
+- **Descubierto**: 2026-04-20. Tras rebuild del bundle rove con `--python-source=standalone`
+  (74 MB comprimido, 718 MB descomprimido, incluye CPython + wheels + repo tree),
+  el binario Python embedido es **glibc-linked for GNU/Linux**, no bionic.
+- **Evidencia**:
+  ```
+  $ file python3.13
+  → ELF 64-bit LSB pie executable, ARM aarch64, ...,
+    interpreter /lib/ld-linux-aarch64.so.1, for GNU/Linux 3.7.0
+  ```
+  Android usa bionic libc con dynamic linker en `/system/bin/linker64`.
+  El `execve` del kernel falla con **"No such file or directory"** (engañoso:
+  el binary sí está, pero su interpreter declarado no existe en Android).
+- **Implicación**: server mode on-APK-standalone **no funciona hoy**. El diseño
+  (rove bundle → ShellEnvironment extrae tar.xz → EmbeddedCoreRunner arranca
+  Python + uvicorn) está completo en código pero bloqueado por el origen del
+  binario Python.
+- **Infraestructura lista para el fix** (committed pero inactiva):
+  - `ShellEnvironment.extractTarXz()` con commons-compress + tukaani-xz
+    (descomprime el bundle full-size correctamente).
+  - `ShellEnvironment.prepareEmbeddedCoreRuntime()` actualizado para usar
+    `extracted/` tree en vez de solo copiar el tarball.
+  - `app/build.gradle.kts` con deps `org.apache.commons:commons-compress:1.26.2`
+    + `org.tukaani:xz:1.9`.
+- **Opciones de fix** (ordenadas por costo / feasibilidad):
+  1. **Termux path** (1–2 días): requerir Termux (app con Python bionic nativo);
+     escribir bootstrap que cargue el wheelhouse del APK. Rompe "zero-ADB setup"
+     pero es straightforward. Uso: `pkg install python && python -m pip install
+     --no-index --find-links=/path/wheelhouse fastapi uvicorn && python -m uvicorn
+     tools.gimo_server.main:app`.
+  2. **Chaquopy** (licencia comercial): Python embedded for Android, bionic-native.
+     Integración Gradle oficial. Requiere decisión comercial.
+  3. **python-for-android** (1–2 semanas): pipeline de Kivy para producir APKs
+     con Python bionic. Requiere build infra Linux dedicada.
+  4. **Cross-compile CPython con NDK from source** (1+ mes): custom toolchain,
+     mucho trabajo propio pero zero deps externas.
+  5. **Rewrite Core en Kotlin/Go/Rust** (meses): scope masivo, abandona Python
+     como estándar del Core.
+- **Decisión pendiente**: requiere input de producto sobre aceptabilidad de
+  Termux-dep (rompe experiencia "single-APK") vs gasto de Chaquopy vs plazo
+  de python-for-android.
+- **Mitigación actual**: server mode queda como "arquitectura definida,
+  implementación pending blocker G27" hasta que se elija camino.
 
 ### G1. Binarios nativos con `Permission denied` desde ProcessBuilder (Android 10+)
 - **Síntoma**: `java.io.IOException: error=13, Permission denied` al invocar

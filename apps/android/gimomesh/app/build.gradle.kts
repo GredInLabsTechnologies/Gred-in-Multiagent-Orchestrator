@@ -233,4 +233,10 @@ dependencies {
 
     // Core
     implementation("androidx.core:core-ktx:1.15.0")
+
+    // Server mode: embedded Core runtime bundle extraction
+    // - apache commons-compress gives us tar readers (tar.xz layer is streamed
+    //   on top of the XZ decoder from tukaani). Both are small pure-Java libs.
+    implementation("org.apache.commons:commons-compress:1.26.2")
+    implementation("org.tukaani:xz:1.9")
 }

@@ -277,12 +277,21 @@ class ShellEnvironment(private val context: Context) {
         val abi = resolveRuntimeAbi() ?: return null
         val manifest = readRuntimeManifest(abi) ?: return null
 
-        // Copy the signed tarball from assets to internal storage. Extraction
-        // to usable tree is responsibility del consumer (Termux bootstrap,
-        // o `rove` CLI embebido en el futuro) — Kotlin no descomprime xz.
+        // Layout after this method:
+        //   runtimeDir/gimo-core-runtime.tar.xz      (the raw bundle, for
+        //                                             upgrade-peer sharing)
+        //   runtimeDir/extracted/.unpacked.marker    (sentinel: extraction OK)
+        //   runtimeDir/extracted/python/             (standalone CPython)
+        //   runtimeDir/extracted/site-packages/      (wheels)
+        //   runtimeDir/extracted/repo/               (tools/gimo_server, …)
         val tarballAsset = "runtime/$abi/${manifest.tarballName}"
         val tarballDest = File(runtimeDir, manifest.tarballName)
+        val extractedRoot = File(runtimeDir, "extracted")
+        val unpackedMarker = File(extractedRoot, ".unpacked.v${manifest.runtimeVersion.ifBlank { "unknown" }}")
+
         runtimeDir.mkdirs()
+
+        // 1. Always ensure the tarball is on disk (size-matches manifest).
         if (!tarballDest.exists() || tarballDest.length() != manifest.compressedSizeBytes) {
             try {
                 extractAsset(tarballAsset, tarballDest)
@@ -291,16 +300,36 @@ class ShellEnvironment(private val context: Context) {
             }
         }
 
-        // After tarball is in filesystem, ShellEnvironment.isCoreRuntimeReady
-        // signals "bundle disponible para este ABI". El runner externo lo
-        // consume: Termux side carga wheels via `pip install --no-index
-        // --find-links=<tarball>`, runtime_upgrader lo sirve peer-to-peer.
-        val pythonBinary = File(runtimeDir, manifest.pythonRelPath)
-        val repoRoot = File(runtimeDir, manifest.projectRootRelPath)
+        // 2. Unpack the tar.xz into extracted/ if the version marker doesn't
+        // match (re-install/upgrade path). Uses Apache Commons Compress +
+        // tukaani XZ — both pure-Java, work under untrusted_app sandbox.
+        if (!unpackedMarker.exists()) {
+            if (extractedRoot.exists()) extractedRoot.deleteRecursively()
+            extractedRoot.mkdirs()
+            try {
+                extractTarXz(tarballDest, extractedRoot)
+                unpackedMarker.parentFile.mkdirs()
+                unpackedMarker.writeText("ok\n", Charsets.UTF_8)
+            } catch (ex: Exception) {
+                // Leave the partial extraction for diagnostics; return null so
+                // isCoreRuntimeReady stays false.
+                return null
+            }
+        }
+
+        val pythonBinary = File(extractedRoot, manifest.pythonRelPath)
+        val repoRoot = File(extractedRoot, manifest.projectRootRelPath)
         val pythonPath = manifest.pythonPathEntries
-            .map { File(runtimeDir, it).absolutePath }
+            .map { File(extractedRoot, it).absolutePath }
             .filter { it.isNotBlank() }
             .joinToString(":")
+
+        // Sanity: pythonBinary must be executable after unpack.
+        if (pythonBinary.exists()) {
+            pythonBinary.setExecutable(true, false)
+        } else {
+            return null
+        }
 
         return EmbeddedCoreRuntime(
             rootDir = runtimeDir,
@@ -320,6 +349,58 @@ class ShellEnvironment(private val context: Context) {
             runtimeJson.decodeFromString<EmbeddedCoreRuntimeManifest>(raw)
         } catch (_: Exception) {
             null
+        }
+    }
+
+    /**
+     * Extract a .tar.xz archive to a destination directory using pure-Java
+     * streams (commons-compress + tukaani-xz). Designed for the embedded Core
+     * runtime bundle: preserves executable bits, resolves "./xxx" entries,
+     * skips absolute or traversal paths defensively, and re-creates parent
+     * dirs on the fly. Throws on any I/O or malformed-tar failure — the
+     * caller handles the isCoreRuntimeReady=false path.
+     */
+    private fun extractTarXz(src: File, destRoot: File) {
+        destRoot.mkdirs()
+        val destCanonical = destRoot.canonicalFile
+        src.inputStream().buffered().use { fis ->
+            org.tukaani.xz.XZInputStream(fis).use { xz ->
+                org.apache.commons.compress.archivers.tar.TarArchiveInputStream(xz).use { tar ->
+                    while (true) {
+                        val entry = tar.nextEntry ?: break
+                        val name = entry.name
+                        if (name.startsWith("/") || name.contains("..")) continue
+                        val target = File(destRoot, name)
+                        val targetCanonical = target.canonicalFile
+                        if (!targetCanonical.path.startsWith(destCanonical.path)) continue
+                        if (entry.isDirectory) {
+                            target.mkdirs()
+                            continue
+                        }
+                        if (entry.isSymbolicLink) {
+                            target.parentFile?.mkdirs()
+                            try {
+                                java.nio.file.Files.createSymbolicLink(
+                                    target.toPath(),
+                                    java.nio.file.Paths.get(entry.linkName),
+                                )
+                            } catch (_: Exception) {
+                                // fall through — missing symlinks are not fatal
+                                // for our use (CPython standalone uses symlinks
+                                // in share/terminfo that aren't needed to run
+                                // uvicorn).
+                            }
+                            continue
+                        }
+                        target.parentFile?.mkdirs()
+                        target.outputStream().use { out -> tar.copyTo(out) }
+                        // Preserve exec bit: tar mode bits include 0o111.
+                        if ((entry.mode and 0b001_001_001) != 0) {
+                            target.setExecutable(true, false)
+                        }
+                    }
+                }
+            }
         }
     }
 
