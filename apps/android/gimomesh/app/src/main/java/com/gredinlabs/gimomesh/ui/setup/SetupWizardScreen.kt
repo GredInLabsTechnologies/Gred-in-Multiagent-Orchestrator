@@ -240,8 +240,19 @@ fun SetupWizardScreen(
         if (step == SetupStep.ManualCode && connectedCoreUrl.isNotBlank() && code.length == 6 && code != lastSubmittedCode) submitCode()
     }
 
-    LaunchedEffect(step, connectedCoreUrl, code) {
-        if (step != SetupStep.Enrolling || connectedCoreUrl.isBlank()) return@LaunchedEffect
+    // F-11 fix (2026-04-19): redeem must fire EXACTLY ONCE when entering Enrolling.
+    // Previously this effect keyed on (step, connectedCoreUrl, code); a change to
+    // `code` mid-flight (focus loss, IME re-render) cancelled the coroutine after
+    // the POST had been sent, then a relaunch fired a SECOND redeem which the
+    // server rightly rejected with 403 "already used", sending the UI back to
+    // ManualCode even though the device was successfully enrolled.
+    LaunchedEffect(step) {
+        if (step != SetupStep.Enrolling) return@LaunchedEffect
+        if (connectedCoreUrl.isBlank() || code.length != 6) {
+            error = "Invalid state — reconnect to the Core and retype the code"
+            step = SetupStep.ManualCode
+            return@LaunchedEffect
+        }
         val client = OnboardingClient(connectedCoreUrl)
         try {
             when (
