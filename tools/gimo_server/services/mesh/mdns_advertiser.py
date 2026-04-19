@@ -54,7 +54,13 @@ class MdnsAdvertiser:
         self._runtime_version: str = runtime_version or ""
 
     def start(self) -> None:
-        """Register the mDNS service. Idempotent."""
+        """Register the mDNS service. Idempotent.
+
+        Uses the sync Zeroconf API from a background thread so we don't block
+        the FastAPI async event loop. Zeroconf 0.148+ raises EventLoopBlocked
+        if register_service() is called while a running asyncio loop exists
+        in the same thread.
+        """
         if self._started:
             logger.debug("mDNS advertiser already running")
             return
@@ -76,7 +82,7 @@ class MdnsAdvertiser:
 
         properties = self._build_properties(hostname)
 
-        try:
+        def _sync_register():
             self._info = ServiceInfo(
                 type_=self.SERVICE_TYPE,
                 name=service_name,
@@ -87,6 +93,27 @@ class MdnsAdvertiser:
             )
             self._zc = Zeroconf()
             self._zc.register_service(self._info)
+
+        try:
+            # Run registration in a daemon thread to avoid EventLoopBlocked
+            # from Zeroconf's internal asyncio coordination.
+            import threading
+            error_holder: list[BaseException] = []
+
+            def _runner():
+                try:
+                    _sync_register()
+                except BaseException as exc:  # noqa: BLE001
+                    error_holder.append(exc)
+
+            t = threading.Thread(target=_runner, daemon=True, name="mdns-register")
+            t.start()
+            t.join(timeout=5.0)
+            if t.is_alive():
+                raise TimeoutError("mDNS registration timed out after 5s")
+            if error_holder:
+                raise error_holder[0]
+
             self._started = True
             logger.info(
                 "mDNS advertiser started: %s on %s:%d (mode=%s, health=%d, load=%.2f, runtime=%s)",
@@ -160,29 +187,50 @@ class MdnsAdvertiser:
     # ── Internals ─────────────────────────────────────────────
 
     def _build_properties(self, hostname: str) -> dict:
-        """Compose TXT record properties (rev 2: health/mode/load; runtime pkg: runtime_version)."""
+        """Compose TXT record properties.
+
+        Includes capability manifest (SOTA 2026-04-19: exo labs + Home Assistant
+        zeroconf patterns) so discoverers can filter without extra round-trips.
+        """
         from tools.gimo_server.services.mesh.hmac_signer import sign_payload
 
         # HMAC covers hostname, port AND the live signals so a MITM cannot
         # spoof a healthy peer — any tampering invalidates the signature.
-        # runtime_version is included so a peer cannot spoof a newer bundle.
         payload_to_sign = (
             f"{hostname}:{self._port}:{self._mode}:{self._health}:{self._load:.2f}"
             f":{self._runtime_version}"
         )
         hmac_sig = sign_payload(self._token, payload_to_sign) if self._token else ""
 
+        # Capability manifest — declares what this node can do so the client
+        # can decide whether to use it without a second probe.
+        caps = ["core"]
+        if self._mode in ("server", "hybrid"):
+            caps.append("orchestrator")
+        if self._mode in ("inference", "hybrid"):
+            caps.append("inference")
+        if self._mode == "utility":
+            caps.append("utility")
+
+        local_ip = _get_local_ip()
+        endpoint = f"http://{local_ip}:{self._port}" if local_ip != "127.0.0.1" else ""
+
         return {
             "version": _VERSION,
             "mesh": "true",
             "core_id": "gimo",
             "hmac": hmac_sig,
-            # rev 2 — routing signals (unsigned individually but covered by HMAC above)
+            # Runtime routing signals (covered by HMAC above)
             "mode": self._mode,
             "health": str(self._health),
             "load": f"{self._load:.2f}",
-            # runtime packaging (plan 2026-04-16): bundle version for upgrade hints
             "runtime_version": self._runtime_version,
+            # Capability manifest — SOTA uplift 2026-04-19
+            "role": "server",  # this node is the orchestrator
+            "caps": ",".join(caps),
+            "endpoint": endpoint,
+            "mesh_protocol": "v1",
+            "port": str(self._port),
         }
 
     @staticmethod

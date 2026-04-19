@@ -293,11 +293,42 @@ async def _startup_and_run() -> None:
     except Exception as exc:
         logger.error("Failed to register MCP prompts: %s", exc)
 
-    await mcp.run_stdio_async()
+    # Graceful exit on stdin EOF, BrokenPipe (client closed), or SIGTERM/SIGINT.
+    # Without this, the bridge lingers as a zombie process each time a client
+    # (e.g. Claude Code) disconnects.
+    try:
+        await mcp.run_stdio_async()
+    except (EOFError, BrokenPipeError):
+        logger.info("MCP bridge: stdin closed by client, exiting cleanly")
+    except KeyboardInterrupt:
+        logger.info("MCP bridge: interrupted, exiting cleanly")
+    finally:
+        logger.info("MCP bridge: shutdown complete")
+
+
+def _install_signal_handlers() -> None:
+    """Install SIGTERM/SIGINT handlers so the bridge exits instead of hanging."""
+    import signal
+
+    def _handler(signum, _frame):
+        logger.info("MCP bridge: received signal %s, exiting", signum)
+        # Raising KeyboardInterrupt inside asyncio breaks out of run_stdio_async
+        raise KeyboardInterrupt
+
+    try:
+        signal.signal(signal.SIGTERM, _handler)
+        signal.signal(signal.SIGINT, _handler)
+    except (ValueError, OSError):
+        # signal.signal only works in the main thread; silently skip otherwise
+        logger.debug("MCP bridge: could not install signal handlers (non-main thread)")
 
 
 def main():
-    asyncio.run(_startup_and_run())
+    _install_signal_handlers()
+    try:
+        asyncio.run(_startup_and_run())
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":

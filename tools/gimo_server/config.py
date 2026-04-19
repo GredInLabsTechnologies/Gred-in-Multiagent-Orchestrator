@@ -111,20 +111,25 @@ class Settings:
 
 
 def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_TOKEN") -> str:
-    """Load or create a token. Supports both unified .gimo_credentials and legacy separate files.
+    """Load or create a token. File-based canonical, env as fallback, generate as last resort.
 
-    Priority:
-    1. Environment variable (ORCH_TOKEN, ORCH_ACTIONS_TOKEN, ORCH_OPERATOR_TOKEN)
-    2. Unified .gimo_credentials file (new format)
-    3. Legacy separate token files (.orch_token, .orch_actions_token, .orch_operator_token)
+    Priority (file wins, K8s projected-token pattern):
+    1. Unified .gimo_credentials file (canonical)
+    2. Legacy separate token files (.orch_token, .orch_actions_token, .orch_operator_token)
+    3. Environment variable (ORCH_TOKEN, ORCH_ACTIONS_TOKEN, ORCH_OPERATOR_TOKEN) - for CI/containers
     4. Generate new token and write to appropriate file
+
+    Divergence policy: if both file and env are set but DIFFER, logs a WARNING with
+    hash prefixes of both, and proceeds with the FILE value. Never silent last-writer-wins.
     """
+    import hashlib
+
     token_file = token_file or ORCH_TOKEN_FILE
     env_token = os.environ.get(env_key, "").strip()
-    if env_token:
-        return env_token
+    file_token = ""
+    source = ""
 
-    # Try unified credentials file first (new format)
+    # Try unified credentials file first (canonical)
     base_dir = Path(__file__).parent
     unified_creds = base_dir / ".gimo_credentials"
     if unified_creds.exists():
@@ -137,7 +142,6 @@ def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_T
             try:
                 creds_data = yaml.safe_load(unified_creds.read_text(encoding="utf-8"))
                 if isinstance(creds_data, dict):
-                    # Map env_key to credential key
                     role_key = None
                     if env_key == "ORCH_TOKEN":
                         role_key = "admin"
@@ -147,24 +151,41 @@ def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_T
                         role_key = "operator"
 
                     if role_key and role_key in creds_data:
-                        token = str(creds_data[role_key]).strip()
-                        if token:
-                            os.environ[env_key] = token
-                            return token
+                        candidate = str(creds_data[role_key]).strip()
+                        if candidate:
+                            file_token = candidate
+                            source = ".gimo_credentials"
             except Exception as exc:
                 logger.warning("Failed to read unified credentials file: %s", exc)
 
     # Fall back to legacy separate token file
-    if token_file.exists():
+    if not file_token and token_file.exists():
         try:
-            file_token = token_file.read_text(encoding="utf-8").strip()
-            if file_token:
-                os.environ[env_key] = file_token
-                return file_token
+            candidate = token_file.read_text(encoding="utf-8").strip()
+            if candidate:
+                file_token = candidate
+                source = str(token_file.name)
         except Exception:
             logger.warning("Failed to read token file %s", token_file)
 
-    # Generate new token
+    if file_token:
+        if env_token and env_token != file_token:
+            file_hash = hashlib.sha256(file_token.encode()).hexdigest()[:8]
+            env_hash = hashlib.sha256(env_token.encode()).hexdigest()[:8]
+            logger.warning(
+                "Token mismatch for %s: file[%s]=%s env=%s — using FILE. "
+                "Remove %s from env to silence this, or update the file.",
+                env_key, source, file_hash, env_hash, env_key,
+            )
+        os.environ[env_key] = file_token
+        return file_token
+
+    # No file — use env if set (CI/container path)
+    if env_token:
+        logger.info("Using %s from environment (no file at %s)", env_key, token_file)
+        return env_token
+
+    # Generate new token and persist to legacy file
     token = secrets.token_urlsafe(48)
     token_file.parent.mkdir(parents=True, exist_ok=True)
     token_file.write_text(token, encoding="utf-8")
@@ -173,6 +194,7 @@ def _load_or_create_token(token_file: Path | None = None, env_key: str = "ORCH_T
     except Exception:
         logger.warning("Failed to chmod token file %s", token_file)
     os.environ[env_key] = token
+    logger.info("Generated new %s and wrote to %s", env_key, token_file.name)
     return token
 
 

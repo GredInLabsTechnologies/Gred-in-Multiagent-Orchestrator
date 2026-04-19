@@ -55,8 +55,83 @@ async def mesh_status(
     _rl: Annotated[None, Depends(check_rate_limit)],
 ) -> MeshStatus:
     _require_role(auth, "operator")
+    if not _get_mesh_enabled(request):
+        raise HTTPException(404, detail="Mesh is disabled")
     registry = _get_registry(request)
-    return registry.get_status(_get_mesh_enabled(request))
+    return registry.get_status(True)
+
+
+class MeshPruneRequest(BaseModel):
+    stale_days: int = 7
+
+
+class MeshPruneResponse(BaseModel):
+    pruned: List[str]
+
+
+@router.post("/prune")
+async def mesh_prune(
+    request: Request,
+    body: MeshPruneRequest,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+) -> MeshPruneResponse:
+    """Permanently remove devices that have been offline longer than stale_days.
+
+    Admin-only. Use to clean up stale registrations from tests, dev environments,
+    or devices that have been decommissioned. Irreversible (pruned devices must
+    re-enroll). Audit-logged per device.
+    """
+    _require_role(auth, "admin")
+    if not _get_mesh_enabled(request):
+        raise HTTPException(404, detail="Mesh is disabled")
+    registry = _get_registry(request)
+    if body.stale_days < 1:
+        raise HTTPException(400, detail="stale_days must be >= 1")
+    pruned = registry.prune_stale_devices(delete_after_seconds=body.stale_days * 24 * 3600)
+    for dev_id in pruned:
+        audit_log("OPS", "/ops/mesh/prune", dev_id, operation="DELETE", actor=_actor_label(auth))
+    return MeshPruneResponse(pruned=pruned)
+
+
+class MeshToggleRequest(BaseModel):
+    enabled: bool
+
+
+class MeshToggleResponse(BaseModel):
+    enabled: bool
+    changed: bool
+
+
+@router.post("/toggle")
+async def mesh_toggle(
+    request: Request,
+    body: MeshToggleRequest,
+    auth: Annotated[AuthContext, Depends(verify_token)],
+    _rl: Annotated[None, Depends(check_rate_limit)],
+) -> MeshToggleResponse:
+    """Enable/disable the mesh feature atomically.
+
+    Admin-only. Read-modify-write on OpsConfig.mesh_enabled only. All other
+    config fields are preserved. Audit-logged.
+    """
+    _require_role(auth, "admin")
+    from tools.gimo_server.services.ops import OpsService
+
+    OpsService.set_gics(getattr(request.app.state, "gics", None))
+    current_cfg = OpsService.get_config()
+    changed = current_cfg.mesh_enabled != body.enabled
+    if changed:
+        new_cfg = current_cfg.model_copy(update={"mesh_enabled": body.enabled})
+        OpsService.set_config(new_cfg)
+        audit_log(
+            "OPS",
+            "/ops/mesh/toggle",
+            "enable" if body.enabled else "disable",
+            operation="WRITE",
+            actor=_actor_label(auth),
+        )
+    return MeshToggleResponse(enabled=body.enabled, changed=changed)
 
 
 # ── Device list ──────────────────────────────────────────────
@@ -124,25 +199,58 @@ async def mesh_host(
             live = registry.get_device(host.device_id)
     device = live or host
 
+    import os as _os
+    port = int(_os.environ.get("ORCH_PORT", "9325"))
+
+    # Enumerate all non-loopback IPv4 addresses from active interfaces.
+    # Clients use this to resolve the Core when mDNS is unavailable.
     lan_urls: List[str] = []
+    try:
+        import psutil as _psutil
+        for iface, addrs in _psutil.net_if_addrs().items():
+            # Skip virtual/tunnel interfaces we don't want to advertise
+            if iface.lower().startswith(("loopback", "lo", "vethernet", "vmware", "vbox")):
+                continue
+            for addr in addrs:
+                if addr.family == socket.AF_INET if False else str(addr.family).endswith("AF_INET"):
+                    pass  # handled below
+        # Simpler: use getaddrinfo on hostname + explicit interface walk
+        import socket as _socket
+        for iface, addrs in _psutil.net_if_addrs().items():
+            if iface.lower().startswith(("lo", "loopback")):
+                continue
+            for addr in addrs:
+                if hasattr(addr, "family") and addr.family == _socket.AF_INET:
+                    ip = addr.address
+                    if ip and not ip.startswith("127.") and not ip.startswith("169.254."):
+                        url = f"http://{ip}:{port}"
+                        if url not in lan_urls:
+                            lan_urls.append(url)
+    except Exception:
+        logger.debug("psutil interface enumeration failed", exc_info=True)
+        # Fallback to the mdns helper (single IP)
+        try:
+            from tools.gimo_server.services.mesh.mdns_advertiser import _get_local_ip
+            ip = _get_local_ip()
+            if ip and ip != "127.0.0.1":
+                lan_urls.append(f"http://{ip}:{port}")
+        except Exception:
+            pass
+
     advertised: dict = {}
-    if advertiser is not None and getattr(advertiser, "is_running", False):
-        from tools.gimo_server.services.mesh.mdns_advertiser import _get_local_ip
-        import os as _os
-        port = int(_os.environ.get("ORCH_PORT", "9325"))
-        ip = _get_local_ip()
-        if ip and ip != "127.0.0.1":
-            lan_urls.append(f"http://{ip}:{port}")
+    mdns_active = advertiser is not None and getattr(advertiser, "is_running", False)
+    if mdns_active:
         advertised = {
             "mode": getattr(advertiser, "_mode", ""),
             "health": getattr(advertiser, "_health", 0),
             "load": getattr(advertiser, "_load", 0.0),
+            "service_type": getattr(advertiser, "SERVICE_TYPE", "_gimo._tcp.local."),
         }
 
     return MeshHostInfo(
         device=device,
         lan_urls=lan_urls,
-        mdns_active=advertiser is not None and getattr(advertiser, "is_running", False),
+        mdns_active=mdns_active,
         advertised_signals=advertised,
     )
 
@@ -335,7 +443,22 @@ async def get_thermal_profile(
     return telemetry.get_profile(device_id).to_dict()
 
 
-# ── Enrollment tokens ────────────────────────────────────────
+# ── Enrollment tokens (DEPRECATED — use /onboard/* instead) ──
+#
+# The /enrollment/* family is legacy. Canonical flow is /onboard/code +
+# /onboard/redeem (RFC 8628-style device flow). Android app already uses
+# /onboard/*. Planned removal: 2026-06-01.
+
+_DEPRECATED_SUNSET = "2026-06-01"
+
+
+def _mark_deprecated(request: Request, actor: str, canonical: str) -> None:
+    """Log usage of a deprecated endpoint so we can track real traffic before removal."""
+    logger.warning(
+        "Deprecated endpoint %s called by %s — use %s instead (sunset %s)",
+        request.url.path, actor, canonical, _DEPRECATED_SUNSET,
+    )
+
 
 def _get_enrollment(request: Request):
     from tools.gimo_server.services.mesh.enrollment import EnrollmentService
@@ -351,7 +474,11 @@ class ClaimRequest(BaseModel):
     device_class: str = "desktop"
 
 
-@router.post("/enrollment/token")
+@router.post(
+    "/enrollment/token",
+    deprecated=True,
+    summary="[DEPRECATED] Use POST /ops/mesh/onboard/code",
+)
 async def create_enrollment_token(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
@@ -361,24 +488,40 @@ async def create_enrollment_token(
     _require_role(auth, "admin")
     if not _get_mesh_enabled(request):
         raise HTTPException(403, detail="Mesh is disabled")
+    _mark_deprecated(request, _actor_label(auth), "POST /ops/mesh/onboard/code")
     svc = _get_enrollment(request)
     token = svc.create_token(ttl_minutes=ttl_minutes)
     audit_log("OPS", "/ops/mesh/enrollment/token", "created", operation="WRITE", actor=_actor_label(auth))
-    return {"token": token.token, "expires_at": token.expires_at.isoformat()}
+    return {
+        "token": token.token,
+        "expires_at": token.expires_at.isoformat(),
+        "_deprecated": True,
+        "_sunset": _DEPRECATED_SUNSET,
+        "_canonical": "POST /ops/mesh/onboard/code",
+    }
 
 
-@router.get("/enrollment/tokens")
+@router.get(
+    "/enrollment/tokens",
+    deprecated=True,
+    summary="[DEPRECATED] /onboard/* flow does not require listing tokens",
+)
 async def list_enrollment_tokens(
     request: Request,
     auth: Annotated[AuthContext, Depends(verify_token)],
     _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
+    _mark_deprecated(request, _actor_label(auth), "/ops/mesh/onboard/*")
     svc = _get_enrollment(request)
     return [t.model_dump(mode="json") for t in svc.list_tokens()]
 
 
-@router.post("/enrollment/claim")
+@router.post(
+    "/enrollment/claim",
+    deprecated=True,
+    summary="[DEPRECATED] Use POST /ops/mesh/onboard/redeem",
+)
 async def claim_enrollment(
     request: Request,
     body: ClaimRequest,
@@ -388,6 +531,7 @@ async def claim_enrollment(
     _require_role(auth, "operator")
     if not _get_mesh_enabled(request):
         raise HTTPException(403, detail="Mesh is disabled")
+    _mark_deprecated(request, _actor_label(auth), "POST /ops/mesh/onboard/redeem")
     svc = _get_enrollment(request)
     try:
         device = svc.claim(
@@ -403,7 +547,11 @@ async def claim_enrollment(
     return device
 
 
-@router.delete("/enrollment/token/{token_str}")
+@router.delete(
+    "/enrollment/token/{token_str}",
+    deprecated=True,
+    summary="[DEPRECATED] /onboard/* codes are single-use and auto-expire",
+)
 async def revoke_enrollment_token(
     token_str: str,
     request: Request,
@@ -411,6 +559,7 @@ async def revoke_enrollment_token(
     _rl: Annotated[None, Depends(check_rate_limit)],
 ):
     _require_role(auth, "admin")
+    _mark_deprecated(request, _actor_label(auth), "/ops/mesh/onboard/*")
     svc = _get_enrollment(request)
     if not svc.revoke_token(token_str):
         raise HTTPException(404, detail="Token not found")

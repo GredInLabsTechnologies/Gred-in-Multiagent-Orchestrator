@@ -41,6 +41,12 @@ if not exist "%PYTHON_EXE%" set "PYTHON_EXE=python"
 
 powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue'; try { $r=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:9325/auth/check' -TimeoutSec 2; Write-Output ('[OK] Backend responde en 9325 (HTTP ' + $r.StatusCode + ')') } catch { Write-Output '[INFO] Backend no responde en 9325 (normal si no esta iniciado)' }"
 
+rem Diagnóstico mesh: si mesh_enabled=true pero Core bindeado a loopback, avisar.
+powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue'; try { $t=(Get-Content '.env' -ErrorAction SilentlyContinue | Select-String '^ORCH_TOKEN=').ToString().Split('=',2)[1]; $headers=@{ Authorization = 'Bearer ' + $t }; $cfg=Invoke-RestMethod -Uri 'http://127.0.0.1:9325/ops/mesh/status' -Headers $headers -TimeoutSec 2 -ErrorAction Stop; if($cfg.mesh_enabled -eq $true){ $bind = netstat -an | Select-String ':9325\s' | Select-String 'LISTENING' ; if($bind -match '127.0.0.1:9325'){ Write-Output '[WARN] mesh_enabled=true pero Core bindeado a 127.0.0.1 — dispositivos LAN no podran conectar. Reinicia con ORCH_HOST=0.0.0.0.' } else { Write-Output '[OK] Mesh activo y Core accesible desde LAN.' } } else { Write-Output '[INFO] Mesh desactivado.' } } catch { Write-Output '[INFO] No se pudo verificar estado mesh.' }"
+
+rem Diagnóstico de duplicados uvicorn
+powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue'; $procs = Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='python3.13.exe'\" | Where-Object { $_.CommandLine -like '*uvicorn tools.gimo_server*' }; if($procs.Count -gt 1){ Write-Output ('[WARN] ' + $procs.Count + ' procesos uvicorn de GIMO detectados. Se recomienda matar duplicados.') } elseif($procs.Count -eq 1){ Write-Output '[OK] Un unico proceso uvicorn GIMO.' } else { Write-Output '[INFO] Ningun uvicorn GIMO corriendo.' }"
+
 echo.
 echo [DONE] Doctor finalizado.
 if "%FAIL%"=="1" (

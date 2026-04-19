@@ -49,7 +49,10 @@ class SettingsStore(private val context: Context) {
 
     // Defaults
     data class Settings(
-        val coreUrl: String = "http://192.168.0.49:9325",
+        // coreUrl: empty by default. The wizard auto-discovers via mDNS or
+        // takes the URL from the QR payload. User never needs to type it
+        // unless corporate WiFi blocks discovery.
+        val coreUrl: String = "",
         val token: String = "",
         val localCoreToken: String = "",
         val localDeviceSecret: String = "",

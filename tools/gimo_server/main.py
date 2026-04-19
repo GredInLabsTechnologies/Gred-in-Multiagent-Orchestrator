@@ -531,22 +531,36 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Mesh registry init warning: %s", exc)
 
-        # mDNS advertiser — auto-enabled when host bootstrap publishes device_mode=server
-        # (single lever: `gimo --role server` or GIMO_MESH_HOST_DEVICE_MODE=server). Admin
-        # can still opt-in explicitly via ORCH_MDNS_ENABLED=true for clients that want to
-        # broadcast under another mode.
-        _mdns_explicit = _os.environ.get("ORCH_MDNS_ENABLED", "false").lower() == "true"
+        # mDNS advertiser lifecycle:
+        # - Arranca si mesh_enabled=true en OpsConfig (doctrina: mesh_enabled=true debe ser operativo).
+        # - O si ORCH_MDNS_ENABLED=true (override explícito, útil en clientes no-server).
+        # - O si el host bootstrap se registró como device_mode=server.
+        # - ORCH_MDNS_ENABLED=false fuerza OFF aunque mesh_enabled=true (opt-out).
+        _mdns_env = _os.environ.get("ORCH_MDNS_ENABLED", "").strip().lower()
+        _mdns_opt_out = _mdns_env == "false"
+        _mdns_opt_in = _mdns_env == "true"
         _host_dev = getattr(app.state, "mesh_host_device", None)
-        _mdns_auto = False
+        _mdns_auto_server_mode = False
+        _mdns_auto_mesh_enabled = False
         try:
             from tools.gimo_server.models.mesh import DeviceMode as _DeviceMode
-            _mdns_auto = (
+            _mdns_auto_server_mode = (
                 _host_dev is not None
                 and getattr(_host_dev, "device_mode", None) == _DeviceMode.server
             )
         except Exception:
             pass
-        if _mdns_explicit or _mdns_auto:
+        try:
+            from tools.gimo_server.services.ops import OpsService as _OpsService
+            _OpsService.set_gics(getattr(app.state, "gics", None))
+            _mdns_auto_mesh_enabled = bool(_OpsService.get_config().mesh_enabled)
+        except Exception:
+            logger.debug("mDNS mesh_enabled probe failed", exc_info=True)
+        _should_start_mdns = (
+            not _mdns_opt_out
+            and (_mdns_opt_in or _mdns_auto_server_mode or _mdns_auto_mesh_enabled)
+        )
+        if _should_start_mdns:
             try:
                 from tools.gimo_server.services.mesh.mdns_advertiser import MdnsAdvertiser
                 _mdns_port = int(_os.environ.get("ORCH_PORT", "9325"))
@@ -580,10 +594,13 @@ async def lifespan(app: FastAPI):
                     except Exception:
                         logger.debug("mDNS initial update_signals failed", exc_info=True)
                 app.state.mdns_advertiser = advertiser
-                if _mdns_auto and not _mdns_explicit:
-                    logger.info(
-                        "mDNS auto-enabled because host bootstrap published device_mode=server"
-                    )
+                _mdns_reason = (
+                    "ORCH_MDNS_ENABLED=true" if _mdns_opt_in
+                    else "host device_mode=server" if _mdns_auto_server_mode
+                    else "mesh_enabled=true" if _mdns_auto_mesh_enabled
+                    else "unknown"
+                )
+                logger.info("mDNS advertiser started (trigger=%s)", _mdns_reason)
             except Exception as exc:
                 logger.warning("mDNS advertiser init warning: %s", exc)
 

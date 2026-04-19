@@ -403,6 +403,37 @@ class MeshRegistry:
                 )
         return expired
 
+    def prune_stale_devices(self, delete_after_seconds: float = 7 * 24 * 3600) -> List[str]:
+        """Permanently remove devices that have been silent for longer than the threshold.
+
+        Default threshold: 7 days. A device is pruned if:
+        - connection_state is offline, AND
+        - last_heartbeat is older than delete_after_seconds, OR
+        - last_heartbeat is None AND created_at is older than delete_after_seconds.
+
+        Returns list of pruned device_ids.
+        """
+        now = _utcnow()
+        pruned: List[str] = []
+        for device in self.list_devices():
+            if device.connection_state != ConnectionState.offline:
+                continue
+            reference_ts = device.last_heartbeat or getattr(device, "created_at", None)
+            if reference_ts is None:
+                continue
+            age = (now - reference_ts).total_seconds()
+            if age > delete_after_seconds:
+                try:
+                    self.remove_device(device.device_id)
+                    pruned.append(device.device_id)
+                    logger.info(
+                        "Pruned device %s (offline for %.0fh, threshold=%.0fh)",
+                        device.device_id, age / 3600, delete_after_seconds / 3600,
+                    )
+                except Exception:
+                    logger.warning("Failed to prune device %s", device.device_id, exc_info=True)
+        return pruned
+
     # ── Eligible devices for task dispatch ────────────────────
 
     def get_eligible_devices(self, mesh_enabled: bool) -> List[MeshDeviceInfo]:

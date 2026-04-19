@@ -120,11 +120,21 @@ call :upsert_env_value "tools\orchestrator_ui\.env.local" "VITE_FIREBASE_STORAGE
 call :upsert_env_value "tools\orchestrator_ui\.env.local" "VITE_FIREBASE_MESSAGING_SENDER_ID" "!FB_MESSAGING_SENDER_ID!"
 call :upsert_env_value "tools\orchestrator_ui\.env.local" "VITE_FIREBASE_APP_ID" "!FB_APP_ID!"
 
+if not defined ORCH_HOST set "ORCH_HOST=0.0.0.0"
+
+echo [1/4] Probando si el backend ya responde ...
+powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:9325/auth/check' -TimeoutSec 1; if($r.StatusCode -ge 200){ exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+if not errorlevel 1 (
+  echo [OK] Backend ya corriendo en 9325, no relanzo.
+  set "HEALTH_OK=1"
+  goto :HEALTH_DONE
+)
+
 echo [1/4] Limpiando puertos ^(9325, 5173, 3000^) ...
 "%PYTHON_EXE%" scripts\ops\kill_port.py 9325 5173 3000 >nul 2>&1
 
-echo [2/4] Lanzando backend ...
-start "GIMO Backend" cmd /k "title GIMO Backend && cd /d "%ROOT_DIR%" && "%PYTHON_EXE%" -m uvicorn tools.gimo_server.main:app --host 127.0.0.1 --port 9325 --reload --log-level info"
+echo [2/4] Lanzando backend en %ORCH_HOST%:9325 ...
+start "GIMO Backend" cmd /k "title GIMO Backend && cd /d "%ROOT_DIR%" && "%PYTHON_EXE%" -m uvicorn tools.gimo_server.main:app --host %ORCH_HOST% --port 9325 --reload --log-level info"
 
 echo [3/4] Esperando health backend ...
 set "HEALTH_OK=0"
@@ -145,15 +155,19 @@ if "%HEALTH_OK%"=="1" (
 )
 
 echo [4/4] Lanzando frontend y web ...
-start "GIMO Frontend" cmd /k "title GIMO Frontend && cd /d "%ROOT_DIR%\tools\orchestrator_ui" && npm run dev -- --host 127.0.0.1"
+start "GIMO Frontend" cmd /k "title GIMO Frontend && cd /d "%ROOT_DIR%\tools\orchestrator_ui" && npm run dev -- --host %ORCH_HOST%"
 start "GIMO Web" cmd /k "title GIMO Web && cd /d "%ROOT_DIR%\apps\web" && npm run dev"
 
 echo.
 echo [OK] Servicios lanzados:
-echo      Backend:  http://127.0.0.1:9325
-echo      UI:       http://127.0.0.1:5173
+echo      Backend:  http://%ORCH_HOST%:9325 ^(acceso local: http://127.0.0.1:9325^)
+echo      UI:       http://%ORCH_HOST%:5173 ^(acceso local: http://127.0.0.1:5173^)
 echo      Web:      http://localhost:3000
 echo.
+if /I not "%ORCH_HOST%"=="127.0.0.1" (
+  echo [AVISO] Backend expuesto a LAN. Verifica firewall Windows para 9325/tcp.
+  echo.
+)
 start "" http://127.0.0.1:5173
 exit /b 0
 
