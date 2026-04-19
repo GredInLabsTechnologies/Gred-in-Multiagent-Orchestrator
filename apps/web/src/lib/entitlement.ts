@@ -2,6 +2,24 @@
  * Entitlement helpers:
  * - Decide si una licencia puede emitir token
  * - Mantener consistencia entre estado de suscripción y licencia
+ *
+ * SCOPE: web-surface-only by design (audit finding F7 evaluation).
+ *
+ * This module runs exclusively in the Next.js server runtime (API routes /
+ * server components). It reads/writes Firestore via firebase-admin SDK which
+ * is not available in Python backend nor in first-party surfaces (CLI, MCP,
+ * Agent SDK). The web app is the single consumer of license entitlement today
+ * because licenses gate the *landing page token emission*, not runtime ops.
+ *
+ * Cross-surface extraction (backend canonical service + /ops/entitlement/*)
+ * is deliberately deferred until a non-web surface actually needs entitlement.
+ * Per AGENTS.md: "abstractions introduced before pressure proves they are
+ * needed" are an anti-pattern. When CLI/MCP need to check license state,
+ * extract `evaluateLicenseEntitlement` to a backend service that returns a
+ * frozen EntitlementDecision and keep the Firestore side-effects here.
+ *
+ * Ownership: apps/web/. Trigger for extraction: any non-web surface requires
+ * license verification. See docs/architecture/ENTITLEMENT.md.
  */
 import { adminDb } from "@/lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";

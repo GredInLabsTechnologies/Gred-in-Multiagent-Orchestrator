@@ -1,6 +1,19 @@
-"""Legacy /ui/* endpoints still used by the frontend.
+"""Legacy /ui/* endpoints — UNMOUNTED shim, kept for reference.
 
-These will be migrated to /ops/* equivalents in a future iteration.
+# DEPRECATED: this router is not included in main.py and has no live callers.
+# The canonical equivalents are live under /ops/* (see docs/CLIENT_SURFACES.md
+# §Parity Closure). This file is preserved because:
+#   1. The /ui/* URL pattern is documented as a legacy surface; if anyone mounts
+#      this router in the future, the handlers below already delegate to the
+#      canonical OperatorStatusService (audit F2 fix applied preventively).
+#   2. Removing the file would violate the "reconnect, don't delete" principle
+#      from AGENTS.md §12 without a verified-replacement audit of every handler.
+#
+# Sunset criterion: once docs/CLIENT_SURFACES.md removes /ui/* from the topology
+# and no external documentation references the URL, delete this file in a
+# dedicated commit with a 30-day notice in the changelog.
+#
+# Owner: surface-parity team.
 """
 
 from __future__ import annotations
@@ -49,19 +62,28 @@ def get_ui_status(
     auth: AuthContext = Depends(require_read_only_access),
     rl: None = Depends(check_rate_limit),
 ):
-    audit_lines = FileService.tail_audit_lines(limit=1)
-    base_dir = get_active_repo_dir()
-    allowed_paths = get_allowed_paths(base_dir) if ALLOWLIST_REQUIRE else {}
-    is_healthy = base_dir.exists() and os.access(base_dir, os.R_OK)
-    status_str = "RUNNING" if is_healthy else "DEGRADED"
+    """Legacy /ui/status ingress. Delegates to the canonical OperatorStatusService.
+
+    DEPRECATED: the canonical endpoint is /ops/operator/status. This handler
+    remains as a thin compatibility shim for clients that have not migrated
+    (audit finding F2 — surface authority drift). No domain logic is computed
+    locally; all authoritative fields come from the canonical service.
+
+    Sunset criterion: when all documented clients migrate to /ops/operator/status.
+    Owner: surface-parity team.
+    """
+    from tools.gimo_server.services.operator_status_service import OperatorStatusService
+    snapshot = OperatorStatusService.ui_status_snapshot(app_start_time=request.app.state.start_time)
+    # Surface-specific presentation: annotate the canonical status with the
+    # calling UA. This is a render concern, not domain state — kept local.
     user_agent = request.headers.get("User-Agent", "").lower()
     agent_label = "ChatGPT" if "openai" in user_agent or "gpt" in user_agent else "Dashboard"
     return {
         "version": __version__,
-        "uptime_seconds": time.time() - request.app.state.start_time,
-        "allowlist_count": len(allowed_paths),
-        "last_audit_line": audit_lines[-1] if audit_lines else None,
-        "service_status": f"{status_str} ({agent_label})",
+        "uptime_seconds": snapshot.get("uptime_seconds", time.time() - request.app.state.start_time),
+        "allowlist_count": snapshot.get("allowlist_count", 0),
+        "last_audit_line": snapshot.get("last_audit_line"),
+        "service_status": f"{snapshot.get('service_status', 'UNKNOWN')} ({agent_label})",
     }
 
 

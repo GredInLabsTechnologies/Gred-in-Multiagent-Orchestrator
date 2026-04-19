@@ -128,7 +128,7 @@ class OperatorStatusService:
         return remaining_pct, ("ok" if remaining_pct > 20.0 else "low"), budget_spend, budget_limit
 
     @classmethod
-    def _ui_status_snapshot(
+    def ui_status_snapshot(
         cls,
         app_start_time: float | None = None,
     ) -> dict[str, Any]:
@@ -180,7 +180,7 @@ class OperatorStatusService:
             "backend_status": "ok",
             "backend_version": __version__,
         }
-        snapshot.update(cls._ui_status_snapshot(app_start_time=app_start_time))
+        snapshot.update(cls.ui_status_snapshot(app_start_time=app_start_time))
 
         # Git snapshot (optional, fail-safe)
         try:
@@ -256,9 +256,48 @@ class OperatorStatusService:
 
         # Alerts (optional, fail-safe)
         try:
-            snapshot["alerts"] = NoticePolicyService.evaluate_all(snapshot)
+            alerts = NoticePolicyService.evaluate_all(snapshot)
+            snapshot["alerts"] = alerts
+            # F6 fix: reconnect NoticePolicyService with NotificationService so that
+            # freshly-appeared notices propagate to SSE subscribers. The two services
+            # were previously disconnected: NoticePolicyService produced notices that
+            # only rendered in the status panel; NotificationService sent push events
+            # but never saw notices. Now notices trigger a push on first appearance.
+            cls._broadcast_new_notices(alerts)
         except Exception:
             logger.warning("Failed to evaluate alerts", exc_info=True)
             snapshot["alerts"] = []
 
         return snapshot
+
+    # Track notice IDs we've already broadcast so each unique notice fires exactly once
+    # until it clears. Keyed by `code` (the stable identifier in NoticePolicyService).
+    _last_broadcast_notice_codes: set[str] = set()
+
+    @classmethod
+    def _broadcast_new_notices(cls, alerts: list[dict]) -> None:
+        """Publish any notice code that wasn't in the previous evaluation.
+
+        Notices that persist across evaluations only fire once — consumers see the
+        transition, not a repeating stream. When a notice clears (no longer produced
+        by evaluate_all), it drops from the cache so a future reappearance re-fires.
+        """
+        try:
+            from .notification_service import NotificationService
+            import asyncio
+            current_codes = {str(a.get("code")) for a in alerts if a.get("code")}
+            freshly_appeared = current_codes - cls._last_broadcast_notice_codes
+            for alert in alerts:
+                code = str(alert.get("code") or "")
+                if code and code in freshly_appeared:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(NotificationService.publish("notice_appeared", alert))
+                    except RuntimeError:
+                        # No running loop (sync context) — fire-and-forget via asyncio.run
+                        # would block; skip broadcast rather than deadlock. Next snapshot
+                        # in an async context will pick it up (notice still in cache).
+                        pass
+            cls._last_broadcast_notice_codes = current_codes
+        except Exception:
+            logger.debug("notice broadcast failed", exc_info=True)
