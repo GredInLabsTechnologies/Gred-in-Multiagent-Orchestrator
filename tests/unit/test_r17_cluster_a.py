@@ -189,7 +189,7 @@ async def test_engine_service_asserts_planned_stages_executed():
         captured["msg"] = msg or ""
         return fake_run
 
-    with patch("tools.gimo_server.services.ops_service.OpsService") as mock_ops, \
+    with patch("tools.gimo_server.services.ops.OpsService") as mock_ops, \
          patch.object(EngineService, "run_composition", side_effect=_fake_run_composition):
         mock_ops.get_run.return_value = fake_run
         mock_ops.get_approved.return_value = None
@@ -243,7 +243,7 @@ async def test_merge_gate_run_passes_invariant_with_zero_tokens():
         captured["msg"] = msg or ""
         return fake_run
 
-    with patch("tools.gimo_server.services.ops_service.OpsService") as mock_ops, \
+    with patch("tools.gimo_server.services.ops.OpsService") as mock_ops, \
          patch.object(EngineService, "run_composition", side_effect=_fake_run_composition):
         mock_ops.get_run.return_value = fake_run
         mock_ops.get_approved.return_value = None

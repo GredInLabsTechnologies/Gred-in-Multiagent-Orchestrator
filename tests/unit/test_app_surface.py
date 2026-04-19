@@ -7,7 +7,7 @@ from tools.gimo_server.app_mcp.server import create_app_mcp, mcp
 from tools.gimo_server.app_mcp.tools import ALL_TOOL_NAMES, EXTENDED_ONLY_TOOL_NAMES, SAFE_TOOL_NAMES
 from tools.gimo_server.main import app
 from tools.gimo_server.services.app_session_service import AppSessionService
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 
 
 class _Dumpable:

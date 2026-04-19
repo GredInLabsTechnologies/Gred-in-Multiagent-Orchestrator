@@ -44,27 +44,64 @@ class MergeGateService:
         return GitService.commit_all(workspace_path, f"GIMO workspace snapshot for run {run_id}")
 
     @classmethod
+    def _reevaluate_policy_from_context(cls, run_id: str, context: dict) -> tuple[str, str] | None:
+        """Re-evaluate policy via RuntimePolicyService when upstream gate didn't persist a decision.
+
+        Returns (decision, decision_id) on success, None on failure. Fail-closed: the caller must
+        treat None as a blocked run. This exists because policy_decision may legitimately be absent
+        if the pipeline crashed between PolicyGate and MergeGate, and we must never default to allow.
+        """
+        try:
+            from .runtime_policy_service import RuntimePolicyService
+            decision = RuntimePolicyService.evaluate_draft_policy(
+                path_scope=list(context.get("path_scope") or context.get("allowed_paths") or []),
+                estimated_files_changed=context.get("files_changed") or context.get("estimated_files_changed"),
+                estimated_loc_changed=context.get("loc_changed") or context.get("estimated_loc_changed"),
+            )
+            OpsService.append_log(
+                run_id, level="WARN",
+                msg=f"policy_decision absent; re-evaluated via RuntimePolicyService: id={decision.policy_decision_id} decision={decision.decision} status={decision.status_code}"
+            )
+            return decision.decision, decision.policy_decision_id
+        except Exception as exc:
+            logger.exception("RuntimePolicyService re-evaluation failed for run %s", run_id)
+            OpsService.update_run_status(
+                run_id, "WORKER_CRASHED_RECOVERABLE",
+                msg=f"policy re-evaluation failed: {type(exc).__name__}"
+            )
+            return None
+
+    @classmethod
     def _validate_policy(cls, run_id: str, context: dict, run: Any) -> bool:
         policy_decision = str(context.get("policy_decision") or "").strip().lower()
         policy_decision_id = str(context.get("policy_decision_id") or run.policy_decision_id or "").strip()
         human_approval_granted = bool(context.get("human_approval_granted"))
 
+        # Fail-closed contract (OWASP ASI02): if upstream gate didn't persist a decision, we must
+        # NOT assume allow. Re-evaluate against RuntimePolicyService; if that fails, block the run.
         if not policy_decision_id:
             intent_effective = str(context.get("intent_effective") or "").upper()
             if intent_effective in cls._LOW_RISK_INTENTS or not intent_effective:
-                policy_decision_id = f"policy_fallback_{int(time.time() * 1000)}"
-                OpsService.append_log(
-                    run_id, level="WARN",
-                    msg=f"policy_decision_id absent; synthetic fallback issued id={policy_decision_id}"
-                )
-                if not policy_decision:
-                    policy_decision = "allow"
+                # DEPRECATED: synthetic fallback path for LOW_RISK intents. Kept as a narrow
+                # recovery for doc-only / file-write intents where PolicyGate didn't run, but the
+                # decision itself now comes from RuntimePolicyService re-evaluation — never a
+                # hardcoded "allow". Sunset criterion: when pipeline guarantees policy_decision_id
+                # in context for 100% of runs. Owner: merge_gate team.
+                reeval = cls._reevaluate_policy_from_context(run_id, context)
+                if reeval is None:
+                    return False  # append_log + status transition already handled
+                policy_decision, policy_decision_id = reeval
             else:
                 OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg="missing policy_decision_id")
                 return False
 
+        # Fail-closed: a present decision_id with an empty decision value is an upstream bug; we
+        # re-evaluate rather than default to allow. Historical behavior was `policy_decision = "allow"`.
         if not policy_decision:
-            policy_decision = "allow"
+            reeval = cls._reevaluate_policy_from_context(run_id, context)
+            if reeval is None:
+                return False
+            policy_decision, policy_decision_id = reeval
 
         if policy_decision == "deny":
             OpsService.update_run_status(run_id, "WORKER_CRASHED_RECOVERABLE", msg="Policy deny at merge gate")

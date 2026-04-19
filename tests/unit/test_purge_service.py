@@ -41,10 +41,10 @@ def test_purge_removes_reconstructive_state(mock_run):
     settings = _settings()
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.purge_service.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_events_path", return_value=Path("events.jsonl")), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_log_path", return_value=Path("logs.jsonl")), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_path", return_value=Path("run.json")), \
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService._run_events_path", return_value=Path("events.jsonl")), \
+         patch("tools.gimo_server.services.ops.OpsService._run_log_path", return_value=Path("logs.jsonl")), \
+         patch("tools.gimo_server.services.ops.OpsService._run_path", return_value=Path("run.json")), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.is_dir", return_value=True), \
          patch("pathlib.Path.resolve", autospec=True, side_effect=lambda self: self), \
@@ -68,10 +68,10 @@ def test_minimal_terminal_metadata_only(mock_run):
     settings = _settings()
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.purge_service.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_events_path", return_value=Path("events.jsonl")), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_log_path", return_value=Path("logs.jsonl")), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_path", return_value=Path("run.json")), \
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService._run_events_path", return_value=Path("events.jsonl")), \
+         patch("tools.gimo_server.services.ops.OpsService._run_log_path", return_value=Path("logs.jsonl")), \
+         patch("tools.gimo_server.services.ops.OpsService._run_path", return_value=Path("run.json")), \
          patch("pathlib.Path.exists", return_value=False), \
          patch("pathlib.Path.is_dir", return_value=True), \
          patch("pathlib.Path.resolve", autospec=True, side_effect=lambda self: self), \
@@ -99,7 +99,7 @@ def test_purge_fails_on_repo_root(mock_run):
 
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.purge_service.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.is_dir", return_value=True):
         with pytest.raises(LifecycleProofError, match="resolves to repo_root"):
@@ -111,8 +111,8 @@ def test_purge_fails_closed_on_unlink_error(mock_run):
     mock_run.validated_task_spec["workspace_path"] = None
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.purge_service.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_events_path", return_value=Path("events.jsonl")), \
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService._run_events_path", return_value=Path("events.jsonl")), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.unlink", side_effect=IOError("Permission denied")):
         with pytest.raises(PurgeExecutionError, match="Failed to unlink events"):
@@ -130,11 +130,11 @@ def test_purge_receipt_behavioral(mock_run, tmp_path):
 
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.purge_service.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_events_path", return_value=temp_ops_dir / "events.jsonl"), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_log_path", return_value=temp_ops_dir / "logs.jsonl"), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_path", return_value=temp_ops_dir / "run.json"), \
-         patch("tools.gimo_server.services.ops_service.OpsService.OPS_DIR", temp_ops_dir):
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService._run_events_path", return_value=temp_ops_dir / "events.jsonl"), \
+         patch("tools.gimo_server.services.ops.OpsService._run_log_path", return_value=temp_ops_dir / "logs.jsonl"), \
+         patch("tools.gimo_server.services.ops.OpsService._run_path", return_value=temp_ops_dir / "run.json"), \
+         patch("tools.gimo_server.services.ops.OpsService.OPS_DIR", temp_ops_dir):
         (temp_ops_dir / "run.json").write_text("{}", encoding="utf-8")
         receipt = PurgeService.purge_run("r_test_purge")
 
@@ -154,7 +154,7 @@ def test_purge_fails_on_workspace_outside_canonical_roots(mock_run):
     mock_run.validated_task_spec["workspace_path"] = "c:/unsafe/workspace"
 
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run):
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run):
         with pytest.raises(LifecycleProofError, match="outside canonical workspace roots"):
             PurgeService.purge_run("r_test_purge")
 

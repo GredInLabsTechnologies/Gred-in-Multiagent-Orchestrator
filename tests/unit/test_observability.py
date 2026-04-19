@@ -150,7 +150,7 @@ async def test_provider_service_returns_metrics():
         )
 
         with patch("tools.gimo_server.services.providers.service.ProviderService.get_config", return_value=mock_cfg), \
-             patch("tools.gimo_server.services.ops_service.OpsService.get_config", return_value=mock_ops_cfg):
+             patch("tools.gimo_server.services.ops.OpsService.get_config", return_value=mock_ops_cfg):
             result = await ProviderService.static_generate("test prompt", {})
 
             assert result["content"] == "Hello world"
@@ -189,7 +189,7 @@ async def test_provider_service_handles_missing_usage_gracefully():
         )
 
         with patch("tools.gimo_server.services.providers.service.ProviderService.get_config", return_value=mock_cfg), \
-             patch("tools.gimo_server.services.ops_service.OpsService.get_config", return_value=mock_ops_cfg):
+             patch("tools.gimo_server.services.ops.OpsService.get_config", return_value=mock_ops_cfg):
             result = await ProviderService.static_generate("test prompt", {})
 
             assert result["content"] == "Hello world"

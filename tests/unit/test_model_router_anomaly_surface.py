@@ -42,7 +42,7 @@ def test_decision_flags_anomaly_when_gics_reports():
     reliability = {"score": 0.5, "anomaly": True}
 
     with patch(
-        "tools.gimo_server.services.ops_service.OpsService.get_model_reliability",
+        "tools.gimo_server.services.ops.OpsService.get_model_reliability",
         return_value=reliability,
     ):
         with patch(
@@ -71,7 +71,7 @@ def test_decision_no_anomaly_when_clean():
     reliability = {"score": 0.8, "anomaly": False}
 
     with patch(
-        "tools.gimo_server.services.ops_service.OpsService.get_model_reliability",
+        "tools.gimo_server.services.ops.OpsService.get_model_reliability",
         return_value=reliability,
     ):
         with patch(
@@ -111,7 +111,7 @@ def test_anomaly_alternative_suggests_clean_candidate():
         return anom if binding.model == "anom" else clean
 
     with patch(
-        "tools.gimo_server.services.ops_service.OpsService.get_model_reliability",
+        "tools.gimo_server.services.ops.OpsService.get_model_reliability",
         side_effect=fake_reliability,
     ):
         with patch(
@@ -149,7 +149,7 @@ def test_reason_includes_anomaly_marker():
     reliability = {"score": 0.5, "anomaly": True}
 
     with patch(
-        "tools.gimo_server.services.ops_service.OpsService.get_model_reliability",
+        "tools.gimo_server.services.ops.OpsService.get_model_reliability",
         return_value=reliability,
     ):
         with patch(
@@ -178,7 +178,7 @@ def test_anomaly_does_not_exclude_model():
     reliability = {"score": 0.5, "anomaly": True}
 
     with patch(
-        "tools.gimo_server.services.ops_service.OpsService.get_model_reliability",
+        "tools.gimo_server.services.ops.OpsService.get_model_reliability",
         return_value=reliability,
     ):
         with patch(
@@ -208,7 +208,7 @@ def test_decision_fields_default_safe():
     clean = _entry("clean")
 
     with patch(
-        "tools.gimo_server.services.ops_service.OpsService.get_model_reliability",
+        "tools.gimo_server.services.ops.OpsService.get_model_reliability",
         return_value=None,
     ):
         with patch(

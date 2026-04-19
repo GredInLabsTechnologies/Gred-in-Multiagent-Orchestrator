@@ -40,11 +40,11 @@ def test_invariant_purge_receipt_persisted(tmp_path):
 
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.purge_service.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_events_path", return_value=temp_ops_dir / "events.jsonl"), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_log_path", return_value=temp_ops_dir / "logs.jsonl"), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_path", return_value=temp_ops_dir / "run.json"), \
-         patch("tools.gimo_server.services.ops_service.OpsService.OPS_DIR", temp_ops_dir):
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService._run_events_path", return_value=temp_ops_dir / "events.jsonl"), \
+         patch("tools.gimo_server.services.ops.OpsService._run_log_path", return_value=temp_ops_dir / "logs.jsonl"), \
+         patch("tools.gimo_server.services.ops.OpsService._run_path", return_value=temp_ops_dir / "run.json"), \
+         patch("tools.gimo_server.services.ops.OpsService.OPS_DIR", temp_ops_dir):
         (temp_ops_dir / "run.json").write_text("{}", encoding="utf-8")
         receipt = PurgeService.purge_run("r_receipt_test")
 
@@ -66,8 +66,8 @@ def test_invariant_minimal_terminal_metadata_only():
 
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.purge_service.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
-         patch("tools.gimo_server.services.ops_service.OpsService._run_path", return_value=Path("run.json")), \
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService._run_path", return_value=Path("run.json")), \
          patch("pathlib.Path.exists", return_value=False), \
          patch("pathlib.Path.write_text") as mock_write, \
          patch("tools.gimo_server.services.purge_service.PurgeService._persist_receipt"):
@@ -87,7 +87,7 @@ def test_invariant_minimal_terminal_metadata_only():
 
 
 def test_invariant_purge_fails_closed_on_partial_cleanup():
-    with patch("tools.gimo_server.services.ops_service.OpsService.get_run", side_effect=Exception("Database down")):
+    with patch("tools.gimo_server.services.ops.OpsService.get_run", side_effect=Exception("Database down")):
         with pytest.raises(PurgeExecutionError, match="Purge failed for run r1: Database down"):
             PurgeService.purge_run("r1")
 
@@ -99,7 +99,7 @@ def test_invariant_workspace_equals_repo_root_fails_closed():
 
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.purge_service.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.is_dir", return_value=True):
         with pytest.raises(LifecycleProofError, match="resolves to repo_root"):
@@ -112,6 +112,6 @@ def test_invariant_workspace_must_stay_inside_canonical_roots():
     settings = _settings(repo_root="/repo", ephemeral_root="/ephemeral", worktree_root="/worktrees")
 
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run):
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run):
         with pytest.raises(LifecycleProofError, match="outside canonical workspace roots"):
             PurgeService.purge_run("r_root")

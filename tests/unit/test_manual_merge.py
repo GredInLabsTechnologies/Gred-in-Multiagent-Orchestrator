@@ -12,13 +12,13 @@ async def test_merge_gate_stops_at_awaiting_merge():
     transitions to AWAITING_MERGE.
     """
     run_id = str(uuid.uuid4())
-    with patch("tools.gimo_server.services.ops_service.OpsService.get_run") as mock_get_run, \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_approved") as mock_get_approved, \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_draft") as mock_get_draft, \
-         patch("tools.gimo_server.services.ops_service.OpsService.update_run_status") as mock_status, \
-         patch("tools.gimo_server.services.ops_service.OpsService.append_log"), \
-         patch("tools.gimo_server.services.ops_service.OpsService.set_run_stage"), \
-         patch("tools.gimo_server.services.ops_service.OpsService.update_run_merge_metadata"), \
+    with patch("tools.gimo_server.services.ops.OpsService.get_run") as mock_get_run, \
+         patch("tools.gimo_server.services.ops.OpsService.get_approved") as mock_get_approved, \
+         patch("tools.gimo_server.services.ops.OpsService.get_draft") as mock_get_draft, \
+         patch("tools.gimo_server.services.ops.OpsService.update_run_status") as mock_status, \
+         patch("tools.gimo_server.services.ops.OpsService.append_log"), \
+         patch("tools.gimo_server.services.ops.OpsService.set_run_stage"), \
+         patch("tools.gimo_server.services.ops.OpsService.update_run_merge_metadata"), \
          patch("tools.gimo_server.services.git_service.GitService.dry_run_merge") as mock_dry_run, \
          patch("tools.gimo_server.services.git_service.GitService.run_tests") as mock_tests, \
          patch("tools.gimo_server.services.git_service.GitService.run_lint_typecheck") as mock_lint, \
@@ -53,12 +53,12 @@ async def test_perform_manual_merge_success():
     Verifies that perform_manual_merge correctly executes the final merge.
     """
     run_id = str(uuid.uuid4())
-    with patch("tools.gimo_server.services.ops_service.OpsService.get_run") as mock_get_run, \
-         patch("tools.gimo_server.services.ops_service.OpsService.update_run_status") as mock_status, \
-         patch("tools.gimo_server.services.ops_service.OpsService.set_run_stage"), \
-         patch("tools.gimo_server.services.ops_service.OpsService._load_run_metadata") as mock_load, \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_approved") as mock_get_approved, \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_draft") as mock_get_draft, \
+    with patch("tools.gimo_server.services.ops.OpsService.get_run") as mock_get_run, \
+         patch("tools.gimo_server.services.ops.OpsService.update_run_status") as mock_status, \
+         patch("tools.gimo_server.services.ops.OpsService.set_run_stage"), \
+         patch("tools.gimo_server.services.ops.OpsService._load_run_metadata") as mock_load, \
+         patch("tools.gimo_server.services.ops.OpsService.get_approved") as mock_get_approved, \
+         patch("tools.gimo_server.services.ops.OpsService.get_draft") as mock_get_draft, \
          patch("tools.gimo_server.services.git_service.GitService.perform_merge") as mock_real_merge, \
          patch("tools.gimo_server.services.git_service.GitService.get_head_commit") as mock_head, \
          patch("tools.gimo_server.services.merge_gate_service.resolve_authoritative_repo_path", return_value=Path("/repo")), \
@@ -88,12 +88,12 @@ async def test_perform_manual_merge_conflict():
     Verifies handling of merge conflicts during manual merge.
     """
     run_id = str(uuid.uuid4())
-    with patch("tools.gimo_server.services.ops_service.OpsService.get_run") as mock_get_run, \
-         patch("tools.gimo_server.services.ops_service.OpsService.update_run_status") as mock_status, \
-         patch("tools.gimo_server.services.ops_service.OpsService.set_run_stage"), \
-         patch("tools.gimo_server.services.ops_service.OpsService._load_run_metadata") as mock_load, \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_approved") as mock_get_approved, \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_draft") as mock_get_draft, \
+    with patch("tools.gimo_server.services.ops.OpsService.get_run") as mock_get_run, \
+         patch("tools.gimo_server.services.ops.OpsService.update_run_status") as mock_status, \
+         patch("tools.gimo_server.services.ops.OpsService.set_run_stage"), \
+         patch("tools.gimo_server.services.ops.OpsService._load_run_metadata") as mock_load, \
+         patch("tools.gimo_server.services.ops.OpsService.get_approved") as mock_get_approved, \
+         patch("tools.gimo_server.services.ops.OpsService.get_draft") as mock_get_draft, \
          patch("tools.gimo_server.services.git_service.GitService.perform_merge") as mock_real_merge, \
          patch("tools.gimo_server.services.git_service.GitService.get_head_commit") as mock_head, \
          patch("tools.gimo_server.services.merge_gate_service.resolve_authoritative_repo_path", return_value=Path("/repo")), \

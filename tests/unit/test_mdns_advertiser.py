@@ -243,7 +243,7 @@ class TestQrPayload:
 
 @pytest.fixture(autouse=True)
 def _enable_mesh(test_client, monkeypatch):
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
     original = OpsService.get_config
 
     def _patched():

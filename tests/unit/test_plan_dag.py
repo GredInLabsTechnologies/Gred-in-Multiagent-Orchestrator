@@ -68,7 +68,7 @@ async def test_execute_plan_runs_independent_layer_nodes_in_parallel(monkeypatch
     monkeypatch.setattr(CustomPlanService, "_save", lambda _plan: None)
     monkeypatch.setattr(CustomPlanService, "_execute_node", fake_execute_node)
     monkeypatch.setattr("tools.gimo_server.services.notification_service.NotificationService.publish", fake_publish)
-    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=4))
+    monkeypatch.setattr("tools.gimo_server.services.ops.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=4))
     monkeypatch.setattr("tools.gimo_server.services.authority.ExecutionAuthority.get", lambda: (_ for _ in ()).throw(RuntimeError("skip-governor")))
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.get_current_branch", lambda _repo: "main")
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.is_worktree_clean", lambda _repo: True)
@@ -116,7 +116,7 @@ async def test_execute_plan_persists_running_and_final_node_states(monkeypatch, 
     monkeypatch.setattr(CustomPlanService, "get_plan", lambda _pid: plan)
     monkeypatch.setattr(CustomPlanService, "_save", record_save)
     monkeypatch.setattr("tools.gimo_server.services.notification_service.NotificationService.publish", fake_publish)
-    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=2))
+    monkeypatch.setattr("tools.gimo_server.services.ops.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=2))
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.SandboxService.create_worktree_handle", lambda *_args, **_kwargs: SandboxHandle(
         run_id="plan_persist_worker",
         repo_path=str(tmp_path),
@@ -189,8 +189,8 @@ async def test_execute_plan_records_successful_nodes_with_high_quality(monkeypat
     monkeypatch.setattr(CustomPlanService, "get_plan", lambda _pid: plan)
     monkeypatch.setattr(CustomPlanService, "_save", lambda _plan: None)
     monkeypatch.setattr("tools.gimo_server.services.notification_service.NotificationService.publish", fake_publish)
-    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=2, economy=SimpleNamespace(autonomy_level="balanced")))
-    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService._gics", object())
+    monkeypatch.setattr("tools.gimo_server.services.ops.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=2, economy=SimpleNamespace(autonomy_level="balanced")))
+    monkeypatch.setattr("tools.gimo_server.services.ops.OpsService._gics", object())
     monkeypatch.setattr("tools.gimo_server.services.storage_service.StorageService", _FakeStorageService)
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.SandboxService.create_worktree_handle", lambda *_args, **_kwargs: SandboxHandle(
         run_id="plan_quality_worker",
@@ -268,7 +268,7 @@ async def test_execute_plan_uses_unique_worktree_run_ids_per_execution(monkeypat
     monkeypatch.setattr(CustomPlanService, "get_plan", lambda _pid: plans.pop(0))
     monkeypatch.setattr(CustomPlanService, "_save", lambda _plan: None)
     monkeypatch.setattr("tools.gimo_server.services.notification_service.NotificationService.publish", fake_publish)
-    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=2))
+    monkeypatch.setattr("tools.gimo_server.services.ops.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=2))
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.SandboxService.create_worktree_handle", fake_create_worktree_handle)
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.SandboxService.cleanup_worktree", lambda *_args, **_kwargs: True)
     monkeypatch.setattr("tools.gimo_server.services.agentic_loop_service.AgenticLoopService.run_node", fake_run_node)
@@ -332,7 +332,7 @@ async def test_execute_plan_does_not_persist_done_before_commit(monkeypatch, tmp
     monkeypatch.setattr(CustomPlanService, "get_plan", lambda _pid: plan)
     monkeypatch.setattr(CustomPlanService, "_save", record_save)
     monkeypatch.setattr("tools.gimo_server.services.notification_service.NotificationService.publish", fake_publish)
-    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=2))
+    monkeypatch.setattr("tools.gimo_server.services.ops.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=2))
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.SandboxService.create_worktree_handle", lambda *_args, **_kwargs: SandboxHandle(
         run_id="plan_commit_failure_worker",
         repo_path=str(tmp_path),
@@ -410,7 +410,7 @@ async def test_execute_plan_blocks_transitive_dependents_of_failed_nodes(monkeyp
     monkeypatch.setattr(CustomPlanService, "_save", lambda _plan: None)
     monkeypatch.setattr(CustomPlanService, "_execute_node", fake_execute_node)
     monkeypatch.setattr("tools.gimo_server.services.notification_service.NotificationService.publish", fake_publish)
-    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=4))
+    monkeypatch.setattr("tools.gimo_server.services.ops.OpsService.get_config", lambda: SimpleNamespace(max_concurrent_runs=4))
     monkeypatch.setattr("tools.gimo_server.services.authority.ExecutionAuthority.get", lambda: (_ for _ in ()).throw(RuntimeError("skip-governor")))
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.get_current_branch", lambda _repo: "main")
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.is_worktree_clean", lambda _repo: True)
@@ -481,8 +481,8 @@ async def test_execute_node_treats_non_stop_finish_reason_as_error(monkeypatch, 
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.get_diff_text", lambda *_args, **_kwargs: "")
     monkeypatch.setattr("tools.gimo_server.services.custom_plan_service.GitService.commit_all", lambda *_args, **_kwargs: "")
     monkeypatch.setattr("tools.gimo_server.services.storage_service.StorageService", _FakeStorageService)
-    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService._gics", object())
-    monkeypatch.setattr("tools.gimo_server.services.ops_service.OpsService.get_config", lambda: SimpleNamespace(economy=SimpleNamespace(autonomy_level="balanced")))
+    monkeypatch.setattr("tools.gimo_server.services.ops.OpsService._gics", object())
+    monkeypatch.setattr("tools.gimo_server.services.ops.OpsService.get_config", lambda: SimpleNamespace(economy=SimpleNamespace(autonomy_level="balanced")))
 
     artifact = await CustomPlanService._execute_node(
         plan,

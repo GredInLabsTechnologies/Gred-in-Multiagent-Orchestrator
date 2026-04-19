@@ -3,7 +3,7 @@ from __future__ import annotations
 from tools.gimo_server.schemas.draft_validation import DraftCreateRequest, DraftValidationResponse
 from tools.gimo_server.services.app_session_service import AppSessionService
 from tools.gimo_server.services.draft_validation_service import DraftValidationService
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.workspace.workspace_policy_service import WorkspacePolicyService
 
 

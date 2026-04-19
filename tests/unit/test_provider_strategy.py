@@ -125,8 +125,8 @@ async def test_provider_service_static_generate_records_outcome_success():
 
     with patch.object(ProviderService, "get_config", return_value=fake_cfg):
         with patch.object(ProviderService, "_build_adapter", return_value=_Adapter()):
-            with patch("tools.gimo_server.services.ops_service.OpsService.get_config", return_value=SimpleNamespace(economy=fake_economy)):
-                with patch("tools.gimo_server.services.ops_service.OpsService.record_model_outcome") as mock_record:
+            with patch("tools.gimo_server.services.ops.OpsService.get_config", return_value=SimpleNamespace(economy=fake_economy)):
+                with patch("tools.gimo_server.services.ops.OpsService.record_model_outcome") as mock_record:
                     result = await ProviderService.static_generate("hola", {"task_type": "coding"})
 
     assert result["content"] == "ok"
@@ -156,8 +156,8 @@ async def test_provider_service_static_generate_records_outcome_failure():
 
     with patch.object(ProviderService, "get_config", return_value=fake_cfg):
         with patch.object(ProviderService, "_build_adapter", return_value=_Adapter()):
-            with patch("tools.gimo_server.services.ops_service.OpsService.get_config", return_value=SimpleNamespace(economy=fake_economy)):
-                with patch("tools.gimo_server.services.ops_service.OpsService.record_model_outcome") as mock_record:
+            with patch("tools.gimo_server.services.ops.OpsService.get_config", return_value=SimpleNamespace(economy=fake_economy)):
+                with patch("tools.gimo_server.services.ops.OpsService.record_model_outcome") as mock_record:
                     with pytest.raises(RuntimeError):
                         await ProviderService.static_generate("hola", {"task_type": "coding"})
 

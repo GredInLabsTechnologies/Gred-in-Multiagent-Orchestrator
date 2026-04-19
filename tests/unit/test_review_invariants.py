@@ -37,7 +37,7 @@ def test_invariant_review_bundle_contains_changed_files(mock_run):
     settings = _settings()
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.review_purge_contract.AppSessionService.get_path_from_handle", return_value="/repo"), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.is_dir", return_value=True), \
          patch("tools.gimo_server.services.git_service.GitService.get_head_commit", side_effect=["h", "b"]), \
@@ -53,7 +53,7 @@ def test_invariant_review_bundle_contains_diff_or_diff_summary(mock_run):
     settings = _settings()
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.review_purge_contract.AppSessionService.get_path_from_handle", return_value="/repo"), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.is_dir", return_value=True), \
          patch("tools.gimo_server.services.git_service.GitService.get_head_commit", side_effect=["h", "b"]), \
@@ -68,7 +68,7 @@ def test_invariant_review_bundle_carries_available_logs_and_test_evidence(mock_r
     settings = _settings()
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.review_purge_contract.AppSessionService.get_path_from_handle", return_value="/repo"), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.is_dir", return_value=True), \
          patch("tools.gimo_server.services.git_service.GitService.get_head_commit", side_effect=["h", "b"]), \
@@ -85,7 +85,7 @@ def test_invariant_merge_preview_detects_base_drift(mock_run):
     settings = _settings()
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.review_purge_contract.AppSessionService.get_path_from_handle", return_value="/repo"), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.is_dir", return_value=True):
         with patch("tools.gimo_server.services.git_service.GitService.get_head_commit", return_value="base123"):
@@ -101,7 +101,7 @@ def test_invariant_manual_merge_only(mock_run):
     settings = _settings()
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
          patch("tools.gimo_server.services.review_purge_contract.AppSessionService.get_path_from_handle", return_value="/repo"), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run), \
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.is_dir", return_value=True), \
          patch("tools.gimo_server.services.git_service.GitService.get_head_commit", return_value="base123"):
@@ -122,6 +122,6 @@ def test_invariant_workspace_must_stay_inside_canonical_roots(mock_run):
     mock_run.validated_task_spec["workspace_path"] = "/unsafe/workspace"
 
     with patch("tools.gimo_server.services.review_purge_contract.get_settings", return_value=settings), \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=mock_run):
+         patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=mock_run):
         with pytest.raises(LifecycleProofError, match="outside canonical workspace roots"):
             ReviewMergeService.build_review_bundle("r1")

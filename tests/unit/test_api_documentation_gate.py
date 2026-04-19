@@ -15,11 +15,11 @@ async def test_merge_gate_refuses_no_workspace():
     WP-01/GAP-01: Verifies that MergeGateService refuses execution if no workspace is provided.
     """
     run_id = "test-run-fail"
-    with patch("tools.gimo_server.services.ops_service.OpsService.get_run") as mock_get_run, \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_approved") as mock_get_approved, \
-         patch("tools.gimo_server.services.ops_service.OpsService.get_draft") as mock_get_draft, \
-         patch("tools.gimo_server.services.ops_service.OpsService.update_run_status") as mock_status, \
-         patch("tools.gimo_server.services.ops_service.OpsService.append_log") as mock_log:
+    with patch("tools.gimo_server.services.ops.OpsService.get_run") as mock_get_run, \
+         patch("tools.gimo_server.services.ops.OpsService.get_approved") as mock_get_approved, \
+         patch("tools.gimo_server.services.ops.OpsService.get_draft") as mock_get_draft, \
+         patch("tools.gimo_server.services.ops.OpsService.update_run_status") as mock_status, \
+         patch("tools.gimo_server.services.ops.OpsService.append_log") as mock_log:
         
         mock_get_run.return_value = MagicMock(approved_id="app1", risk_score=10.0, policy_decision_id="p1", repo_id="default")
         mock_get_approved.return_value = MagicMock(draft_id="d1")

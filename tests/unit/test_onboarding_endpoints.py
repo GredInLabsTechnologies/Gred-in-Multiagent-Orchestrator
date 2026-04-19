@@ -26,7 +26,7 @@ from tests.conftest import DEFAULT_TEST_TOKEN
 @pytest.fixture(autouse=True)
 def _enable_mesh(test_client, monkeypatch):
     """Ensure mesh is enabled for all tests in this module."""
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
     from tools.gimo_server.ops_models import OpsConfig
 
     original = OpsService.get_config

@@ -41,7 +41,7 @@ def _get_registry(request: Request) -> MeshRegistry:
 
 
 def _get_mesh_enabled(request: Request) -> bool:
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
     OpsService.set_gics(getattr(request.app.state, "gics", None))
     return OpsService.get_config().mesh_enabled
 

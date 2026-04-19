@@ -46,13 +46,13 @@ async def test_execute_run_infers_multi_agent_composition_for_parent_flows() -> 
     fake_approved = SimpleNamespace(draft_id="d1")
     fake_draft = SimpleNamespace(context={"wake_on_demand": True})
 
-    with patch("tools.gimo_server.services.ops_service.OpsService.get_run", return_value=fake_run), patch(
-        "tools.gimo_server.services.ops_service.OpsService.get_approved", return_value=fake_approved
-    ), patch("tools.gimo_server.services.ops_service.OpsService.get_draft", return_value=fake_draft), patch(
-        "tools.gimo_server.services.ops_service.OpsService.update_run_status",
+    with patch("tools.gimo_server.services.ops.OpsService.get_run", return_value=fake_run), patch(
+        "tools.gimo_server.services.ops.OpsService.get_approved", return_value=fake_approved
+    ), patch("tools.gimo_server.services.ops.OpsService.get_draft", return_value=fake_draft), patch(
+        "tools.gimo_server.services.ops.OpsService.update_run_status",
         return_value=fake_run,
     ), patch(
-        "tools.gimo_server.services.ops_service.OpsService.append_log",
+        "tools.gimo_server.services.ops.OpsService.append_log",
         return_value=fake_run,
     ), patch(
         "tools.gimo_server.services.execution.engine_service.EngineService.run_composition",
