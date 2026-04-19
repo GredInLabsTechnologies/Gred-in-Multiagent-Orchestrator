@@ -9,7 +9,7 @@ from ..models.core import PurgeReceipt
 from .ephemeral_repo_service import EphemeralRepoService
 from .git_service import GitService
 from .lifecycle_errors import LifecycleProofError, PurgeExecutionError, PurgeSafetyError, RunNotFoundError
-from .ops_service import OpsService
+from .ops import OpsService
 from .review_purge_contract import get_run_with_context, resolve_workspace_path
 from ..config import get_settings
 

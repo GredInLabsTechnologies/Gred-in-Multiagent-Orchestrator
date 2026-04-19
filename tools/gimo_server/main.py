@@ -93,7 +93,7 @@ async def _threat_decay_loop():
 
 async def _ops_runs_cleanup_loop():
     import asyncio
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
     import logging
     logger = logging.getLogger("orchestrator")
     while True:
@@ -193,7 +193,7 @@ async def _mcp_sampling_loop():
     """
     import asyncio
     from tools.gimo_server.mcp_server import mcp
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
     import logging
     logger = logging.getLogger("orchestrator")
     while True:
@@ -380,7 +380,7 @@ async def lifespan(app: FastAPI):
         from tools.gimo_server.security.auth import session_store as _session_store
         _session_store.set_gics(gics_service)
 
-        from tools.gimo_server.services.ops_service import OpsService
+        from tools.gimo_server.services.ops import OpsService
 
         OpsService.set_gics(gics_service)
 
@@ -392,7 +392,7 @@ async def lifespan(app: FastAPI):
 
         # Start background cleanup tasks
         cleanup_task = asyncio.create_task(snapshot_cleanup_loop())
-        from tools.gimo_server.services.ops_service import OpsService
+        from tools.gimo_server.services.ops import OpsService
 
         threat_cleanup_task = asyncio.create_task(_threat_decay_loop())
 
@@ -416,7 +416,7 @@ async def lifespan(app: FastAPI):
             merge_wt_dir = settings.ops_data_dir / "worktrees"
             if merge_wt_dir.exists():
                 import shutil
-                from tools.gimo_server.services.ops_service import OpsService as _OpsServiceWt
+                from tools.gimo_server.services.ops import OpsService as _OpsServiceWt
 
                 active_run_ids = {
                     r.id
@@ -441,7 +441,7 @@ async def lifespan(app: FastAPI):
         # (orphaned children) are also marked error to prevent them from
         # executing without a valid parent context.
         try:
-            from tools.gimo_server.services.ops_service import OpsService as _OpsServiceReconcile
+            from tools.gimo_server.services.ops import OpsService as _OpsServiceReconcile
 
             _ZOMBIE_ACTIVE = {"running", "awaiting_subagents", "awaiting_review"}
             _TERMINAL = _OpsServiceReconcile._TERMINAL_RUN_STATUSES
@@ -498,7 +498,7 @@ async def lifespan(app: FastAPI):
 
         hw_monitor = HardwareMonitorService.get_instance()
         try:
-            from tools.gimo_server.services.ops_service import OpsService
+            from tools.gimo_server.services.ops import OpsService
 
             cfg = OpsService.get_config()
             if cfg.economy.hardware_thresholds:

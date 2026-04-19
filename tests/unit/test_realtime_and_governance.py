@@ -29,7 +29,7 @@ from tools.gimo_server.services.notification_service import (
     NotificationService,
     CIRCUIT_BREAKER_THRESHOLD,
 )
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.resource_governor import (
     AdmissionDecision,
     ResourceGovernor,

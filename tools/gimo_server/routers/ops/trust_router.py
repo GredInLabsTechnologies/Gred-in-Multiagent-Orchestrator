@@ -6,7 +6,7 @@ from ...ops_models import CircuitBreakerConfigModel
 from ...services.storage_service import StorageService
 from ...services.trust_engine import TrustEngine
 from ...services.institutional_memory_service import InstitutionalMemoryService
-from ...services.ops_service import OpsService
+from ...services.ops import OpsService
 from .common import _require_role, _actor_label
 
 router = APIRouter()

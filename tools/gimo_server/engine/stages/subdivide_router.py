@@ -29,7 +29,7 @@ class SubdivideRouter:
         if not input.context.get("ace_subdivide_mode"):
             return StageOutput(status="continue")
 
-        from ...services.ops_service import OpsService
+        from ...services.ops import OpsService
 
         llm_content = str(input.artifacts.get("content") or "")
 

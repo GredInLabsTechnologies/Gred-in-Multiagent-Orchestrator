@@ -5,7 +5,7 @@ from typing import Any, Dict, Tuple
 
 from ..config import get_settings
 from .lifecycle_errors import LifecycleProofError, RunNotFoundError
-from .ops_service import OpsService
+from .ops import OpsService
 from .app_session_service import AppSessionService
 from .workspace.workspace_policy_service import WorkspacePolicyService
 

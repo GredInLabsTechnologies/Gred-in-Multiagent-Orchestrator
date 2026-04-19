@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from tools.gimo_server.ops_models import OpsApproved
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.plan_graph_builder import build_graph_from_ops_plan
 from tools.gimo_server.services.task_descriptor_service import TaskDescriptorService
 

@@ -13,7 +13,7 @@ from .conversation_service import ConversationService
 from .file_service import FileService
 from .git_service import GitService
 from .notice_policy_service import NoticePolicyService
-from .ops_service import OpsService
+from .ops import OpsService
 from .providers.service_impl import ProviderService
 from .run_lifecycle import is_active_run_status, is_terminal_run_status
 from .storage_service import StorageService

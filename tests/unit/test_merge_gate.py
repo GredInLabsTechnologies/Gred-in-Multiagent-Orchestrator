@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from tools.gimo_server.models.core import OpsRun, OpsApproved
 from tools.gimo_server.schemas.draft_validation import ValidatedTaskSpec
 from tools.gimo_server.services.execution.run_worker import RunWorker
-from tools.gimo_server.services.ops.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.app_session_service import AppSessionService
 from tools.gimo_server.services.providers.service_impl import ProviderService
 from tools.gimo_server.engine.tools.executor import ToolExecutor, ToolExecutionResult

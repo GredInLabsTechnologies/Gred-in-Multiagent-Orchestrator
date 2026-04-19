@@ -275,7 +275,7 @@ class GraphEngine(
         return await self._call_execute_node(node)
 
     async def _run_llm_call_with_cascade(self, node: WorkflowNode) -> Any:
-        from tools.gimo_server.services.ops_service import OpsService
+        from tools.gimo_server.services.ops import OpsService
         config = OpsService.get_config()
 
         economy = config.economy

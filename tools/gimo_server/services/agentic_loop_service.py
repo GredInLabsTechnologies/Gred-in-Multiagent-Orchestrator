@@ -251,7 +251,7 @@ class AgenticLoopService:
     @staticmethod
     def _get_ops_service():
         try:
-            from .ops_service import OpsService
+            from .ops import OpsService
 
             return OpsService
         except Exception:
@@ -396,7 +396,7 @@ class AgenticLoopService:
     @staticmethod
     def _get_gics():
         try:
-            from .ops_service import OpsService
+            from .ops import OpsService
 
             return getattr(OpsService, "_gics", None)
         except Exception:
@@ -1111,7 +1111,7 @@ class AgenticLoopService:
         """
         try:
             from .observability_pkg.observability_service import ObservabilityService as UnifiedObservabilityService
-            from .ops_service import OpsService
+            from .ops import OpsService
             from .storage_service import StorageService
 
             try:

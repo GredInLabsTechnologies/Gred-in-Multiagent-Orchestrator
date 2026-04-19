@@ -478,7 +478,7 @@ class ObservabilityService:
         """Best-effort run-health snapshot used for P2 operational SLI/SLO monitoring."""
         now = datetime.now(timezone.utc)
         try:
-            from ..ops_service import OpsService
+            from ..ops import OpsService
 
             runs = OpsService.list_runs()
         except Exception:

@@ -10,8 +10,8 @@ from ...ops_models import (
     NormalizedModelInfo,
     ProviderValidateRequest,
 )
-from ..ops_service import OpsService
-from ..providers.metadata import REMOTE_MODELS_BASE_URLS
+from ..ops import OpsService
+from ..providers.metadata import OPENAI_COMPAT_CATALOG_TYPES, REMOTE_MODELS_BASE_URLS
 from ._base import (
     _fallback_models_for,
 )

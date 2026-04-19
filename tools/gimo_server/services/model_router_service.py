@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 from ..ops_models import ProviderRoleBinding, WorkflowNode
 from ..utils.debug_mode import is_debug_mode
 from .economy.cost_service import CostService
-from .model_inventory_service import ModelInventoryService, ModelEntry, _infer_capabilities, _infer_tier
+from .model_inventory_service import ModelInventoryService, ModelEntry, _infer_tier
 from .hardware_monitor_service import HardwareMonitorService
 
 logger = logging.getLogger("orchestrator.model_router")
@@ -204,7 +204,7 @@ class ModelRouterService:
             provider_type=provider_type,
             is_local=is_local,
             quality_tier=_infer_tier(binding.model),
-            capabilities=_infer_capabilities(binding.model),
+            capabilities={"chat"},
             cost_input=pricing.get("input", 0.0),
             cost_output=pricing.get("output", 0.0),
         )
@@ -257,7 +257,7 @@ class ModelRouterService:
     @classmethod
     def _gics_success_adjustment(cls, task_type: str, entry: ModelEntry) -> tuple[float, list[str]]:
         from .capability_profile_service import CapabilityProfileService
-        from .ops_service import OpsService
+        from .ops import OpsService
 
         reasons: list[str] = []
         adjustment = 0.0
@@ -469,16 +469,6 @@ class ModelRouterService:
     # Keep for backwards compat with CascadeService and tests
     _TIERS = _LEGACY_TIERS
 
-    DEFAULT_POLICY: Dict[str, str] = {
-        "classification": "haiku",
-        "code_generation": "sonnet",
-        "security_review": "opus",
-        "formatting": "local",
-        "default": "sonnet",
-    }
-
-    PHASE6_PRIMARY_MODEL = "qwen3-coder:480b-cloud"
-    PHASE6_FALLBACK_MODEL = "qwen3:8b"
     _PHASE6_FALLBACK_ALLOWED = {
         "429",
         "session_limit",
@@ -585,7 +575,7 @@ class ModelRouterService:
         Never returns an empty list — always preserves at least the original set.
         """
         try:
-            from .ops_service import OpsService
+            from .ops import OpsService
             gics = getattr(OpsService, "_gics", None)
             if not gics:
                 return candidates
@@ -628,7 +618,7 @@ class ModelRouterService:
                 pass  # Fall back to minimal sync inventory
 
     async def choose_model(self, node: WorkflowNode, _state: Dict[str, Any]) -> ModelSelectionDecision:
-        from .ops_service import OpsService
+        from .ops import OpsService
         config = OpsService.get_config()
 
         await self._ensure_inventory_loaded()
@@ -771,6 +761,11 @@ class ModelRouterService:
         return None
 
     @classmethod
+    def _phase6_config(cls):
+        from .ops import OpsService
+        return OpsService.get_config().phase6
+
+    @classmethod
     def classify_phase6_failure_reason(cls, exc: Exception) -> str:
         httpx_err = cls._classify_httpx_error(exc)
         if httpx_err:
@@ -799,6 +794,9 @@ class ModelRouterService:
     def resolve_phase6_strategy(
         cls,
         *,
+        primary_model: str,
+        fallback_model: str,
+        forced_local_intents: List[str],
         intent_effective: str,
         path_scope: List[str],
         primary_failure_reason: str = "",
@@ -815,7 +813,7 @@ class ModelRouterService:
             for p in normalized_scope
         )
 
-        forced_local = intent_effective in {"SECURITY_CHANGE", "CORE_RUNTIME_CHANGE"} or sensitive_scope
+        forced_local = intent_effective in set(forced_local_intents) or sensitive_scope
         reason = str(primary_failure_reason or "")
 
         if forced_local:
@@ -823,9 +821,9 @@ class ModelRouterService:
             return Phase6StrategyDecision(
                 strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
                 strategy_reason="forced_local_only",
-                model_attempted=cls.PHASE6_FALLBACK_MODEL,
+                model_attempted=fallback_model,
                 failure_reason="",
-                final_model_used=cls.PHASE6_FALLBACK_MODEL,
+                final_model_used=fallback_model,
                 fallback_used=False,
                 final_status="PRIMARY_MODEL_SUCCESS",
             )
@@ -835,9 +833,9 @@ class ModelRouterService:
             return Phase6StrategyDecision(
                 strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
                 strategy_reason="cloud_primary_selected",
-                model_attempted=cls.PHASE6_PRIMARY_MODEL,
+                model_attempted=primary_model,
                 failure_reason="",
-                final_model_used=cls.PHASE6_PRIMARY_MODEL,
+                final_model_used=primary_model,
                 fallback_used=False,
                 final_status="PRIMARY_MODEL_SUCCESS",
             )
@@ -847,9 +845,9 @@ class ModelRouterService:
             return Phase6StrategyDecision(
                 strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
                 strategy_reason="fallback_forbidden",
-                model_attempted=cls.PHASE6_PRIMARY_MODEL,
+                model_attempted=primary_model,
                 failure_reason=reason,
-                final_model_used=cls.PHASE6_PRIMARY_MODEL,
+                final_model_used=primary_model,
                 fallback_used=False,
                 final_status="PRIMARY_MODEL_SUCCESS",
             )
@@ -859,9 +857,9 @@ class ModelRouterService:
             return Phase6StrategyDecision(
                 strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
                 strategy_reason="cloud_to_local_fallback",
-                model_attempted=cls.PHASE6_PRIMARY_MODEL,
+                model_attempted=primary_model,
                 failure_reason=reason,
-                final_model_used=cls.PHASE6_FALLBACK_MODEL,
+                final_model_used=fallback_model,
                 fallback_used=True,
                 final_status="FALLBACK_MODEL_USED",
             )
@@ -870,9 +868,9 @@ class ModelRouterService:
         return Phase6StrategyDecision(
             strategy_decision_id=hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:16],
             strategy_reason="fallback_not_allowed_unknown_reason",
-            model_attempted=cls.PHASE6_PRIMARY_MODEL,
+            model_attempted=primary_model,
             failure_reason=reason,
-            final_model_used=cls.PHASE6_PRIMARY_MODEL,
+            final_model_used=primary_model,
             fallback_used=False,
             final_status="PRIMARY_MODEL_SUCCESS",
         )

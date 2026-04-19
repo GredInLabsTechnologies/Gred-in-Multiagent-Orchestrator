@@ -11,22 +11,6 @@ logger = logging.getLogger("orchestrator.model_inventory")
 
 CACHE_TTL = 300  # 5 minutes
 
-# Heuristic patterns to infer quality tier (1-5) from model ID
-_TIER_PATTERNS: list[tuple[int, re.Pattern]] = [
-    (5, re.compile(r"opus|ultra|max|o1-pro|gpt-4-?o(?!-mini)", re.I)),
-    (4, re.compile(r"sonnet|pro|70b|72b|65b|claude-3|gpt-4(?!o)", re.I)),
-    (3, re.compile(r"haiku|13b|14b|8b|7b|medium|gpt-3\.5|gpt-4o-mini|mistral-large", re.I)),
-    (2, re.compile(r"3b|4b|small|mini|phi-?[23]|gemma.*2b", re.I)),
-    (1, re.compile(r"1b|0\.5b|tiny|nano|qwen.*0\.5", re.I)),
-]
-
-# Infer capabilities from model name
-_CAP_PATTERNS: dict[str, re.Pattern] = {
-    "code": re.compile(r"code|coder|starcoder|codellama|deepseek-coder", re.I),
-    "reasoning": re.compile(r"opus|o1|o3|deepseek-r1|qwq", re.I),
-    "vision": re.compile(r"vision|llava|bakllava|moondream", re.I),
-}
-
 
 def _parse_size_gb(size_str: Optional[str]) -> Optional[float]:
     if not size_str:
@@ -52,9 +36,7 @@ def _parse_size_gb(size_str: Optional[str]) -> Optional[float]:
 
 
 def _infer_tier(model_id: str, size_gb: Optional[float] = None) -> int:
-    for tier, pattern in _TIER_PATTERNS:
-        if pattern.search(model_id):
-            return tier
+    """Infer quality tier from physical size. No name-based heuristics."""
     if size_gb:
         if size_gb < 2:
             return 1
@@ -65,15 +47,7 @@ def _infer_tier(model_id: str, size_gb: Optional[float] = None) -> int:
         if size_gb < 50:
             return 4
         return 5
-    return 3  # default: mid-tier
-
-
-def _infer_capabilities(model_id: str) -> set[str]:
-    caps = {"chat"}  # All models can chat
-    for cap, pattern in _CAP_PATTERNS.items():
-        if pattern.search(model_id):
-            caps.add(cap)
-    return caps
+    return 3  # default: mid-tier — benchmarks and GICS refine later
 
 
 @dataclass
@@ -148,7 +122,7 @@ class ModelInventoryService:
                     quality_tier=pricing.get("quality_tier") or tier,
                     size_gb=size,
                     context_window=m.context_window or pricing.get("context_window"),
-                    capabilities=_infer_capabilities(m.id),
+                    capabilities={"chat"},
                     cost_input=pricing.get("input", 0.0),
                     cost_output=pricing.get("output", 0.0),
                 ))
@@ -167,7 +141,7 @@ class ModelInventoryService:
                         is_local=is_local,
                         quality_tier=pricing.get("quality_tier") or _infer_tier(active_model),
                         context_window=pricing.get("context_window"),
-                        capabilities=_infer_capabilities(active_model),
+                        capabilities={"chat"},
                         cost_input=pricing.get("input", 0.0),
                         cost_output=pricing.get("output", 0.0),
                     ))
@@ -238,7 +212,7 @@ class ModelInventoryService:
                 entries.append(ModelEntry(
                     model_id=model, provider_id=pid, provider_type=ptype,
                     is_local=is_local, quality_tier=_infer_tier(model),
-                    capabilities=_infer_capabilities(model),
+                    capabilities={"chat"},
                     cost_input=pricing.get("input", 0.0),
                     cost_output=pricing.get("output", 0.0),
                 ))

@@ -19,11 +19,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ...ops_models import ExecutorReport
-from ..ops_service import OpsService
+from ..ops import OpsService
 from ..providers.service import ProviderService
 from ..notification_service import NotificationService
 from ..critic_service import CriticService
 from ..quality_service import QualityService
+from ..app_session_service import AppSessionService
+from ..workspace.repo_recon_service import RepoReconService
 from ..run_lifecycle import is_active_run_status
 
 logger = logging.getLogger("orchestrator.run_worker")
@@ -440,7 +442,7 @@ class RunWorker:
 
     async def _execute_run(self, run_id: str) -> None:
         try:
-            from ..ops_service import OpsService
+            from ..ops import OpsService
             run = OpsService.get_run(run_id)
             if not run:
                 return

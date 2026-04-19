@@ -6,6 +6,7 @@ from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.app_session_service import AppSessionService
 from tools.gimo_server.services.app_draft_service import AppDraftService, AppDraftSessionNotFoundError
 from tools.gimo_server.services.workspace.repo_recon_service import RepoReconService
+from tools.gimo_server.services.draft_validation_service import DraftValidationService
 from tools.gimo_server.services.context_request_service import ContextRequestService
 from tools.gimo_server.services.lifecycle_errors import (
     LifecycleProofError,
@@ -14,8 +15,9 @@ from tools.gimo_server.services.lifecycle_errors import (
     RunNotFoundError,
 )
 from tools.gimo_server.services.merge_gate_service import MergeGateService
-from tools.gimo_server.services.ops_service import OpsService
+from tools.gimo_server.services.ops import OpsService
 from tools.gimo_server.services.review_merge_service import ReviewMergeService
+from tools.gimo_server.services.workspace.workspace_policy_service import WorkspacePolicyService
 
 from tools.gimo_server.schemas.repo_recon import ReconEntry, FileContentResponse
 from tools.gimo_server.schemas.draft_validation import DraftCreateRequest, DraftValidationResponse

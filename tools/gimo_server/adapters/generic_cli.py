@@ -74,12 +74,10 @@ class GenericCLISession(AgentSession):
             self._execution_policy = ExecutionPolicyService.get_policy(routing_summary.execution_policy)
             self._role_profile = routing_summary.mood  # For legacy compatibility
         elif role_profile:
+            # Backward compatibility: derive from role_profile
             from ..services.execution.execution_policy_service import ExecutionPolicyService
-            logger.warning(
-                "Legacy role_profile='%s' provided without execution_policy; defaulting to workspace_safe.",
-                role_profile,
-            )
-            self._execution_policy = ExecutionPolicyService.get_policy("workspace_safe")
+            policy_name = ExecutionPolicyService.policy_name_from_legacy_mood(role_profile)
+            self._execution_policy = ExecutionPolicyService.get_policy(policy_name)
             self._role_profile = role_profile
         else:
             # Default fallback

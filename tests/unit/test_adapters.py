@@ -13,7 +13,7 @@ from tools.gimo_server.adapters import (
     OpenAICompatibleAdapter,
 )
 from tools.gimo_server.services.model_router_service import ModelRouterService, RoutingDecision
-from tools.gimo_server.services.graph_engine import GraphEngine
+from tools.gimo_server.services.graph import GraphEngine
 from tools.gimo_server.ops_models import WorkflowGraph, WorkflowNode
 
 

@@ -13,8 +13,6 @@ from tools.gimo_server.security import (
 )
 from tools.gimo_server.security.access_control import require_read_only_access
 from tools.gimo_server.security.auth import AuthContext
-from tools.gimo_server.security.path_safety import is_within
-from tools.gimo_server.services.file_service import FileService
 from tools.gimo_server.services.observability_pkg.observability_service import ObservabilityService
 from tools.gimo_server.services.notification_service import NotificationService
 from .common import _require_role, _actor_label
@@ -200,6 +198,7 @@ async def observability_duration_stats(
     """
     _require_role(auth, "operator")
     from tools.gimo_server.services.timeout.duration_telemetry_service import DurationTelemetryService
+    from tools.gimo_server.services.ops import OpsService
 
     # Inject GICS
     DurationTelemetryService.set_gics(getattr(request.app.state, "gics", None))

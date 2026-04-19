@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from fastapi import Depends, HTTPException
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
-from tools.gimo_server.services.graph_engine import GraphEngine
+from tools.gimo_server.services.graph import GraphEngine
 
 
 def require_read(auth: Annotated[AuthContext, Depends(verify_token)]) -> AuthContext:

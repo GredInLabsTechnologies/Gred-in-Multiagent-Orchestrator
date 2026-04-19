@@ -62,7 +62,7 @@ class PresetTelemetryService:
         alternatives_count: int,
     ) -> None:
         """Registra que un preset fue SELECCIONADO por routing."""
-        from ..services.ops_service import OpsService
+        from ..services.ops import OpsService
 
         gics = getattr(OpsService, '_gics', None)
         if not gics:
@@ -103,7 +103,7 @@ class PresetTelemetryService:
         Returns:
             Updated telemetry record
         """
-        from ..services.ops_service import OpsService
+        from ..services.ops import OpsService
 
         gics = getattr(OpsService, '_gics', None)
         if not gics:
@@ -189,7 +189,7 @@ class PresetTelemetryService:
         preset_name: str,
     ) -> Optional[Dict[str, Any]]:
         """Obtiene telemetría de un preset para un semantic."""
-        from ..services.ops_service import OpsService
+        from ..services.ops import OpsService
 
         # GICS is injected via OpsService.set_gics()
         gics = getattr(OpsService, '_gics', None)
@@ -205,7 +205,7 @@ class PresetTelemetryService:
         task_semantic: str,
     ) -> List[Dict[str, Any]]:
         """Obtiene telemetría de TODOS los presets para un semantic."""
-        from ..services.ops_service import OpsService
+        from ..services.ops import OpsService
 
         gics = getattr(OpsService, '_gics', None)
         if not gics:
@@ -277,7 +277,7 @@ class PresetTelemetryService:
         Usado en startup para evitar cold start. Crea entries sintéticas con N=5 samples
         basadas en los priors semánticos de ProfileRouterService.
         """
-        from ..services.ops_service import OpsService
+        from ..services.ops import OpsService
         from ..services.profile_router_service import ProfileRouterService
 
         gics = getattr(OpsService, '_gics', None)

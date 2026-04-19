@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import time
 from typing import Any, Dict, List, Tuple
 
@@ -15,6 +14,15 @@ from ...ops_models import (
 )
 from ..providers.service import ProviderService
 from ..providers.auth_service import ProviderAuthService
+from ..ops import OpsService
+from .._subprocess_util import popen_compat
+from ..providers.catalog_ollama_helpers import (
+    ensure_ollama_ready as _ensure_ollama_ready_helper,
+    ollama_health as _ollama_health_helper,
+    ollama_list_installed as _ollama_list_installed_helper,
+)
+from ..providers.metadata import OPENAI_COMPAT_CATALOG_TYPES, REMOTE_MODELS_BASE_URLS
+from ...security import audit_log
 
 
 # Recommended Ollama models for local agentic code workloads.
@@ -218,12 +226,11 @@ def _mock_mode_enabled(payload: ProviderValidateRequest | None = None) -> bool:
 
 
 def _run_sync(args: list[str], timeout: float = 10.0) -> tuple[int, str]:
-    """Run a CLI command synchronously; uses shell=True on Windows for .cmd shim compat."""
+    """Run a CLI command synchronously with nested-session guard removed."""
     try:
-        cmd = " ".join(args) if sys.platform == "win32" else args
         clean_env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE")}
-        proc = subprocess.Popen(
-            cmd, shell=(sys.platform == "win32"),  # nosec B602
+        proc = popen_compat(
+            args,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             env=clean_env,  # remove nested-session guard so claude/codex CLIs work
         )
@@ -418,17 +425,8 @@ class ProviderCatalogBase:
 
     @classmethod
     def _infer_capabilities(cls, model_id: str, description: str | None = None) -> List[str]:
-        bag = f"{model_id} {description or ''}".lower()
-        caps: List[str] = []
-        if any(k in bag for k in ["code", "coder", "codex", "program", "software"]):
-            caps.append("code")
-        if any(k in bag for k in ["reason", "thinking", "logic", "math"]):
-            caps.append("reasoning")
-        if any(k in bag for k in ["tool", "function", "agent"]):
-            caps.append("tools")
-        if any(k in bag for k in ["vision", "image", "multimodal"]):
-            caps.append("multimodal")
-        return caps
+        """Returns empty list. Capabilities come from benchmarks and GICS."""
+        return []
 
     @classmethod
     def _build_prior_scores(
@@ -438,30 +436,15 @@ class ProviderCatalogBase:
         capabilities: List[str],
         context_window: int | None,
     ) -> Dict[str, float]:
-        priors: Dict[str, float] = {
-            "coding": 0.45,
-            "reasoning": 0.45,
-            "tools": 0.35,
+        """Neutral priors. GICS refines from operational evidence."""
+        return {
+            "coding": 0.5,
+            "reasoning": 0.5,
+            "tools": 0.5,
         }
-        caps = set(capabilities or [])
-        if "code" in caps:
-            priors["coding"] = max(priors["coding"], 0.85)
-        if "reasoning" in caps:
-            priors["reasoning"] = max(priors["reasoning"], 0.8)
-        if "tools" in caps:
-            priors["tools"] = max(priors["tools"], 0.75)
-        if context_window and context_window >= 128000:
-            priors["reasoning"] = max(priors["reasoning"], 0.75)
-        raw = model_id.lower()
-        if "codex" in raw or "coder" in raw:
-            priors["coding"] = max(priors["coding"], 0.9)
-        return priors
 
     @classmethod
     def _infer_weakness(cls, model_id: str) -> str | None:
-        raw = model_id.lower()
-        if any(k in raw for k in ["opus", "gpt-5", "o1", "r1", "70b"]):
-            return "Coste alto"
         return None
 
     @classmethod

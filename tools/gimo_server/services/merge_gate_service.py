@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .git_service import GitService
-from .ops_service import OpsService
+from .ops import OpsService
 from .review_purge_contract import resolve_authoritative_repo_path, resolve_workspace_path
 
 logger = logging.getLogger("orchestrator.merge_gate")

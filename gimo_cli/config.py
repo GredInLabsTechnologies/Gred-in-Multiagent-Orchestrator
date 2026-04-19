@@ -20,7 +20,7 @@ except ImportError:
 
 from gimo_cli import console
 
-# ── Constants (from cli_constants.py) ─────────────────────────────────────────
+# ── Constants ────────────────────────────────────────────────────────────────
 
 DEFAULT_API_BASE_URL = os.environ.get("GIMO_API_URL") or os.environ.get("ORCH_BASE_URL") or "http://127.0.0.1:9325"
 DEFAULT_TIMEOUT_SECONDS = 180.0  # Increased from 15s to 180s - plan generation can take 30-60s

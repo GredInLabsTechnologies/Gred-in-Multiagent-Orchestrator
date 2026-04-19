@@ -10,7 +10,7 @@ from ..ops_models import (
     EvalRunReport,
     WorkflowGraph,
 )
-from .graph_engine import GraphEngine
+from .graph import GraphEngine
 
 
 class EvalsService:

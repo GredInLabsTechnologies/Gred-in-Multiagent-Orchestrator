@@ -181,7 +181,7 @@ class TestExecuteRun:
     @pytest.mark.asyncio
     async def test_execute_run_rejects_missing_task_spec(self):
         from tools.gimo_server.services.execution.run_worker import RunWorker
-        from tools.gimo_server.services.ops_service import OpsService
+        from tools.gimo_server.services.ops import OpsService
 
         worker = RunWorker()
         worker._running_ids.add("r1")
@@ -197,7 +197,7 @@ class TestExecuteRun:
     @pytest.mark.asyncio
     async def test_execute_run_silently_returns_on_missing_run(self):
         from tools.gimo_server.services.execution.run_worker import RunWorker
-        from tools.gimo_server.services.ops_service import OpsService
+        from tools.gimo_server.services.ops import OpsService
 
         worker = RunWorker()
         worker._running_ids.add("r1")

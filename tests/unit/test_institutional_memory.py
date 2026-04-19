@@ -23,7 +23,7 @@ def test_institutional_memory_suggests_block_on_failure_burst():
 
 
 def test_ops_service_gics_bridge_seed_record_get():
-    from tools.gimo_server.services.ops_service import OpsService
+    from tools.gimo_server.services.ops import OpsService
 
     gics = _StubGicsBridge()
     OpsService.set_gics(gics)

@@ -443,7 +443,6 @@ class ProviderService:
         provider_id: str,
         *,
         requested_model: str | None = None,
-        prefer_family: str | None = None,
     ) -> str:
         cfg = cls.get_config()
         if not cfg:
@@ -455,7 +454,6 @@ class ProviderService:
         canonical = cls.normalize_provider_type(entry.provider_type or entry.type)
         current_model = str(entry.model_id or entry.model or "").strip()
         requested_model = str(requested_model or "").strip() or None
-        prefer_family = str(prefer_family or "").strip().lower() or None
 
         if canonical != "ollama_local":
             return requested_model or current_model
@@ -479,21 +477,7 @@ class ProviderService:
         if current_model in installed_ids:
             return current_model
 
-        ranked_ids = list(installed_ids)
-        preferred_tokens = [prefer_family] if prefer_family else ["qwen"]
-        preferred_tokens.extend(["coder", "code"])
-
-        def _score(model_id: str) -> tuple[int, int, str]:
-            lower = model_id.lower()
-            family_score = 0
-            if preferred_tokens and preferred_tokens[0] and preferred_tokens[0] in lower:
-                family_score += 2
-            if any(token in lower for token in preferred_tokens[1:]):
-                family_score += 1
-            return (-family_score, len(lower), lower)
-
-        ranked_ids.sort(key=_score)
-        return ranked_ids[0]
+        return installed_ids[0]
 
     @classmethod
     async def select_provider(
@@ -501,7 +485,6 @@ class ProviderService:
         *,
         provider_id: str,
         model: str | None = None,
-        prefer_family: str | None = None,
         api_key: str | None = None,
     ) -> ProviderConfig:
         cfg = cls.get_config()
@@ -513,7 +496,6 @@ class ProviderService:
         resolved_model = await cls._resolve_runtime_model(
             provider_id,
             requested_model=model,
-            prefer_family=prefer_family,
         )
         existing_entry = cfg.providers[provider_id]
         return cls.upsert_provider_entry(
@@ -652,7 +634,7 @@ class ProviderService:
             return provider_id, model_id
 
         def _rel(ptype: str, model: str) -> tuple[float, bool]:
-            from ..ops_service import OpsService
+            from ..ops import OpsService
 
             data = OpsService.get_model_reliability(provider_type=ptype, model_id=model) or {}
             score = float(data.get("score", 0.5) or 0.5)
@@ -782,7 +764,7 @@ class ProviderService:
     def _record_outcome_safe(
         cls, provider_type: str, model_id: str, success: bool, start_ts: float, cost_usd: float, task_type: str
     ) -> None:
-        from ..ops_service import OpsService
+        from ..ops import OpsService
         try:
             OpsService.record_model_outcome(
                 provider_type=provider_type, model_id=model_id, success=success,
@@ -795,7 +777,7 @@ class ProviderService:
     async def static_generate(cls, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Static version of generate for legacy/class-level calls."""
         from ..economy.cost_service import CostService
-        from ..ops_service import OpsService
+        from ..ops import OpsService
         
         cfg = cls.get_config()
         if not cfg:
@@ -882,8 +864,8 @@ class ProviderService:
         safe_context: Dict[str, Any],
         decision: Any,
         started_at: float,
+        primary_model: str,
     ) -> tuple[Optional[Dict[str, Any]], Optional[Exception], str]:
-        primary_model = ModelRouterService.PHASE6_PRIMARY_MODEL
         max_primary_attempts = 2
         backoff_seconds = 0.25
         last_error: Optional[Exception] = None
@@ -938,21 +920,27 @@ class ProviderService:
     ) -> Dict[str, Any]:
         """Phase-6 deterministic cloud/local strategy resolver execution.
 
-        Rules:
-        - Primary: qwen3-coder:480b-cloud
-        - Fallback: qwen3:8b (local)
-        - Fallback only on: 429, session/weekly limits, timeout, network error, 5xx
-        - No fallback on: 400, policy/schema/merge-gate errors
-        - SECURITY_CHANGE / CORE_RUNTIME_CHANGE / sensitive scope => local-only
+        Models are read from OpsConfig.phase6 (primary_model / fallback_model).
+        Forced-local intents come from OpsConfig.auto_run_excluded_intents.
+        Fallback only on: 429, session/weekly limits, timeout, network error, 5xx.
+        No fallback on: 400, policy/schema/merge-gate errors.
         """
+        from ..ops import OpsService
+
+        ops_cfg = OpsService.get_config()
+        phase6_cfg = ops_cfg.phase6
+        _resolve = ModelRouterService.resolve_phase6_strategy
+        _common_kwargs = dict(
+            primary_model=phase6_cfg.primary_model,
+            fallback_model=phase6_cfg.fallback_model,
+            forced_local_intents=ops_cfg.auto_run_excluded_intents,
+            intent_effective=str(intent_effective or ""),
+            path_scope=list(path_scope or []),
+        )
 
         safe_context = dict(context or {})
         started_at = time.perf_counter()
-        decision = ModelRouterService.resolve_phase6_strategy(
-            intent_effective=str(intent_effective or ""),
-            path_scope=list(path_scope or []),
-            primary_failure_reason="",
-        )
+        decision = _resolve(**_common_kwargs, primary_failure_reason="")
 
         if decision.strategy_reason == "forced_local_only":
             local_result = await cls.static_generate(
@@ -980,18 +968,13 @@ class ProviderService:
             return local_result
 
         primary_result, last_error, last_reason = await cls._execute_phase6_primary(
-            prompt, safe_context, decision, started_at
+            prompt, safe_context, decision, started_at,
+            primary_model=phase6_cfg.primary_model,
         )
         if primary_result:
             return primary_result
 
-        fallback_model = ModelRouterService.PHASE6_FALLBACK_MODEL
-
-        resolved = ModelRouterService.resolve_phase6_strategy(
-            intent_effective=str(intent_effective or ""),
-            path_scope=list(path_scope or []),
-            primary_failure_reason=last_reason,
-        )
+        resolved = _resolve(**_common_kwargs, primary_failure_reason=last_reason)
 
         if not resolved.fallback_used:
             raise RuntimeError(f"PHASE6_NO_FALLBACK:{last_reason}") from last_error
@@ -999,7 +982,7 @@ class ProviderService:
         try:
             fallback_result = await cls.static_generate(
                 prompt,
-                {**safe_context, "model": fallback_model},
+                {**safe_context, "model": phase6_cfg.fallback_model},
             )
         except Exception as fallback_exc:
             raise RuntimeError(f"PHASE6_FALLBACK_FAILED:{last_reason}") from fallback_exc

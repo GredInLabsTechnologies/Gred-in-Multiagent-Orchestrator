@@ -28,7 +28,7 @@ class IntentClassificationService:
     )
     _CORE_RUNTIME_HINTS = (
         "tools/gimo_server/services/runtime_policy_service.py",
-        "tools/gimo_server/services/run_worker.py",
+        "tools/gimo_server/services/execution/run_worker.py",
         "tools/gimo_server/routers/ops/run_router.py",
         "tools/gimo_server/routers/ops/plan_router.py",
         "tools/gimo_server/ops_models.py",
@@ -145,7 +145,7 @@ class IntentClassificationService:
         effective, rec = cls._classify_effective_intent(declared, normalized_scope)
         reasons.extend(rec)
 
-        if risk > 60:
+        if risk >= 60:
             reasons.append("risk_gt_60")
             return IntentDecisionAudit(
                 intent_declared=declared,
@@ -155,7 +155,7 @@ class IntentClassificationService:
                 execution_decision="RISK_SCORE_TOO_HIGH",
             )
 
-        if 31 <= risk <= 60:
+        if 31 <= risk < 60:
             reasons.append("risk_between_31_and_60")
             return IntentDecisionAudit(
                 intent_declared=declared,

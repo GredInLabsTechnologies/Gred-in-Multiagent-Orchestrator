@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 
 from ...security import check_rate_limit
 from ...security.auth import AuthContext
-from ...services.ops_service import OpsService
+from ...services.ops import OpsService
 from ...services.plan_graph_builder import build_graph_from_ops_plan
 from ...services.run_lifecycle import is_active_run_status
 from ..ops.common import require_read, _WORKFLOW_ENGINES

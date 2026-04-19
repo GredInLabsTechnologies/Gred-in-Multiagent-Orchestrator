@@ -50,7 +50,7 @@ class CognitiveAssessmentStage:
     name = "cognitive_assessment"
 
     async def execute(self, input: StageInput) -> StageOutput:
-        from ...services.ops_service import OpsService
+        from ...services.ops import OpsService
 
         run = OpsService.get_run(input.run_id)
         if not run:
@@ -355,7 +355,7 @@ def _gather_sibling_context(
     parent_run_id: str,
 ) -> tuple[List[Dict[str, Any]], float, str]:
     """Find completed sibling runs and extract their outputs for cross-pollination."""
-    from ...services.ops_service import OpsService
+    from ...services.ops import OpsService
 
     parent = OpsService.get_run(parent_run_id)
     if not parent:
@@ -393,7 +393,7 @@ def _gather_sibling_context(
 
 def _extract_run_output(run_id: str) -> Optional[str]:
     """Extract the substantive output from a completed run's logs."""
-    from ...services.ops_service import OpsService
+    from ...services.ops import OpsService
 
     run = OpsService.get_run(run_id)
     logs = run.log if run else None

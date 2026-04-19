@@ -169,7 +169,7 @@ class SubAgentManager:
     async def spawn_via_draft(cls, parent_id: str, request) -> SubAgent:
         """Create a governed execution record and keep SubAgent as a read projection."""
         from tools.gimo_server.services.agent_broker_service import AgentBrokerService, BrokerTaskDescriptor
-        from tools.gimo_server.services.ops.ops_service import OpsService
+        from tools.gimo_server.services.ops import OpsService
 
         workspace_path_str = str(cls._request_value(request, "workspace_path", "") or "").strip()
         if not workspace_path_str:

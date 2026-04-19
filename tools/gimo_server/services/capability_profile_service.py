@@ -64,7 +64,7 @@ class CapabilityProfileService:
 
     @classmethod
     def _gics(cls):
-        from .ops_service import OpsService
+        from .ops import OpsService
         return OpsService._gics
 
     @classmethod

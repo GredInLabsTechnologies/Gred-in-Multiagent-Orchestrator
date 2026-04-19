@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..models.agent_routing import RoutingDecision, TaskConstraints, TaskDescriptor, ModelBinding
 from .agent_catalog_service import AgentCatalogService, PRESET_CATALOG
+from .execution.execution_policy_service import LEGACY_MOOD_TO_POLICY
 
 
 class ProfileRouterService:
