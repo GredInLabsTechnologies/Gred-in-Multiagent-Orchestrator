@@ -10,6 +10,7 @@ Replaces the binary panic_mode with a 4-level defense system that:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from enum import IntEnum
@@ -136,6 +137,9 @@ class ThreatEngine:
         self._events: List[ThreatEvent] = []
         self._sources: Dict[str, SourceRecord] = {}
         self._max_events = 500  # ring-buffer cap
+        self._debug_mode: bool = os.environ.get("DEBUG", "").lower() == "true"
+        if self._debug_mode:
+            logger.info("ThreatEngine running in DEBUG mode — escalation disabled")
 
     # -- Public API ---------------------------------------------------------
 
@@ -318,6 +322,10 @@ class ThreatEngine:
     # -- Internal -----------------------------------------------------------
 
     def _set_level(self, level: ThreatLevel, reason: str = "") -> None:
+        # DEBUG mode: never escalate above NOMINAL
+        if self._debug_mode and level > ThreatLevel.NOMINAL:
+            logger.debug("ThreatEngine DEBUG: suppressed escalation to %s (%s)", THREAT_LABELS.get(level, "?"), reason)
+            return
         self._level = level
         self._level_since = time.time()
         if reason:

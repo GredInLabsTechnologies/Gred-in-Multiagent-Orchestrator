@@ -8,7 +8,7 @@ import { fetchWithRetry } from '../lib/fetchWithRetry';
  * Primary sidebar tabs — only the essentials.
  * Everything else opens as an overlay drawer.
  */
-export type SidebarTab = 'graph' | 'plans';
+export type SidebarTab = 'graph' | 'plans' | 'threads';
 
 /**
  * Overlay drawers that slide over the main view.
@@ -100,7 +100,7 @@ interface AppActions {
 
 /* ── Helpers ───────────────────────────────────────────── */
 
-const SIDEBAR_TABS = new Set<string>(['graph', 'plans']);
+const SIDEBAR_TABS = new Set<string>(['graph', 'plans', 'threads']);
 const OVERLAY_IDS = new Set<string>(['connections', 'settings', 'evals', 'metrics', 'mastery', 'security', 'operations']);
 
 /* ── Store ──────────────────────────────────────────────── */

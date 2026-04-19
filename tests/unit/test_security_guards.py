@@ -65,25 +65,33 @@ class TestThreatEngine:
 
     def test_escalation_lifecycle(self):
         engine = ThreatEngine()
+        # Tests exercise real escalation logic — bypass DEBUG suppression
+        # (see ThreatEngine._set_level and tests/conftest.py DEBUG default).
+        engine._debug_mode = False
         # Escalation: 3 -> ALERT, 5 -> GUARDED, 10 -> LOCKDOWN
         for _ in range(3): engine.record_auth_failure("1.1.1.1")
         assert engine.level == ThreatLevel.ALERT
-        
+
         for i in range(4, 6): engine.record_auth_failure(f"1.1.1.{i}")
         assert engine.level == ThreatLevel.GUARDED
-        
+
         for i in range(6, 11): engine.record_auth_failure(f"1.1.1.{i}")
         assert engine.level == ThreatLevel.LOCKDOWN
 
     def test_panic_mode_isolation(self, test_client):
         """Verify only authenticated users can bypass lockdown (Consolidated)."""
         from tools.gimo_server.security import threat_engine
+        # Tests exercise real lockdown — bypass DEBUG suppression so the
+        # level setter actually moves the engine into LOCKDOWN.
+        prev_debug = threat_engine._debug_mode
+        threat_engine._debug_mode = False
         threat_engine.level = ThreatLevel.LOCKDOWN
         try:
             # Unauthenticated -> 503
             assert test_client.get("/status").status_code == 503
         finally:
             threat_engine.clear_all()
+            threat_engine._debug_mode = prev_debug
 
 # ── Redaction & LLM Guards ────────────────────────────────
 
@@ -122,7 +130,7 @@ class TestContentSecurity:
     def test_audit_log_sanitization(self, test_client):
         """Verify audit logs don't leak tokens."""
         # Simulate a log with a token
-        with patch("tools.gimo_server.routers.legacy_ui_router.FileService.tail_audit_lines") as m:
+        with patch("tools.gimo_server.routers.ops.observability_router.FileService.tail_audit_lines") as m:
             m.return_value = ["User accessed file with token ghp_12345"]
-            response = test_client.get("/ui/audit", headers={"Authorization": f"Bearer {'a'*32}"})
+            response = test_client.get("/ops/audit/tail", headers={"Authorization": f"Bearer {'a'*32}"})
             assert response.status_code == 200

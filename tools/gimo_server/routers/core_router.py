@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -20,8 +21,8 @@ router = APIRouter(tags=["core"])
 @router.get("/status", response_model=StatusResponse)
 def get_status(
     request: Request,
-    auth: AuthContext = Depends(require_read_only_access),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(require_read_only_access)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     return {"version": __version__, "uptime_seconds": time.time() - request.app.state.start_time}
 
@@ -29,8 +30,8 @@ def get_status(
 @router.get("/health/deep")
 async def get_health_deep(
     request: Request,
-    auth: AuthContext = Depends(require_read_only_access),
-    rl: None = Depends(check_rate_limit),
+    auth: Annotated[AuthContext, Depends(require_read_only_access)],
+    rl: Annotated[None, Depends(check_rate_limit)],
 ):
     import shutil
     uptime_seconds = time.time() - request.app.state.start_time

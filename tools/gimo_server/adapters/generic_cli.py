@@ -66,7 +66,9 @@ class GenericCLISession(AgentSession):
         self._task_type = task_type
         self._actor = actor
 
-        # F7.1: Derive execution_policy from routing_summary or legacy role_profile
+        # Prefer explicit execution_policy from canonical routing.  Legacy
+        # role_profile survives only as a behavior tag, never as a permission
+        # source of truth.
         if routing_summary:
             from ..services.execution.execution_policy_service import ExecutionPolicyService
             self._execution_policy = ExecutionPolicyService.get_policy(routing_summary.execution_policy)
@@ -114,7 +116,7 @@ class GenericCLISession(AgentSession):
         try:
             await asyncio.gather(_read_stdout(), _read_stderr())
         except Exception as e:
-            logger.error(f"Error reading from process: {e}")
+            logger.error("Error reading from process: %s", e)
             self.status = AgentStatus.FAILED
 
     def _handle_stdout_line(self, line: str) -> None:

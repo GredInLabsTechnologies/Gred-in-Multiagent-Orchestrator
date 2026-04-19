@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tools.gimo_server.ops_models import WorkflowCheckpoint
+    pass
 
 logger = logging.getLogger("orchestrator.services.graph_engine")
 

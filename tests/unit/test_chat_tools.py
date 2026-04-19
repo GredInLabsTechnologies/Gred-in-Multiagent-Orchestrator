@@ -69,8 +69,10 @@ class TestChatToolsSchema:
     def test_propose_plan_schema_marks_agent_mood_as_legacy_compatibility(self):
         propose_plan = next(tool for tool in CHAT_TOOLS if tool["function"]["name"] == "propose_plan")
         task_properties = propose_plan["function"]["parameters"]["properties"]["tasks"]["items"]["properties"]
+        assert "mood" in task_properties
+        assert "execution-style" in task_properties["mood"]["description"].lower()
         assert "legacy" in task_properties["agent_mood"]["description"].lower()
-        assert "prefer agent_preset" in task_properties["agent_mood"]["description"].lower()
+        assert "canonical mood field" in task_properties["agent_mood"]["description"].lower()
 
 
 class TestToolExecutorExtensions:

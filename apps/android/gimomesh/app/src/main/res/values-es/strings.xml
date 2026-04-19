@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GIMO Mesh</string>
+
+    <!-- Traducciones ES de los strings del ModelCard — ver values/strings.xml. -->
+    <string name="rec_badge_recommended">RECOMENDADO</string>
+    <string name="rec_device_load">Carga del dispositivo</string>
+    <string name="rec_ram_format">%1$s / %2$s GB RAM</string>
+    <string name="rec_stat_speed">velocidad</string>
+    <string name="rec_stat_battery">batería</string>
+    <string name="rec_stat_mode">modo</string>
+    <string name="rec_run_at_your_own_risk">Úsalo bajo tu propio riesgo</string>
+
+    <!-- Niveles de encaje — acrónimos mostrados como pill badges. -->
+    <string name="rec_fit_optimal">ÓPTIMO</string>
+    <string name="rec_fit_comfortable">CÓMODO</string>
+    <string name="rec_fit_tight">AJUSTADO</string>
+    <string name="rec_fit_overload">SOBRECARGA</string>
+</resources>

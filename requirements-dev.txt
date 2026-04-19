@@ -26,7 +26,7 @@ pdoc>=14.0.0
 
 # Testing Utilities
 ddt>=1.7.0
-httpx>=0.27.0
+httpx>=0.28.1
 respx>=0.22.0
 
 # Linting

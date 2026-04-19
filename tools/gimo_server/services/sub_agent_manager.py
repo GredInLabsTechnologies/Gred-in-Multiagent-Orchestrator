@@ -7,6 +7,7 @@ from tools.gimo_server.models import SubAgent, SubAgentConfig
 from tools.gimo_server.services.providers.service import ProviderService
 from tools.gimo_server.config import get_settings
 from tools.gimo_server.services.providers.catalog_service import ProviderCatalogService
+from tools.gimo_server.security.safe_log import sanitize_for_log
 
 logger = logging.getLogger("orchestrator.sub_agent_manager")
 
@@ -308,7 +309,7 @@ class SubAgentManager:
             raise ValueError("workspace_path is required to spawn a sub-agent. Direct source-repo worktree creation is no longer supported.")
 
         worktree_path = Path(workspace_path_str)
-        logger.info(f"Using provisioned workspace for sub-agent {sub_id} at {worktree_path}")
+        logger.info("Using provisioned workspace for sub-agent %s at %s", sub_id, worktree_path)
 
         agent = SubAgent(
             id=sub_id,
@@ -321,7 +322,7 @@ class SubAgentManager:
         )
         cls._sub_agents[sub_id] = agent
         cls._persist()
-        logger.info(f"Created sub-agent {sub_id} for parent {parent_id}")
+        logger.info("Created sub-agent %s for parent %s", sub_id, parent_id)
         
         return agent
 
@@ -355,7 +356,7 @@ class SubAgentManager:
                     if agent_id in cls._sub_agents:
                         cls._sub_agents[agent_id].status = "idle" if is_alive else "offline"
         except Exception as e:
-            logger.error(f"Failed to sync with Ollama: {e}")
+            logger.error("Failed to sync with Ollama: %s", e)
 
     @classmethod
     def get_sub_agents(
@@ -424,7 +425,7 @@ class SubAgentManager:
                     agent.worktreePath,
                 )
             
-            logger.info(f"Terminated sub-agent {sub_id}")
+            logger.info("Terminated sub-agent %s", sub_id)
             cls._persist()
 
     @classmethod
@@ -440,7 +441,7 @@ class SubAgentManager:
         agent.currentTask = task
         
         try:
-            logger.info(f"Sub-agent {sub_id} executing task: {task[:50]}...")
+            logger.info("Sub-agent %s executing task: %s...", sub_id, task[:50])
             
             # Smart Wake: Ensure Ollama is running if using an Ollama model
             if agent.id.startswith("ollama_"):
@@ -465,5 +466,9 @@ class SubAgentManager:
         except Exception as e:
             agent.status = "failed"
             agent.currentTask = None
-            logger.error(f"Sub-agent {sub_id} failed: {e}")
+            logger.error(
+                "Sub-agent %s failed: %s",
+                sanitize_for_log(sub_id),
+                sanitize_for_log(e),
+            )
             raise e

@@ -91,10 +91,12 @@ Para variables de GIMO Web (Firebase, Stripe, licencias), ver `apps/web/.env.exa
 
 El surface oficial para ChatGPT Apps sigue siendo `/mcp/app`.
 
-- `gimo mcp` sirve la fachada oficial de App en `http://127.0.0.1:8000/mcp/app/sse`
+- `gimo mcp` sirve la fachada oficial de ChatGPT Apps en `http://127.0.0.1:8000/mcp/app/sse`
 - si `ORCH_APP_MCP_STREAMABLE_HTTP=true`, tambi&eacute;n expone `http://127.0.0.1:8000/mcp/app/mcp`
 - el perfil por defecto es `safe`, pensado para Developer Mode personal con un subconjunto m&aacute;s restringido de tools
 - `extended` se deja como opt-in para dogfooding interno
+- `/mcp` sigue siendo el bridge MCP general para consumidores no-App; no es un alias ni un fallback de `/mcp/app`
+- /mcp/app existe precisamente porque ChatGPT Apps es una superficie de un tercero fuera del perímetro de control de GIMO; por eso recibe una fachada más estrecha y restringida.
 
 ## Documentaci&oacute;n
 
@@ -144,3 +146,4 @@ tests/                    # Test suite (575+ tests)
 ## License
 
 Propietario — Gred In Labs
+

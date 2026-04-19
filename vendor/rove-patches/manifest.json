@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "patches": [
+    {
+      "id": "psutil/android-platform-allow",
+      "package": "psutil",
+      "version_spec": ">=6.0.0",
+      "targets": [
+        "android-arm64",
+        "android-armv7",
+        "android-x86_64"
+      ],
+      "kind": "patch",
+      "path": "patches/psutil/android-platform-allow.patch",
+      "sha256": "a3b3c35ff829e57fb67e024bc5380a089d0159f556483952706405ab7f4455f2",
+      "description": "Skip the platform==android check in psutil setup.py so build proceeds on Android."
+    },
+    {
+      "id": "maturin/android-api-level",
+      "package": "maturin",
+      "version_spec": ">=1.10",
+      "targets": [
+        "android-arm64",
+        "android-armv7",
+        "android-x86_64"
+      ],
+      "kind": "env",
+      "path": "patches/maturin/android-api-level.env",
+      "sha256": "843b16ce96a876ecb88c58b9efb8ddd72d11f2d5d51b98001f10f586a1ca0fbf",
+      "description": "Sets ANDROID_API_LEVEL+ANDROID_PLATFORM=24 so maturin pep517 can resolve the cross-compile target."
+    },
+    {
+      "id": "cryptography/pkg-fallback",
+      "package": "cryptography",
+      "version_spec": ">=43",
+      "targets": [
+        "android-arm64",
+        "android-armv7",
+        "android-x86_64"
+      ],
+      "kind": "toml",
+      "path": "patches/cryptography/pkg-fallback.toml",
+      "sha256": "3f5f780e08180ae07202d851a5297e1fb035ce8dcf00a50161594537dc8f88cb",
+      "description": "Force pip --only-binary=cryptography to reject 15+ min Rust builds; surfaces the missing wheel case loudly."
+    }
+  ]
+}

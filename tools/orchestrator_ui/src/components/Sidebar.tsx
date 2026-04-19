@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Network, ClipboardList, Settings } from 'lucide-react';
+import { Network, ClipboardList, MessageSquare, Settings } from 'lucide-react';
 import { useAppStore, SidebarTab } from '../stores/appStore';
 
 interface TabDef {
@@ -12,6 +12,7 @@ interface TabDef {
 const tabs: TabDef[] = [
     { id: 'graph', icon: Network, label: 'Grafo' },
     { id: 'plans', icon: ClipboardList, label: 'Planes' },
+    { id: 'threads', icon: MessageSquare, label: 'Threads' },
 ];
 
 export const Sidebar: React.FC = () => {

@@ -98,6 +98,8 @@ tests/metrics/*.md
 # Vendor dependencies
 vendor/gics
 *.tar.gz
+# Rove wheel vendorizado — sdist se mantiene en git para reproducibilidad del build
+!vendor/rove/*.tar.gz
 
 # License system — archivos sensibles (nunca deben subirse al repo)
 private_key.pem
@@ -132,3 +134,23 @@ calc_lab/*
 
 # ── gimo_prueba: nested git repo (decide later: submodule vs absorb) ──
 gimo_prueba/
+
+# ── Codex scratch dir (per-session cache, never commit) ──────
+.codex_tmp/
+
+# ── Android app build/local artifacts ────────────────────────
+apps/android/gimomesh/.gradle/
+apps/android/gimomesh/local.properties
+# Bundle Core generado por scripts/package_core_runtime.py (se copia
+# a assets/runtime/ via tarea gradle :app:packageCoreRuntime — no commitear).
+apps/android/gimomesh/app/src/main/assets/runtime/
+# Runtime-assets es output del productor Python — build artifact, no source.
+/runtime-assets/
+# Keypairs Ed25519 privados — NUNCA commitear. Las claves privadas viven en
+# CI secrets (ORCH_RUNTIME_SIGNING_KEY); las públicas van embebidas en el
+# código via runtime_signature.EMBEDDED_RUNTIME_PUBLIC_KEY.
+/secrets/
+# Local dev venv / extracted runtime / IDE state
+/.wsl-venv/
+/runtime-python-local/
+/.idea/

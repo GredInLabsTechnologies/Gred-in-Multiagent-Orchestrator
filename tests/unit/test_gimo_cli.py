@@ -191,6 +191,81 @@ def test_config_updates_local_yaml(tmp_path, monkeypatch):
     assert updated["orchestrator"]["verbose"] is True
 
 
+def test_providers_login_api_key_stores_credentials_without_switching_active(tmp_path, monkeypatch):
+    _seed_config(tmp_path, monkeypatch)
+    calls: list[tuple[str, str, object, str]] = []
+
+    def _fake_api_request(config, method, path, *, json_body=None, role="operator", **kwargs):
+        del config, kwargs
+        calls.append((method, path, json_body, role))
+        if path == "/ops/provider":
+            return 200, {
+                "active": "openai-main",
+                "providers": {
+                    "openai-main": {"provider_type": "openai"},
+                    "groq-main": {"provider_type": "groq"},
+                },
+            }
+        if path == "/ops/connectors/groq-main/credentials":
+            assert json_body == {"api_key": "gsk_test_1234567890"}
+            return 200, {"provider_id": "groq-main", "status": "stored", "active": "openai-main"}
+        raise AssertionError(f"Unexpected path: {path}")
+
+    monkeypatch.setattr("gimo_cli.commands.providers.api_request", _fake_api_request)
+
+    result = runner.invoke(
+        gimo_cli.app,
+        ["providers", "login", "groq", "--api-key", "gsk_test_1234567890"],
+        color=False,
+    )
+
+    assert result.exit_code == 0
+    assert calls == [
+        ("GET", "/ops/provider", None, "operator"),
+        ("POST", "/ops/connectors/groq-main/credentials", {"api_key": "gsk_test_1234567890"}, "operator"),
+    ]
+    assert "/ops/provider/select" not in result.stdout
+    assert "Active provider unchanged: openai-main" in result.stdout
+
+
+def test_providers_add_registers_without_activation_by_default(tmp_path, monkeypatch):
+    _seed_config(tmp_path, monkeypatch)
+    captured: dict[str, object] = {}
+
+    def _fake_api_request(config, method, path, *, json_body=None, role="operator", **kwargs):
+        del config, kwargs
+        captured["method"] = method
+        captured["path"] = path
+        captured["json_body"] = json_body
+        captured["role"] = role
+        return 200, {"active": "openai-main"}
+
+    monkeypatch.setattr("gimo_cli.commands.providers.api_request", _fake_api_request)
+
+    result = runner.invoke(
+        gimo_cli.app,
+        ["providers", "add", "groq-main", "--type", "groq", "--api-key", "gsk_test_1234567890"],
+        color=False,
+    )
+
+    assert result.exit_code == 0
+    assert captured == {
+        "method": "POST",
+        "path": "/ops/provider/upsert",
+        "json_body": {
+            "provider_id": "groq-main",
+            "provider_type": "groq",
+            "display_name": None,
+            "base_url": None,
+            "api_key": "gsk_test_1234567890",
+            "model": "qwen/qwen3-32b",
+            "activate": False,
+        },
+        "role": "admin",
+    }
+    assert "Provider 'groq-main' registered" in result.stdout
+
+
 def test_audit_aggregates_backend_checks(tmp_path, monkeypatch):
     _seed_config(tmp_path, monkeypatch)
 
@@ -200,7 +275,7 @@ def test_audit_aggregates_backend_checks(tmp_path, monkeypatch):
             return 200, {"items": [], "count": 0}
         if path == "/ops/system/dependencies":
             return 200, {"items": [{"id": "git"}], "count": 1}
-        if path == "/ui/audit":
+        if path == "/ops/audit/tail":
             return 200, {"lines": ["line-1", "line-2"]}
         raise AssertionError(f"Unexpected path: {path}")
 

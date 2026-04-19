@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { API_BASE, UserEconomyConfig } from '../types';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
+import { fetchOperatorStatus } from '../lib/operatorStatus';
 import { Shield, SlidersHorizontal, Coins, Info, ArrowRight, Server, Wrench, Globe } from 'lucide-react';
 import { useToast } from './Toast';
 
@@ -53,19 +54,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [configRes, statusRes] = await Promise.all([
+                const [configRes, statusInfo] = await Promise.all([
                     fetchWithRetry(`${API_BASE}/ops/config`, { credentials: 'include' }),
-                    fetchWithRetry(`${API_BASE}/ui/status`, { credentials: 'include' }),
+                    fetchOperatorStatus().catch(() => null),
                 ]);
 
                 if (configRes.ok) setConfig(await configRes.json());
-                if (statusRes.ok) setStatusInfo(await statusRes.json());
+                if (statusInfo) setStatusInfo(statusInfo);
 
                 const economyRes = await fetchWithRetry(`${API_BASE}/ops/mastery/config/economy`, { credentials: 'include' });
                 if (economyRes.ok) setEconomyConfig(await economyRes.json());
 
                 const [hwRes, rtRes] = await Promise.all([
-                    fetchWithRetry(`${API_BASE}/ui/hardware`, { credentials: 'include' }).catch(() => null),
+                    fetchWithRetry(`${API_BASE}/ops/mastery/hardware`, { credentials: 'include' }).catch(() => null),
                     fetchWithRetry(`${API_BASE}/ops/realtime/metrics`, { credentials: 'include' }).catch(() => null),
                 ]);
                 if (hwRes?.ok) setHwMetrics(await hwRes.json());
@@ -329,7 +330,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ onOpenMastery }) =
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                                 <SettingCell label="Version" value={statusInfo?.version ?? '—'} />
                                 <SettingCell label="Uptime" value={formatUptime(statusInfo?.uptime_seconds)} />
-                                <SettingCell label="Endpoints" value="/ui/* + /ops/*" />
+                                <SettingCell label="Endpoints" value="/ops/*" />
                             </div>
                         </section>
                     )}

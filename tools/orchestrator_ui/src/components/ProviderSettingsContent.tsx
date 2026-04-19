@@ -7,7 +7,7 @@ import { useProviderSettingsState } from '../hooks/useProviderSettingsState';
 import { useToast } from './Toast';
 import { API_BASE } from '../types';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
-import { Server, Cpu, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Server, Cpu } from 'lucide-react';
 import { CodexAuthSection } from './provider/CodexAuthSection';
 import { ClaudeAuthSection } from './provider/ClaudeAuthSection';
 import { OllamaLocalSection } from './provider/OllamaLocalSection';
@@ -67,7 +67,6 @@ export const ProviderSettings: React.FC = () => {
         roles,
         catalogs,
         catalogLoading,
-        nodes,
         loadProviders,
         loadCatalog,
         installModel,
@@ -801,30 +800,6 @@ export const ProviderSettings: React.FC = () => {
                 </div>
                 </div>
             </Card>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {Object.entries(nodes).map(([id, node]: [string, any]) => (
-                    <Card key={id} className="bg-surface-2/70 border-border-primary p-3">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="font-semibold text-sm flex items-center gap-2">
-                                {id === 'ally_x' ? <Cpu className="w-4 h-4 text-emerald-400" /> : <Server className="w-4 h-4 text-blue-400" />}
-                                {node.name}
-                            </span>
-                            <span className="text-xs text-text-secondary">{node.type}</span>
-                        </div>
-                        <div className="w-full bg-surface-0 h-2 rounded-full overflow-hidden">
-                            <div
-                                className={`h-full transition-all duration-500 ${node.current_load >= node.max_concurrency ? 'bg-red-500' : 'bg-emerald-500'}`}
-                                style={{ width: `${(node.current_load / node.max_concurrency) * 100}%` }}
-                            />
-                        </div>
-                        <div className="flex justify-between mt-1 text-xs text-text-secondary">
-                            <span>Carga: {node.current_load} / {node.max_concurrency} agentes</span>
-                            <span>{node.current_load >= node.max_concurrency ? 'LLENO' : 'DISPONIBLE'}</span>
-                        </div>
-                    </Card>
-                ))}
-            </div>
 
             <ProviderList
                 providers={providers}

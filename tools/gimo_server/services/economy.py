@@ -51,7 +51,7 @@ class EconomyService:
             else:
                 cls.PRICING_REGISTRY = {"local": {"input": 0.0, "output": 0.0}}
         except Exception as e:
-            logger.error(f"Failed to load pricing: {e}")
+            logger.error("Failed to load pricing: %s", e)
             cls.PRICING_REGISTRY = {"local": {"input": 0.0, "output": 0.0}}
 
     @classmethod
@@ -130,7 +130,7 @@ class EconomyService:
                     "quality_score": quality.score, "cost_usd": step_cost,
                     "success": quality.score >= config.quality_threshold
                 })
-                final_output = output
+                final_output = output.copy()
                 if quality.score >= config.quality_threshold:
                     success = True; break
                 
@@ -140,7 +140,7 @@ class EconomyService:
                 else: break
 
             except Exception as e:
-                logger.error(f"Cascade attempt {attempts} failed: {e}")
+                logger.error("Cascade attempt %s failed: %s", attempts, e)
                 break
 
         return CascadeResult(

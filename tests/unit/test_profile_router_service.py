@@ -44,6 +44,31 @@ def test_profile_router_selects_executor_for_workspace_mutation():
     assert decision.binding_mode == "plan_time"
 
 
+def test_profile_router_preserves_requested_mood_without_loosening_policy():
+    descriptor = TaskDescriptorService.descriptor_from_task(
+        {
+            "id": "t2a",
+            "title": "Implement fix carefully",
+            "description": "Apply the code change and update the module",
+            "agent_preset": "executor",
+            "mood": "cautious",
+        }
+    )
+    constraints = ConstraintCompilerService.compile_for_descriptor(descriptor)
+
+    decision = ProfileRouterService.route(
+        descriptor=descriptor,
+        constraints=constraints,
+        requested_preset="executor",
+        requested_mood="cautious",
+    )
+
+    assert decision.resolved_profile.agent_preset == "executor"
+    assert decision.resolved_profile.task_role == "executor"
+    assert decision.resolved_profile.mood == "cautious"
+    assert decision.resolved_profile.execution_policy == "workspace_safe"
+
+
 def test_profile_router_rejects_requested_mutating_preset_under_read_only_envelope():
     descriptor = TaskDescriptorService.descriptor_from_task(
         {

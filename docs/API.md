@@ -6,7 +6,7 @@ All endpoints require `Authorization: Bearer <ORCH_TOKEN>`.
 
 ## 1. Core & UI Endpoints
 - `GET /status`: Returns version & uptime.
-- `GET /ui/status`: Returns version, uptime, allowlist_count, service status.
+- `GET /ops/operator/status`: Canonical operator snapshot including backend version, uptime, allowlist_count, service status, and alerts.
 - `GET /ui/audit?limit=200`: Tail the audit log.
 - `GET /ui/allowlist`: List allowed paths.
 - `GET /ui/security/events`: List security events & panic mode status.
@@ -35,12 +35,12 @@ All endpoints require `Authorization: Bearer <ORCH_TOKEN>`.
 - `GET /ops/openapi.json`: [LEGACY INTEGRATION] OpenAPI schema for external agents. Preferred: `/mcp/app`.
 
 ## 4. First-Class Client Façades [Phase 7B Verified]
-- `/mcp/app`: **[OFFICIAL]** App façade for ChatGPT and other first-class consumers.
+- `/mcp/app`: **[OFFICIAL]** ChatGPT Apps façade.
+- This ingress exists because ChatGPT Apps is a third-party surface outside the GIMO trust boundary; it receives a narrower contract than the generic MCP bridge by design.
 - `/mcp/app/sse`: Official App MCP SSE transport for ChatGPT Developer Mode.
 - `/mcp/app/mcp`: Official App MCP streamable HTTP transport.
-- `/mcp`: **[LEGACY]** General-purpose MCP bridge.
-- `/ops/operator/status`: Canonical backend status for TUI/CLI parity.
-- `/ops/notices`: Canonical notification feed for all surfaces.
+- `/mcp`: **[LEGACY HTTP INGRESS]** General-purpose MCP bridge for non-App MCP consumers. This is a distinct surface from `/mcp/app`, not a fallback spelling for the App façade.
+- `/ops/operator/status`: Canonical backend status snapshot for all surfaces, including `alerts`.
 - Default App MCP profile is `safe`; `extended` is opt-in for broader internal dogfooding.
 - `POST /ops/app/sessions`: Create App session.
 - `GET /ops/app/sessions/{id}`: Read App session state.
@@ -115,3 +115,5 @@ All endpoints require `Authorization: Bearer <ORCH_TOKEN>`.
 - **Audit Logging**: `logs/orchestrator_audit.log` (rotates, redacts secrets).
 - **Panic Mode**: Triggered by invalid tokens or exceptions. Cleared via `/ui/security/resolve`.
 - **Snapshots**: File reads use `.orch_snapshots/` with TTL (default 240s) for safe reading.
+
+

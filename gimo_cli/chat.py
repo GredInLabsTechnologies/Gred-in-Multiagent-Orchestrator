@@ -17,7 +17,6 @@ from gimo_cli.api import (
     chat_provider_summary,
     provider_config_request,
     resolve_token,
-    select_chat_provider,
 )
 from gimo_cli.config import (
     get_budget_color,
@@ -34,7 +33,6 @@ from terminal_command_executor import (
     TerminalCommandOutcome,
     TerminalSurfaceAdapter,
     build_terminal_command_callbacks,
-    fetch_operator_status_snapshot,
 )
 
 

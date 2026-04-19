@@ -37,7 +37,6 @@ class TrustStorage:
 
     def ensure_tables(self) -> None:
         """No-op: using GICS."""
-        pass
 
     def save_trust_event(self, event: TrustEvent | Dict[str, Any]) -> None:
         if not self.gics:

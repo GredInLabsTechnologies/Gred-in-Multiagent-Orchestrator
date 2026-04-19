@@ -8,9 +8,8 @@ This service ORCHESTRATES existing services; it does NOT duplicate logic.
 from __future__ import annotations
 
 import logging
-import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from ..models.governance import GovernanceSnapshot, GovernanceVerdict
 from ..models.surface import SurfaceIdentity
@@ -142,8 +141,6 @@ class SagpGateway:
         thread_id: str = "",
     ) -> GovernanceSnapshot:
         """Aggregate all governance state into a single snapshot."""
-        from ..services.economy.cost_service import CostService
-        from ..services.execution.execution_policy_service import EXECUTION_POLICIES
 
         # Active policy — default to workspace_safe
         active_policy = "workspace_safe"

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict
 
 from ..models.governance import GovernanceSnapshot, GovernanceVerdict
 from ..models.surface import SurfaceIdentity

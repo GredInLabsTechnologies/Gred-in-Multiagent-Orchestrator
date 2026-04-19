@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import List, Optional
 
 from ...ops_models import BudgetForecast, UserEconomyConfig
+from ...utils.debug_mode import is_debug_mode
 from ..storage_service import StorageService
 
 logger = logging.getLogger("orchestrator.ops.budget")
-
-_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
 
 
 class BudgetForecastService:
@@ -20,7 +18,7 @@ class BudgetForecastService:
 
     @property
     def debug_mode(self) -> bool:
-        return _DEBUG_MODE
+        return is_debug_mode()
 
     def forecast(self, economy_config: UserEconomyConfig) -> List[BudgetForecast]:
         """Generates budget forecasts based on recent spend and user configuration.
@@ -127,5 +125,5 @@ class BudgetForecastService:
                 alert_level=alert_level,
             )
         except Exception as e:
-            logger.error(f"Failed to calculate forecast for {label}: {e}")
+            logger.error("Failed to calculate forecast for %s: %s", label, e)
             return None

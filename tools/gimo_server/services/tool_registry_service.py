@@ -12,6 +12,9 @@ from ..ops_models import ToolEntry, McpServerConfig
 class ToolRegistryService:
     """Allowlist registry for tools (fail-closed on unknown tools)."""
 
+    # These paths are derived from OPS_DATA_DIR (server config) and a constant
+    # filename — no user-controlled component. Sonar S2083/S6549 reports here
+    # are false positives; kept safe via fixed string literals.
     REGISTRY_PATH: Path = OPS_DATA_DIR / "tool_registry.json"
     DISCOVERED_PATH: Path = OPS_DATA_DIR / "tool_registry_discovered.json"
 

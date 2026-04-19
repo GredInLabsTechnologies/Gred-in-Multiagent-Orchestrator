@@ -9,18 +9,17 @@ from tools.gimo_server.engine.tools.executor import ToolExecutor
 
 
 @pytest.mark.asyncio
-async def test_read_only_mood_blocks_mutating_tools(tmp_path):
+async def test_default_mood_does_not_block_mutating_tools_without_explicit_policy(tmp_path):
     executor = ToolExecutor(workspace_root=str(tmp_path), mood="forensic")
 
     result = await executor.execute_tool_call("write_file", {"path": "x.txt", "content": "hello"})
 
-    assert result["status"] == "error"
-    assert "read-only" in result["message"].lower()
+    assert result["status"] == "success"
 
 
 @pytest.mark.asyncio
 async def test_shell_command_patterns_are_enforced(tmp_path):
-    executor = ToolExecutor(workspace_root=str(tmp_path), mood="forensic")
+    executor = ToolExecutor(workspace_root=str(tmp_path), mood="forensic", execution_policy="docs_research")
 
     result = await executor.handle_shell_exec({"command": "python -V", "timeout": 1})
 
@@ -30,7 +29,7 @@ async def test_shell_command_patterns_are_enforced(tmp_path):
 
 @pytest.mark.asyncio
 async def test_web_search_results_are_filtered_by_allowed_domains(tmp_path):
-    executor = ToolExecutor(workspace_root=str(tmp_path), mood="dialoger")
+    executor = ToolExecutor(workspace_root=str(tmp_path), mood="dialoger", execution_policy="propose_only")
 
     fake_response = type(
         "FakeResponse",
@@ -61,7 +60,7 @@ async def test_web_search_results_are_filtered_by_allowed_domains(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_workspace_only_mood_blocks_mutations_outside_workspace(tmp_path):
+async def test_workspace_safe_policy_blocks_mutations_outside_workspace(tmp_path):
     executor = ToolExecutor(workspace_root=str(tmp_path), mood="executor")
     outside = tmp_path.parent / "outside.txt"
 
@@ -136,11 +135,10 @@ async def test_explicit_execution_policy_keeps_permissions_stable_across_moods(t
 
 
 @pytest.mark.asyncio
-async def test_legacy_mood_compatibility_still_resolves_policy_when_missing(tmp_path):
+async def test_legacy_mood_no_longer_resolves_policy_when_missing(tmp_path):
     executor = ToolExecutor(workspace_root=str(tmp_path), mood="forensic")
 
     result = await executor.execute_tool_call("write_file", {"path": "x.txt", "content": "hello"})
 
-    assert executor.execution_policy == "docs_research"
-    assert result["status"] == "error"
-    assert "read-only" in result["message"].lower()
+    assert executor.execution_policy == "workspace_safe"
+    assert result["status"] == "success"

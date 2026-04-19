@@ -11,6 +11,7 @@ from tools.gimo_server.app_mcp.tools import ALL_TOOL_NAMES, EXTENDED_ONLY_TOOL_N
 from tools.gimo_server.main import app
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
+from tools.gimo_server.services.ops_service import OpsService
 
 
 def _auth(role: str):
@@ -102,6 +103,11 @@ async def test_cli_and_tui_consume_same_operator_status_contract():
     assert "Budget usage is near limit" in notices
 
 
+def test_legacy_notices_route_removed_from_ops_surface():
+    route_paths = {getattr(route, "path", None) for route in app.routes}
+    assert "/ops/notices" not in route_paths
+
+
 @pytest.mark.anyio
 async def test_app_rest_and_mcp_share_session_state_for_official_overlap(test_client, app_registered_repo):
     app.dependency_overrides[verify_token] = _auth("operator")
@@ -136,6 +142,61 @@ async def test_app_rest_and_mcp_share_session_state_for_official_overlap(test_cl
 
     missing_via_mcp = _parse_text_payload(await mcp.call_tool("get_app_session", {"session_id": session_id}))
     assert missing_via_mcp == {"status": "error", "msg": "Session not found", "session_id": session_id}
+
+
+@pytest.mark.anyio
+async def test_app_rest_and_mcp_both_create_durable_drafts(test_client, app_registered_repo):
+    app.dependency_overrides[verify_token] = _auth("operator")
+    repo_id = app_registered_repo["repo_id"]
+    extended_mcp = create_app_mcp("extended")
+
+    rest_session = test_client.post("/ops/app/sessions", json={"metadata": {"created_via": "rest"}}).json()["id"]
+    assert test_client.post(f"/ops/app/sessions/{rest_session}/repo/select", json={"repo_id": repo_id}).status_code == 200
+    rest_listing = test_client.get(f"/ops/app/sessions/{rest_session}/recon/list")
+    assert rest_listing.status_code == 200
+    rest_file = next(entry for entry in rest_listing.json() if entry["name"] == "app.py")
+    assert test_client.get(f"/ops/app/sessions/{rest_session}/recon/read/{rest_file['handle']}").status_code == 200
+    rest_draft = test_client.post(
+        f"/ops/app/sessions/{rest_session}/drafts",
+        json={"acceptance_criteria": "Confirm the app.py file was read.", "allowed_paths": ["app.py"]},
+    )
+    assert rest_draft.status_code == 200
+    rest_payload = rest_draft.json()
+    assert rest_payload["draft_id"].startswith("d_")
+    rest_created = OpsService.get_draft(rest_payload["draft_id"])
+    assert rest_created is not None
+    assert rest_created.operator_class == "cognitive_agent"
+    assert rest_created.context["operator_class"] == "cognitive_agent"
+
+    mcp_session = _parse_text_payload(
+        await extended_mcp.call_tool("create_app_session", {"metadata": {"created_via": "mcp"}})
+    )["id"]
+    selected = _parse_text_payload(
+        await extended_mcp.call_tool("select_app_repo", {"session_id": mcp_session, "repo_id": repo_id})
+    )
+    assert selected == {"status": "ok", "repo_id": repo_id}
+    listing = _parse_text_payload(await extended_mcp.call_tool("list_app_files", {"session_id": mcp_session}))
+    file_entry = next(entry for entry in listing["entries"] if entry["name"] == "app.py")
+    _parse_text_payload(
+        await extended_mcp.call_tool("read_app_file", {"session_id": mcp_session, "file_handle": file_entry["handle"]})
+    )
+    mcp_payload = _parse_text_payload(
+        await extended_mcp.call_tool(
+            "create_validated_app_draft",
+            {
+                "session_id": mcp_session,
+                "acceptance_criteria": "Confirm the app.py file was read.",
+                "allowed_paths": ["app.py"],
+            },
+        )
+    )
+    assert mcp_payload["status"] == "ok"
+    assert mcp_payload["draft_id"].startswith("d_")
+    mcp_created = OpsService.get_draft(mcp_payload["draft_id"])
+    assert mcp_created is not None
+    assert mcp_created.operator_class == "cognitive_agent"
+    assert mcp_created.context["operator_class"] == "cognitive_agent"
+    assert mcp_payload["validated_task_spec"]["allowed_paths"] == rest_payload["validated_task_spec"]["allowed_paths"]
 
 
 @pytest.mark.anyio

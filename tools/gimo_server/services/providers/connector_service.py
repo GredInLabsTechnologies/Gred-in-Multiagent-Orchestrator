@@ -45,6 +45,8 @@ class ProviderConnectorService:
         },
     }
     _install_jobs: Dict[str, CliDependencyInstallResponse] = {}
+    # Strong refs for fire-and-forget dependency install tasks (prevents premature GC).
+    _install_bg_tasks: set[asyncio.Task] = set()
 
     @classmethod
     async def _run_install_preflight(cls, install_command: str) -> tuple[bool, list[str]]:
@@ -268,7 +270,11 @@ class ProviderConnectorService:
             progress=0.0,
             logs=[],
         )
-        asyncio.create_task(cls._execute_dependency_install_job(dependency_id=dep_id, job_id=job_id))
+        _install_task = asyncio.create_task(
+            cls._execute_dependency_install_job(dependency_id=dep_id, job_id=job_id)
+        )
+        cls._install_bg_tasks.add(_install_task)
+        _install_task.add_done_callback(cls._install_bg_tasks.discard)
         return job
 
     @classmethod

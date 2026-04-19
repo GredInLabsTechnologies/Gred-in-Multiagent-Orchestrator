@@ -1,6 +1,8 @@
 """OPS security endpoints — migrated from legacy /ui/security/*."""
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from ...security.auth import AuthContext
@@ -10,15 +12,15 @@ router = APIRouter(prefix="/ops/security", tags=["security"])
 
 
 @router.get("/events")
-def get_security_events(auth: AuthContext = Depends(require_read)):
+def get_security_events(auth: Annotated[AuthContext, Depends(require_read)]):
     from ...security import threat_engine
     return threat_engine.snapshot()
 
 
 @router.post("/resolve")
 def resolve_security(
+    auth: Annotated[AuthContext, Depends(require_operator)],
     action: str = "clear_all",
-    auth: AuthContext = Depends(require_operator),
 ):
     from ...security import save_security_db, threat_engine
 

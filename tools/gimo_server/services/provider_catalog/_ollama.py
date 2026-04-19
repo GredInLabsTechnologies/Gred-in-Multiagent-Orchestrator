@@ -1,22 +1,16 @@
 from __future__ import annotations
 
 import shutil
-from typing import Dict, List, Tuple
+from typing import List
 
 from ...ops_models import (
     NormalizedModelInfo,
-    ProviderValidateRequest,
     ProviderValidateResponse,
 )
 from ..providers.catalog_ollama_helpers import (
     ensure_ollama_ready as _ensure_ollama_ready_helper,
     ollama_health as _ollama_health_helper,
     ollama_list_installed as _ollama_list_installed_helper,
-)
-from ._base import (
-    ProviderCatalogBase,
-    _mock_mode_enabled,
-    _fallback_models_for,
 )
 
 

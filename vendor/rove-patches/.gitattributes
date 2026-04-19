@@ -1,0 +1,5 @@
+# Preserve LF line endings for the rove-patches registry. Every file here
+# is sha256-hashed by `rove.patches.loader.load_patch_set()`; Git's default
+# autocrlf on Windows would break those hashes silently.
+* binary
+*.md text

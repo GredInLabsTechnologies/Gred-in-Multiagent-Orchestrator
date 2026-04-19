@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from tools.gimo_server.main import app
-from tools.gimo_server.ops_models import ProviderConfig, ProviderEntry
+from tools.gimo_server.ops_models import ProviderConfig, ProviderEntry, ProviderRoleBinding, ProviderRolesConfig
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.providers.service import ProviderService
@@ -285,3 +285,49 @@ def test_normalize_config_does_not_inject_default_id_when_custom_account_provide
     assert "codex-main" in normalized.providers
     assert "codex-account" not in normalized.providers
     assert normalized.active == "codex-main"
+
+
+def test_account_refresh_keeps_existing_active_provider(monkeypatch):
+    cfg = ProviderConfig(
+        active="openai-main",
+        providers={
+            "openai-main": ProviderEntry(
+                type="openai",
+                provider_type="openai",
+                auth_mode="api_key",
+                model="gpt-4o",
+            ),
+            "codex-main": ProviderEntry(
+                type="codex",
+                provider_type="codex",
+                auth_mode="account",
+                model="gpt-5-codex",
+            ),
+        },
+        roles=ProviderRolesConfig(
+            orchestrator=ProviderRoleBinding(provider_id="openai-main", model="gpt-4o"),
+            workers=[],
+        ),
+    )
+
+    from tools.gimo_server.services.providers.account_service import ProviderAccountService
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(ProviderService, "get_config", lambda: cfg)
+
+    def _fake_upsert(**kwargs):
+        captured.update(kwargs)
+        return cfg
+
+    monkeypatch.setattr(ProviderService, "upsert_provider_entry", _fake_upsert)
+
+    result = ProviderAccountService.refresh_account_ref(
+        provider_id="codex-main",
+        account_token="acct-token-1234567890",
+    )
+
+    assert result["provider_id"] == "codex-main"
+    assert captured["provider_id"] == "codex-main"
+    assert captured["activate"] is False
+    assert captured["auth_mode"] == "account"

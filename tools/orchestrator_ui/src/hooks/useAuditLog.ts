@@ -12,7 +12,7 @@ export const useAuditLog = (token?: string, limit: number = 200) => {
         try {
             const requestInit: RequestInit = { credentials: 'include' };
 
-            const res = await fetchWithRetry(`${API_BASE}/ui/audit?limit=${limit}`, requestInit);
+            const res = await fetchWithRetry(`${API_BASE}/ops/audit/tail?limit=${limit}`, requestInit);
             if (!res.ok) throw new Error('Failed to fetch audit logs');
             const data = await res.json();
             setLogs(data.lines || []);

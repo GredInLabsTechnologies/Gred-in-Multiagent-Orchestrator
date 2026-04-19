@@ -29,6 +29,7 @@ All domain logic, execution authority, and state persistence lives strictly in t
 ### 4. MCPs (Model Context Protocol) — SAGP Canonical Bridge
 - **Role**: **Canonical governance bridge** for IDEs, Claude App/Code, and external agents.
 - **Consumption**: MCP server via stdio (for Claude Desktop, VS Code, Cursor) or SSE (for web clients). Registered as `gimo` in surface configs.
+- **Ingress note**: The generic MCP bridge remains a distinct surface from the ChatGPT Apps façade. In HTTP form it is mounted at `/mcp`; that path is legacy as an HTTP ingress, but it still represents the general MCP bridge, not the ChatGPT Apps façade.
 - **Protocol**: SAGP (Surface-Agnostic Governance Protocol). All surfaces traverse the same `SagpGateway` before any action.
 - **Governance tools**: 8 first-class MCP tools (`gimo_evaluate_action`, `gimo_estimate_cost`, `gimo_get_trust_profile`, `gimo_get_governance_snapshot`, `gimo_get_gics_insight`, `gimo_verify_proof_chain`, `gimo_get_execution_policy`, `gimo_get_budget_status`).
 - **Resources**: `governance://snapshot`, `governance://policies`, `gics://health`.
@@ -43,6 +44,8 @@ All domain logic, execution authority, and state persistence lives strictly in t
 - **Role**: Official façade for ChatGPT consumers.
 - **Consumption**: A hardened, purpose-built façade mounted at `/mcp/app` (**[OFFICIAL FAÇADE]**).
 - **Transport note**: The official façade serves both `/mcp/app/sse` and `/mcp/app/mcp`.
+- **Boundary note**: `/mcp/app` is not a replacement for the generic MCP bridge. It is a narrower, purpose-built façade for ChatGPT Apps with stricter contracts and profile gating.
+- **Trust-boundary note**: This façade exists because ChatGPT Apps is a third-party client surface outside the GIMO trust boundary. We do not fully control that outer runtime, so access must flow through a narrower ingress with explicit limits instead of exposing the generic MCP bridge unchanged.
 - **Parity**: Shares the same backend authority as CLI and Web via Canonical Contracts.
 - **Note**: This is the primary entry point for modern external agents.
 - **Authority note**: ChatGPT Apps is not a sovereign operator surface. From the user perspective, the conversational ChatGPT-side agent acts as the outer orchestrator, so this surface must remain more constrained than first-party GIMO surfaces.
@@ -89,10 +92,10 @@ See [SAGP Architecture](architecture/SAGP.md) for the full protocol specificatio
 
 | Feature | Web | CLI/TUI | MCP (Claude/VS Code/Cursor) | App Façade | Agent SDK |
 |---|---|---|---|---|---|
-| Status | `/ui/status` *(legacy — migrate to `/ops/operator/status`)* | `/ops/operator/status` | `gimo_status` | `/ops/operator/status` | `gimo_status` |
+| Status | `/ops/operator/status` | `/ops/operator/status` | `gimo_get_status` | `/ops/operator/status` | `gimo_get_status` |
 | Governance | `/ops/governance/snapshot` | `gimo status --json` | `gimo_get_governance_snapshot` | `/ops/governance/snapshot` | `gimo_get_governance_snapshot` |
 | Pre-action check | (backend-enforced) | (backend-enforced) | `gimo_evaluate_action` | (backend-enforced) | `gimo_evaluate_action` |
-| Notices | `/ops/notices` | `/ops/notices` | `gimo_event_stream` | `/ops/notices` | `gimo_event_stream` |
+| Notices | `alerts` in `/ops/operator/status` | `alerts` in `/ops/operator/status` | `alerts` in `gimo_get_status` | `alerts` in `/ops/operator/status` | `alerts` in `gimo_get_status` |
 | Approval | `/ops/drafts/{id}/approve` | `/ops/drafts/{id}/approve` | `gimo_approve_draft` | `/ops/drafts/{id}/approve` | `gimo_approve_draft` |
 | Execution | `RunWorker` (Backend) | `RunWorker` (Backend) | `RunWorker` (Backend) | `RunWorker` (Backend) | `RunWorker` (Backend) |
 | Trust | `/ops/trust/*` | `/ops/trust/*` | `gimo_get_trust_profile` | `/ops/trust/*` | `gimo_get_trust_profile` |
@@ -134,3 +137,5 @@ Uses `PYTHONPATH` (not `cwd`) for portability — Claude Desktop does not suppor
 - **[CANONICAL]**: Fully supported components operating under the centralized GIMO Core authority.
 - **[CANONICAL SAGP BRIDGE]**: MCP surfaces operating under SAGP governance protocol. This is the primary integration point for all IDE and agent surfaces.
 - **[LEGACY/TRANSITIONAL]**: Systems slated for removal or refactoring as part of the Multiconsumer transition (e.g., executing worktrees directly on source repos, generic MCP entry for Apps, path-based repo selections). These must not be extended further.
+
+

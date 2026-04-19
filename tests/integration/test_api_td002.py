@@ -36,6 +36,11 @@ def test_api_service_status(test_client):
         assert response.status_code == 200
         assert response.json() == {"status": "RUNNING"}
 
+def test_api_service_status_headless_returns_canonical_enum(test_client):
+    response = test_client.get("/ops/service/status")
+    assert response.status_code == 200
+    assert response.json() == {"status": "RUNNING"}
+
 def test_api_service_restart(test_client):
     with patch('tools.gimo_server.routers.ops.service_router.SystemService.restart') as mock_restart:
         mock_restart.return_value = True

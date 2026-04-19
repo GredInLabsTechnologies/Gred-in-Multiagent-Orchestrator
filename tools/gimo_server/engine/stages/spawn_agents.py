@@ -10,6 +10,7 @@ Implements dynamic wave-based spawning with fractal safety guardrails:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import Any, Dict, List, Optional, Set
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 # Default max fractal depth (0 = root, 1 = first-gen children, 2 = grandchildren)
 DEFAULT_MAX_SPAWN_DEPTH = 2
+
+# Strong refs for fire-and-forget escalation tasks so they are not GC'd mid-flight.
+_BG_ESCALATION_TASKS: Set[asyncio.Task] = set()
 
 
 def _resolve_task_tier(task: Dict[str, Any]) -> Optional[int]:
@@ -204,7 +208,6 @@ async def _emit_escalation(run_id: str, reason: str, context: Dict[str, Any]) ->
         logger.warning("GICS record failed (non-critical): %s", exc)
 
     # Emit escalation action draft via HitlGateService (non-blocking fire-and-forget)
-    import asyncio
     async def _gate():
         try:
             await HitlGateService.gate_tool_call(
@@ -223,4 +226,6 @@ async def _emit_escalation(run_id: str, reason: str, context: Dict[str, Any]) ->
         except Exception as exc:
             logger.warning("Escalation gate error (non-critical): %s", exc)
 
-    asyncio.create_task(_gate())
+    _task = asyncio.create_task(_gate())
+    _BG_ESCALATION_TASKS.add(_task)
+    _task.add_done_callback(_BG_ESCALATION_TASKS.discard)

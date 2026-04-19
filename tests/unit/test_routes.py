@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tools.gimo_server.main import app
+from tools.gimo_server.mcp_bridge.manifest import MANIFEST
 from tools.gimo_server.models import RepoEntry
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
@@ -59,42 +60,43 @@ def test_ui_plan_create_writes_canonical_plan_content(client):
         ],
     }
 
+    from tools.gimo_server.models.core import OpsDraft
+
     captured = {}
 
-    def _capture_create_draft(**kwargs):
+    def _capture_create_draft(*args, **kwargs):
+        # Handle both positional and keyword prompt invocations.
+        prompt = kwargs.get("prompt") if "prompt" in kwargs else (args[0] if args else "")
         captured["content"] = kwargs["content"]
-        return type(
-            "Draft",
-            (),
-            {
-                "id": "d_ui_1",
-                "status": "draft",
-                "prompt": kwargs["prompt"],
-                "content": kwargs["content"],
-            },
-        )()
+        return OpsDraft(
+            id="d_ui_1",
+            prompt=prompt,
+            content=kwargs["content"],
+            provider=kwargs.get("provider"),
+            status="draft",
+        )
 
-    async def _fake_generate(*_args, **_kwargs):
-        return {"content": json.dumps(raw_plan)}
+    async def _fake_generate_with_provider(*_args, **_kwargs):
+        return {"provider": "fake", "content": json.dumps(raw_plan)}
 
     with patch(
-        "tools.gimo_server.routers.legacy_ui_router.ProviderService.static_generate",
-        new=_fake_generate,
+        "tools.gimo_server.routers.ops.plan_router.ProviderService.static_generate",
+        new=_fake_generate_with_provider,
     ), patch(
-        "tools.gimo_server.routers.legacy_ui_router.OpsService.create_draft",
+        "tools.gimo_server.routers.ops.plan_router.OpsService.create_draft",
         side_effect=_capture_create_draft,
     ):
-        response = client.post("/ui/plan/create", json={"prompt": "ship p2"})
+        response = client.post("/ops/generate?prompt=ship%20p2")
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     payload = json.loads(captured["content"])
     assert payload["tasks"][0]["task_descriptor"]["task_id"] == "t1"
     assert "task_fingerprint" in payload["tasks"][0]
 
 
 def test_get_health_deep(client, tmp_path):
-    with patch("tools.gimo_server.routers.legacy_ui_router.ProviderService.health_check", return_value=True):
-        with patch("tools.gimo_server.routers.legacy_ui_router.OpsService.OPS_DIR", tmp_path):
+    with patch("tools.gimo_server.routers.core_router.ProviderService.health_check", return_value=True):
+        with patch("tools.gimo_server.routers.core_router.OpsService.OPS_DIR", tmp_path):
             response = client.get("/health/deep")
             assert response.status_code == 200
             payload = response.json()
@@ -151,16 +153,6 @@ def test_cold_room_access_disabled(client):
         assert response.status_code == 404
 
 
-def test_get_ui_status(client):
-    with patch(
-        "tools.gimo_server.routers.legacy_ui_router.FileService.tail_audit_lines", return_value=["audit line"]
-    ):
-        with patch("tools.gimo_server.routers.ops.file_router.get_active_repo_dir", return_value=Path(".")):
-            response = client.get("/ui/status")
-            assert response.status_code == 200
-            assert response.json()["last_audit_line"] == "audit line"
-
-
 def test_get_ui_hardware(client):
     fake_hw = MagicMock()
     fake_hw.get_current_state.return_value = {"cpu_percent": 12.5}
@@ -171,7 +163,7 @@ def test_get_ui_hardware(client):
     ]
     with patch("tools.gimo_server.services.hardware_monitor_service.HardwareMonitorService.get_instance", return_value=fake_hw):
         with patch("tools.gimo_server.services.model_inventory_service.ModelInventoryService.get_available_models", return_value=fake_models):
-            response = client.get("/ui/hardware")
+            response = client.get("/ops/mastery/hardware")
             assert response.status_code == 200
             payload = response.json()
             assert payload["cpu_percent"] == 12.5
@@ -200,9 +192,9 @@ def test_get_me_uses_cookie_session(client):
 
 def test_get_ui_audit(client):
     with patch(
-        "tools.gimo_server.routers.legacy_ui_router.FileService.tail_audit_lines", return_value=["l1", "l2"]
+        "tools.gimo_server.routers.ops.observability_router.FileService.tail_audit_lines", return_value=["l1", "l2"]
     ):
-        response = client.get("/ui/audit?limit=10")
+        response = client.get("/ops/audit/tail?limit=10")
         assert response.status_code == 200
         assert len(response.json()["lines"]) == 2
 
@@ -212,19 +204,49 @@ def test_get_ui_allowlist(client, tmp_path):
     base.mkdir()
     f = base / "file.py"
     f.write_text("ok")
-    with patch("tools.gimo_server.routers.legacy_ui_router.get_active_repo_dir", return_value=base):
-        with patch("tools.gimo_server.routers.legacy_ui_router.get_allowed_paths", return_value={f}):
+    with patch("tools.gimo_server.routers.ops.observability_router.get_active_repo_dir", return_value=base):
+        with patch("tools.gimo_server.routers.ops.observability_router.get_allowed_paths", return_value={f}):
             with patch(
-                "tools.gimo_server.routers.legacy_ui_router.serialize_allowlist",
+                "tools.gimo_server.routers.ops.observability_router.serialize_allowlist",
                 return_value=[
                     {"path": str(f), "type": "file"},
                     {"path": "/outside", "type": "file"},
                 ],
             ):
-                response = client.get("/ui/allowlist")
+                response = client.get("/ops/allowlist")
                 assert response.status_code == 200
                 assert response.json()["paths"][0]["path"] == "file.py"
                 assert len(response.json()["paths"]) == 1
+
+
+def test_ui_provider_legacy_routes_absent_from_router_table():
+    route_paths = {getattr(route, "path", None) for route in app.routes}
+    assert "/ui/nodes" not in route_paths
+    assert "/ui/status" not in route_paths
+    assert "/ui/providers" not in route_paths
+    assert "/ui/providers/{provider_id}" not in route_paths
+    assert "/ui/providers/{provider_id}/test" not in route_paths
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/ui/status",
+        "/ui/nodes",
+        "/ui/providers",
+        "/ui/providers/openai-main",
+        "/ui/providers/openai-main/test",
+    ],
+)
+def test_ui_provider_legacy_paths_return_not_found_for_get(client, path):
+    response = client.get(path)
+    assert response.status_code == 404
+
+
+def test_mcp_bridge_manifest_does_not_publish_legacy_provider_routes():
+    assert not any(str(entry.get("path", "")) == "/ui/status" for entry in MANIFEST)
+    assert not any(str(entry.get("path", "")).startswith("/ui/providers") for entry in MANIFEST)
+    assert not any(str(entry.get("path", "")) == "/ui/nodes" for entry in MANIFEST)
 
 
 def test_list_repos(client, tmp_path):

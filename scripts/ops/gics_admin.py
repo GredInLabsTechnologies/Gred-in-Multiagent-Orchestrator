@@ -2,7 +2,6 @@
 import argparse
 import subprocess
 import sys
-import os
 from pathlib import Path
 
 # Buscamos la ruta al CLI compilado de GICS
@@ -29,22 +28,22 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # 1. FLUSH
-    flush_parser = subparsers.add_parser("flush", help="Forzar el volcado de la capa HOT (MemTable) a disco WARM.")
+    subparsers.add_parser("flush", help="Forzar el volcado de la capa HOT (MemTable) a disco WARM.")
     
     # 2. COMPACT
-    compact_parser = subparsers.add_parser("compact", help="Compactar segmentos WARM para mejorar rendimiento de lectura.")
+    subparsers.add_parser("compact", help="Compactar segmentos WARM para mejorar rendimiento de lectura.")
     
     # 3. ROTATE
-    rotate_parser = subparsers.add_parser("rotate", help="Rotar datos WARM antiguos hacia la capa COLD (opcionalmente cifrada).")
+    subparsers.add_parser("rotate", help="Rotar datos WARM antiguos hacia la capa COLD (opcionalmente cifrada).")
     
     # 4. INFERENCE FLUSH
-    infer_flush_parser = subparsers.add_parser("flush-inference", help="Forzar el volcado de todos los buffers del Motor de Inferencia.")
+    subparsers.add_parser("flush-inference", help="Forzar el volcado de todos los buffers del Motor de Inferencia.")
     
     # 5. STATUS
-    status_parser = subparsers.add_parser("status", help="Obtener el estado general del demonio GICS en formato JSON.")
+    subparsers.add_parser("status", help="Obtener el estado general del demonio GICS en formato JSON.")
     
     # 6. INFERENCE HEALTH
-    infer_health_parser = subparsers.add_parser("infer-health", help="Ver estado y metricas del Motor de Inferencia de GICS.")
+    subparsers.add_parser("infer-health", help="Ver estado y metricas del Motor de Inferencia de GICS.")
 
     args = parser.parse_args()
 

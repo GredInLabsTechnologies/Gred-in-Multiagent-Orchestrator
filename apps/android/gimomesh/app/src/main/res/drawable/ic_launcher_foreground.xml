@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Hexagon mesh mark -->
+    <path
+        android:fillColor="#00E0A0"
+        android:pathData="M54,30 L72,42 L72,66 L54,78 L36,66 L36,42 Z" />
+    <path
+        android:fillColor="#0A0E14"
+        android:pathData="M54,38 L66,46 L66,62 L54,70 L42,62 L42,46 Z" />
+    <path
+        android:fillColor="#00E0A0"
+        android:pathData="M54,46 L60,50 L60,58 L54,62 L48,58 L48,50 Z" />
+</vector>

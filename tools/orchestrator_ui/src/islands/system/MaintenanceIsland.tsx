@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 
 import { API_BASE } from '../../types';
-import { fetchWithRetry } from '../../lib/fetchWithRetry';
+import { fetchOperatorStatus } from '../../lib/operatorStatus';
 
 interface MaintenanceIslandProps {
     token?: string;
@@ -56,13 +56,13 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
 
     const [selectedRepoPath, setSelectedRepoPath] = useState<string>('');
     const [manualRepoPath, setManualRepoPath] = useState<string>('');
-    const [uptimeLabel, setUptimeLabel] = useState<string>('—');
+    const [uptimeLabel, setUptimeLabel] = useState<string>('-');
 
     useEffect(() => {
         let cancelled = false;
 
         const formatUptime = (uptimeSeconds: number): string => {
-            if (!Number.isFinite(uptimeSeconds) || uptimeSeconds < 0) return '—';
+            if (!Number.isFinite(uptimeSeconds) || uptimeSeconds < 0) return '-';
             const total = Math.floor(uptimeSeconds);
             const days = Math.floor(total / 86400);
             const hours = Math.floor((total % 86400) / 3600);
@@ -77,20 +77,12 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
 
         const fetchUiStatus = async () => {
             try {
-                const response = await fetchWithRetry(`${API_BASE}/ui/status`, {
-                    credentials: 'include',
-                });
-                if (!response.ok) {
-                    if (!cancelled) setUptimeLabel('—');
-                    return;
-                }
-
-                const data = await response.json() as { uptime_seconds?: number };
+                const data = await fetchOperatorStatus();
                 if (!cancelled) {
                     setUptimeLabel(formatUptime(data.uptime_seconds ?? Number.NaN));
                 }
             } catch {
-                if (!cancelled) setUptimeLabel('—');
+                if (!cancelled) setUptimeLabel('-');
             }
         };
 
@@ -120,7 +112,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                     border: 'border-red-500/30',
                     bar: 'bg-red-500',
                     icon: <ShieldAlert className="w-6 h-6" />,
-                    message: 'BLOQUEO PROTECTIVO: Tráfico anónimo bloqueado.'
+                    message: 'BLOQUEO PROTECTIVO: Trafico anonimo bloqueado.'
                 };
             case 2: // GUARDED
                 return {
@@ -147,7 +139,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                     border: 'border-emerald-500/20',
                     bar: 'bg-emerald-500',
                     icon: <ShieldCheck className="w-6 h-6" />,
-                    message: 'NOMINAL: Seguridad del sistema dentro de parámetros normales.'
+                    message: 'NOMINAL: Seguridad del sistema dentro de parametros normales.'
                 };
         }
     };
@@ -238,7 +230,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
 
             <div className="p-3 rounded-xl border border-[#2c2c2e] bg-[#141414] text-xs text-[#86868b]">
                 <strong className="text-[#f5f5f7]">Nota:</strong> <span className="text-[#f5f5f7]">Estado</span> (servicio EJECUTANDO/DETENIDO)
-                {' '}y <span className="text-[#f5f5f7]">Nivel de Seguridad</span> (NOMINAL/ALERTA/PROTEGIDO/BLOQUEO) son métricas independientes.
+                {' '}y <span className="text-[#f5f5f7]">Nivel de Seguridad</span> (NOMINAL/ALERTA/PROTEGIDO/BLOQUEO) son metricas independientes.
             </div>
 
             {/* Top Grid: Status & Controls */}
@@ -389,7 +381,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                                 </select>
                                 <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none transition-transform group-hover:text-zinc-300" />
                                 <div className="text-[10px] text-zinc-500">
-                                    ¿No aparece tu repo? Pega la ruta completa y regístrala manualmente.
+                                    No aparece tu repo? Pega la ruta completa y registrala manualmente.
                                 </div>
                                 <div className="flex gap-2">
                                     <input
@@ -442,7 +434,7 @@ export const MaintenanceIsland: React.FC<MaintenanceIslandProps> = ({ token }) =
                 <div className="p-6 border-b border-white/5 bg-white/[0.02] flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                         <Terminal className="w-5 h-5 text-amber-500" />
-                        <h3 className="text-xs font-black uppercase tracking-widest text-[#f5f5f7]">Registro de auditoría</h3>
+                        <h3 className="text-xs font-black uppercase tracking-widest text-[#f5f5f7]">Registro de auditoria</h3>
                     </div>
                     <div className="flex items-center space-x-3">
                         <div className="relative flex items-center">

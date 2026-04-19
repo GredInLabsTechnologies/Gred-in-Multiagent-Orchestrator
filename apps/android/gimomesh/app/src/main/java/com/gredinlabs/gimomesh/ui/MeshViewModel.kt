@@ -1,0 +1,345 @@
+package com.gredinlabs.gimomesh.ui
+
+import android.app.Application
+import android.content.Intent
+import android.os.Build
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.gredinlabs.gimomesh.GimoMeshApp
+import com.gredinlabs.gimomesh.data.api.GimoCoreClient
+import com.gredinlabs.gimomesh.data.model.ConnectionState
+import com.gredinlabs.gimomesh.data.model.DeviceMode
+import com.gredinlabs.gimomesh.data.model.MeshDevice
+import com.gredinlabs.gimomesh.data.model.MeshState
+import com.gredinlabs.gimomesh.data.model.OperationalState
+import com.gredinlabs.gimomesh.data.store.SettingsStore
+import com.gredinlabs.gimomesh.service.HostRuntimeStatus
+import com.gredinlabs.gimomesh.service.MeshAgentService
+import com.gredinlabs.gimomesh.service.MetricsCollector
+import com.gredinlabs.gimomesh.service.TerminalBuffer
+import com.gredinlabs.gimomesh.service.isServeMode
+import com.gredinlabs.gimomesh.service.resolveControlPlaneBaseUrl
+import com.gredinlabs.gimomesh.service.resolveControlPlaneToken
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+
+class MeshViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val app = application as GimoMeshApp
+    private val terminalBuffer: TerminalBuffer = app.terminalBuffer
+    private val hostRuntimeReporter = app.hostRuntimeReporter
+    val settingsStore: SettingsStore = app.settingsStore
+    private val metricsCollector = MetricsCollector(application)
+
+    private var coreClient: GimoCoreClient? = null
+    private var coreClientKey: String = ""
+    private var metricsJob: Job? = null
+    private var devicePollJob: Job? = null
+
+    private val _state = MutableStateFlow(MeshState())
+    val state: StateFlow<MeshState> = _state.asStateFlow()
+
+    private var currentSettings = SettingsStore.Settings()
+
+    init {
+        observeSettings()
+        observeTerminal()
+        observeHostRuntime()
+        startMetricsLoop()
+        startDevicePollLoop()
+    }
+
+    private fun observeSettings() {
+        viewModelScope.launch {
+            settingsStore.settings.collect { settings ->
+                currentSettings = settings
+                rebuildClient(settings)
+                _state.update { state ->
+                    state.copy(
+                        coreUrl = resolveDisplayCoreUrl(settings),
+                        deviceId = resolveDeviceId(settings),
+                        deviceName = resolveDeviceName(settings),
+                        modelLoaded = state.modelLoaded.ifBlank { settings.model },
+                        inferenceRunning = settings.inferenceRunning,
+                        inferencePort = settings.inferencePort,
+                        inferenceEndpoint = state.inferenceEndpoint.ifBlank {
+                            if (settings.inferenceRunning) {
+                                buildInferenceEndpoint(settings.inferencePort).orEmpty()
+                            } else {
+                                ""
+                            }
+                        },
+                        deviceMode = parseDeviceMode(settings.deviceMode),
+                        isMeshRunning = settings.meshServiceRunning,
+                        isLinked = if (settings.meshServiceRunning) state.isLinked else false,
+                        connectionState = if (settings.meshServiceRunning) {
+                            state.connectionState
+                        } else {
+                            ConnectionState.OFFLINE
+                        },
+                        operationalState = if (settings.meshServiceRunning) {
+                            state.operationalState
+                        } else {
+                            OperationalState.IDLE
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    private fun observeTerminal() {
+        viewModelScope.launch {
+            terminalBuffer.lines.collect { lines ->
+                _state.update { it.copy(terminalLines = lines) }
+            }
+        }
+    }
+
+    private fun observeHostRuntime() {
+        viewModelScope.launch {
+            hostRuntimeReporter.snapshot.collect { snapshot ->
+                _state.update { state ->
+                    val serveMode = isServeMode(currentSettings)
+                    val connectionState = when {
+                        !serveMode -> state.connectionState
+                        !currentSettings.meshServiceRunning -> ConnectionState.OFFLINE
+                        snapshot.status == HostRuntimeStatus.STARTING -> ConnectionState.RECONNECTING
+                        snapshot.status == HostRuntimeStatus.ERROR ||
+                            snapshot.status == HostRuntimeStatus.UNAVAILABLE -> ConnectionState.REFUSED
+                        else -> state.connectionState
+                    }
+
+                    state.copy(
+                        hostRuntimeStatus = snapshot.status.name.lowercase(),
+                        hostRuntimeAvailable = snapshot.available,
+                        hostLanUrl = snapshot.lanUrl,
+                        hostWebUrl = snapshot.webUrl,
+                        hostMcpUrl = snapshot.mcpUrl,
+                        hostRuntimeError = snapshot.error,
+                        connectionState = connectionState,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun startMetricsLoop() {
+        metricsJob?.cancel()
+        metricsJob = viewModelScope.launch {
+            while (isActive) {
+                try {
+                    val snapshot = metricsCollector.collect()
+                    val settings = currentSettings
+                    val throttled = snapshot.cpuTempC > settings.cpuWarningTemp ||
+                        snapshot.batteryTempC > settings.batteryWarningTemp
+                    val lockedOut = snapshot.cpuTempC > settings.cpuLockoutTemp ||
+                        snapshot.batteryTempC > settings.batteryLockoutTemp
+
+                    _state.update { state ->
+                        state.copy(
+                            cpuPercent = snapshot.cpuPercent,
+                            ramPercent = snapshot.ramPercent,
+                            batteryPercent = snapshot.batteryPercent,
+                            cpuTempC = snapshot.cpuTempC,
+                            gpuTempC = snapshot.gpuTempC,
+                            batteryTempC = snapshot.batteryTempC,
+                            thermalThrottled = throttled,
+                            thermalLockedOut = lockedOut,
+                        )
+                    }
+                } catch (_: Exception) {
+                    // Metrics are observational only; keep the UI loop alive.
+                }
+                delay(METRICS_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun startDevicePollLoop() {
+        devicePollJob?.cancel()
+        devicePollJob = viewModelScope.launch {
+            while (isActive) {
+                val settings = currentSettings
+                val client = coreClient
+
+                if (!settings.meshServiceRunning || client == null) {
+                    delay(DEVICE_POLL_INTERVAL_MS)
+                    continue
+                }
+
+                try {
+                    val device = client.getDevice(resolveDeviceId(settings))
+                    if (device != null) {
+                        applyAuthoritativeDeviceState(device)
+                    } else if (isServeMode(settings)) {
+                        _state.update { state ->
+                            state.copy(
+                                isLinked = false,
+                                operationalState = OperationalState.IDLE,
+                                connectionState = if (state.hostRuntimeAvailable) {
+                                    ConnectionState.RECONNECTING
+                                } else {
+                                    ConnectionState.REFUSED
+                                },
+                            )
+                        }
+                    } else {
+                        _state.update {
+                            it.copy(
+                                isLinked = false,
+                                operationalState = OperationalState.IDLE,
+                                connectionState = ConnectionState.OFFLINE,
+                            )
+                        }
+                    }
+                } catch (_: Exception) {
+                    _state.update { state ->
+                        state.copy(
+                            isLinked = false,
+                            connectionState = if (isServeMode(settings)) {
+                                ConnectionState.RECONNECTING
+                            } else {
+                                ConnectionState.OFFLINE
+                            },
+                        )
+                    }
+                }
+
+                delay(DEVICE_POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun applyAuthoritativeDeviceState(device: MeshDevice) {
+        _state.update { state ->
+            state.copy(
+                isLinked = device.connectionState != ConnectionState.OFFLINE &&
+                    device.connectionState != ConnectionState.REFUSED,
+                connectionState = device.connectionState,
+                operationalState = device.operationalState,
+                deviceMode = device.deviceMode,
+                healthScore = device.healthScore,
+                cpuPercent = device.cpuPercent.takeIf { it >= 0f } ?: state.cpuPercent,
+                ramPercent = device.ramPercent.takeIf { it >= 0f } ?: state.ramPercent,
+                batteryPercent = device.batteryPercent.takeIf { it >= 0f } ?: state.batteryPercent,
+                cpuTempC = device.cpuTempC.takeIf { it >= 0f } ?: state.cpuTempC,
+                gpuTempC = device.gpuTempC.takeIf { it >= 0f } ?: state.gpuTempC,
+                batteryTempC = device.batteryTempC.takeIf { it >= 0f } ?: state.batteryTempC,
+                thermalThrottled = device.thermalThrottled,
+                thermalLockedOut = device.thermalLockedOut,
+                modelLoaded = device.modelLoaded?.takeIf { it.isNotBlank() } ?: state.modelLoaded,
+                inferenceEndpoint = device.inferenceEndpoint.ifBlank { state.inferenceEndpoint },
+                activeTaskId = device.activeTaskId,
+            )
+        }
+    }
+
+    private fun rebuildClient(settings: SettingsStore.Settings) {
+        val baseUrl = resolveControlPlaneBaseUrl(settings)
+        val token = resolveControlPlaneToken(settings)
+        val newKey = "$baseUrl|$token"
+        if (newKey == coreClientKey) return
+
+        coreClient?.shutdown()
+        coreClient = if (token.isNotBlank()) GimoCoreClient(baseUrl, token) else null
+        coreClientKey = newKey
+    }
+
+    fun toggleMesh() {
+        if (currentSettings.meshServiceRunning) {
+            stopMesh()
+        } else {
+            startMesh()
+        }
+    }
+
+    private fun startMesh() {
+        val context = getApplication<Application>()
+        val intent = Intent(context, MeshAgentService::class.java).apply {
+            action = MeshAgentService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+    }
+
+    private fun stopMesh() {
+        val context = getApplication<Application>()
+        val intent = Intent(context, MeshAgentService::class.java).apply {
+            action = MeshAgentService.ACTION_STOP
+        }
+        context.startService(intent)
+    }
+
+    fun changeMode(mode: String) {
+        viewModelScope.launch {
+            settingsStore.updateDeviceMode(mode)
+        }
+    }
+
+    fun toggleModeLock(locked: Boolean) {
+        viewModelScope.launch {
+            settingsStore.updateModeLocked(locked)
+        }
+    }
+
+    fun clearTerminal() {
+        terminalBuffer.clear()
+    }
+
+    private fun resolveDisplayCoreUrl(settings: SettingsStore.Settings): String =
+        resolveControlPlaneBaseUrl(settings)
+            .removePrefix("http://")
+            .removePrefix("https://")
+
+    private fun resolveDeviceId(settings: SettingsStore.Settings): String =
+        settings.deviceId.ifBlank { Build.MODEL.lowercase().replace(" ", "-") }
+
+    private fun resolveDeviceName(settings: SettingsStore.Settings): String =
+        settings.deviceName.ifBlank { "${Build.MANUFACTURER} ${Build.MODEL}" }
+
+    private fun getLocalIp(): String {
+        return try {
+            java.net.NetworkInterface.getNetworkInterfaces()?.toList()
+                ?.flatMap { it.inetAddresses.toList() }
+                ?.firstOrNull { !it.isLoopbackAddress && it is java.net.Inet4Address }
+                ?.hostAddress
+                ?: "0.0.0.0"
+        } catch (_: Exception) {
+            "0.0.0.0"
+        }
+    }
+
+    private fun buildInferenceEndpoint(port: Int): String? {
+        val ip = getLocalIp()
+        return if (ip == "0.0.0.0") null else "http://$ip:$port"
+    }
+
+    private fun parseDeviceMode(mode: String): DeviceMode = try {
+        DeviceMode.valueOf(mode.uppercase())
+    } catch (_: Exception) {
+        DeviceMode.INFERENCE
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        metricsJob?.cancel()
+        devicePollJob?.cancel()
+        coreClient?.shutdown()
+    }
+
+    companion object {
+        const val METRICS_INTERVAL_MS = 5_000L
+        const val DEVICE_POLL_INTERVAL_MS = 5_000L
+    }
+}

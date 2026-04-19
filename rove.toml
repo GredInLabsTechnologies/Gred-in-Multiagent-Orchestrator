@@ -1,0 +1,103 @@
+# rove.toml — GIMO Core wheelhouse forge config
+#
+# Consumido por `python -m rove.cli build --target <X>` para producir un
+# wheelhouse firmado (CPython + deps pre-compiled + repo subset) que se
+# vendoriza o se sirve peer-to-peer al mesh.
+#
+# Para generar bundle android-arm64:
+#   python -m rove.cli build --target android-arm64 \
+#       --output dist/ --patch-set vendor/rove-patches
+#
+# Para firmar con la clave de GIMO (fallback al embedded pubkey):
+#   ORCH_RUNTIME_SIGNING_KEY=$(cat secrets/runtime-signing.pem) \
+#       python -m rove.cli build --target android-arm64
+#
+# Los targets disponibles vienen del enum rove.targets.Target; ver
+# docs/DEV_MESH_ARCHITECTURE.md § 2.4 para el wire-protocol de la firma.
+
+project_name = "gimo-core"
+version = "0.2.0-rove"
+
+# Subset del repo que va al wheelhouse. Mismos paths que el tar de
+# scripts/push_repo_to_termux.cmd — un Core mínimo ejecutable sin el resto
+# del workspace.
+include = [
+    "tools/__init__.py",
+    "tools/gimo_server",
+    "tools/gimo_mesh_agent",
+    "gimo_cli",
+    "gimo.py",
+    "docs/SECURITY.md",
+]
+
+# Patrones que rove excluye siempre del bundle.
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/.pytest_cache",
+    "**/test_*",
+    "**/*.test.py",
+    ".orch_data",
+    ".orch_snapshots",
+    ".gimo_credentials",
+    ".orch_token*",
+    "secrets/*",
+]
+
+# Targets que GIMO publica bundles para. El productor refusa si se pide
+# un target no listado aquí (evita bundles mal etiquetados).
+targets = [
+    "android-arm64",
+    "android-armv7",
+    "android-x86_64",
+    "linux-x86_64",
+    "linux-arm64",
+    "darwin-arm64",
+    "darwin-x86_64",
+    "windows-x86_64",
+]
+
+# Patch registry que se aplica automáticamente antes del pip install
+# cuando el target lo requiere (ANDROID_API_LEVEL=24 para maturin sdists,
+# etc.). Vendorizado de GredInLabsTechnologies/rove-patches.
+patches = ["vendor/rove-patches"]
+
+# Clave privada Ed25519. Env var format: `${ENV_VAR}` expandido por rove.
+# Fallback a archivo local si el env no está set.
+sign_key = "${ORCH_RUNTIME_SIGNING_KEY:secrets/runtime-signing.pem}"
+
+# requirements consumidos por rove.builder.pip_runner — PEP 508 strings
+# inline (no paths a requirements files; rove no resuelve `-r file.txt`).
+# Mantener en sync con requirements.txt:
+#   python -c "from pathlib import Path; [print(f'    \"{l.split(\"#\")[0].strip()}\",') for l in Path('requirements.txt').read_text().splitlines() if l.strip() and not l.strip().startswith('#') and not l.strip().startswith('./')]"
+# No incluir ./vendor/rove/*.whl aquí — rove conoce su propia instalación.
+requirements = [
+    "cryptography>=43.0.0",
+    "PyJWT[crypto]>=2.9.0",
+    "httpx>=0.28.1",
+    "fastapi>=0.128.0",
+    "uvicorn[standard]>=0.34.2",
+    "starlette>=0.49.1",
+    "pydantic>=2.11.7",
+    "requests==2.33.1",
+    "python-dotenv==1.2.1",
+    "rich==14.3.2",
+    "typer>=0.12.5",
+    "PyYAML>=6.0.2",
+    "textual>=0.83.0",
+    "opentelemetry-api==1.27.0",
+    "opentelemetry-sdk==1.27.0",
+    "opentelemetry-exporter-otlp-proto-http==1.27.0",
+    "opentelemetry-instrumentation-fastapi==0.48b0",
+    "python-multipart>=0.0.22",
+    "urllib3>=2.6.3",
+    "filelock>=3.20.3",
+    "psutil>=6.0.0",
+    "pyasn1>=0.6.2",
+    "zeroconf>=0.132.0",
+    "zstandard>=0.22",
+    "fastmcp>=3.1.0",
+    # mcp no se pinea explícito — fastmcp ya resuelve la versión compatible;
+    # pinear ambos cause resolver conflicts (mcp 1.26 vs 1.27 transitive).
+    "sse-starlette>=3.3.0",
+]

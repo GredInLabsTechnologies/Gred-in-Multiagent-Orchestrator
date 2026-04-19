@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import hashlib
-import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Tuple
 
@@ -11,16 +10,12 @@ if TYPE_CHECKING:
     from .storage_service import StorageService
 
 from ..ops_models import ProviderRoleBinding, WorkflowNode
+from ..utils.debug_mode import is_debug_mode
 from .economy.cost_service import CostService
 from .model_inventory_service import ModelInventoryService, ModelEntry, _infer_tier
 from .hardware_monitor_service import HardwareMonitorService
 
 logger = logging.getLogger("orchestrator.model_router")
-
-# Debug mode scaffold — kept active (routing always runs), but when
-# DEBUG=true the router logs extra detail and tags decisions with
-# debug_mode=True so callers can distinguish dev vs prod routing.
-_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
 
 
 # Task-type → required capability + minimum quality tier
@@ -33,6 +28,24 @@ TASK_REQUIREMENTS: Dict[str, Tuple[str, int]] = {
     "translation": ("chat", 2),
     "analysis": ("chat", 3),
     "default": ("chat", 2),
+}
+
+# BUGS_LATENTES §H5 — task_type → benchmark dimension mapping.
+# Las 14 dimensiones de BenchmarkEnrichmentService (coding, math, reasoning,
+# creative, long_context, business, science, writing, multi_step_reasoning,
+# general_knowledge, expert_knowledge, instruction_following, multi_turn,
+# overall) son scores ordinales 0.0-1.0 por modelo. Este mapping elige qué
+# dimensión consultar para cada task_type. Fallback a "overall" cuando no
+# hay match específico.
+TASK_BENCHMARK_DIMENSION: Dict[str, str] = {
+    "classification": "instruction_following",
+    "code_generation": "coding",
+    "security_review": "reasoning",
+    "formatting": "instruction_following",
+    "summarization": "writing",
+    "translation": "instruction_following",
+    "analysis": "multi_step_reasoning",
+    "default": "overall",
 }
 
 # Legacy tier names → numeric tier (backwards compat)
@@ -57,6 +70,14 @@ class ModelSelectionDecision:
     tier: int = 3
     alternatives: List[str] = field(default_factory=list)
     hardware_state: str = "safe"
+    # BUGS_LATENTES §H7 — advisory flags (NO bloquean).
+    # Populados cuando el modelo elegido tiene un flag GICS anomaly activo.
+    # Consistente con feedback_constraint_compiler_philosophy.md: "GICS
+    # signals = metadata annotations, NEVER policy overrides". El selector
+    # no excluye modelos anómalos, pero sí los SEÑALA para que el operator
+    # / UI pueda mostrar un warning + la alternative sugerida.
+    anomaly_detected: bool = False
+    anomaly_alternative: str = ""  # model_id alternativo sugerido si existe
 
 
 # Backward compatibility alias (renamed from RoutingDecision in P6)
@@ -75,11 +96,15 @@ class Phase6StrategyDecision:
 
 
 class ModelRouterService:
-    """Agnostic model router that uses only the user's configured providers."""
+    """Agnostic model router that uses only the user's configured providers.
 
-    # Debug mode: routing remains active but decisions are tagged with
-    # debug_mode=True for downstream consumers.  Activate via DEBUG=true.
-    debug_mode: bool = _DEBUG_MODE
+    Debug mode: routing remains active but decisions are tagged with
+    ``debug_mode=True`` for downstream consumers.  Activate via DEBUG=true.
+    """
+
+    @property
+    def debug_mode(self) -> bool:
+        return is_debug_mode()
 
     @classmethod
     def normalize_task_type(cls, task_type: Optional[str]) -> str:
@@ -244,6 +269,10 @@ class ModelRouterService:
             reasons.append(f"gics_reliability={score:.2f}")
             if reliability.get("anomaly"):
                 adjustment -= 0.25
+                # BUGS_LATENTES §H7 — marcar el reason con flag legible para
+                # que downstream consumers (UI, log parsers) detecten anomaly
+                # sin re-consultar GICS.
+                reasons.append("gics_anomaly_detected=true")
                 reasons.append("gics_anomaly_penalty=0.25")
 
         capability = CapabilityProfileService.get_capability(
@@ -258,6 +287,69 @@ class ModelRouterService:
                 f"gics_task_success={capability.success_rate:.2f}/samples={capability.samples}"
             )
 
+        return adjustment, reasons
+
+    @classmethod
+    def _benchmark_dimension_adjustment(
+        cls, task_type: str, entry: ModelEntry
+    ) -> tuple[float, list[str]]:
+        """Consulta BenchmarkEnrichmentService per-request y ajusta el score
+        por la dimensión apropiada al task_type.
+
+        BUGS_LATENTES §H5 fix. Antes, las 14 dimensiones externas (LMArena +
+        OpenLLM Leaderboard) solo se usaban al startup para:
+        - Enriquecer ``ModelEntry.capabilities`` binario (tiene/no tiene "code")
+        - Seed GICS priors 20/80
+
+        Ahora ModelRouter las lee per-request: task de math prefiere el modelo
+        con math_score=0.85 sobre el de 0.62, aunque ambos tengan "math" en
+        su capability set. Ajuste ±0.2 × (score - 0.5), bounded, consistente
+        con el GICS capability adjustment (misma familia, misma magnitud).
+
+        Fallback silencioso: modelo sin benchmark profile → adjustment 0.
+        """
+        reasons: list[str] = []
+        try:
+            from .benchmark_enrichment_service import lookup_model as _bench_lookup
+        except Exception:  # noqa: BLE001
+            return 0.0, reasons
+
+        try:
+            profile = _bench_lookup(entry.model_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "benchmark lookup failed for model=%s: %s", entry.model_id, exc
+            )
+            return 0.0, reasons
+
+        if profile is None:
+            return 0.0, reasons
+
+        dimensions = getattr(profile, "dimensions", None) or {}
+        if not dimensions:
+            return 0.0, reasons
+
+        normalized_task_type = cls.normalize_task_type(task_type)
+        requested_dimension = TASK_BENCHMARK_DIMENSION.get(
+            normalized_task_type,
+            TASK_BENCHMARK_DIMENSION["default"],
+        )
+        score = dimensions.get(requested_dimension)
+        used_dimension = requested_dimension
+        if score is None:
+            # Fallback a overall si la dimensión task-specific no existe para
+            # este modelo (p.ej. LMArena solo tiene general_knowledge)
+            score = dimensions.get("overall")
+            used_dimension = "overall" if score is not None else requested_dimension
+        if score is None:
+            return 0.0, reasons
+
+        score_f = max(0.0, min(1.0, float(score)))
+        adjustment = max(-0.2, min(0.2, (score_f - 0.5) * 0.4))
+        # Reporta la dimensión efectivamente usada (útil cuando hay fallback).
+        reasons.append(
+            f"benchmark_{used_dimension}={score_f:.2f}→adj={adjustment:+.2f}"
+        )
         return adjustment, reasons
 
     @classmethod
@@ -304,7 +396,14 @@ class ModelRouterService:
             if preferred_provider and binding.provider_id == preferred_provider:
                 topology_bonus = 1.0 if not preferred_model or binding.model == preferred_model else 0.7
             gics_adjustment, gics_reasons = cls._gics_success_adjustment(normalized_task_type, entry)
-            success_score = topology_bonus + gics_adjustment
+            # BUGS_LATENTES §H7 — propaga anomaly flag + alternative del GICS
+            # al consumidor via RoutingDecision (advisory, no bloquea).
+            entry_anomaly = any("gics_anomaly_detected=true" in r for r in gics_reasons)
+            # BUGS_LATENTES §H5: benchmark dimensions per-request (ordinal 0-1)
+            bench_adjustment, bench_reasons = cls._benchmark_dimension_adjustment(
+                normalized_task_type, entry
+            )
+            success_score = topology_bonus + gics_adjustment + bench_adjustment
             quality_score = (1.0 if entry.quality_tier >= tier_min else 0.0) + (entry.quality_tier / 100.0)
             latency_score = (1.0 if entry.is_local else 0.0) + (0.0 if not entry.size_gb else max(0.0, 0.5 - (entry.size_gb / 100.0)))
             total_cost = max(0.0, entry.cost_input) + max(0.0, entry.cost_output)
@@ -322,6 +421,7 @@ class ModelRouterService:
                 reason_parts.append(f"topology_preference={preferred_provider}/{preferred_model or 'auto'}")
             reason_parts.extend(eligibility_notes)
             reason_parts.extend(gics_reasons)
+            reason_parts.extend(bench_reasons)
 
             ranked.append(
                 (
@@ -339,6 +439,7 @@ class ModelRouterService:
                         reason="|".join(reason_parts),
                         tier=entry.quality_tier,
                         hardware_state="safe",
+                        anomaly_detected=entry_anomaly,
                     ),
                 )
             )
@@ -355,6 +456,14 @@ class ModelRouterService:
         )
         selected = ranked[0][1]
         selected.alternatives = [candidate.model for _, candidate in ranked[1:4]]
+        # BUGS_LATENTES §H7 — si el modelo elegido tiene anomaly flag, sugiere
+        # como alternative el siguiente mejor binding que NO lo tenga. Advisory
+        # only — no cambia la selección.
+        if selected.anomaly_detected:
+            for _, candidate in ranked[1:]:
+                if not candidate.anomaly_detected:
+                    selected.anomaly_alternative = candidate.model
+                    break
         return selected
 
     # Keep for backwards compat with CascadeService and tests

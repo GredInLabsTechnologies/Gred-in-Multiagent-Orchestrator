@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..models.agent_routing import RoutingDecision, RoutingDecisionSummary, TaskConstraints, TaskDescriptor, ModelBinding
+from ..models.agent_routing import RoutingDecision, TaskConstraints, TaskDescriptor, ModelBinding
 from .agent_catalog_service import AgentCatalogService, PRESET_CATALOG
 from .execution.execution_policy_service import LEGACY_MOOD_TO_POLICY
 
@@ -124,6 +124,7 @@ class ProfileRouterService:
         descriptor: TaskDescriptor,
         constraints: TaskConstraints,
         requested_preset: str | None = None,
+        requested_mood: str | None = None,
         legacy_mood: str | None = None,
     ) -> RoutingDecision:
         if not constraints.allowed_policies:
@@ -136,10 +137,6 @@ class ProfileRouterService:
         )
         preset = AgentCatalogService.get_preset(preset_name)
         execution_policy = preset.execution_policy
-        if legacy_mood and legacy_mood in LEGACY_MOOD_TO_POLICY:
-            candidate_policy = LEGACY_MOOD_TO_POLICY[legacy_mood]
-            if candidate_policy in constraints.allowed_policies:
-                execution_policy = candidate_policy
         if execution_policy not in constraints.allowed_policies:
             execution_policy = constraints.allowed_policies[0]
 
@@ -155,6 +152,7 @@ class ProfileRouterService:
 
         resolved = AgentCatalogService.resolve_profile(
             agent_preset=preset.name,
+            mood=requested_mood,
             legacy_mood=legacy_mood,
             workflow_phase=workflow_phase,
         )

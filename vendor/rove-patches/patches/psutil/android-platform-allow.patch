@@ -1,0 +1,15 @@
+--- a/setup.py
++++ b/setup.py
+@@ -55,11 +55,7 @@ FREEBSD = sys.platform.startswith(("freebsd", "midnightbsd"))
+ OPENBSD = sys.platform.startswith("openbsd")
+ NETBSD = sys.platform.startswith("netbsd")
+ BSD = FREEBSD or OPENBSD or NETBSD
+-AIX = sys.platform.startswith("aix")
+-
+-if "bdist_wheel" in sys.argv and not (LINUX or MACOS or WINDOWS or BSD or SUNOS or AIX):
+-    raise RuntimeError(
+-        "platform %s is not supported" % sys.platform)
++AIX = sys.platform.startswith(("aix", "android"))
+
+ PYPY = '__pypy__' in sys.builtin_module_names
+ macros = []

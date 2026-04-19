@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import importlib.util
-import json
 import logging
 import os
 import re
@@ -50,7 +49,10 @@ class ToolExecutor:
         if execution_policy:
             self.execution_policy = ExecutionPolicyService.canonical_policy_name(execution_policy)
         else:
-            self.execution_policy = ExecutionPolicyService.policy_name_from_legacy_mood(mood)
+            # Mood modulates execution style, not tool authority.  Default to the
+            # canonical safe workspace policy unless a caller resolved policy
+            # explicitly before constructing the executor.
+            self.execution_policy = "workspace_safe"
         self.session_id = session_id
         try:
             self._policy_profile = ExecutionPolicyService.get_policy(self.execution_policy)
@@ -575,7 +577,7 @@ class ToolExecutor:
             if not task.get("agent_preset"):
                 return ToolExecutionResult(
                     "error",
-                    f"Task {task.get('id')} must include 'agent_preset'; legacy mood hints are accepted only for read compatibility",
+                    f"Task {task.get('id')} must include 'agent_preset'; canonical mood can refine execution style, while legacy mood hints are accepted only for read compatibility",
                 )
         return ToolExecutionResult(
             "plan_proposed",

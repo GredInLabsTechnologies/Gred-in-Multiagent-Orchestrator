@@ -3,7 +3,7 @@ from .core import (
     OpsTask as OpsTask, OpsPlan as OpsPlan, OpsDraft as OpsDraft, OpsApproved as OpsApproved, OpsRunStatus as OpsRunStatus, OpsRun as OpsRun,
     OpsConfig as OpsConfig, ExecutorReport as ExecutorReport, OpsCreateDraftRequest as OpsCreateDraftRequest, OpsUpdateDraftRequest as OpsUpdateDraftRequest,
     OpsApproveResponse as OpsApproveResponse, OpsCreateRunRequest as OpsCreateRunRequest, OpsResumeRunRequest as OpsResumeRunRequest, ChildRunRequest as ChildRunRequest, RepoEntry as RepoEntry, RunEvent as RunEvent, RunLogEntry as RunLogEntry,
-    StatusResponse, UiStatusResponse, VitaminizeResponse,
+    StatusResponse, ServiceStatusResponse, VitaminizeResponse,
 )
 from .conversation import (
     GimoItemType, GimoItemStatus, GimoThreadStatus, GimoItem, GimoTurn, GimoThread

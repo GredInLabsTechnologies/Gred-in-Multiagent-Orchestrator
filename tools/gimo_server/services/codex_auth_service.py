@@ -159,7 +159,7 @@ class CodexAuthService:
                 "action": "npm install -g @openai/codex",
             }
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             result = await asyncio.wait_for(
                 loop.run_in_executor(None, _device_flow_sync, binary),
@@ -180,7 +180,7 @@ class CodexAuthService:
         if shutil.which("codex") is None:
             return {"authenticated": False, "method": None, "detail": "Codex CLI not installed"}
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             rc, output = await asyncio.wait_for(
                 loop.run_in_executor(None, _run, ["codex", "login", "status"]),
@@ -217,7 +217,7 @@ class CodexAuthService:
         if shutil.which("codex") is None:
             return {"status": "error", "message": "Codex CLI not installed"}
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             rc, output = await asyncio.wait_for(
                 loop.run_in_executor(None, _run, ["codex", "logout"]),

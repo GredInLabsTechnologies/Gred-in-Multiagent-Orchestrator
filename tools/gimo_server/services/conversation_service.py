@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, List, Optional, TypeVar, get_args
 
 from ..models.agent_routing import ProfileSummary, WorkflowPhase
+from ..security.safe_log import sanitize_for_log
 from .notification_service import NotificationService
 from ..config import OPS_DATA_DIR
 from ..ops_models import GimoItem, GimoThread, GimoTurn
@@ -23,7 +24,7 @@ _WORKFLOW_PHASE_VALUES = frozenset(str(value) for value in get_args(WorkflowPhas
 
 class ConversationService:
     """Service for managing GIMO conversation threads, turns, and items.
-    
+
     **Authority of threads.**
     """
 
@@ -31,6 +32,8 @@ class ConversationService:
     _AGENT_ID_RE = __import__("re").compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
     _locks_guard = threading.Lock()
     _thread_locks: dict[str, threading.RLock] = {}
+    # Strong refs for fire-and-forget notification tasks (prevents premature GC).
+    _notification_tasks: set[asyncio.Task] = set()
 
     @classmethod
     def _ensure_dir(cls):
@@ -143,8 +146,8 @@ class ConversationService:
         thread.agent_preset = str(summary.agent_preset or thread.agent_preset or "plan_orchestrator")
         return thread
 
-    @staticmethod
-    def _schedule_notification(coro: Any) -> None:
+    @classmethod
+    def _schedule_notification(cls, coro: Any) -> None:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -153,7 +156,9 @@ class ConversationService:
             except Exception:
                 pass
             return
-        asyncio.create_task(coro)
+        task = asyncio.create_task(coro)
+        cls._notification_tasks.add(task)
+        task.add_done_callback(cls._notification_tasks.discard)
 
     @classmethod
     def _load_thread_unlocked(cls, thread_id: str) -> Optional[GimoThread]:
@@ -165,7 +170,7 @@ class ConversationService:
             thread = GimoThread.model_validate(data)
             return cls._hydrate_thread(thread, data)
         except Exception as e:
-            logger.error(f"Error loading thread {thread_id}: {e}")
+            logger.error("Error loading thread %s: %s", sanitize_for_log(thread_id), e)
             return None
 
     @classmethod
@@ -225,7 +230,7 @@ class ConversationService:
                     continue
                 threads.append(thread)
             except Exception as e:
-                logger.error(f"Error loading thread {p.name}: {e}")
+                logger.error("Error loading thread %s: %s", sanitize_for_log(p.name), e)
         
         # Sort by updated_at descending
         return sorted(threads, key=lambda t: t.updated_at, reverse=True)

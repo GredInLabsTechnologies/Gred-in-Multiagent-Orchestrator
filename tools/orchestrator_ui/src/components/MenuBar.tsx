@@ -245,7 +245,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                     {[
                                         ['Versión', `v${status?.version || '1.0.0-rc.1'}`, 'text-accent-primary'],
                                         ['Estado', status?.service_status || 'Operativo', 'text-emerald-400'],
-                                        ['Uptime', status?.uptime ? `${Math.floor(status.uptime / 3600)}h ${Math.floor((status.uptime % 3600) / 60)}m` : '0h 0m', 'text-text-primary'],
+                                        ['Uptime', status?.uptime_seconds ? `${Math.floor(status.uptime_seconds / 3600)}h ${Math.floor((status.uptime_seconds % 3600) / 60)}m` : '0h 0m', 'text-text-primary'],
                                     ].map(([label, value, color]) => (
                                         <div key={label} className="flex justify-between items-center border-b border-white/[0.04] pb-2 last:border-0 last:pb-0">
                                             <span className="text-xs text-text-secondary">{label}</span>

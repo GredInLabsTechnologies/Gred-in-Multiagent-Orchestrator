@@ -22,6 +22,14 @@ components:
         detail:
           type: string
 
+    ServiceStatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [RUNNING, STOPPED, STARTING, STOPPING, UNKNOWN]
+
     OpsTask:
       type: object
       required: [id, title, scope, description]
@@ -242,18 +250,10 @@ paths:
               schema: { type: string }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
-  /ui/status:
-    get:
-      summary: UI status payload
-      operationId: getUiStatus
-      responses:
-        '200':
-          description: OK
-
-  /ui/audit:
+  /ops/audit/tail:
     get:
       summary: Tail audit log lines
-      operationId: getUiAudit
+      operationId: getOpsAuditTail
       parameters:
         - name: limit
           in: query
@@ -263,10 +263,10 @@ paths:
         '200':
           description: OK
 
-  /ui/allowlist:
+  /ops/allowlist:
     get:
       summary: Return allowlist items (relative to active repo)
-      operationId: getUiAllowlist
+      operationId: getOpsAllowlist
       responses:
         '200':
           description: OK
@@ -712,6 +712,9 @@ paths:
       responses:
         '200':
           description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceStatusResponse' }
 
   /ops/service/restart:
     post:

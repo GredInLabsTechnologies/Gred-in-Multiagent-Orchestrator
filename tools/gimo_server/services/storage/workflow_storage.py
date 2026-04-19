@@ -18,7 +18,6 @@ class WorkflowStorage:
 
     def ensure_tables(self) -> None:
         """No-op: using GICS."""
-        pass
 
     def save_workflow(self, workflow_id: str, data: str) -> None:
         if not self.gics:

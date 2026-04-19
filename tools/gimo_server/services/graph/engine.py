@@ -15,7 +15,7 @@ import inspect
 import logging
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from tools.gimo_server.ops_models import (
     CostEvent,
@@ -24,7 +24,7 @@ from tools.gimo_server.ops_models import (
     WorkflowNode,
     WorkflowState,
 )
-from tools.gimo_server.models.agent_routing import TaskDescriptor, RoutingDecisionSummary
+from tools.gimo_server.models.agent_routing import TaskDescriptor
 from tools.gimo_server.services.constraint_compiler_service import ConstraintCompilerService
 from tools.gimo_server.services.model_router_service import ModelRouterService
 from tools.gimo_server.services.profile_router_service import ProfileRouterService
@@ -159,7 +159,7 @@ class GraphEngine(
                                 "context": output
                             }))
                         except Exception as ne:
-                            logger.error(f"Failed to publish notification: {ne}")
+                            logger.error("Failed to publish notification: %s", ne)
 
                         break
 
@@ -190,7 +190,7 @@ class GraphEngine(
                         break
 
                 except Exception as e:
-                    logger.error(f"Error executing node {node.id}: {e}")
+                    logger.error("Error executing node %s: %s", node.id, e)
                     if isinstance(e, TimeoutError):
                         error_text = "timed out"
                     else:
@@ -351,6 +351,7 @@ class GraphEngine(
                 descriptor=descriptor,
                 constraints=constraints,
                 requested_preset=agent_preset,
+                requested_mood=str(node.config.get("mood") or "").strip() or None,
             )
 
             # Extract provider/model from routing_decision (v2.0 canonical fields)

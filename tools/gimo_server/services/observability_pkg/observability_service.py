@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import logging
 import threading
 from collections import Counter
 from collections import deque
@@ -9,13 +10,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional
 
+logger = logging.getLogger("orchestrator.observability")
+
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader, ConsoleMetricExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider, Span
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
 from ...config import OPS_DATA_DIR
 from ..run_lifecycle import is_active_run_status
@@ -667,6 +670,154 @@ class ObservabilityService:
         trace_obj["duration_ms"] = cls._resolve_trace_duration_ms(trace_obj)
 
         return trace_obj
+
+    # --- Migrated from legacy simple ObservabilityService (preserved for compat) ---
+
+    @classmethod
+    def record_usage(cls, data: Dict[str, Any]) -> None:
+        """Legacy: record a raw AI-usage audit payload to the JSONL log.
+
+        Prefer `record_ai_usage` for new call sites; kept because the simple
+        ObservabilityService exposed it as a public helper.
+        """
+        payload = dict(data or {})
+        payload["ts"] = datetime.now(timezone.utc).isoformat()
+        try:
+            cls.AI_USAGE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with cls.AI_USAGE_LOG_PATH.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception as exc:  # pragma: no cover - observability never crashes hot path
+            logger.error("Failed to log usage: %s", exc)
+
+    @classmethod
+    def record_llm_usage(
+        cls,
+        *,
+        thread_id: Optional[str] = None,
+        model: str = "unknown",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        cost_usd: float = 0.0,
+        tools_executed: int = 0,
+        tool_call_format: str = "none",
+        estimated: bool = False,
+    ) -> None:
+        """Single sink for agentic chat / LLM usage.
+
+        Writes to (1) in-memory UI metrics (segregating estimated vs exact
+        totals), (2) the AI usage audit JSONL, and (3) per-thread metadata.
+        Migrated verbatim from the legacy simple ObservabilityService so no
+        telemetry is lost during the unification.
+        """
+        if not cls._initialized:
+            cls._initialize_sdk()
+
+        total = int(prompt_tokens or 0) + int(completion_tokens or 0)
+
+        with cls._lock:
+            if estimated:
+                cls._ui_metrics.setdefault("tokens_estimated", 0)
+                cls._ui_metrics.setdefault("cost_estimated_usd", 0.0)
+                cls._ui_metrics["tokens_estimated"] += total
+                cls._ui_metrics["cost_estimated_usd"] += float(cost_usd or 0.0)
+            else:
+                cls._ui_metrics["tokens_total"] += total
+                cls._ui_metrics["cost_total_usd"] += float(cost_usd or 0.0)
+
+        # Append-only audit log (reuse the JSONL sink).
+        cls.record_usage({
+            "thread_id": thread_id,
+            "model": model,
+            "prompt_tokens": int(prompt_tokens or 0),
+            "completion_tokens": int(completion_tokens or 0),
+            "cost_usd": float(cost_usd or 0.0),
+            "tools_executed": int(tools_executed or 0),
+            "tool_call_format": tool_call_format,
+            "estimated": bool(estimated),
+        })
+
+        # Per-thread metadata so the UI conversation view can show tokens/cost.
+        if thread_id:
+            try:
+                from ..conversation_service import ConversationService
+
+                def _update(t):
+                    prev = t.metadata.get("usage") if isinstance(t.metadata.get("usage"), dict) else {}
+                    t.metadata["usage"] = {
+                        "prompt_tokens": prev.get("prompt_tokens", 0) + int(prompt_tokens or 0),
+                        "completion_tokens": prev.get("completion_tokens", 0) + int(completion_tokens or 0),
+                        "cost_usd": prev.get("cost_usd", 0.0) + float(cost_usd or 0.0),
+                        "total_tokens": prev.get("total_tokens", 0) + total,
+                        "estimated": bool(prev.get("estimated") or estimated),
+                    }
+                    return True
+
+                ConversationService.mutate_thread(thread_id, _update)
+            except Exception:
+                logger.debug("Failed to update thread usage for %s", thread_id, exc_info=True)
+
+    @classmethod
+    def record_agent_action(cls, event: Any) -> None:
+        """Logs an agent action event for behavioral analysis.
+
+        Kept as a log-only sink (parity with the legacy simple service); a
+        future iteration can route this through GICS or a dedicated store.
+        """
+        try:
+            agent_id = getattr(event, "agent_id", None)
+            tool = getattr(event, "tool", None)
+            outcome = getattr(event, "outcome", None)
+            logger.info("Agent Action: %s -> %s (%s)", agent_id, tool, outcome)
+        except Exception:
+            logger.debug("record_agent_action failed", exc_info=True)
+
+    @classmethod
+    def get_agent_insights(cls, agent_id: str) -> List[Any]:
+        """Return simulated optimization recommendations for an agent.
+
+        Preserves the legacy stub behavior; the real analysis pipeline is a
+        separate service and will replace this shim when wired up.
+        """
+        try:
+            from ..ops_models import AgentInsight  # local import to avoid cycles
+        except Exception:
+            return []
+
+        return [
+            AgentInsight(
+                type="PERFORMANCE",
+                priority="medium",
+                message=f"Agent {agent_id} has high latency on 'search' tool.",
+                recommendation="Consider using a faster model for simple searches.",
+                agent_id=agent_id,
+            )
+        ]
+
+    @classmethod
+    def record_span(cls, kind: str, name: str, attributes: Dict[str, Any]) -> None:
+        """Legacy minimal span recording — UI compatibility shim.
+
+        New call sites should use `record_node_span`, `record_workflow_start`,
+        or `record_handoff_event`. This keeps parity with the simple service's
+        free-form span API.
+        """
+        if not cls._initialized:
+            cls._initialize_sdk()
+
+        span = {
+            "kind": kind,
+            "name": name,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **(attributes or {}),
+        }
+        with cls._lock:
+            cls._ui_spans.append(span)
+            if (attributes or {}).get("status") == "failed":
+                cls._ui_metrics["nodes_failed"] += 1
+            if kind == "node":
+                cls._ui_metrics["nodes_total"] += 1
+                cls._ui_metrics["tokens_total"] += int((attributes or {}).get("tokens_used", 0) or 0)
+                cls._ui_metrics["cost_total_usd"] += float((attributes or {}).get("cost_usd", 0.0) or 0.0)
 
     @classmethod
     def reset(cls) -> None:

@@ -105,11 +105,11 @@ class TestHandleWebSearch:
 
 class TestMoodToolConstraints:
     def test_whitelist_blocks_unlisted_tool(self):
-        """forensic legacy mood resolves to a restrictive docs_research policy."""
+        """Mood alone no longer grants a restrictive policy."""
         executor = ToolExecutor(workspace_root="/tmp", mood="forensic")
         allowed, reason = executor._is_tool_allowed("write_file")
-        assert not allowed
-        assert "allowed by execution policy" in reason.lower()
+        assert allowed
+        assert reason is None
 
     def test_whitelist_allows_listed_tool(self):
         executor = ToolExecutor(workspace_root="/tmp", mood="forensic")
@@ -118,20 +118,20 @@ class TestMoodToolConstraints:
         assert reason is None
 
     def test_empty_whitelist_allows_all(self):
-        """neutral mood has empty whitelist, so all tools pass."""
+        """workspace_safe remains permissive when no explicit tool allowlist exists."""
         executor = ToolExecutor(workspace_root="/tmp", mood="neutral")
         allowed, _ = executor._is_tool_allowed("shell_exec")
         assert allowed
 
     def test_requires_confirmation_detected(self):
-        """dialoger legacy mood resolves to propose_only, which requires confirmation for writes."""
-        executor = ToolExecutor(workspace_root="/tmp", mood="dialoger")
+        """Explicit execution_policy, not mood, drives confirmation requirements."""
+        executor = ToolExecutor(workspace_root="/tmp", mood="dialoger", execution_policy="propose_only")
         assert executor._requires_confirmation("write_file")
         assert not executor._requires_confirmation("read_file")
 
     def test_execute_tool_call_returns_requires_confirmation(self):
-        """dialoger legacy mood resolves to propose_only, which blocks shell execution."""
-        executor = ToolExecutor(workspace_root="/tmp", mood="dialoger")
+        """Explicit execution_policy, not mood, blocks shell execution."""
+        executor = ToolExecutor(workspace_root="/tmp", mood="dialoger", execution_policy="propose_only")
         result = asyncio.run(executor.execute_tool_call("shell_exec", {"command": "ls"}))
         assert result["status"] == "error"
         assert "allowed by execution policy" in result["message"].lower()

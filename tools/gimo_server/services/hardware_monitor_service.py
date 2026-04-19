@@ -4,9 +4,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import platform
+import sys
 import time
 import subprocess
 from collections import deque
+from pathlib import Path
 from dataclasses import dataclass, asdict, field
 from typing import Literal, Optional
 
@@ -15,6 +19,14 @@ import psutil
 from ..config import OPS_DATA_DIR
 
 logger = logging.getLogger("orchestrator.hardware")
+
+# BUGS_LATENTES §H12 — probe dinámico de runtimes disponibles.
+# El cache evita correr los probes en cada snapshot (10s por default) — los
+# runtimes cambian en escala de minutos/horas (install/uninstall tools), no
+# sub-segundo. 5 min TTL es conservador sin sobrecargar.
+_RUNTIMES_CACHE_TTL = 300.0
+_runtimes_cache: Optional[list[str]] = None
+_runtimes_cached_at: float = 0.0
 
 LoadLevel = Literal["safe", "caution", "critical"]
 
@@ -49,6 +61,29 @@ class HardwareSnapshot:
     # GIE deep device capabilities (populated lazily by DeviceDetector)
     devices: list = field(default_factory=list)  # list[DeviceCapability]
 
+    # Mobile / device classification
+    device_class: str = "desktop"          # "desktop" | "laptop" | "smartphone" | "tablet" | "sbc"
+    soc_model: str = ""                    # "Snapdragon 855" | "Exynos 2100" | ""
+    soc_vendor: str = ""                   # "qualcomm" | "samsung" | "apple" | "mediatek" | ""
+    gpu_compute_api: str = ""              # "cuda" | "vulkan" | "metal" | "opencl" | ""
+    max_model_params_b: float = 0.0        # estimated max model size (RAM available GB / 2 for Q4 GGUF)
+
+    # Battery
+    battery_percent: float = -1.0          # 0-100, -1 if not applicable
+    battery_charging: bool = False
+    battery_temp_c: float = -1.0           # -1 if not available
+
+    # Thermal protection state
+    thermal_throttled: bool = False        # true if any sensor above warning threshold
+    thermal_locked_out: bool = False       # true if lockout active
+
+    # BUGS_LATENTES §H12 — runtimes disponibles detectados por probe dinámico.
+    # Valores actualmente mapeados: "python_native" (CPython ejecutable directo),
+    # "wasm" (wasmtime/wasmer CLI o python package wasmtime). Otros tiers
+    # (micro_c, web) se detectan en adapters específicos y se unen al vector
+    # vía enrollment — no en el snapshot del host Python.
+    supported_runtimes: list[str] = field(default_factory=list)
+
     def to_dict(self) -> dict:
         return asdict(self)
 
@@ -58,6 +93,129 @@ def _detect_wsl2() -> bool:
         return result.returncode == 0
     except Exception:
         return False
+
+
+def _detect_device_class() -> str:
+    """Detect the type of device we're running on."""
+    system = platform.system().lower()
+
+    # Android detection (Termux or native)
+    if os.path.exists("/system/build.prop") or "ANDROID_ROOT" in os.environ:
+        return "smartphone"  # conservative default; tablet detection requires screen size heuristic
+
+    # iOS detection (jailbreak/sideload with Python)
+    if os.path.exists("/var/mobile"):
+        return "smartphone"
+
+    # SBC detection (Raspberry Pi, etc.)
+    if system == "linux" and os.path.exists("/proc/device-tree/model"):
+        try:
+            model = Path("/proc/device-tree/model").read_text(errors="ignore").lower()
+            if "raspberry" in model or "orange pi" in model or "rock" in model:
+                return "sbc"
+        except Exception:
+            pass
+
+    # Laptop detection: has battery on desktop OS
+    if system in ("linux", "darwin", "windows"):
+        try:
+            battery = psutil.sensors_battery()
+            if battery is not None:
+                return "laptop"
+        except Exception:
+            pass
+
+    return "desktop"
+
+
+def _detect_soc_info() -> tuple[str, str]:
+    """Detect SoC model and vendor on Android. Returns (model, vendor)."""
+    if not (os.path.exists("/system/build.prop") or "ANDROID_ROOT" in os.environ):
+        return ("", "")
+
+    soc_model = ""
+    soc_vendor = ""
+
+    try:
+        # Try getprop (available on Android)
+        result = subprocess.run(
+            ["getprop", "ro.board.platform"],
+            capture_output=True, text=True, timeout=5
+        )
+        platform_name = result.stdout.strip().lower()
+
+        if "sm" in platform_name or "msm" in platform_name or "sdm" in platform_name:
+            soc_vendor = "qualcomm"
+        elif "exynos" in platform_name:
+            soc_vendor = "samsung"
+        elif "mt" in platform_name:
+            soc_vendor = "mediatek"
+
+        # Try to get more specific model
+        result2 = subprocess.run(
+            ["getprop", "ro.hardware.chipname"],
+            capture_output=True, text=True, timeout=5
+        )
+        soc_model = result2.stdout.strip() or platform_name
+
+    except Exception:
+        pass
+
+    return (soc_model, soc_vendor)
+
+
+def _read_battery_info() -> tuple[float, bool, float]:
+    """Read battery info. Returns (percent, charging, temp_c). Uses -1 for unavailable."""
+    # Try psutil first (works on laptops)
+    try:
+        battery = psutil.sensors_battery()
+        if battery is not None:
+            return (battery.percent, battery.power_plugged or False, -1.0)
+    except Exception:
+        pass
+
+    # Try Android sysfs
+    try:
+        capacity_path = Path("/sys/class/power_supply/battery/capacity")
+        status_path = Path("/sys/class/power_supply/battery/status")
+        temp_path = Path("/sys/class/power_supply/battery/temp")
+
+        percent = -1.0
+        charging = False
+        temp_c = -1.0
+
+        if capacity_path.exists():
+            percent = float(capacity_path.read_text().strip())
+        if status_path.exists():
+            charging = status_path.read_text().strip().lower() in ("charging", "full")
+        if temp_path.exists():
+            temp_c = float(temp_path.read_text().strip()) / 10.0  # Android reports in tenths of degree
+
+        if percent >= 0:
+            return (percent, charging, temp_c)
+    except Exception:
+        pass
+
+    return (-1.0, False, -1.0)
+
+
+def _estimate_max_model_params(ram_available_gb: float) -> float:
+    """Estimate max model size in billions of parameters (Q4 GGUF rule of thumb)."""
+    if ram_available_gb <= 0:
+        return 0.0
+    return round(ram_available_gb / 2.0, 1)
+
+
+def _detect_gpu_compute_api(gpu_vendor: str) -> str:
+    """Determine GPU compute API from vendor string."""
+    if gpu_vendor == "nvidia":
+        return "cuda"
+    elif gpu_vendor == "amd":
+        return "vulkan"
+    elif gpu_vendor == "apple":
+        return "metal"
+    return ""
+
 
 def _detect_gpu() -> dict:
     info = {"vendor": "none", "name": "none", "vram": 0.0, "vram_free": 0.0, "gpu_temp": 0.0}
@@ -164,6 +322,97 @@ def _get_installed_providers() -> list[str]:
     return []
 
 
+# BUGS_LATENTES §H12 — probe functions. Miden qué runtimes pueden ejecutar
+# en este device. Cada probe devuelve True/False y nunca lanza; fallo =
+# runtime no disponible, no error.
+
+def _probe_python_native() -> bool:
+    """¿Puede este host ejecutar CPython directamente?
+
+    Usa ``sys.executable`` — el mismo intérprete que corre GIMO. Si GIMO
+    está corriendo, Python native es por definición disponible. El probe
+    funciona también como sanity check: un ambiente roto donde
+    sys.executable no ejecuta indica un problema grave.
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "--version"],
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+        return result.returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _probe_wasm() -> bool:
+    """¿Hay un runtime WASM disponible?
+
+    Chequea en orden:
+        1. ``wasmtime`` CLI en PATH
+        2. ``wasmer`` CLI en PATH
+        3. Python package ``wasmtime`` importable
+
+    Si cualquiera responde, el tier WASM es viable. Si ninguno, el device
+    aún puede consumir bundles que NO requieran WASM (e.g. python_native).
+    """
+    for candidate in ("wasmtime", "wasmer"):
+        try:
+            result = subprocess.run(
+                [candidate, "--version"],
+                capture_output=True,
+                timeout=2,
+                check=False,
+            )
+            if result.returncode == 0:
+                return True
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
+        except Exception:  # noqa: BLE001
+            continue
+    # Fallback: Python library
+    try:
+        import importlib
+        importlib.import_module("wasmtime")
+        return True
+    except ImportError:
+        return False
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _probe_supported_runtimes() -> list[str]:
+    """Probe todos los runtimes y devuelve la lista de disponibles. Cached.
+
+    TTL de 5 min — los runtimes raramente cambian en scale sub-minuto. Los
+    adapters específicos (Android Kotlin) reportan sus propios tiers al
+    backend vía enrollment; esta función cubre solo lo que el Python host
+    puede detectar localmente.
+    """
+    global _runtimes_cache, _runtimes_cached_at
+    now = time.time()
+    if _runtimes_cache is not None and (now - _runtimes_cached_at) < _RUNTIMES_CACHE_TTL:
+        return list(_runtimes_cache)
+
+    runtimes: list[str] = []
+    if _probe_python_native():
+        runtimes.append("python_native")
+    if _probe_wasm():
+        runtimes.append("wasm")
+
+    _runtimes_cache = runtimes
+    _runtimes_cached_at = now
+    return list(runtimes)
+
+
+def _invalidate_runtimes_cache() -> None:
+    """Exposed para tests — fuerza re-probe en el próximo snapshot."""
+    global _runtimes_cache, _runtimes_cached_at
+    _runtimes_cache = None
+    _runtimes_cached_at = 0.0
+
+
 class HardwareMonitorService:
     """Singleton that samples system state periodically."""
 
@@ -177,6 +426,8 @@ class HardwareMonitorService:
         self._task_loop: Optional[asyncio.AbstractEventLoop] = None
         self._last_level: LoadLevel = "safe"
         self._running = False
+        # Strong refs for fire-and-forget notification tasks (prevents premature GC).
+        self._notification_tasks: set[asyncio.Task] = set()
 
     @classmethod
     def get_instance(cls) -> "HardwareMonitorService":
@@ -200,14 +451,22 @@ class HardwareMonitorService:
         gpu_info = _detect_gpu()
         npu_info = _detect_npu()
         total_ram_gb = round(mem.total / (1024 ** 3), 2)
+        ram_available_gb = round(mem.available / (1024 ** 3), 2)
         unified = bool(npu_info.get("unified_memory", False))
         # CPU inference capable: ≥16GB RAM + ≥4 cores (can run 7B Q4 at acceptable speed)
         cpu_infer = total_ram_gb >= 16.0 and (psutil.cpu_count(logical=False) or 0) >= 4
 
+        # Mobile / mesh device detection
+        device_class = _detect_device_class()
+        soc_model, soc_vendor = _detect_soc_info()
+        battery_pct, battery_charging, battery_temp = _read_battery_info()
+        max_params = _estimate_max_model_params(ram_available_gb)
+        gpu_compute_api = _detect_gpu_compute_api(gpu_info["vendor"])
+
         return HardwareSnapshot(
             cpu_percent=psutil.cpu_percent(interval=0.1),
             ram_percent=mem.percent,
-            ram_available_gb=round(mem.available / (1024 ** 3), 2),
+            ram_available_gb=ram_available_gb,
             timestamp=time.time(),
             gpu_vendor=gpu_info["vendor"],
             gpu_name=gpu_info["name"],
@@ -222,6 +481,16 @@ class HardwareMonitorService:
             npu_tops=npu_info["tops"],
             unified_memory=unified,
             cpu_inference_capable=cpu_infer,
+            device_class=device_class,
+            soc_model=soc_model,
+            soc_vendor=soc_vendor,
+            gpu_compute_api=gpu_compute_api,
+            max_model_params_b=max_params,
+            battery_percent=battery_pct,
+            battery_charging=battery_charging,
+            battery_temp_c=battery_temp,
+            # BUGS_LATENTES §H12: runtime availability dinámico (cached 5 min).
+            supported_runtimes=_probe_supported_runtimes(),
         )
 
     def get_load_level(self, snapshot: Optional[HardwareSnapshot] = None) -> LoadLevel:
@@ -313,12 +582,16 @@ class HardwareMonitorService:
             try:
                 from .notification_service import NotificationService
                 import asyncio
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.create_task(NotificationService.publish(
-                        "system_degraded",
-                        {"level": new, "cpu": snap.cpu_percent, "ram": snap.ram_percent,
-                         "vram_free_gb": snap.gpu_vram_free_gb, "critical": True},
-                    ))
+                # Called from an async monitor loop — get_running_loop raises
+                # RuntimeError if we somehow ended up outside a loop, which the
+                # outer try/except swallows (fail-open: just skip the notify).
+                asyncio.get_running_loop()
+                _notify_task = asyncio.create_task(NotificationService.publish(
+                    "system_degraded",
+                    {"level": new, "cpu": snap.cpu_percent, "ram": snap.ram_percent,
+                     "vram_free_gb": snap.gpu_vram_free_gb, "critical": True},
+                ))
+                self._notification_tasks.add(_notify_task)
+                _notify_task.add_done_callback(self._notification_tasks.discard)
             except Exception:
                 pass

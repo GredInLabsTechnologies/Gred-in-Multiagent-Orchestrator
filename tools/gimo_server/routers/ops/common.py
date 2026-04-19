@@ -1,24 +1,24 @@
 from __future__ import annotations
 import hashlib
-from typing import Literal
+from typing import Annotated, Literal
 from fastapi import Depends, HTTPException
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.graph import GraphEngine
 
 
-def require_read(auth: AuthContext = Depends(verify_token)) -> AuthContext:
+def require_read(auth: Annotated[AuthContext, Depends(verify_token)]) -> AuthContext:
     """Dependency: any authenticated user can read."""
     return auth
 
 
-def require_operator(auth: AuthContext = Depends(verify_token)) -> AuthContext:
+def require_operator(auth: Annotated[AuthContext, Depends(verify_token)]) -> AuthContext:
     """Dependency: operator or admin required."""
     _require_role(auth, "operator")
     return auth
 
 
-def require_admin(auth: AuthContext = Depends(verify_token)) -> AuthContext:
+def require_admin(auth: Annotated[AuthContext, Depends(verify_token)]) -> AuthContext:
     """Dependency: admin required."""
     _require_role(auth, "admin")
     return auth
@@ -42,7 +42,6 @@ def _actor_label(auth: AuthContext) -> str:
 _ACTIONS_SAFE_PATHS = {
     "/ops/plan", "/ops/drafts", "/ops/approved", "/ops/runs",
     "/ops/config", "/status", "/tree", "/file", "/search", "/diff",
-    "/ui/status",
 }
 _ACTIONS_SAFE_PATH_PREFIXES = (
     "/ops/drafts/", "/ops/approved/", "/ops/runs/",

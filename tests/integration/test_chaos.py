@@ -120,10 +120,10 @@ def test_panic_mode_trigger_and_recovery(metrics):
         print("System successfully entered PANIC mode.")
 
         # 2. Attempt Recovery
-        # POST /ui/security/resolve
+        # POST /ops/security/resolve
         try:
             res_resp = requests.post(
-                f"{BASE_URL}/ui/security/resolve",
+                f"{BASE_URL}/ops/security/resolve",
                 headers={"Authorization": f"Bearer {AUTH_TOKEN}"},
                 params={"action": "clear_panic"},
             )

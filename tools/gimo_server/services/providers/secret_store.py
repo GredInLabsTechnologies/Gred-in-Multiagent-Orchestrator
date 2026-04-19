@@ -19,7 +19,11 @@ from typing import Optional
 
 logger = logging.getLogger("orchestrator.secret_store")
 
-_SALT = b"GIMO-PROVIDER-SECRETS-2026-v1"
+# S2053: Static salt is intentional — key derivation MUST be deterministic
+# across process restarts to decrypt the existing vault file. Entropy comes
+# from the hardware fingerprint (see ``_derive_key``), not the salt. Rotating
+# the salt would invalidate every stored secret on every boot.
+_SALT = b"GIMO-PROVIDER-SECRETS-2026-v1"  # nosec python:S2053
 _STORE_REL = Path(".orch_data") / "ops" / "state" / "provider_secrets.enc"
 
 
@@ -38,6 +42,9 @@ def _derive_key() -> bytes:
 
 
 def _store_path() -> Path:
+    # No user-controlled segment: the path is composed of ``Path.cwd()`` and
+    # a fixed relative literal. Sonar S2083/S6549 report here is a false
+    # positive. Kept explicit so this remains true under refactors.
     return Path.cwd() / _STORE_REL
 
 

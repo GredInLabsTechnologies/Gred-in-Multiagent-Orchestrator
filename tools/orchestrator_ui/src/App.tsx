@@ -8,6 +8,7 @@ import { useProviderHealth } from './hooks/useProviderHealth';
 import { checkSession, logout } from './lib/auth';
 import { API_BASE, UiStatusResponse } from './types';
 import { fetchWithRetry } from './lib/fetchWithRetry';
+import { fetchOperatorStatus } from './lib/operatorStatus';
 import { getCommandHandlers } from './lib/commands';
 import { LoginModal } from './components/LoginModal';
 import { MenuBar } from './components/MenuBar';
@@ -23,6 +24,7 @@ import { SkillsRail } from './components/SkillsRail';
 /* ── Lazy-loaded views ─────────────────────────────────── */
 const GraphView = lazy(() => import('./views/GraphView'));
 const PlansView = lazy(() => import('./views/PlansView'));
+const ThreadView = lazy(() => import('./components/ThreadView').then(m => ({ default: m.ThreadView })));
 
 /* Overlay content (lazy) */
 const SettingsPanel = lazy(() => import('./components/SettingsPanel').then(m => ({ default: m.SettingsPanel })));
@@ -95,15 +97,13 @@ export default function App() {
         let toastedOffline = false;
         const fetchStatus = async () => {
             try {
-                const res = await fetchWithRetry(`${API_BASE}/ui/status`, { credentials: 'include' });
-                if (res.status === 401) { setAuthenticated(false); return; }
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
+                const data = await fetchOperatorStatus();
                 setStatus(data);
                 setBootState('ready');
                 setBootError(null);
                 toastedOffline = false;
-            } catch {
+            } catch (error) {
+                if (error instanceof Error && error.message === 'HTTP 401') { setAuthenticated(false); return; }
                 if (!toastedOffline) {
                     addToast('No hay conexión con el backend.', 'error');
                     toastedOffline = true;
@@ -262,6 +262,10 @@ export default function App() {
                 );
             case 'plans':
                 return <PlansView />;
+            case 'threads':
+                // ThreadView consumes credentials via cookies (`credentials: 'include'`) and uses
+                // `API_BASE` directly — no extra props required from App state.
+                return <ThreadView />;
             default:
                 return null;
         }

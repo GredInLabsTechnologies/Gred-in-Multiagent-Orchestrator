@@ -118,7 +118,7 @@ class ConfidenceService:
                 "type": "proactive"
             }
         except Exception as e:
-            logger.error(f"Error in project_confidence: {e}")
+            logger.error("Error in project_confidence: %s", e)
             return {
                 "score": 0.5,
                 "analysis": f"Evaluación fallida: {str(e)}",

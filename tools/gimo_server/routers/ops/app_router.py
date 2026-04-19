@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from tools.gimo_server.security import verify_token
 from tools.gimo_server.security.auth import AuthContext
 from tools.gimo_server.services.app_session_service import AppSessionService
+from tools.gimo_server.services.app_draft_service import AppDraftService, AppDraftSessionNotFoundError
 from tools.gimo_server.services.workspace.repo_recon_service import RepoReconService
 from tools.gimo_server.services.draft_validation_service import DraftValidationService
 from tools.gimo_server.services.context_request_service import ContextRequestService
@@ -131,37 +132,10 @@ async def create_draft(
     payload: DraftCreateRequest
 ):
     """P5.2 Validation: validate and persist the canonical OPS draft backed by recon evidence."""
-    _require_existing_session(id)
     try:
-        result = DraftValidationService.validate_draft(id, payload.model_dump())
-        validated_task_spec = result["validated_task_spec"]
-        repo_context_pack = result["repo_context_pack"]
-        allowed_paths = validated_task_spec.get("allowed_paths", [])
-        acceptance_criteria = str(validated_task_spec.get("acceptance_criteria") or "").strip()
-        prompt = (
-            "Implement the validated task strictly within the approved repository scope.\n\n"
-            f"Acceptance criteria:\n{acceptance_criteria}\n\n"
-            f"Allowed paths:\n" + "\n".join(f"- {path}" for path in allowed_paths)
-        )
-        draft = OpsService.create_draft(
-            prompt=prompt,
-            content=prompt,
-            context={
-                "validated_task_spec": validated_task_spec,
-                "repo_context_pack": repo_context_pack,
-                "repo_context": {"repo_id": validated_task_spec.get("repo_handle")},
-                "execution_decision": "MANUAL_REVIEW_REQUIRED",
-                "intent_effective": "CODE_CHANGE",
-                "commit_base": validated_task_spec.get("base_commit"),
-                "surface": WorkspacePolicyService.SURFACE_CHATGPT_APP,
-                "workspace_mode": WorkspacePolicyService.MODE_EPHEMERAL,
-            },
-        )
-        return {
-            "draft_id": draft.id,
-            "validated_task_spec": validated_task_spec,
-            "repo_context_pack": repo_context_pack,
-        }
+        return AppDraftService.create_validated_draft(id, payload)
+    except AppDraftSessionNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:

@@ -198,6 +198,25 @@ def _resolve_role(token: str) -> str:
     return "admin"
 
 
+def _verify_device_secret(token: str, request: Request) -> AuthContext | None:
+    """Check if token is a valid mesh device_secret.
+
+    Grants 'operator' role — devices can access mesh endpoints (models,
+    heartbeat, tasks) but not admin operations (enrollment, workspaces).
+    """
+    try:
+        registry = getattr(request.app.state, "mesh_registry", None)
+        if registry is None:
+            return None
+        device = registry.authenticate_device(token)
+        if device is not None:
+            logger.debug("Authenticated mesh device %s via device_secret", device.device_id)
+            return AuthContext(token=f"device:{device.device_id}", role="operator")
+    except Exception:
+        pass
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Unified verify: Bearer header OR session cookie
 # ---------------------------------------------------------------------------
@@ -269,6 +288,13 @@ def verify_token(
             if bond_ctx:
                 request.state.auth_role = bond_ctx.role
                 return bond_ctx
+
+        # 1c. Mesh device_secret — grants "operator" role for device endpoints
+        if token:
+            device_ctx = _verify_device_secret(token, request)
+            if device_ctx:
+                request.state.auth_role = device_ctx.role
+                return device_ctx
 
         if token:
             _report_auth_failure(request, token)

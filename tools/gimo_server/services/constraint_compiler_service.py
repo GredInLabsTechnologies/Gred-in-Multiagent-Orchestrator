@@ -5,6 +5,7 @@ import os
 from typing import Any, Dict
 
 from ..models.agent_routing import TaskConstraints, TaskDescriptor, TrustAuthorityResult
+from ..utils.debug_mode import is_debug_mode
 from .intent_classification_service import IntentClassificationService
 from .providers.service import ProviderService
 from .providers.topology_service import ProviderTopologyService
@@ -12,8 +13,6 @@ from .runtime_policy_service import RuntimePolicyService
 from .workspace.workspace_policy_service import WorkspacePolicyService
 
 logger = logging.getLogger("orchestrator.services.constraint_compiler")
-
-_DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes", "verbose")
 
 
 class ConstraintCompilerService:
@@ -34,6 +33,41 @@ class ConstraintCompilerService:
         "medium": 20.0,
         "high": 55.0,
     }
+
+    @classmethod
+    def _rerank_bindings_by_capability(
+        cls, bindings: list, task_type: str
+    ) -> list:
+        """Reordena bindings por success_rate del (provider, model, task_type).
+
+        BUGS_LATENTES §H4. Sin exclusión — solo prioridad. Los bindings sin
+        muestras ni track record quedan al final (después de los que SÍ tienen
+        histórico). Preserva el orden relativo original entre bindings con
+        score idéntico (stable sort).
+
+        Safe: excepciones del lookup no rompen compile — se trata como score
+        ausente.
+        """
+        from .capability_profile_service import CapabilityProfileService
+
+        def _score(binding) -> tuple[int, float]:
+            # Tuple: (has_samples, success_rate). has_samples=1 prefix hace
+            # que los bindings sin track queden al final.
+            try:
+                cap = CapabilityProfileService.get_capability(
+                    provider_type=getattr(binding, "provider_id", ""),
+                    model_id=getattr(binding, "model", ""),
+                    task_type=task_type or "default",
+                )
+            except Exception:  # noqa: BLE001
+                return (0, 0.0)
+            if not cap or cap.samples < 2:
+                return (0, 0.0)
+            return (1, float(cap.success_rate))
+
+        # Python sort es estable — bindings con mismo score mantienen orden
+        # original. Reverse=True porque queremos mejores scores primero.
+        return sorted(bindings, key=_score, reverse=True)
 
     @classmethod
     def _base_policies(cls, descriptor: TaskDescriptor) -> list[str]:
@@ -231,8 +265,7 @@ class ConstraintCompilerService:
         # Layer 2: Benchmark data — static capability scores by dimension
         dimension = cls._SEMANTIC_TO_DIMENSION.get(task_semantic or "implementation", "coding")
         try:
-            from .benchmark_enrichment_service import get_best_model_for_task, refresh_benchmarks
-            import asyncio
+            from .benchmark_enrichment_service import get_best_model_for_task
             # Use cached profiles (don't await refresh in sync context)
             from .benchmark_enrichment_service import _load_runtime_cache, _load_seed_file
             profiles = _load_runtime_cache() or _load_seed_file() or {}
@@ -290,7 +323,7 @@ class ConstraintCompilerService:
 
         Fail-open: if signals unavailable, returns policy with no metadata.
         """
-        if _DEBUG_MODE:
+        if is_debug_mode():
             logger.warning(
                 "Trust authority: DEBUG mode — bypassing GICS/trust checks for %s/%s",
                 provider_type, model_id,
@@ -468,6 +501,21 @@ class ConstraintCompilerService:
         )
         if constrained_bindings != topology_bindings:
             compiler_notes.append("binding_candidates_narrowed_by_request")
+
+        # BUGS_LATENTES §H4 fix: re-rank bindings by capability profile track
+        # record. Antes, ConstraintCompiler y CapabilityProfileService vivían
+        # en silos — el compiler solo usaba CapabilityProfile para metadata
+        # advisory. Ahora los bindings quedan ordenados por success_rate del
+        # (provider, model, task_type) tuple. Preserva todos los candidatos
+        # — nunca excluye — solo prioriza. Si ninguno tiene muestras, queda
+        # el orden original.
+        if len(constrained_bindings) > 1:
+            reranked = cls._rerank_bindings_by_capability(
+                constrained_bindings, descriptor.task_type
+            )
+            if reranked != constrained_bindings:
+                constrained_bindings = reranked
+                compiler_notes.append("bindings_reranked_by_capability_profile")
 
         allowed_binding_modes = cls._compile_binding_modes(
             descriptor,

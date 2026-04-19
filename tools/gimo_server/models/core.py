@@ -176,6 +176,7 @@ class OpsConfig(BaseModel):
     phase6: Phase6StrategyConfig = Field(default_factory=Phase6StrategyConfig)
     ui_show_ids_events: bool = True
     ui_enable_chat_investigation: bool = True
+    mesh_enabled: bool = False
 
 
 class OpsCreateDraftRequest(BaseModel):
@@ -251,12 +252,11 @@ class StatusResponse(BaseModel):
     uptime_seconds: float
 
 
-class UiStatusResponse(BaseModel):
-    version: str
-    uptime_seconds: float
-    allowlist_count: int
-    last_audit_line: Optional[str] = None
-    service_status: str
+ServiceLifecycleStatus = Literal["RUNNING", "STOPPED", "STARTING", "STOPPING", "UNKNOWN"]
+
+
+class ServiceStatusResponse(BaseModel):
+    status: ServiceLifecycleStatus
 
 
 class VitaminizeResponse(BaseModel):
