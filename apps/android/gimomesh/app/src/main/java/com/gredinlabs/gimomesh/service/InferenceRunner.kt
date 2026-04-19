@@ -1,6 +1,7 @@
 package com.gredinlabs.gimomesh.service
 
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -51,9 +52,6 @@ class InferenceRunner(
         stop()
         _status.value = Status.STARTING
 
-        // BUGS_LATENTES §H1: gate on the inference-specific sub-resource,
-        // not on the broader isReady flag — server-only devices may have
-        // Core runtime but no llama-server.
         if (!shell.isInferenceReady) {
             _status.value = Status.ERROR
             return@withContext false
@@ -95,10 +93,17 @@ class InferenceRunner(
             _status.value = Status.RUNNING
             startHealthMonitor(port)
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // Keep a single ERROR log so future silent failures are diagnosable.
+            // Previous swallowed catch hid a SELinux permission denial for hours.
+            Log.e(TAG, "llama-server start() failed", e)
             _status.value = Status.ERROR
             false
         }
+    }
+
+    private companion object {
+        const val TAG = "InferenceRunner"
     }
 
     fun stop() {

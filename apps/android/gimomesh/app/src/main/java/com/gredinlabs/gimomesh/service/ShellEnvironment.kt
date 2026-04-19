@@ -120,14 +120,22 @@ class ShellEnvironment(private val context: Context) {
     }
 
     /**
-     * Attempts to extract llama-server. Returns `true` if the binary is
-     * present and executable (does NOT validate that a model is loaded —
-     * that's InferenceRunner's responsibility).
+     * Locates llama-server. Since Android 10 blocks execve of binaries in
+     * /data/data/<pkg>/files/ (untrusted_app SELinux context), we ship the
+     * binary as a JNI library (libllama-server.so under jniLibs/<abi>/) so
+     * it lands in applicationInfo.nativeLibraryDir, which is labeled for
+     * native exec. Returns `true` if the binary is present and executable.
      */
     private fun initInference(): Boolean {
-        val llamaServer = File(binDir, "llama-server")
-        val ok = extractAsset("bin/llama-server", llamaServer)
-        return ok && llamaServer.canExecute()
+        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
+        val nativeBin = File(nativeDir, "libllama-server.so")
+        if (nativeBin.exists() && nativeBin.canExecute()) {
+            // Keep a stable path under binDir for any legacy caller — but
+            // prefer getBinaryPath("llama-server") which resolves to the
+            // native dir directly (see below).
+            return true
+        }
+        return false
     }
 
     suspend fun exec(
@@ -200,7 +208,15 @@ class ShellEnvironment(private val context: Context) {
 
     fun getModelsDir(): File = modelsDir
 
-    fun getBinaryPath(name: String): File = File(binDir, name)
+    fun getBinaryPath(name: String): File {
+        // Binaries shipped via jniLibs live in applicationInfo.nativeLibraryDir
+        // (labeled for exec). Binaries extracted to filesDir/bin are legacy.
+        if (name == "llama-server") {
+            val nativeBin = File(context.applicationInfo.nativeLibraryDir, "libllama-server.so")
+            if (nativeBin.exists()) return nativeBin
+        }
+        return File(binDir, name)
+    }
 
     fun getEmbeddedCoreRuntime(): EmbeddedCoreRuntime? = embeddedCoreRuntime
 

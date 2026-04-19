@@ -76,7 +76,19 @@ class MeshAgentService : Service() {
         when (intent?.action) {
             ACTION_START -> startMesh()
             ACTION_STOP -> stopMesh()
-            ACTION_START_INFERENCE -> scope.launch { requestStartInferenceNow() }
+            ACTION_START_INFERENCE -> {
+                // Android 14+ kills background services quickly — promote to
+                // foreground before touching anything. If mesh isn't running
+                // yet, bring it up too (inference without a mesh node is a
+                // dead end; the user tapping START implicitly wants both).
+                if (!scope.coroutineContext.isActive) {
+                    // scope was cancelled by a prior stopMesh — no-op, let
+                    // the next user gesture restart.
+                } else if (heartbeatJob?.isActive != true) {
+                    startMesh()
+                }
+                scope.launch { requestStartInferenceNow() }
+            }
             ACTION_STOP_INFERENCE -> scope.launch { requestStopInference() }
         }
         return START_NOT_STICKY
