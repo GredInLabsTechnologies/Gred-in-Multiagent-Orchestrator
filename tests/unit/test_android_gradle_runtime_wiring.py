@@ -33,8 +33,12 @@ def gradle_content() -> str:
 
 
 def test_package_core_runtime_task_registered(gradle_content: str) -> None:
-    assert 'tasks.register<Copy>("packageCoreRuntime")' in gradle_content, (
-        "La tarea :app:packageCoreRuntime debe estar registrada como tipo Copy."
+    # Desde commit c87ad86 (APK multi-ABI + rove 1.0.1) la tarea dejó de ser
+    # Copy<> fijo y se convirtió en una tarea custom que recorre los bundles
+    # por ABI producidos por rove. Seguimos verificando que existe; el tipo
+    # exacto es detalle de implementación.
+    assert 'tasks.register("packageCoreRuntime")' in gradle_content, (
+        "La tarea :app:packageCoreRuntime debe estar registrada."
     )
 
 
@@ -53,10 +57,13 @@ def test_copy_source_and_destination(gradle_content: str) -> None:
 
 
 def test_required_artifacts_in_copy(gradle_content: str) -> None:
-    for artifact in ("gimo-core-runtime.json", "gimo-core-runtime.tar.xz", "gimo-core-runtime.sig"):
+    # Desde rove 1.0.1 el schema de manifest es el canónico WheelhouseManifest
+    # (gimo-core-runtime.manifest.json) y la firma va embebida en el manifest,
+    # no en un archivo .sig separado. Sobreviven el tarball y el manifest.
+    for artifact in ("gimo-core-runtime.manifest.json", "gimo-core-runtime.tar.xz"):
         assert artifact in gradle_content, (
-            f"Missing artifact {artifact!r} en include() de packageCoreRuntime. "
-            "El bundle tiene 3 ficheros (manifest + tarball + sig) — los 3 deben copiarse."
+            f"Missing artifact {artifact!r} en packageCoreRuntime. "
+            "El bundle tiene 2 ficheros (manifest rove + tarball) — ambos deben copiarse por ABI."
         )
 
 
@@ -69,9 +76,14 @@ def test_merge_assets_depends_on_package_core_runtime(gradle_content: str) -> No
 
 
 def test_error_message_references_python_producer(gradle_content: str) -> None:
-    """Si el bundle no existe, el error debe decir cómo producirlo localmente."""
-    assert 'scripts/package_core_runtime.py' in gradle_content, (
-        "El mensaje de GradleException debe referenciar scripts/package_core_runtime.py "
+    """Si el bundle no existe, el error debe decir cómo producirlo localmente.
+
+    Post-rove (commit c87ad86) el productor canónico es build_rove_wheelhouse.py.
+    El gradle legacy referenciaba package_core_runtime.py; ambos quedan válidos
+    porque el CLI wheelhouse forge es el wrapper de más alto nivel.
+    """
+    assert 'scripts/build_rove_wheelhouse.py' in gradle_content, (
+        "El mensaje de GradleException debe referenciar scripts/build_rove_wheelhouse.py "
         "para que el operator sepa cómo desbloquearse sin leer el plan entero."
     )
 

@@ -154,3 +154,4 @@ apps/android/gimomesh/app/src/main/assets/runtime/
 /.wsl-venv/
 /runtime-python-local/
 /.idea/
+.claude/scheduled_tasks.lock

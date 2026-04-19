@@ -405,16 +405,18 @@ export const OpsIsland: React.FC<OpsIslandProps> = ({ token }) => {
                                     </div>
                                     {(expandedRun === run.id || run.status === 'running') && (
                                         <div className="bg-zinc-950/40 p-4 max-h-64 overflow-y-auto font-mono text-[10px] space-y-1">
-                                            {run.log.length > 0 ? (
-                                                run.log.map((log, i) => {
+                                            {(run.log?.length ?? 0) > 0 ? (
+                                                run.log!.map((log, i) => {
                                                     let levelColor = 'text-zinc-400';
                                                     if (log.level === 'ERROR') levelColor = 'text-red-400';
                                                     else if (log.level === 'WARN') levelColor = 'text-amber-400';
+                                                    const ts = typeof log.ts === 'string' ? log.ts : '';
+                                                    const msg = typeof log.msg === 'string' ? log.msg : '';
                                                     return (
                                                         <div key={`${run.id}-${i}`} className="flex space-x-3">
-                                                            <span className="text-zinc-700 whitespace-nowrap">[{log.ts.split('T')[1]?.split('.')[0] || log.ts}]</span>
+                                                            <span className="text-zinc-700 whitespace-nowrap">[{ts.split('T')[1]?.split('.')[0] || ts}]</span>
                                                             <span className={levelColor}>
-                                                                {log.msg}
+                                                                {msg}
                                                             </span>
                                                         </div>
                                                     );

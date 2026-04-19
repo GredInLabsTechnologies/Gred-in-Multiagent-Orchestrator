@@ -118,6 +118,11 @@ _STANDALONE_PYTHON_VERSION = "3.13.13"
 _STANDALONE_ASSETS: dict[str, str] = {
     "android-arm64": f"cpython-{_STANDALONE_PYTHON_VERSION}+{_STANDALONE_RELEASE}-aarch64-unknown-linux-gnu-install_only.tar.gz",
     "android-armv7": f"cpython-{_STANDALONE_PYTHON_VERSION}+{_STANDALONE_RELEASE}-armv7-unknown-linux-gnueabihf-install_only.tar.gz",
+    # android-x86_64 añadido tras rove 1.0.1 (commit c87ad86) que expuso el target
+    # para emulador Android y Chromebook ARC. Reusa el tarball linux-x86_64 porque
+    # python-build-standalone no publica un flavor Android-específico (mismo ABI
+    # glibc bajo Termux proot-distro).
+    "android-x86_64": f"cpython-{_STANDALONE_PYTHON_VERSION}+{_STANDALONE_RELEASE}-x86_64-unknown-linux-gnu-install_only.tar.gz",
     "linux-x86_64": f"cpython-{_STANDALONE_PYTHON_VERSION}+{_STANDALONE_RELEASE}-x86_64-unknown-linux-gnu-install_only.tar.gz",
     "linux-arm64": f"cpython-{_STANDALONE_PYTHON_VERSION}+{_STANDALONE_RELEASE}-aarch64-unknown-linux-gnu-install_only.tar.gz",
     "darwin-arm64": f"cpython-{_STANDALONE_PYTHON_VERSION}+{_STANDALONE_RELEASE}-aarch64-apple-darwin-install_only.tar.gz",
@@ -131,6 +136,7 @@ _STANDALONE_ASSETS: dict[str, str] = {
 _PIP_PLATFORM_TAGS: dict[str, list[str]] = {
     "android-arm64": ["manylinux2014_aarch64", "manylinux_2_17_aarch64"],
     "android-armv7": ["manylinux2014_armv7l", "manylinux_2_17_armv7l"],
+    "android-x86_64": ["manylinux2014_x86_64", "manylinux_2_17_x86_64"],
     "linux-x86_64": ["manylinux2014_x86_64", "manylinux_2_17_x86_64"],
     "linux-arm64": ["manylinux2014_aarch64", "manylinux_2_17_aarch64"],
     "darwin-arm64": ["macosx_11_0_arm64"],

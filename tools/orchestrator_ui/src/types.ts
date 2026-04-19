@@ -16,6 +16,34 @@ function resolveDefaultApiBase(): string {
 
 export const API_BASE = _envApiBase || resolveDefaultApiBase();
 
+/**
+ * Backend contract types — re-exported from codegen output.
+ *
+ * `backend-generated.ts` is produced by `npm run codegen` from the live
+ * FastAPI `app.openapi()` schema (which derives from Pydantic models).
+ * Never hand-edit that file, and never re-declare these shapes here.
+ *
+ * Regression guard for audit findings F3 (contract drift), F4 (polling
+ * misses statuses), F5 (optimistic status assertion).
+ */
+import type { components as _BackendComponents } from './types/backend-generated';
+type _Schemas = _BackendComponents['schemas'];
+export type OpsRun = _Schemas['OpsRun'];
+export type OpsRunStatus = OpsRun['status'];
+/**
+ * Active run statuses — runs in these states may still transition server-side
+ * without user action, so the UI must keep polling. Exhaustively derived from
+ * OpsRunStatus to guarantee we never miss a new backend state (F4).
+ */
+export const ACTIVE_RUN_STATUSES: readonly OpsRunStatus[] = [
+    'pending',
+    'running',
+    'awaiting_subagents',
+    'awaiting_review',
+    'AWAITING_MERGE',
+    'HUMAN_APPROVAL_REQUIRED',
+] as const;
+
 export type TrustLevel = 'autonomous' | 'supervised' | 'restricted';
 
 export interface ConfidenceScore {
@@ -461,14 +489,8 @@ export interface OpsApproved {
     approved_by?: string | null;
 }
 
-export interface OpsRun {
-    id: string;
-    approved_id: string;
-    status: 'pending' | 'running' | 'done' | 'error' | 'cancelled';
-    log: Array<{ ts: string; level: string; msg: string }>;
-    started_at?: string | null;
-    created_at: string;
-}
+// OpsRun and OpsRunStatus are re-exported from backend-generated.ts at the top of this file
+// (see _Schemas['OpsRun']). Do not re-declare here — the backend is the source of truth.
 
 export interface OpsApproveResponse {
     approved: OpsApproved;

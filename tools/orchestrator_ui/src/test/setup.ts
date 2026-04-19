@@ -1,5 +1,8 @@
 import '@testing-library/jest-dom/vitest'
 import { vi } from 'vitest'
+// Initialize i18n so components using useTranslation() render actual strings
+// instead of raw keys. Tests that assert on user-visible text rely on this.
+import '../i18n'
 
 // Mock globalThis.location for API_BASE (safe across runtimes/jsdom versions)
 try {
@@ -20,6 +23,15 @@ try {
 } catch {
     // Ignore when runtime does not allow overriding global fetch.
 }
+
+// Stub fetchWithRetry as a pass-through to global `fetch`. Hooks that fetch
+// via fetchWithRetry would otherwise retry 3× with 500-4000ms backoff on
+// rejected promises and 5xx, which breaks single-shot `mockRejectedValueOnce`
+// / `mockResolvedValueOnce` patterns used across hook tests. No existing test
+// exercises retry/backoff logic directly, so this is safe.
+vi.mock('../lib/fetchWithRetry', () => ({
+    fetchWithRetry: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
+}))
 
 // Mock URL.createObjectURL and revokeObjectURL for export tests
 globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url')

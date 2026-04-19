@@ -12,7 +12,9 @@
         "test:ui": "node ./scripts/run-vitest.mjs --environment jsdom",
         "test:file": "node ./scripts/run-vitest.mjs --environment jsdom",
         "test:coverage": "node ./scripts/run-vitest.mjs --coverage --passWithNoTests",
-        "test:ci": "node ./scripts/run-vitest.mjs --reporter=dot"
+        "test:ci": "node ./scripts/run-vitest.mjs --reporter=dot",
+        "codegen": "node ./scripts/codegen-backend-types.mjs",
+        "codegen:check": "node ./scripts/codegen-backend-types.mjs --check"
     },
     "engines": {
         "node": ">=20 <21 || >=22 <23 || >=24 <25"
@@ -49,6 +51,7 @@
         "eslint-plugin-react-hooks": "^7.0.1",
         "eslint-plugin-react-refresh": "^0.4.26",
         "jsdom": "^29.0.1",
+        "openapi-typescript": "^7.13.0",
         "postcss": "^8.4.35",
         "tailwindcss": "^3.4.1",
         "typescript": "^5.2.2",

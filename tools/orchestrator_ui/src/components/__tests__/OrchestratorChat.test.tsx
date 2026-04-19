@@ -84,7 +84,7 @@ describe('OrchestratorChat', () => {
 
         const textarea = screen.getByPlaceholderText(chatInputPlaceholder);
         fireEvent.change(textarea, { target: { value: 'help' } });
-        fireEvent.click(screen.getByRole('button', { name: /^Enviar$/i }));
+        fireEvent.click(screen.getByRole('button', { name: /^Send$/i }));
 
         await waitFor(() => {
             expect(screen.getByText('Intent: HELP')).toBeTruthy();
@@ -148,7 +148,7 @@ describe('OrchestratorChat', () => {
         fireEvent.change(screen.getByPlaceholderText(chatInputPlaceholder), {
             target: { value: 'crear plan de pruebas' },
         });
-        fireEvent.click(screen.getByRole('button', { name: /^Enviar$/i }));
+        fireEvent.click(screen.getByRole('button', { name: /^Send$/i }));
 
         const approveButtons = await screen.findAllByRole('button', { name: /aprobar/i });
         fireEvent.click(approveButtons[0]);
@@ -205,7 +205,7 @@ describe('OrchestratorChat', () => {
         fireEvent.change(screen.getByPlaceholderText(chatInputPlaceholder), {
             target: { value: '/explorar' },
         });
-        fireEvent.click(screen.getByRole('button', { name: /^Enviar$/i }));
+        fireEvent.click(screen.getByRole('button', { name: /^Send$/i }));
 
         await waitFor(() => {
             expect(screen.getByText(/Skill \/explorar en cola/)).toBeTruthy();
@@ -237,7 +237,7 @@ describe('OrchestratorChat', () => {
         fireEvent.change(screen.getByPlaceholderText(chatInputPlaceholder), {
             target: { value: '/desconocido' },
         });
-        fireEvent.click(screen.getByRole('button', { name: /^Enviar$/i }));
+        fireEvent.click(screen.getByRole('button', { name: /^Send$/i }));
 
         await waitFor(() => {
             expect(screen.getByText(/Comando \/desconocido no encontrado/)).toBeTruthy();
@@ -267,7 +267,7 @@ describe('OrchestratorChat', () => {
         fireEvent.change(screen.getByPlaceholderText(chatInputPlaceholder), {
             target: { value: 'hola terminal' },
         });
-        fireEvent.click(screen.getByRole('button', { name: /^Enviar$/i }));
+        fireEvent.click(screen.getByRole('button', { name: /^Send$/i }));
 
         const sendButtons = await screen.findAllByRole('button', { name: /enviar a terminal/i });
         fireEvent.click(sendButtons[0]);

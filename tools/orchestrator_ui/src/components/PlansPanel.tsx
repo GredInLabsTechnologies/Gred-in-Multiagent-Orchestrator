@@ -86,7 +86,9 @@ export const PlansPanel: React.FC<PlansPanelProps> = ({
             type: 'run',
             status: r.status,
             title: `Run ${r.id}`,
-            createdAt: r.created_at,
+            // created_at is nullable in the backend schema (see OpsRun). Fall back to epoch
+            // so the sort below is stable; runs without created_at appear oldest.
+            createdAt: r.created_at ?? new Date(0).toISOString(),
             subtitle: `Approved: ${r.approved_id}`,
         }));
 

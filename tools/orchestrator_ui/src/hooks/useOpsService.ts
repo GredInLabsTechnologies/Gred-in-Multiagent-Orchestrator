@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import {
     API_BASE,
     OpsPlan, OpsDraft, OpsApproved, OpsRun, OpsConfig,
-    OpsApproveResponse, ProviderConfig
+    OpsApproveResponse, ProviderConfig,
+    ACTIVE_RUN_STATUSES
 } from '../types';
 import { fetchWithRetry } from '../lib/fetchWithRetry';
 
@@ -58,7 +59,11 @@ export const useOpsService = (_token?: string) => {
     }, [getHeaders]);
 
     useEffect(() => {
-        const hasActive = runs.some(r => r.status === 'pending' || r.status === 'running');
+        // F4 fix: poll while any run is in an active (non-terminal) status,
+        // exhaustively derived from backend-generated OpsRunStatus. This list
+        // is the single source of truth — adding a new backend status requires
+        // an explicit decision here, caught at codegen time (F3).
+        const hasActive = runs.some(r => ACTIVE_RUN_STATUSES.includes(r.status));
         if (hasActive && !pollRef.current) {
             pollRef.current = setInterval(refreshRuns, POLL_INTERVAL_MS);
         } else if (!hasActive && pollRef.current) {
@@ -108,7 +113,14 @@ export const useOpsService = (_token?: string) => {
             if (!res.ok) throw new Error('Approval failed');
             const data: OpsApproveResponse = await res.json();
             setApproved(prev => [data.approved, ...prev]);
-            setDrafts(prev => prev.map(d => d.id === id ? { ...d, status: 'approved' as const } : d));
+            // F5 fix: reflect the draft status from the server's approved payload,
+            // not a hardcoded client assertion. The draft is stamped with the
+            // approval metadata server-side; we mirror it rather than assume it.
+            setDrafts(prev => prev.map(d =>
+                d.id === id
+                    ? { ...d, status: 'approved', approved_at: data.approved.approved_at, approved_by: data.approved.approved_by ?? null }
+                    : d
+            ));
             if (data.run) setRuns(prev => [data.run!, ...prev]);
             return data;
         } catch (err) {
@@ -125,7 +137,11 @@ export const useOpsService = (_token?: string) => {
                 if (res.status === 403) throw new Error('Permission denied: You need operator or admin role to reject drafts.');
                 throw new Error('Rejection failed');
             }
-            setDrafts(prev => prev.map(d => d.id === id ? { ...d, status: 'rejected' as const } : d));
+            // F5 fix: trust the server-updated draft in the response rather than
+            // asserting the new status locally. The server may enrich the draft
+            // (rejected_by, rejected_at) — we must not invent those fields.
+            const updatedDraft: OpsDraft = await res.json();
+            setDrafts(prev => prev.map(d => d.id === id ? updatedDraft : d));
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Rejection failed');
         }
