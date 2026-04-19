@@ -76,6 +76,8 @@ class MeshAgentService : Service() {
         when (intent?.action) {
             ACTION_START -> startMesh()
             ACTION_STOP -> stopMesh()
+            ACTION_START_INFERENCE -> scope.launch { requestStartInferenceNow() }
+            ACTION_STOP_INFERENCE -> scope.launch { requestStopInference() }
         }
         return START_NOT_STICKY
     }
@@ -273,6 +275,8 @@ class MeshAgentService : Service() {
     }
 
     private suspend fun syncInferenceRuntime(settings: SettingsStore.Settings) {
+        // Always enforce the stop path — if the mode no longer permits inference,
+        // tear down the runner regardless of consent state.
         if (!allowsInference(settings)) {
             if (inferenceRunner.status.value != InferenceRunner.Status.STOPPED) {
                 inferenceRunner.stop()
@@ -280,24 +284,108 @@ class MeshAgentService : Service() {
             return
         }
 
+        // KISI invariant: never auto-start llama-server without explicit human
+        // consent. If the runner is already RUNNING (because the user tapped
+        // START via ACTION_START_INFERENCE), leave it alone.
+        if (inferenceRunner.status.value == InferenceRunner.Status.RUNNING) return
+        if (!settings.inferenceAutoStartAllowed) return
+
         val modelFile = resolveModelFile(settings)
         if (!modelFile.exists()) {
             terminalBuffer.append(
                 LogSource.INFER,
-                "inference enabled but no local model is available yet",
+                "auto-start deferred: no local model available yet",
                 LogLevel.WARN,
             )
             return
         }
 
-        if (inferenceRunner.status.value != InferenceRunner.Status.RUNNING) {
-            inferenceRunner.start(
-                modelPath = modelFile.absolutePath,
-                port = settings.inferencePort,
-                threads = settings.threads,
-                contextSize = settings.contextSize,
+        // Hardware safety gate: user has authorised auto-start, but the device
+        // still vetoes when running inference would harm it.
+        val safety = currentSafety()
+        if (safety is SafetyResult.Unsafe) {
+            terminalBuffer.append(
+                LogSource.INFER,
+                "auto-start deferred: ${safety.reason}",
+                LogLevel.WARN,
             )
+            return
         }
+
+        inferenceRunner.start(
+            modelPath = modelFile.absolutePath,
+            port = settings.inferencePort,
+            threads = settings.threads,
+            contextSize = settings.contextSize,
+        )
+    }
+
+    private suspend fun currentSafety(): SafetyResult {
+        val snapshot = try {
+            metricsCollector.collect()
+        } catch (_: Exception) {
+            return SafetyResult.Safe // can't measure → don't block; user already authorised
+        }
+        return isInferenceSafeNow(
+            batteryPercent = snapshot.batteryPercent,
+            cpuTempC = snapshot.cpuTempC,
+            thermalThrottled = snapshot.cpuTempC > 0f && snapshot.cpuTempC > 65f,
+            ramPercent = snapshot.ramPercent,
+        )
+    }
+
+    /**
+     * User explicitly tapped START in the ModelCard. Gate on safety but ignore
+     * the auto-start consent flag — the tap *is* the consent for this moment.
+     */
+    private suspend fun requestStartInferenceNow() {
+        val settings = settingsStore.settings.first()
+        if (!allowsInference(settings)) {
+            terminalBuffer.append(LogSource.INFER, "start refused: device mode does not allow inference", LogLevel.WARN)
+            return
+        }
+        if (inferenceRunner.status.value == InferenceRunner.Status.RUNNING) return
+
+        // Ensure shell/inference binaries are resolved. startMesh normally does
+        // this, but a user may tap START on the badge before activating the
+        // mesh node — initialise on-demand so the path works either way.
+        if (!shell.isInferenceReady) {
+            try { shell.init() } catch (_: Exception) { /* keep flow going */ }
+        }
+        if (!shell.isInferenceReady) {
+            terminalBuffer.append(
+                LogSource.INFER,
+                "start refused: llama-server binary missing or not executable",
+                LogLevel.ERROR,
+            )
+            return
+        }
+
+        val modelFile = resolveModelFile(settings)
+        if (!modelFile.exists()) {
+            terminalBuffer.append(LogSource.INFER, "start refused: no model downloaded yet", LogLevel.WARN)
+            return
+        }
+
+        val safety = currentSafety()
+        if (safety is SafetyResult.Unsafe) {
+            terminalBuffer.append(LogSource.INFER, "start deferred: ${safety.reason}", LogLevel.WARN)
+            return
+        }
+
+        terminalBuffer.append(LogSource.INFER, "user requested llama-server start")
+        inferenceRunner.start(
+            modelPath = modelFile.absolutePath,
+            port = settings.inferencePort,
+            threads = settings.threads,
+            contextSize = settings.contextSize,
+        )
+    }
+
+    private suspend fun requestStopInference() {
+        if (inferenceRunner.status.value == InferenceRunner.Status.STOPPED) return
+        terminalBuffer.append(LogSource.INFER, "user requested llama-server stop")
+        inferenceRunner.stop()
     }
 
     private fun startTaskPolling(settings: SettingsStore.Settings) {
@@ -481,6 +569,8 @@ class MeshAgentService : Service() {
     companion object {
         const val ACTION_START = "com.gredinlabs.gimomesh.START"
         const val ACTION_STOP = "com.gredinlabs.gimomesh.STOP"
+        const val ACTION_START_INFERENCE = "com.gredinlabs.gimomesh.START_INFERENCE"
+        const val ACTION_STOP_INFERENCE = "com.gredinlabs.gimomesh.STOP_INFERENCE"
         const val CHANNEL_ID = "gimo_mesh_agent"
         const val NOTIFICATION_ID = 1
         const val HEARTBEAT_INTERVAL_MS = 30_000L

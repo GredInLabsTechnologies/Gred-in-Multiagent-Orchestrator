@@ -76,9 +76,15 @@ fun GimoMeshNavHost(
         mutableStateOf(if (needsSetup) Screen.SETUP else Screen.DASH)
     }
 
+    // The initial `needsSetup` evaluation is based on the DataStore's default
+    // (blank) snapshot because the Flow hasn't emitted yet. That forces Screen.SETUP
+    // even for a provisioned device. Once the real settings arrive, correct the
+    // position — bidirectionally, so re-provisioning after a clear-data also flows.
     LaunchedEffect(needsSetup) {
-        if (needsSetup) {
-            currentScreen = Screen.SETUP
+        currentScreen = when {
+            needsSetup -> Screen.SETUP
+            currentScreen == Screen.SETUP -> Screen.DASH
+            else -> currentScreen
         }
     }
 
@@ -112,6 +118,8 @@ fun GimoMeshNavHost(
                     onModeChange = viewModel::changeMode,
                     modeLocked = settings.modeLocked,
                     onToggleModeLock = viewModel::toggleModeLock,
+                    onStartInference = viewModel::onStartInference,
+                    onStopInference = viewModel::onStopInference,
                 )
                 Screen.TERM -> TerminalScreen(
                     state = state,

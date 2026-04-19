@@ -93,7 +93,15 @@ fun SettingsScreen(
             SettingsRow("Model", settings.model)
             SettingsRow("Inference Port", settings.inferencePort.toString())
             SettingsRow("Threads", settings.threads.toString())
-            SettingsRow("Context Size", settings.contextSize.toString(), isLast = true)
+            SettingsRow("Context Size", settings.contextSize.toString())
+            SettingsRowToggle(
+                "Auto-start when safe",
+                settings.inferenceAutoStartAllowed,
+                onToggle = { enabled ->
+                    scope.launch { settingsStore.updateInferenceAutoStartAllowed(enabled) }
+                },
+                isLast = true,
+            )
         }
 
         // Hybrid Mode Configuration

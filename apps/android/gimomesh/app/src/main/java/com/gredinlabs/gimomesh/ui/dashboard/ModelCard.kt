@@ -21,10 +21,22 @@ fun ModelCard(
     params: String,
     quantization: String,
     throughput: String,
+    deferredReason: String = "",
+    onStartInference: () -> Unit = {},
+    onStopInference: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val badgeColor = if (inferenceRunning) GimoAccents.green else GimoAccents.alert
-    val badgeText = if (inferenceRunning) "running" else "stopped"
+    val deferred = deferredReason.isNotBlank()
+    val badgeColor = when {
+        inferenceRunning -> GimoAccents.green
+        deferred -> GimoAccents.warning
+        else -> GimoAccents.alert
+    }
+    val badgeText = when {
+        inferenceRunning -> "running"
+        deferred -> "deferred"
+        else -> "tap to start"
+    }
     val endpointText = when {
         endpoint.isNotBlank() -> endpoint
         else -> "port $inferencePort"
@@ -48,7 +60,24 @@ fun ModelCard(
                 fontSize = 12.sp,
                 color = GimoText.primary,
             )
-            Badge(text = badgeText, color = badgeColor)
+            Badge(
+                text = badgeText,
+                color = badgeColor,
+                onClick = {
+                    if (inferenceRunning) onStopInference() else onStartInference()
+                },
+            )
+        }
+
+        if (deferred) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "auto-start deferred: $deferredReason".uppercase(),
+                fontFamily = GimoMono,
+                fontSize = 7.sp,
+                letterSpacing = 0.8.sp,
+                color = GimoAccents.warning,
+            )
         }
 
         Spacer(Modifier.height(6.dp))

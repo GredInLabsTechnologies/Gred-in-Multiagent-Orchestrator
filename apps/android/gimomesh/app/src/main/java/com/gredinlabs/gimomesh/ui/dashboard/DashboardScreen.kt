@@ -47,6 +47,8 @@ fun DashboardScreen(
     onModeChange: (String) -> Unit = {},
     modeLocked: Boolean = false,
     onToggleModeLock: (Boolean) -> Unit = {},
+    onStartInference: () -> Unit = {},
+    onStopInference: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var graphOverlayVisible by remember { mutableStateOf(false) }
@@ -67,6 +69,8 @@ fun DashboardScreen(
                     modeLocked = modeLocked,
                     onToggleModeLock = onToggleModeLock,
                     onExpandGraph = { graphOverlayVisible = true },
+                    onStartInference = onStartInference,
+                    onStopInference = onStopInference,
                 )
             }
         }
@@ -88,6 +92,8 @@ private fun InstrumentView(
     modeLocked: Boolean = false,
     onToggleModeLock: (Boolean) -> Unit = {},
     onExpandGraph: () -> Unit = {},
+    onStartInference: () -> Unit = {},
+    onStopInference: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -166,6 +172,9 @@ private fun InstrumentView(
             params = state.modelParams,
             quantization = state.quantization,
             throughput = state.throughput,
+            deferredReason = state.inferenceDeferredReason,
+            onStartInference = onStartInference,
+            onStopInference = onStopInference,
         )
 
         // Kill Switch

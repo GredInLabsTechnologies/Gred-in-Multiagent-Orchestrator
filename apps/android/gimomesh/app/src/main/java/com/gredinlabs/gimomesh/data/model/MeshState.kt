@@ -43,6 +43,12 @@ data class MeshState(
     val modelParams: String = "",
     val quantization: String = "",
     val throughput: String = "",
+    // KISI: human has authorised auto-start (via SettingsStore) — this mirror
+    // drives the ModelCard badge. Empty = no consent. Non-empty = consent given.
+    val inferenceAutoStartAllowed: Boolean = false,
+    // When auto-start is allowed but hardware gate defers it, surface the reason.
+    // Empty when safe or when auto-start is off.
+    val inferenceDeferredReason: String = "",
 
     // Inference (for blackout mode)
     val tokensPerSecond: Float = 0f,

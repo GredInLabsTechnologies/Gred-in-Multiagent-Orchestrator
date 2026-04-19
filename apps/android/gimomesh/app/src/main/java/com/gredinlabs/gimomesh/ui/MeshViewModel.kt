@@ -16,7 +16,9 @@ import com.gredinlabs.gimomesh.data.store.SettingsStore
 import com.gredinlabs.gimomesh.service.HostRuntimeStatus
 import com.gredinlabs.gimomesh.service.MeshAgentService
 import com.gredinlabs.gimomesh.service.MetricsCollector
+import com.gredinlabs.gimomesh.service.SafetyResult
 import com.gredinlabs.gimomesh.service.TerminalBuffer
+import com.gredinlabs.gimomesh.service.isInferenceSafeNow
 import com.gredinlabs.gimomesh.service.isServeMode
 import com.gredinlabs.gimomesh.service.resolveControlPlaneBaseUrl
 import com.gredinlabs.gimomesh.service.resolveControlPlaneToken
@@ -68,6 +70,7 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
                         deviceName = resolveDeviceName(settings),
                         modelLoaded = state.modelLoaded.ifBlank { settings.model },
                         inferenceRunning = settings.inferenceRunning,
+                        inferenceAutoStartAllowed = settings.inferenceAutoStartAllowed,
                         inferencePort = settings.inferencePort,
                         inferenceEndpoint = state.inferenceEndpoint.ifBlank {
                             if (settings.inferenceRunning) {
@@ -143,6 +146,15 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
                     val lockedOut = snapshot.cpuTempC > settings.cpuLockoutTemp ||
                         snapshot.batteryTempC > settings.batteryLockoutTemp
 
+                    val deferredReason = computeDeferredReason(
+                        autoStartAllowed = settings.inferenceAutoStartAllowed,
+                        running = settings.inferenceRunning,
+                        batteryPercent = snapshot.batteryPercent,
+                        cpuTempC = snapshot.cpuTempC,
+                        thermalThrottled = throttled,
+                        ramPercent = snapshot.ramPercent,
+                    )
+
                     _state.update { state ->
                         state.copy(
                             cpuPercent = snapshot.cpuPercent,
@@ -153,6 +165,7 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
                             batteryTempC = snapshot.batteryTempC,
                             thermalThrottled = throttled,
                             thermalLockedOut = lockedOut,
+                            inferenceDeferredReason = deferredReason,
                         )
                     }
                 } catch (_: Exception) {
@@ -258,6 +271,47 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
             stopMesh()
         } else {
             startMesh()
+        }
+    }
+
+    /**
+     * User tapped START on the ModelCard. Sends an intent to the service,
+     * which gates on hardware safety before actually launching llama-server.
+     */
+    fun onStartInference() {
+        val context = getApplication<Application>()
+        val intent = Intent(context, MeshAgentService::class.java).apply {
+            action = MeshAgentService.ACTION_START_INFERENCE
+        }
+        context.startService(intent)
+    }
+
+    fun onStopInference() {
+        val context = getApplication<Application>()
+        val intent = Intent(context, MeshAgentService::class.java).apply {
+            action = MeshAgentService.ACTION_STOP_INFERENCE
+        }
+        context.startService(intent)
+    }
+
+    fun onToggleInferenceAutoStart(allowed: Boolean) {
+        viewModelScope.launch {
+            settingsStore.updateInferenceAutoStartAllowed(allowed)
+        }
+    }
+
+    private fun computeDeferredReason(
+        autoStartAllowed: Boolean,
+        running: Boolean,
+        batteryPercent: Float,
+        cpuTempC: Float,
+        thermalThrottled: Boolean,
+        ramPercent: Float,
+    ): String {
+        if (!autoStartAllowed || running) return ""
+        return when (val r = isInferenceSafeNow(batteryPercent, cpuTempC, thermalThrottled, ramPercent)) {
+            is SafetyResult.Safe -> ""
+            is SafetyResult.Unsafe -> r.reason
         }
     }
 

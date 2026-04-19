@@ -45,6 +45,7 @@ class SettingsStore(private val context: Context) {
         val HYBRID_SERVE = booleanPreferencesKey("hybrid_serve")
         val ACTIVE_WORKSPACE_ID = stringPreferencesKey("active_workspace_id")
         val ACTIVE_WORKSPACE_NAME = stringPreferencesKey("active_workspace_name")
+        val INFERENCE_AUTO_START_ALLOWED = booleanPreferencesKey("inference_auto_start_allowed")
     }
 
     // Defaults
@@ -80,6 +81,9 @@ class SettingsStore(private val context: Context) {
         val hybridServe: Boolean = false,      // default: serve OFF
         val activeWorkspaceId: String = "default",
         val activeWorkspaceName: String = "Default",
+        // KISI invariant: llama-server never auto-starts on boot/relaunch unless
+        // the human has explicitly opted in (and hardware is healthy). Default OFF.
+        val inferenceAutoStartAllowed: Boolean = false,
     )
 
     val settings: Flow<Settings> = context.dataStore.data.map { prefs ->
@@ -112,6 +116,7 @@ class SettingsStore(private val context: Context) {
             hybridServe = prefs[Keys.HYBRID_SERVE] ?: false,
             activeWorkspaceId = prefs[Keys.ACTIVE_WORKSPACE_ID] ?: "default",
             activeWorkspaceName = prefs[Keys.ACTIVE_WORKSPACE_NAME] ?: "Default",
+            inferenceAutoStartAllowed = prefs[Keys.INFERENCE_AUTO_START_ALLOWED] ?: false,
         )
     }
 
@@ -197,6 +202,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun updateHybridServe(enabled: Boolean) {
         context.dataStore.edit { it[Keys.HYBRID_SERVE] = enabled }
+    }
+
+    suspend fun updateInferenceAutoStartAllowed(allowed: Boolean) {
+        context.dataStore.edit { it[Keys.INFERENCE_AUTO_START_ALLOWED] = allowed }
     }
 
     suspend fun updateActiveWorkspace(id: String, name: String) {

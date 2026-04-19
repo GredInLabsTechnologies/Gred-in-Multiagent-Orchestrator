@@ -2,6 +2,7 @@ package com.gredinlabs.gimomesh.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -19,15 +20,19 @@ fun Badge(
     text: String,
     color: Color,
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(5.dp)
+    // clickable goes AFTER background/clip/border/padding so the hit area
+    // matches the full visual bounds of the badge, not just the glyph box.
+    val chain = modifier
+        .clip(shape)
+        .background(color.copy(alpha = 0.1f))
+        .border(1.dp, color.copy(alpha = 0.18f), shape)
+        .padding(horizontal = 7.dp, vertical = 3.dp)
     Text(
         text = text.uppercase(),
-        modifier = modifier
-            .clip(shape)
-            .background(color.copy(alpha = 0.1f))
-            .border(1.dp, color.copy(alpha = 0.18f), shape)
-            .padding(horizontal = 7.dp, vertical = 3.dp),
+        modifier = if (onClick != null) chain.clickable(onClick = onClick) else chain,
         fontFamily = GimoMono,
         fontWeight = FontWeight.Medium,
         fontSize = 8.sp,
