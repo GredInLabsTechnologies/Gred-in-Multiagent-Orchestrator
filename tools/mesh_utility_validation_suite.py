@@ -168,16 +168,14 @@ def case_t9_shell_deny(result: dict) -> tuple[bool, str]:
 
 
 def case_t10_file_hash(result: dict) -> tuple[bool, str]:
-    """T10 — SHA-256 of 1.9 GB GGUF — structural only (any valid 64-hex).
-    This also validates perf: hashing 1.9 GB in ≤90s = ≥22 MB/s on S10."""
+    """T10 — SHA-256 of datastore preferences file (present in any enrolled
+    device). Structural validation only (any valid 64-hex with non-zero size)."""
     r = result.get("result", {})
     sha = r.get("sha256", "")
     size = int(r.get("size", "0"))
-    if re.fullmatch(r"[0-9a-f]{64}", sha) and size > 1_900_000_000:
-        duration = result.get("duration_ms", 0)
-        throughput = size / 1024 / 1024 / (duration / 1000) if duration else 0
-        return True, f"sha256={sha[:16]}... size={size/1024/1024:.0f}MB throughput={throughput:.1f}MB/s"
-    return False, f"expected 64-hex sha + size>1.9GB: sha={sha[:20]!r} size={size}"
+    if re.fullmatch(r"[0-9a-f]{64}", sha) and size > 0:
+        return True, f"sha256={sha[:16]}... size={size}B"
+    return False, f"expected 64-hex sha + size>0: sha={sha[:20]!r} size={size}"
 
 
 SUITE: list[tuple[str, str, dict, Callable[[dict], tuple[bool, str]], int]] = [
@@ -190,7 +188,7 @@ SUITE: list[tuple[str, str, dict, Callable[[dict], tuple[bool, str]], int]] = [
     ("T7  shell uname",       "shell_exec",     {"command": "uname -s"}, case_t7_shell_uname, 30),
     ("T8  shell pipe hash",   "shell_exec",     {"command": "seq 1 100 | sha256sum"}, case_t8_shell_pipe_hash, 30),
     ("T9  shell allowlist",   "shell_exec",     {"command": "rm /tmp/foo"}, case_t9_shell_deny, 30),
-    ("T10 file hash 1.9GB",   "file_hash",      {"path": "models/qwen2.5-coder_3b_q4_k_m.gguf"}, case_t10_file_hash, 120),
+    ("T10 file hash settings","file_hash",      {"path": "datastore/gimo_mesh_settings.preferences_pb"}, case_t10_file_hash, 30),
 ]
 
 

@@ -155,10 +155,13 @@ class TaskExecutor(
                 }
             }
 
-            // Resolve sh from the shell environment so the PATH includes binDir
-            // (busybox symlinks). Falls back to /system/bin/sh which lacks the
-            // utility applets but won't crash the executor.
-            val shPath = shellEnv?.getBinaryPath("sh")?.takeIf { it.exists() }?.absolutePath
+            // Prefer Android's /system/bin/sh — it's seccomp-safe for the app
+            // sandbox. The bundled busybox (GNU/Linux static) can trigger SIGSYS
+            // (exit 159) for syscalls Android's seccomp filter blocks. The sh
+            // then resolves sub-commands via PATH (which shellEnv.buildEnvironment
+            // puts /system/bin first, busybox as fallback for missing applets).
+            val shPath = "/system/bin/sh".takeIf { java.io.File(it).exists() }
+                ?: shellEnv?.getBinaryPath("sh")?.takeIf { it.exists() }?.absolutePath
                 ?: "/system/bin/sh"
             val env = shellEnv?.buildEnvironment() ?: emptyMap()
             try {

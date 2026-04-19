@@ -229,7 +229,13 @@ class ShellEnvironment(private val context: Context) {
     fun getEmbeddedCoreRuntime(): EmbeddedCoreRuntime? = embeddedCoreRuntime
 
     fun buildEnvironment(extra: Map<String, String> = emptyMap()): Map<String, String> = buildMap {
-        put("PATH", "${binDir.absolutePath}:/system/bin:/system/xbin")
+        // Priority: /system/bin first so applets present in Android's toybox
+        // (sh, uname, seq, sha256sum, cat, ls, echo, …) are resolved there —
+        // those pass the Android seccomp filter natively. Our bundled busybox
+        // (GNU/Linux static) is second-tier: only used for applets absent from
+        // the system (awk, find, xargs, …). SIGSYS (exit 159) happens if the
+        // GNU-syscall busybox is resolved for syscalls Android blocks.
+        put("PATH", "/system/bin:/system/xbin:${binDir.absolutePath}")
         put("HOME", context.filesDir.absolutePath)
         put("TMPDIR", tmpDir.absolutePath)
         put("LD_LIBRARY_PATH", "/system/lib64:/system/lib")
