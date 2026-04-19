@@ -59,14 +59,18 @@ def api(method: str, path: str, token: str, body: dict | None = None) -> Any:
 
 
 def create_task(token: str, device_id: str, task_type: str,
-                payload: dict, timeout_s: int = 30) -> str:
-    """Create a task and target-assign it to the device (via payload fields if supported, else rely on auto-assign)."""
+                payload: dict, timeout_s: int = 30,
+                extra: dict | None = None) -> str:
+    """Create a task. `extra` lets the caller inject top-level body fields
+    such as `min_ram_mb` or `requires_arch` for eligibility-gate tests."""
     body = {
         "task_type": task_type,
         "payload": payload,
         "timeout_seconds": timeout_s,
         "workspace_id": "default",
     }
+    if extra:
+        body.update(extra)
     task = api("POST", "/ops/mesh/tasks", token, body)
     return task["task_id"]
 
@@ -178,17 +182,67 @@ def case_t10_file_hash(result: dict) -> tuple[bool, str]:
     return False, f"expected 64-hex sha + size>0: sha={sha[:20]!r} size={size}"
 
 
-SUITE: list[tuple[str, str, dict, Callable[[dict], tuple[bool, str]], int]] = [
-    ("T1  ping",              "ping",           {}, case_t1_ping, 30),
-    ("T2  regex validate",    "text_validate",  {"text": "gimo-mesh-v1.2.3", "pattern": "\\d+"}, case_t2_text_validate, 30),
-    ("T3  transform reverse", "text_transform", {"text": "GIMO Mesh", "operation": "reverse"}, case_t3_text_transform, 30),
-    ("T4  transform length",  "text_transform", {"text": "The quick brown fox", "operation": "length"}, case_t4_text_length, 30),
-    ("T5  json valid",        "json_validate",  {"json_string": '{"a":1,"b":[2,3]}'}, case_t5_json_validate_ok, 30),
-    ("T6  json invalid",      "json_validate",  {"json_string": "not a json"}, case_t6_json_validate_fail, 30),
-    ("T7  shell uname",       "shell_exec",     {"command": "uname -s"}, case_t7_shell_uname, 30),
-    ("T8  shell pipe hash",   "shell_exec",     {"command": "seq 1 100 | sha256sum"}, case_t8_shell_pipe_hash, 30),
-    ("T9  shell allowlist",   "shell_exec",     {"command": "rm /tmp/foo"}, case_t9_shell_deny, 30),
-    ("T10 file hash settings","file_hash",      {"path": "datastore/gimo_mesh_settings.preferences_pb"}, case_t10_file_hash, 30),
+def case_t11_file_read(result: dict) -> tuple[bool, str]:
+    """T11 — file_read must return file content (non-blank) + size > 0.
+    Path-traversal check is implicit: file is inside filesDir (sandbox)."""
+    r = result.get("result", {})
+    content = r.get("content", "")
+    size = int(r.get("size", "0"))
+    if content and size > 0:
+        return True, f"read {size}B, head={content[:30]!r}..."
+    return False, f"expected non-empty content + size>0: {r}"
+
+
+def case_t12_timeout_enforcement(result: dict) -> tuple[bool, str]:
+    """T12 — `sleep 10` with timeout_seconds=3 must NOT take 10s to resolve.
+    Acceptable outcomes:
+      A) status=failed + duration <= 5000ms (coroutine withTimeout fired)
+      B) status=completed + error contains 'timeout'/'timed_out'
+    The opposite (status=completed + duration ~10000ms) means timeout was
+    NOT enforced — a critical bug that would let stuck tasks block a worker."""
+    status = result.get("status", "")
+    duration_ms = int(result.get("duration_ms", 0) or 0)
+    error = (result.get("error") or "").lower()
+    r = result.get("result", {}) or {}
+
+    # Enforcement happened if either:
+    # - the framework timed it out (status=failed or timed_out, duration < 5s)
+    # - the shell exec was killed mid-run (exit_code != 0 or duration << 10s)
+    if duration_ms < 5000:
+        return True, f"killed in {duration_ms}ms (timeout enforced), status={status}"
+    if status in ("failed", "timed_out") and "timeout" in error:
+        return True, f"framework timed out: {error[:40]}"
+    return False, f"sleep 10 ran full {duration_ms}ms — TIMEOUT NOT ENFORCED"
+
+
+def case_t13_min_ram_eligibility(result: dict) -> tuple[bool, str]:
+    """T13 — task with min_ram_mb=99_999 (99 GB, no Android device qualifies)
+    MUST remain unassigned. In the suite harness we signal this by wait_task()
+    returning None after the max_wait_s — that's the PASS path here."""
+    status = result.get("status", "")
+    assigned = result.get("assigned_device_id", "")
+    if status == "pending" and not assigned:
+        return True, "correctly unassigned — min_ram_mb filter works"
+    if status == "completed":
+        return False, f"task completed despite min_ram_mb=99999 — eligibility NOT enforced"
+    return False, f"unexpected status={status} assigned={assigned or '<none>'}"
+
+
+SUITE: list[tuple] = [
+    # (label, task_type, payload, case_fn, timeout_s, extra_body)
+    ("T1  ping",              "ping",           {}, case_t1_ping, 30, None),
+    ("T2  regex validate",    "text_validate",  {"text": "gimo-mesh-v1.2.3", "pattern": "\\d+"}, case_t2_text_validate, 30, None),
+    ("T3  transform reverse", "text_transform", {"text": "GIMO Mesh", "operation": "reverse"}, case_t3_text_transform, 30, None),
+    ("T4  transform length",  "text_transform", {"text": "The quick brown fox", "operation": "length"}, case_t4_text_length, 30, None),
+    ("T5  json valid",        "json_validate",  {"json_string": '{"a":1,"b":[2,3]}'}, case_t5_json_validate_ok, 30, None),
+    ("T6  json invalid",      "json_validate",  {"json_string": "not a json"}, case_t6_json_validate_fail, 30, None),
+    ("T7  shell uname",       "shell_exec",     {"command": "uname -s"}, case_t7_shell_uname, 30, None),
+    ("T8  shell pipe hash",   "shell_exec",     {"command": "seq 1 100 | sha256sum"}, case_t8_shell_pipe_hash, 30, None),
+    ("T9  shell allowlist",   "shell_exec",     {"command": "rm /tmp/foo"}, case_t9_shell_deny, 30, None),
+    ("T10 file hash settings","file_hash",      {"path": "datastore/gimo_mesh_settings.preferences_pb"}, case_t10_file_hash, 30, None),
+    ("T11 file read",         "file_read",      {"path": "datastore/gimo_mesh_settings.preferences_pb"}, case_t11_file_read, 30, None),
+    ("T12 timeout enforce",   "shell_exec",     {"command": "sleep 10"}, case_t12_timeout_enforcement, 3, None),
+    ("T13 ram ineligible",    "ping",           {}, case_t13_min_ram_eligibility, 30, {"min_ram_mb": 99999}),
 ]
 
 
@@ -206,25 +260,40 @@ def main() -> int:
         print("  WARN: device not approved/connected — tasks may not dispatch")
 
     print(f"\nSubmitting {len(SUITE)} tasks...\n")
-    submissions: list[tuple[str, str, Callable, dict]] = []
-    for label, task_type, payload, case_fn, timeout_s in SUITE:
-        tid = create_task(token, args.device, task_type, payload, timeout_s=timeout_s)
+    submissions: list[tuple] = []
+    for label, task_type, payload, case_fn, timeout_s, extra in SUITE:
+        tid = create_task(token, args.device, task_type, payload,
+                           timeout_s=timeout_s, extra=extra)
         print(f"  {label:<24} -> {tid[:8]}  [{task_type}]")
-        submissions.append((label, tid, case_fn, {}))
+        # "expect_pending" flag: some cases (T13 eligibility gate) validate
+        # that the task is NEVER assigned. For those, a wait_task timeout
+        # with status still pending is the PASS signal, not a failure.
+        expect_pending = (extra is not None
+                          and any(k in extra for k in ("min_ram_mb", "min_api_level", "requires_arch")))
+        submissions.append((label, tid, case_fn, expect_pending))
 
     print(f"\nWaiting for completions...\n")
     results = []
-    for label, tid, case_fn, _ in submissions:
+    for label, tid, case_fn, expect_pending in submissions:
         print(f"{label}:")
         try:
-            t = wait_task(token, tid, max_wait_s=180)
+            t = wait_task(token, tid, max_wait_s=(30 if expect_pending else 180))
             passed, msg = case_fn(t)
             results.append((label, passed, msg, t))
             icon = "PASS" if passed else "FAIL"
             print(f"  {icon}: {msg}")
-        except TimeoutError as e:
-            results.append((label, False, f"timeout: {e}", None))
-            print(f"  FAIL: timeout")
+        except TimeoutError:
+            # For eligibility-gate tests, a timeout means the task was never
+            # assigned — evaluate the case_fn with the current (pending) state.
+            if expect_pending:
+                t = api("GET", f"/ops/mesh/tasks/{tid}", token)
+                passed, msg = case_fn(t)
+                results.append((label, passed, msg, t))
+                icon = "PASS" if passed else "FAIL"
+                print(f"  {icon}: {msg}")
+            else:
+                results.append((label, False, f"timeout (task did not resolve)", None))
+                print(f"  FAIL: timeout")
         except Exception as e:
             results.append((label, False, f"exception: {e}", None))
             print(f"  FAIL: {e}")

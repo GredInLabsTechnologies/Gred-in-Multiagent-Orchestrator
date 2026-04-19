@@ -29,6 +29,9 @@ class TaskExecutor(
             "ls", "cat", "df", "free", "uname", "date", "echo", "wc", "stat",
             "uptime", "sha256sum", "md5sum", "nproc", "seq", "head", "tail",
             "sort", "uniq", "printf", "basename", "dirname", "true", "false",
+            // "sleep" exposed so the timeout-enforcement path can be exercised
+            // by the validation suite. Safe: sleep is idempotent and resource-free.
+            "sleep",
         )
         // Dangerous patterns that reject immediately
         private val SHELL_DENY_PATTERNS = listOf(
