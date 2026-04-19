@@ -297,20 +297,29 @@ class MeshRegistry:
                     payload.device_id, payload.workspace_id,
                 )
 
-        # Auto-transition to connected on heartbeat
-        if device.connection_state in (
-            ConnectionState.approved,
-            ConnectionState.reconnecting,
-            ConnectionState.offline,  # Device came back online
-        ):
-            device.connection_state = ConnectionState.connected
-
-        # Thermal lockout — non-bypassable safety valve
+        # Thermal lockout — non-bypassable safety valve. Takes precedence
+        # over the auto-transition below.
         if payload.thermal_locked_out:
             device.connection_state = ConnectionState.thermal_lockout
             device.operational_state = OperationalState.locked_out
             device.model_loaded = ""
             device.active_task_id = ""
+        else:
+            # Auto-transition to connected on heartbeat from any state that
+            # permits the hop. G23 fix (2026-04-20): thermal_lockout was
+            # missing here, leaving recovered devices stuck — a cool-down
+            # heartbeat with thermal_locked_out=false did not lift the gate,
+            # permanently excluding the device from dispatch.
+            if device.connection_state in (
+                ConnectionState.approved,
+                ConnectionState.reconnecting,
+                ConnectionState.offline,       # Device came back online
+                ConnectionState.thermal_lockout,  # Device cooled down
+            ):
+                device.connection_state = ConnectionState.connected
+                # Reset operational_state if we're leaving lockout.
+                if device.operational_state == OperationalState.locked_out:
+                    device.operational_state = OperationalState.idle
 
         self.save_device(device)
         return device

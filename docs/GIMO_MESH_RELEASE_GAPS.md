@@ -223,6 +223,54 @@ Ordenado por criticidad descendente dentro de cada sección.
 - **Fix**: debounce 500ms en el ModelCard onClick, o gate en el service
   que ignore el intent si ya hay una `STARTING` en vuelo.
 
+### G23. ~~Recovery from `thermal_lockout` no transiciona~~ — **FIXED 2026-04-20**
+- **Fix aplicado**: `MeshRegistry.process_heartbeat` reordenado. Thermal
+  lockout es ahora una rama que toma precedencia; si el heartbeat trae
+  `thermal_locked_out=false`, el auto-transition a `connected` se dispara
+  incluyendo el estado `thermal_lockout` entre los que pueden recuperarse.
+  Además, al salir de lockout, `operational_state` vuelve de `locked_out`
+  a `idle`.
+- **Validado E2E 2026-04-20** en emulador API 36 (4 pasos, 4/4 PASS):
+  inject lockout → state=thermal_lockout → dispatch filtra → cooldown
+  heartbeat → state=connected → task post-recovery completada.
+
+### G23 (legacy description below, kept for history)
+- **Síntoma**: cuando el device envía heartbeat con `thermal_locked_out=true`,
+  el Core marca `connection_state=thermal_lockout` correctamente (thermal gate
+  del dispatcher activo — validado). Pero cuando después manda heartbeat con
+  `thermal_locked_out=false`, el campo `thermal_locked_out` server-side se
+  actualiza a `False` pero `connection_state` queda stuck en `thermal_lockout`.
+  Tasks nuevas NO se le asignan al device aunque esté sano de nuevo.
+- **Causa raíz**: probablemente falta transición en
+  `MeshRegistry.process_heartbeat` que haga `connection_state=connected`
+  cuando el thermal anterior se despeja.
+- **Impacto**: un device que tuvo un pico de temperatura queda
+  permanentemente excluido del pool hasta enroll fresh. Inaceptable en prod.
+- **Descubierto**: 2026-04-20 durante el thermal test en emulador API 36.
+  Valida el dispatch gate (entrada a lockout PASS) pero el recovery falla.
+
+### G24. ~~`mesh_heartbeat_timeout_loop` no marca devices offline~~ — **NO ES BUG**
+- **Re-evaluación (2026-04-20)**: el loop sí funciona. El threshold es
+  90s pero el loop itera cada 15s, entonces la ventana efectiva es
+  90-105s. Mi test original chequeó a 95s, justo antes del siguiente tick.
+  Verificado a t=599s: S10 correctamente marcado `offline`.
+- **Recomendación opcional**: bajar el sleep del loop a 5s si el caso de
+  uso exige reacción más rápida; pero 15s es razonable y no costoso.
+
+### G25. ~~UX: dashboard no muestra qué está haciendo la app~~ — **FIXED 2026-04-20**
+- **Fix aplicado**: `MeshState.lastActivity` property computed que lee
+  el tail de `terminalLines`, formateado como `{source}: {message}`.
+  El DashboardScreen renderiza esa string como una línea fina bajo el
+  StatusStrip (fuente GimoMono 8sp, ellipsis si es muy larga). Empty
+  cuando el mesh está off.
+
+### G26. ~~URL Core no auto-completa en emulador~~ — **FIXED 2026-04-20**
+- **Fix aplicado**: helper `isAndroidEmulator()` que mira
+  `Build.FINGERPRINT`/`HARDWARE`/`PRODUCT`/`MODEL`. Si el device es
+  emulador, `initialCoreUrl` se pre-populate con `http://10.0.2.2:9325`
+  (convención emu → host loopback). Real hardware sigue dependiendo de
+  mDNS o settings persistidos.
+
 ### G22b. busybox invocation via `libbusybox.so` fails with "applet not found"
 - **Síntoma**: cuando el binary se invoca desde `nativeLibraryDir/libbusybox.so`,
   argv[0]="libbusybox.so" y busybox interpreta el basename como applet name

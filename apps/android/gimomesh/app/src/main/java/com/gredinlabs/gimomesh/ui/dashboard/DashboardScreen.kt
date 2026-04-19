@@ -120,6 +120,23 @@ private fun InstrumentView(
         )
         Spacer(Modifier.height(7.dp))
 
+        // G25: live activity line — the tail of the terminal buffer so the
+        // user can read what the service is doing right now without jumping
+        // to the Terminal tab. Empty while mesh is off.
+        if (state.lastActivity.isNotBlank()) {
+            Text(
+                text = state.lastActivity,
+                fontFamily = GimoMono,
+                fontSize = 8.sp,
+                letterSpacing = 0.4.sp,
+                color = GimoText.tertiary,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(7.dp))
+        }
+
         if (
             state.deviceMode == com.gredinlabs.gimomesh.data.model.DeviceMode.SERVER ||
             state.deviceMode == com.gredinlabs.gimomesh.data.model.DeviceMode.HYBRID ||

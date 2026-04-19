@@ -113,7 +113,16 @@ fun SetupWizardScreen(
     // If deep link provided, skip straight to enrolling
     val hasDeepLink = deepLinkCode.length == 6 && deepLinkHost.isNotBlank()
     val initialStep = if (hasDeepLink) SetupStep.Enrolling else SetupStep.Welcome
-    val initialCoreUrl = if (hasDeepLink) "http://$deepLinkHost:$deepLinkPort" else settings.coreUrl
+    // G26: on emulators, mDNS discovery does not cross the NAT to the host,
+    // so we pre-populate Core URL with the emulator's host-loopback alias
+    // (10.0.2.2 → host's localhost:9325). Real devices leave it blank for
+    // mDNS / manual entry.
+    val initialCoreUrl = when {
+        hasDeepLink -> "http://$deepLinkHost:$deepLinkPort"
+        settings.coreUrl.isNotBlank() -> settings.coreUrl
+        isAndroidEmulator() -> "http://10.0.2.2:9325"
+        else -> ""
+    }
 
     var step by remember { mutableStateOf<SetupStep>(initialStep) }
     var coreUrlInput by rememberSaveable { mutableStateOf(initialCoreUrl) }
@@ -929,4 +938,23 @@ private fun normalizeCoreUrl(raw: String): String {
     val trimmed = raw.trim().trimEnd('/')
     if (trimmed.isBlank()) return ""
     return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) trimmed else "http://$trimmed"
+}
+
+/**
+ * G26: detect Android emulator to pre-populate the wizard's Core URL with
+ * the emulator's loopback-to-host alias (10.0.2.2). Real hardware relies on
+ * mDNS discovery / manual entry because the host's LAN IP is unpredictable.
+ */
+private fun isAndroidEmulator(): Boolean {
+    val fp = android.os.Build.FINGERPRINT.orEmpty().lowercase()
+    val hw = android.os.Build.HARDWARE.orEmpty().lowercase()
+    val product = android.os.Build.PRODUCT.orEmpty().lowercase()
+    val model = android.os.Build.MODEL.orEmpty().lowercase()
+    return fp.startsWith("generic") ||
+        fp.startsWith("unknown") ||
+        hw == "goldfish" || hw == "ranchu" ||
+        product.contains("sdk") ||
+        product.contains("emulator") ||
+        model.contains("emulator") ||
+        model.contains("android sdk")
 }

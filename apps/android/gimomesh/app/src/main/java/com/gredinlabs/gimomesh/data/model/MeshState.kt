@@ -75,6 +75,18 @@ data class MeshState(
             else -> "OK"
         }
 
+    /**
+     * G25 fix: one-line live activity read from the tail of the terminal
+     * buffer. The dashboard surfaces this so the user can tell what the
+     * service is doing right now ("heartbeat ok", "poll got 1 task",
+     * "executing t-abc"…) without navigating to the Terminal screen.
+     * Empty when the buffer is empty.
+     */
+    val lastActivity: String
+        get() = terminalLines.lastOrNull()?.let { line ->
+            "${line.source.name.lowercase()}: ${line.message}"
+        }.orEmpty()
+
     val elapsedFormatted: String
         get() {
             val s = elapsedSeconds.toInt()
