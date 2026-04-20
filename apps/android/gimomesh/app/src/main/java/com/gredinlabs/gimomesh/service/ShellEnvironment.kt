@@ -219,8 +219,6 @@ class ShellEnvironment(private val context: Context) {
         }
     }
 
-    fun getModelsDir(): File = modelsDir
-
     fun getBinaryPath(name: String): File {
         // Binaries shipped via jniLibs live in applicationInfo.nativeLibraryDir
         // (labeled for exec). Binaries extracted to filesDir/bin are legacy.

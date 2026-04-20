@@ -1,6 +1,8 @@
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Copy
+import java.io.File
 import java.net.URI
+import java.util.concurrent.TimeUnit
 
 plugins {
     id("com.android.application")
@@ -72,6 +74,74 @@ android {
     }
 }
 
+/**
+ * Picks the host-side Python 3.13 interpreter that Chaquopy uses to run pip
+ * during the build. Priority:
+ *   1. `GIMO_BUILD_PYTHON` env var override — CI escape hatch.
+ *   2. On Windows, probe the Microsoft-Store shim
+ *      (`%LOCALAPPDATA%/Microsoft/WindowsApps/python3.13.exe`). This is where
+ *      `pkg install python` or the Store-based install lands by default and
+ *      is reachable from Gradle even when it's not on the shortened PATH
+ *      inherited by the Gradle daemon.
+ *   3. Fall back to `python3.13` — POSIX standard for a python.org install.
+ */
+/**
+ * Ask PowerShell to report the Microsoft Store Python install location.
+ * Returns null if not installed / PowerShell unavailable / non-Windows.
+ * Needed because `C:\Program Files\WindowsApps\` is ACL-locked for
+ * directory listing, so we can't discover the version-suffixed package
+ * subdirectory via `File.listFiles()`.
+ */
+fun queryStorePythonPath(): String? {
+    if (!System.getProperty("os.name").orEmpty().lowercase().contains("windows")) return null
+    return try {
+        val proc = ProcessBuilder(
+            "powershell.exe", "-NoProfile", "-Command",
+            "Get-AppxPackage PythonSoftwareFoundation.Python.3.13 | Select-Object -ExpandProperty InstallLocation",
+        ).redirectErrorStream(true).start()
+        val finished = proc.waitFor(8, TimeUnit.SECONDS)
+        if (!finished) { proc.destroyForcibly(); return null }
+        if (proc.exitValue() != 0) return null
+        val installDir = proc.inputStream.bufferedReader().readText().trim()
+        if (installDir.isEmpty()) return null
+        val exe = File(installDir, "python3.13.exe")
+        if (exe.exists()) exe.absolutePath else null
+    } catch (_: Throwable) {
+        null
+    }
+}
+
+fun resolveHostPython(): String {
+    System.getenv("GIMO_BUILD_PYTHON")?.takeIf { it.isNotBlank() }?.let {
+        logger.info("chaquopy buildPython override: $it")
+        return it
+    }
+    if (System.getProperty("os.name").orEmpty().lowercase().contains("windows")) {
+        val localAppData = System.getenv("LOCALAPPDATA").orEmpty()
+
+        // 1. Microsoft Store Python — resolve via PowerShell Get-AppxPackage.
+        //    The concrete `python3.13.exe` under `C:\Program Files\WindowsApps\...\`
+        //    passes JVM's `File.exists()` check (ACL blocks listing, not stat),
+        //    so Chaquopy's own validation accepts it. Aliases in
+        //    `%LOCALAPPDATA%\Microsoft\WindowsApps` are reparse points that
+        //    `File.exists()` rejects, hence we always prefer the Program Files path.
+        queryStorePythonPath()?.let {
+            logger.info("chaquopy buildPython resolved (Store): $it")
+            return it
+        }
+
+        // 2. python.org per-user install.
+        val programsPython = File("$localAppData\\Programs\\Python\\Python313\\python.exe")
+        if (programsPython.exists()) return programsPython.absolutePath
+
+        // 3. python.org machine-wide install.
+        val systemPython = File("C:\\Program Files\\Python313\\python.exe")
+        if (systemPython.exists()) return systemPython.absolutePath
+    }
+    // POSIX hosts (Linux CI, macOS dev) reach the canonical command name.
+    return "python3.13"
+}
+
 // -----------------------------------------------------------------------------
 // Chaquopy — embedded CPython bionic-compatible (Fase A, smoke test only)
 // -----------------------------------------------------------------------------
@@ -91,6 +161,14 @@ android {
 chaquopy {
     defaultConfig {
         version = "3.13"
+        // Chaquopy needs a host-side Python 3.13 to run pip during the build.
+        // The Gradle daemon inherits a trimmed Windows PATH that misses the
+        // Microsoft-Store shim directory, so `python` alone cannot be resolved.
+        // Resolve the interpreter path from the host user's install at configure
+        // time — falls back to `python3.13` for dev machines using a classic
+        // python.org install or a POSIX host (Linux CI, macOS dev).
+        // Docs: https://chaquo.com/chaquopy/doc/current/android.html#buildpython
+        buildPython(resolveHostPython())
         pip {
             // Smoke test only — validates pip resolution + bionic wheel install.
             // Fase B replaces this with the real GIMO Core requirements subset.
