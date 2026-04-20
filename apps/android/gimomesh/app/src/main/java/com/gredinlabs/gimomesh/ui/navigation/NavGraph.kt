@@ -112,6 +112,7 @@ fun GimoMeshNavHost(
                         }
                     },
                     settingsStore = viewModel.settingsStore,
+                    deviceIdentityStore = viewModel.deviceIdentityStore,
                     deepLinkCode = deepLinkCode,
                     deepLinkHost = deepLinkHost,
                     deepLinkPort = deepLinkPort,

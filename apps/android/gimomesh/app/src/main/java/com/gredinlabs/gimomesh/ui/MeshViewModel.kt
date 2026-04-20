@@ -38,6 +38,7 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
     private val terminalBuffer: TerminalBuffer = app.terminalBuffer
     private val hostRuntimeReporter = app.hostRuntimeReporter
     val settingsStore: SettingsStore = app.settingsStore
+    val deviceIdentityStore = app.deviceIdentityStore
     private val metricsCollector = MetricsCollector(application)
 
     private var coreClient: GimoCoreClient? = null

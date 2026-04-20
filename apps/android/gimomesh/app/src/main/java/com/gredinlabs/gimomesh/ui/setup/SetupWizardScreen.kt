@@ -61,6 +61,8 @@ import com.gredinlabs.gimomesh.data.api.OnboardingClient
 import com.gredinlabs.gimomesh.data.model.CoreDiscovery
 import com.gredinlabs.gimomesh.data.model.ModelInfo
 import com.gredinlabs.gimomesh.data.network.CoreDiscoveryManager
+import com.gredinlabs.gimomesh.data.store.DeviceIdentity
+import com.gredinlabs.gimomesh.data.store.DeviceIdentityStore
 import com.gredinlabs.gimomesh.data.store.SettingsStore
 import com.gredinlabs.gimomesh.service.isServeMode
 import com.gredinlabs.gimomesh.ui.theme.GimoAccents
@@ -97,6 +99,7 @@ fun SetupWizardScreen(
     onSetupComplete: () -> Unit,
     onStartMesh: () -> Unit,
     settingsStore: SettingsStore,
+    deviceIdentityStore: DeviceIdentityStore,
     modifier: Modifier = Modifier,
     deepLinkCode: String = "",
     deepLinkHost: String = "",
@@ -284,6 +287,20 @@ fun SetupWizardScreen(
                     settingsStore.updateDeviceId(onboard.deviceId)
                     settingsStore.updateDeviceName(deviceName)
                     settingsStore.updateActiveWorkspace(onboard.workspaceId, onboard.workspaceName)
+
+                    // Fase D1 — mirror the enrollment into Keystore-backed
+                    // EncryptedSharedPreferences so a subsequent APK reinstall
+                    // recovers deviceId + bearer token + coreUrl automatically,
+                    // skipping the redeem-code wizard (see GimoMeshApp.recoverIdentityIfNeeded).
+                    deviceIdentityStore.save(
+                        DeviceIdentity(
+                            deviceId = onboard.deviceId,
+                            deviceSecret = onboard.bearerToken,
+                            coreUrl = connectedCoreUrl,
+                            workspaceId = onboard.workspaceId,
+                            workspaceName = onboard.workspaceName,
+                        )
+                    )
                     step = if (settings.deviceMode == "inference") {
                         SetupStep.ModelSelect
                     } else {

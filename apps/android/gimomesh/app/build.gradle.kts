@@ -276,6 +276,13 @@ dependencies {
     // Core
     implementation("androidx.core:core-ktx:1.15.0")
 
+    // Device identity persistence — EncryptedSharedPreferences with Keystore-
+    // backed master key. The master key lives in Android's TEE/StrongBox and
+    // survives APK reinstall on modern devices, so the cached device_secret /
+    // device_id / coreUrl are recovered on first boot post-reinstall without
+    // the user having to re-run the enrollment wizard.
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
     // Server mode: embedded Core runtime bundle extraction
     // - apache commons-compress gives us tar readers (tar.xz layer is streamed
     //   on top of the XZ decoder from tukaani). Both are small pure-Java libs.
