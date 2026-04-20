@@ -7,6 +7,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    // Chaquopy embedded CPython — only needed for Server Node role.
+    // Inference + Utility Nodes don't execute Python on-device.
+    id("com.chaquo.python")
 }
 
 android {
@@ -19,6 +22,14 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
+
+        // Chaquopy requires explicit ABI filters. We support the same two ABIs
+        // the llama-server binary already ships for (jniLibs/arm64-v8a/ and
+        // jniLibs/x86_64/). armeabi-v7a intentionally excluded — Chaquopy 17
+        // supports it but Python-Android-Tier-3 (PEP 738) is arm64+x86_64 only.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -58,6 +69,37 @@ android {
     // Plan E2E_ENGINEERING_PLAN_20260416_RUNTIME_PACKAGING §Change 7 — no comprimir XZ.
     androidResources {
         noCompress += listOf("xz", "tar")
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Chaquopy — embedded CPython bionic-compatible (Fase A, smoke test only)
+// -----------------------------------------------------------------------------
+//
+// Fase A scope: plugin wire-up + Python 3.13 pick + 1 trivial pip dep (six)
+// to validate the Chaquopy build toolchain produces a working APK. Real
+// runtime deps (fastapi, uvicorn, pydantic, ...) land in Fase B when we
+// rewrite EmbeddedCoreRunner to call Chaquopy's Python.getInstance() API
+// instead of ProcessBuilder("python", "-m", "uvicorn", ...).
+//
+// Python 3.13 aligns with PEP 738 official Android Tier 3 support (arm64-v8a
+// + x86_64). Chaquopy 17.0 builds CPython 3.13 with Android's NDK toolchain
+// and ships bionic-compatible libpython3.13.so to Maven Central — no glibc
+// issue (G27 resolved).
+//
+// Docs: https://chaquo.com/chaquopy/doc/current/android.html
+chaquopy {
+    defaultConfig {
+        version = "3.13"
+        pip {
+            // Smoke test only — validates pip resolution + bionic wheel install.
+            // Fase B replaces this with the real GIMO Core requirements subset.
+            install("six")
+        }
+        // Extract all installed packages at startup so importlib sees them as
+        // regular file-system modules (required for packages that introspect
+        // __file__ / __path__ — e.g. pydantic plugins, uvicorn workers).
+        extractPackages.add("*")
     }
 }
 
