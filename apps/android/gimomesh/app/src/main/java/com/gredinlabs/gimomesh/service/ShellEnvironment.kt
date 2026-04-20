@@ -2,6 +2,7 @@ package com.gredinlabs.gimomesh.service
 
 import android.content.Context
 import android.os.Build
+import com.gredinlabs.gimomesh.data.store.ModelStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -33,7 +34,11 @@ import java.util.concurrent.TimeUnit
 class ShellEnvironment(private val context: Context) {
 
     private val binDir = File(context.filesDir, "bin")
-    private val modelsDir = File(context.filesDir, "models")
+    // Fase D2 — models live in externalMediaDirs so they survive app reinstall
+    // (combined with hasFragileUserData=true the user decides on uninstall).
+    // Resolved on every call so a device remounting /storage doesn't leave us
+    // with a stale File reference.
+    private val modelsDir: File get() = ModelStorage.resolveModelsDir(context)
     private val runtimeDir = File(context.filesDir, "runtime")
     private val tmpDir = File(context.cacheDir, "tmp")
     private val runtimeJson = Json { ignoreUnknownKeys = true; isLenient = true }

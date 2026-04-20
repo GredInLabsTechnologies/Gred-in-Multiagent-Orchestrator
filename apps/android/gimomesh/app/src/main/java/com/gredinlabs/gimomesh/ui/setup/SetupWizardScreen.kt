@@ -375,7 +375,15 @@ fun SetupWizardScreen(
         downloadProgress = 0f
         downloadBytes = 0L
         downloadTotalBytes = -1L
-        val targetFile = File(context.filesDir, "models/${model.filename.ifBlank { "${model.modelId}.gguf" }}")
+        // Fase D2 — download straight to externalMediaDirs so reinstalls
+        // don't force a re-download. Filename keeps the convention
+        // <model.filename> or <modelId>.gguf for compat with existing
+        // resolve paths (MeshAgentService.resolveModelFile,
+        // NavGraph.requiresOnboardingModel).
+        val targetFile = com.gredinlabs.gimomesh.data.store.ModelStorage.resolveModelFile(
+            context,
+            model.filename.ifBlank { "${model.modelId}.gguf" },
+        )
         val client = OnboardingClient(connectedCoreUrl)
         try {
             when (val result = client.downloadModel(bearerToken, model.modelId, targetFile) { downloaded, total ->

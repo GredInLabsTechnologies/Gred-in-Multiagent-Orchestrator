@@ -6,6 +6,7 @@ import com.gredinlabs.gimomesh.data.model.LogLevel
 import com.gredinlabs.gimomesh.data.model.LogSource
 import com.gredinlabs.gimomesh.data.store.DeviceIdentity
 import com.gredinlabs.gimomesh.data.store.DeviceIdentityStore
+import com.gredinlabs.gimomesh.data.store.ModelStorage
 import com.gredinlabs.gimomesh.data.store.SettingsStore
 import com.gredinlabs.gimomesh.service.ChaquopyBridge
 import com.gredinlabs.gimomesh.service.HostRuntimeReporter
@@ -50,6 +51,20 @@ class GimoMeshApp : Application() {
                 recoverIdentityIfNeeded()
             } catch (t: Throwable) {
                 Log.w("GimoMeshApp", "identity recovery failed (safe to ignore)", t)
+            }
+            // Fase D2 — one-shot migration of pre-D2 models from filesDir
+            // to externalMediaDirs. Idempotent: no-op when the legacy dir
+            // is empty (the common case after the migration has run once).
+            try {
+                val moved = ModelStorage.migrateLegacyModels(this@GimoMeshApp)
+                if (moved > 0) {
+                    terminalBuffer.append(
+                        LogSource.SYS,
+                        "migrated $moved model file(s) to external media (reinstall-safe)",
+                    )
+                }
+            } catch (t: Throwable) {
+                Log.w("GimoMeshApp", "model storage migration failed", t)
             }
         }
 

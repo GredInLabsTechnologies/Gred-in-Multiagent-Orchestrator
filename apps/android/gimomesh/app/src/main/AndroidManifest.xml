@@ -36,7 +36,13 @@
         android:theme="@style/Theme.GIMOMesh"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
-        android:extractNativeLibs="true">
+        android:extractNativeLibs="true"
+        android:hasFragileUserData="true"><!-- Fase D2: uninstall-time "Keep app data" checkbox
+             so the user decides whether downloaded models (~2-3 GB) survive
+             uninstall. When the user does NOT keep data, Android wipes the
+             app's externalMediaDirs along with filesDir, leaving no ~3 GB
+             orphans. Pattern used by WhatsApp, Mihon, etc. since Android 10.
+             Only triggers when uninstalling from Settings (not Play Store). -->
 
         <activity
             android:name=".MainActivity"

@@ -16,6 +16,7 @@ import com.gredinlabs.gimomesh.data.api.GimoCoreClient
 import com.gredinlabs.gimomesh.data.model.HeartbeatPayload
 import com.gredinlabs.gimomesh.data.model.LogLevel
 import com.gredinlabs.gimomesh.data.model.LogSource
+import com.gredinlabs.gimomesh.data.store.ModelStorage
 import com.gredinlabs.gimomesh.data.store.SettingsStore
 import java.io.File
 import java.util.UUID
@@ -561,7 +562,11 @@ class MeshAgentService : Service() {
         if (downloaded?.exists() == true) {
             return downloaded
         }
-        return File(filesDir, "models/${settings.model.replace(":", "_")}.gguf")
+        // Fase D2 — models in externalMediaDirs survive reinstall. Falls back
+        // to the legacy filesDir/models path if the file only exists there
+        // (migrated on next boot by ModelStorage.migrateLegacyModels).
+        return ModelStorage.findModelFileForId(this, settings.model)
+            ?: ModelStorage.resolveModelFileForId(this, settings.model)
     }
 
     private fun watchInferenceStatus() {

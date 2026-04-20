@@ -72,7 +72,7 @@ fun GimoMeshNavHost(
     )
 
     val requiresModel = remember(settings.downloadedModelPath, settings.model, settings.deviceMode) {
-        requiresOnboardingModel(settings, context.filesDir)
+        requiresOnboardingModel(settings, context)
     }
     val needsSetup = setupRequired(settings) || requiresModel
 
@@ -240,7 +240,7 @@ private fun NavItem(
 
 private fun requiresOnboardingModel(
     settings: SettingsStore.Settings,
-    filesDir: File,
+    context: android.content.Context,
 ): Boolean {
     val needsInferenceModel = settings.deviceMode == "inference"
     if (!needsInferenceModel) {
@@ -254,6 +254,10 @@ private fun requiresOnboardingModel(
         return false
     }
 
-    val legacyModel = File(filesDir, "models/${settings.model.replace(":", "_")}.gguf")
-    return !legacyModel.exists()
+    // Fase D2 — look in both the external media dir (preferred) and the
+    // legacy filesDir location. A present file in either counts as "don't
+    // re-prompt the user to download" — the migrator will consolidate both
+    // paths on next boot.
+    return com.gredinlabs.gimomesh.data.store.ModelStorage
+        .findModelFileForId(context, settings.model) == null
 }
