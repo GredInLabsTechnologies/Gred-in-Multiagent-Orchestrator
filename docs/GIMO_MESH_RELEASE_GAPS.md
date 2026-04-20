@@ -1,8 +1,13 @@
 # GIMO Mesh — Release Gaps & Frictions
 
-> **2026-04-20 sprint close**: 19 gaps fixed, 3 no-bug, **G27 declared
-> blocker for server mode**. Ver `docs/audits/GIMO_MESH_SPRINT_2026-04-20.md`
-> para el changelog consolidado.
+> **2026-04-20 Chaquopy sprint close** (rev 2): **G27 interpreter-layer RESUELTO**
+> vía Chaquopy 17.0 (MIT, libpython3.13.so bionic embedded). El server-mode
+> quedó bloqueado en G28 nuevo: wheelhouse glibc-linked no bionic. Ver
+> `docs/audits/GIMO_MESH_CHAQUOPY_SPRINT_2026-04-20.md` para detalle completo.
+>
+> **2026-04-20 sprint close** (rev 1): 19 gaps fixed, 3 no-bug, G27 abierto
+> por python-build-standalone glibc incompatible. Ver
+> `docs/audits/GIMO_MESH_SPRINT_2026-04-20.md`.
 
 
 
@@ -17,7 +22,50 @@ Ordenado por criticidad descendente dentro de cada sección.
 
 ## BLOQUEANTES (ship-stoppers)
 
-### G27. Server mode bloqueado: python-build-standalone no corre en Android bionic — **ACTIVE BLOCKER**
+### G28. Server mode: wheelhouse rove glibc-linked — **ACTIVE BLOCKER (sucesor de G27)**
+- **Descubierto**: 2026-04-20 durante validación end-to-end de Fase B
+  (ver `docs/audits/GIMO_MESH_CHAQUOPY_SPRINT_2026-04-20.md`). El rove
+  bundle produce wheels con etiqueta `cpython-313-aarch64-linux-gnu.so`
+  (glibc), no bionic. Verificado in-device:
+  ```
+  adb shell 'run-as com.gredinlabs.gimomesh find files/runtime/wheelhouse-
+    site-packages -name "*.so"'
+  → pydantic_core/_pydantic_core.cpython-313-aarch64-linux-gnu.so
+  → cryptography/hazmat/bindings/_rust.abi3.so (linked against glibc)
+  → zstandard/*-linux-gnu.so
+  → zeroconf/*-linux-gnu.so
+  ```
+- **Síntoma**: `ImportError: cannot import name 'field_validator' from
+  'pydantic'` porque pydantic 2.x necesita `pydantic_core` y el `.so`
+  glibc no se puede dlopen en bionic; Python bionic busca por ABI tag
+  `android` y rechaza el glibc directamente.
+- **Root cause**: el pipeline rove cross-compile no está produciendo
+  binarios nativos bionic para el target `android-arm64`. El wheelhouse
+  resultante es GLIBC desktop ARM disfrazado de bundle Android.
+- **Fix upstream**: TODO en
+  `/c/Users/shilo/Documents/Github/rove/TODO_ANDROID_BIONIC_WHEELHOUSE.md`
+  con lista priorizada de 8 deps a cross-compile (pydantic-core primero,
+  seguido de cryptography, orjson, zstandard, psutil).
+- **Mitigación mientras llega**: smoke test con `minimal_app.py` (solo
+  FastAPI + `/health`, sin pydantic 2.x) prueba el path infraestructural
+  Chaquopy → uvicorn → socket bind sin el muro.
+
+### G27. Server mode bloqueado: python-build-standalone no corre en Android bionic — **RESUELTO 2026-04-20**
+- **Status**: el interpreter layer quedó resuelto migrando a Chaquopy 17.0
+  (MIT, `chaquo/chaquopy@master LICENSE.txt` re-verificado). La APK ahora
+  empaqueta `libpython3.13.so` bionic-native (5.4 MB arm64, 5.3 MB x86_64)
+  via el plugin Gradle `com.chaquo.python:17.0.0`, bundle-eado desde
+  Maven Central.
+- **Validación in-device** (S10 SM-G973F, Android 12):
+  ```
+  I/ChaquopyBridge: chaquopy python runtime initialised
+  I/GimoMeshApp:    chaquopy ready — cpython 3.13.9 on aarch64 /
+                    fastapi=0.125.0 starlette=0.50.0 uvicorn=0.44.0 anyio=?
+  ```
+- **Consecuencia**: el blocker raíz de G27 desaparece. El problema se
+  desplaza al wheelhouse layer (C/Rust extensions no-bionic del bundle
+  rove) — documentado como G28.
+- **Legacy description below, kept for history**:
 - **Descubierto**: 2026-04-20. Tras rebuild del bundle rove con `--python-source=standalone`
   (74 MB comprimido, 718 MB descomprimido, incluye CPython + wheels + repo tree),
   el binario Python embedido es **glibc-linked for GNU/Linux**, no bionic.

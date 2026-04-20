@@ -1,11 +1,22 @@
 # GIMO Mesh — Architecture Plan
 
-**Status**: APPROVED — Feature module of GIMO  
-**Date**: 2026-04-10  
-**Owner**: shilo  
-**Classification**: Product feature, modular, toggleable via `mesh_enabled` flag  
-**Supersedes**: `docs/experiments/DEV_MESH_EXPERIMENT_PLAN_v2_SUPERSEDED.md`  
-**Companion**: `docs/DEV_MESH_SOTA_AND_INNOVATION.md`  
+**Status**: APPROVED — Feature module of GIMO
+**Date**: 2026-04-10 (Rev 2 post-Chaquopy: 2026-04-20)
+**Owner**: shilo
+**Classification**: Product feature, modular, toggleable via `mesh_enabled` flag
+**Supersedes**: `docs/experiments/DEV_MESH_EXPERIMENT_PLAN_v2_SUPERSEDED.md`
+**Companion**: `docs/DEV_MESH_SOTA_AND_INNOVATION.md`
+
+**Rev 2 note (2026-04-20)**: el interpreter Python para el Android Server
+Node pasó de `python-build-standalone` (glibc-linked, G27 blocker) a
+**Chaquopy 17.0 MIT embedded** (`libpython3.13.so` bionic-native in-APK).
+`EmbeddedCoreRunner.start()` ya no hace `ProcessBuilder("python", "-m",
+"uvicorn")` sino `Python.getInstance().getModule("gimo_server_entry").
+callAttr("start_server", …)` — uvicorn corre en un daemon thread dentro
+de la JVM del foreground service. El bundle rove sigue existiendo para
+shipping el source tree del Core y los wheels cross-compiled, pero el
+intérprete viene de Chaquopy. Ver
+`docs/audits/GIMO_MESH_CHAQUOPY_SPRINT_2026-04-20.md`.
 
 ---
 
