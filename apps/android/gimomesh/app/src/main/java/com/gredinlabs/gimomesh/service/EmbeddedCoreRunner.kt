@@ -1,6 +1,7 @@
 package com.gredinlabs.gimomesh.service
 
 import android.content.Context
+import android.util.Log
 import com.gredinlabs.gimomesh.data.model.LogLevel
 import com.gredinlabs.gimomesh.data.model.LogSource
 import com.gredinlabs.gimomesh.data.store.SettingsStore
@@ -98,22 +99,27 @@ class EmbeddedCoreRunner(
         stop(forceOnly = true)
         reporter.setStatus(status = HostRuntimeStatus.STARTING, available = true)
         terminalBuffer.append(LogSource.SYS, "starting embedded GIMO Core (chaquopy)")
+        Log.i(TAG_RUN, "starting embedded GIMO Core (chaquopy) repoRoot=${runtime.repoRoot}")
 
         try {
             ChaquopyBridge.ensureStarted(context)
 
             val rovePaths = resolveRovePaths(runtime)
+            Log.i(TAG_RUN, "rove paths: site=${rovePaths.sitePackages} repo=${rovePaths.repoRoot} extra=${rovePaths.extraPaths} wheelhouse=${runtime.wheelhouseDir?.absolutePath}")
             val envMap = buildRuntimeEnvironment(settings, runtime)
             val args = mutableMapOf<String, Any>(
                 "rove_site_packages" to rovePaths.sitePackages,
                 "rove_repo_root" to rovePaths.repoRoot,
                 "rove_extra_paths" to rovePaths.extraPaths,
+                "rove_wheelhouse_dir" to (runtime.wheelhouseDir?.absolutePath ?: ""),
+                "rove_wheelhouse_target" to File(runtime.rootDir, "wheelhouse-site-packages").absolutePath,
                 "host" to "0.0.0.0",
                 "port" to LOCAL_CORE_PORT,
                 "env" to envMap,
             )
 
             ChaquopyBridge.startServer(args)
+            Log.i(TAG_RUN, "ChaquopyBridge.startServer returned")
             pythonStarted = true
 
             val ready = waitForReady(timeoutMs = 60_000)
@@ -141,6 +147,7 @@ class EmbeddedCoreRunner(
             startHealthMonitor()
             true
         } catch (e: Exception) {
+            Log.e(TAG_RUN, "embedded core start failed", e)
             stop(forceOnly = true)
             reporter.setStatus(
                 status = HostRuntimeStatus.ERROR,
@@ -154,6 +161,10 @@ class EmbeddedCoreRunner(
             )
             false
         }
+    }
+
+    companion object {
+        private const val TAG_RUN = "EmbeddedCoreRunner"
     }
 
     suspend fun stop(forceOnly: Boolean = false) {

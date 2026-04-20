@@ -91,6 +91,18 @@ class MeshAgentService : Service() {
                 scope.launch { requestStartInferenceNow() }
             }
             ACTION_STOP_INFERENCE -> scope.launch { requestStopInference() }
+            ACTION_TEST_SERVE -> {
+                // Fase B validation helper — forces hybridServe=true and starts
+                // the mesh. Temporary; removed after Fase B validation completes.
+                scope.launch {
+                    settingsStore.updateHybridServe(true)
+                    settingsStore.updateDeviceMode("server")
+                    if (settingsStore.settings.first().localCoreToken.isBlank()) {
+                        settingsStore.updateLocalCoreToken("test-local-token-${System.currentTimeMillis()}")
+                    }
+                }
+                startMesh()
+            }
         }
         return START_NOT_STICKY
     }
@@ -615,6 +627,7 @@ class MeshAgentService : Service() {
         const val ACTION_STOP = "com.gredinlabs.gimomesh.STOP"
         const val ACTION_START_INFERENCE = "com.gredinlabs.gimomesh.START_INFERENCE"
         const val ACTION_STOP_INFERENCE = "com.gredinlabs.gimomesh.STOP_INFERENCE"
+        const val ACTION_TEST_SERVE = "com.gredinlabs.gimomesh.TEST_SERVE"
         const val CHANNEL_ID = "gimo_mesh_agent"
         const val NOTIFICATION_ID = 1
         const val HEARTBEAT_INTERVAL_MS = 30_000L

@@ -53,6 +53,39 @@ def _prepend_sys_path(entries: list[str]) -> None:
         sys.path.insert(0, entry)
 
 
+def _unpack_wheelhouse(wheelhouse_dir: str, dest_site_packages: str) -> str:
+    """Extract every .whl in wheelhouse_dir into dest_site_packages (idempotent).
+
+    Needed because the rove bundle ships wheels that pip already resolved and
+    cross-compiled for bionic aarch64, but Python can't import directly from a
+    .whl on sys.path — it expects unpacked packages. On first boot we unpack
+    once; subsequent boots see the marker file and skip.
+
+    Returns the dest_site_packages path (or empty string on failure).
+    """
+    import glob
+    import os
+    import zipfile
+
+    marker = os.path.join(dest_site_packages, ".unpacked.ok")
+    if os.path.exists(marker):
+        return dest_site_packages
+
+    try:
+        os.makedirs(dest_site_packages, exist_ok=True)
+        wheels = sorted(glob.glob(os.path.join(wheelhouse_dir, "*.whl")))
+        for whl in wheels:
+            with zipfile.ZipFile(whl) as zf:
+                zf.extractall(dest_site_packages)
+        with open(marker, "w") as f:
+            f.write("ok\n")
+        logger.info("unpacked %d wheels into %s", len(wheels), dest_site_packages)
+        return dest_site_packages
+    except Exception as exc:
+        logger.exception("wheelhouse unpack failed: %s", exc)
+        return ""
+
+
 def start_server(args: Dict[str, Any]) -> None:
     """Start uvicorn in a daemon thread. Idempotent.
 
@@ -71,10 +104,22 @@ def start_server(args: Dict[str, Any]) -> None:
             return
         _stop_event.clear()
 
-        # 1. Path layering. rove site-packages first so pydantic_core (Rust)
-        #    and cryptography win over anything Chaquopy installed.
+        # 1. Path layering. rove site-packages / unpacked wheelhouse first so
+        #    pydantic_core (Rust) and cryptography win over anything Chaquopy
+        #    installed.
         extra = args.get("rove_extra_paths", "")
         path_entries: list[str] = []
+
+        # 1a. Unpack the rove wheelhouse on first boot so Python can import
+        #     from a real site-packages tree (wheels on sys.path alone don't
+        #     work — Python wants unpacked packages).
+        wheelhouse = args.get("rove_wheelhouse_dir", "")
+        wheelhouse_target = args.get("rove_wheelhouse_target", "")
+        if wheelhouse and wheelhouse_target:
+            unpacked = _unpack_wheelhouse(wheelhouse, wheelhouse_target)
+            if unpacked:
+                path_entries.append(unpacked)
+
         site_pkgs = args.get("rove_site_packages", "")
         if site_pkgs:
             path_entries.append(site_pkgs)

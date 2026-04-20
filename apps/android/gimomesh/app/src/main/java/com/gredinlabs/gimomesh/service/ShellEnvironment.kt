@@ -277,8 +277,12 @@ class ShellEnvironment(private val context: Context) {
     }
 
     private fun prepareEmbeddedCoreRuntime(): EmbeddedCoreRuntime? {
-        val abi = resolveRuntimeAbi() ?: return null
-        val manifest = readRuntimeManifest(abi) ?: return null
+        val abi = resolveRuntimeAbi()
+        android.util.Log.i("ShellEnv", "prepareEmbeddedCoreRuntime: abi=$abi")
+        if (abi == null) return null
+        val manifest = readRuntimeManifest(abi)
+        android.util.Log.i("ShellEnv", "prepareEmbeddedCoreRuntime: manifest=${manifest != null}")
+        if (manifest == null) return null
 
         // Layout after this method:
         //   runtimeDir/gimo-core-runtime.tar.xz      (the raw bundle, for
@@ -287,8 +291,14 @@ class ShellEnvironment(private val context: Context) {
         //   runtimeDir/extracted/python/             (standalone CPython)
         //   runtimeDir/extracted/site-packages/      (wheels)
         //   runtimeDir/extracted/repo/               (tools/gimo_server, …)
-        val tarballAsset = "runtime/$abi/${manifest.tarballName}"
-        val tarballDest = File(runtimeDir, manifest.tarballName)
+        // The Gradle packageCoreRuntime task renames the producer-side
+        // bundle filename (e.g. gimo-core-android-arm64-0.2.0-rove.tar.xz)
+        // to the canonical "gimo-core-runtime.tar.xz" under assets/runtime/<abi>/.
+        // Respect that canonical filename here, not manifest.tarballName which
+        // still carries the pre-rename producer name.
+        val canonicalTarball = "gimo-core-runtime.tar.xz"
+        val tarballAsset = "runtime/$abi/$canonicalTarball"
+        val tarballDest = File(runtimeDir, canonicalTarball)
         val extractedRoot = File(runtimeDir, "extracted")
         val unpackedMarker = File(extractedRoot, ".unpacked.v${manifest.runtimeVersion.ifBlank { "unknown" }}")
 
@@ -313,24 +323,52 @@ class ShellEnvironment(private val context: Context) {
                 extractTarXz(tarballDest, extractedRoot)
                 unpackedMarker.parentFile.mkdirs()
                 unpackedMarker.writeText("ok\n", Charsets.UTF_8)
+                android.util.Log.i("ShellEnv", "prepareEmbeddedCoreRuntime: extracted tarball OK")
             } catch (ex: Exception) {
-                // Leave the partial extraction for diagnostics; return null so
-                // isCoreRuntimeReady stays false.
+                android.util.Log.e("ShellEnv", "extractTarXz failed", ex)
                 return null
             }
+        } else {
+            android.util.Log.i("ShellEnv", "prepareEmbeddedCoreRuntime: unpack marker present, skipping")
         }
 
-        val pythonBinary = File(extractedRoot, manifest.pythonRelPath)
-        val repoRoot = File(extractedRoot, manifest.projectRootRelPath)
-        val pythonPath = manifest.pythonPathEntries
-            .map { File(extractedRoot, it).absolutePath }
-            .filter { it.isNotBlank() }
-            .joinToString(":")
+        // Producer-side (rove builder) wraps the whole payload in a single
+        // top-level directory whose name encodes bundle + target + version
+        // (e.g. "gimo-core-android-arm64-0.2.0-rove/"). We can't hardcode
+        // that name — a rename in the producer would break the APK silently.
+        // Instead, look for the unique top-level directory in the extracted
+        // tree and resolve manifest-relative paths against it. When the
+        // tarball has no wrapper (legacy/flat producers), paths resolve
+        // directly against extractedRoot.
+        val topLevelDirs = extractedRoot.listFiles()?.filter { it.isDirectory } ?: emptyList()
+        val wrapperDir = when {
+            topLevelDirs.size == 1 -> topLevelDirs[0]
+            else -> extractedRoot
+        }
+        android.util.Log.i("ShellEnv", "prepareEmbeddedCoreRuntime: wrapperDir=${wrapperDir.absolutePath}")
 
-        // Sanity: pythonBinary must be executable after unpack.
+        val pythonBinary = File(wrapperDir, manifest.pythonRelPath)
+        val repoRoot = File(wrapperDir, manifest.projectRootRelPath)
+        val wheelhouseDir = manifest.wheelsRelPath.takeIf { it.isNotBlank() }?.let { File(wrapperDir, it) }
+        val pythonPath = buildList<String> {
+            // Wheelhouse first — provides bionic pydantic_core, cryptography,
+            // psutil that Chaquopy's pip repo doesn't publish for Android.
+            if (wheelhouseDir != null && wheelhouseDir.isDirectory) {
+                add(wheelhouseDir.absolutePath)
+            }
+            addAll(manifest.pythonPathEntries.map { File(wrapperDir, it).absolutePath })
+        }.filter { it.isNotBlank() }.joinToString(":")
+
+        // Fase B — pythonBinary inside the rove bundle is OPTIONAL. Chaquopy
+        // provides the interpreter in-APK (libpython3.13.so). We only need
+        // repoRoot (tools/gimo_server source tree) and site-packages for
+        // bionic C/Rust wheels. Legacy bundles shipped PBS glibc binary —
+        // harmless, we ignore it.
         if (pythonBinary.exists()) {
             pythonBinary.setExecutable(true, false)
-        } else {
+        }
+        android.util.Log.i("ShellEnv", "prepareEmbeddedCoreRuntime: pythonBinary=${pythonBinary.absolutePath} exists=${pythonBinary.exists()} repoRoot=${repoRoot.absolutePath} isDir=${repoRoot.isDirectory}")
+        if (!repoRoot.isDirectory) {
             return null
         }
 
@@ -340,6 +378,7 @@ class ShellEnvironment(private val context: Context) {
             repoRoot = repoRoot,
             pythonPath = pythonPath,
             extraEnv = manifest.extraEnv,
+            wheelhouseDir = wheelhouseDir,
         )
     }
 
@@ -462,6 +501,7 @@ data class EmbeddedCoreRuntimeManifest(
     val signature: String = "",
     @SerialName("python_rel_path") val pythonRelPath: String,
     @SerialName("project_root_rel_path") val projectRootRelPath: String,
+    @SerialName("wheels_rel_path") val wheelsRelPath: String = "",
     @SerialName("python_path_entries") val pythonPathEntries: List<String> = emptyList(),
     @SerialName("extra_env") val extraEnv: Map<String, String> = emptyMap(),
 )
@@ -472,6 +512,13 @@ data class EmbeddedCoreRuntime(
     val repoRoot: File,
     val pythonPath: String,
     val extraEnv: Map<String, String>,
+    /**
+     * Absolute path to the rove wheelhouse dir (contains .whl files),
+     * or null when the bundle carries a pre-unpacked site-packages tree
+     * (rove_rel_path is empty in the manifest). Chaquopy's entrypoint
+     * unpacks each .whl into rootDir/wheelhouse-site-packages/ on first boot.
+     */
+    val wheelhouseDir: File? = null,
 )
 
 data class ShellResult(
