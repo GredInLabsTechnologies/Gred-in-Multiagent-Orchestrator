@@ -4,6 +4,7 @@ import android.content.Context
 import com.gredinlabs.gimomesh.data.model.LogLevel
 import com.gredinlabs.gimomesh.data.model.LogSource
 import com.gredinlabs.gimomesh.data.store.SettingsStore
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -18,6 +19,27 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
+/**
+ * Owns the lifecycle of the server-mode GIMO Core inside the APK.
+ *
+ * Fase B — the Python interpreter is Chaquopy-embedded (no subprocess).
+ * `gimo_server_entry.py` spawns a daemon thread inside the JVM that runs
+ * uvicorn with the unmodified `tools.gimo_server.main:app`. The Kotlin
+ * side sees uvicorn exactly like before through the `/health` + `/ready`
+ * HTTP endpoints — the process/thread swap is invisible to the health
+ * monitor.
+ *
+ * Runtime layering at start:
+ *   1. Rove bundle provides the GIMO Core source tree (tools.gimo_server package)
+ *      plus bionic-cross-compiled C/Rust wheels (pydantic_core, cryptography,
+ *      psutil) under `extracted/site-packages/`.
+ *   2. Chaquopy provides the CPython 3.13 interpreter itself plus the
+ *      pure-Python wheels (fastapi, uvicorn, starlette, anyio, …) that
+ *      don't need platform-specific binaries.
+ *   3. The entrypoint merges both layers into `sys.path` before importing
+ *      `tools.gimo_server.main` — rove first so its C/Rust extensions win
+ *      over any Chaquopy duplicates.
+ */
 class EmbeddedCoreRunner(
     private val context: Context,
     private val shell: ShellEnvironment,
@@ -30,11 +52,12 @@ class EmbeddedCoreRunner(
         .readTimeout(2, TimeUnit.SECONDS)
         .build()
 
-    private var serverProcess: Process? = null
+    @Volatile
+    private var pythonStarted: Boolean = false
     private var monitorJob: Job? = null
 
     suspend fun start(settings: SettingsStore.Settings): Boolean = withContext(Dispatchers.IO) {
-        if (serverProcess?.isAlive == true && isReady()) {
+        if (pythonStarted && isReady()) {
             reporter.setStatus(
                 status = HostRuntimeStatus.READY,
                 available = true,
@@ -74,29 +97,24 @@ class EmbeddedCoreRunner(
 
         stop(forceOnly = true)
         reporter.setStatus(status = HostRuntimeStatus.STARTING, available = true)
-        terminalBuffer.append(LogSource.SYS, "starting embedded GIMO Core")
+        terminalBuffer.append(LogSource.SYS, "starting embedded GIMO Core (chaquopy)")
 
         try {
-            val process = ProcessBuilder(
-                runtime.pythonBinary.absolutePath,
-                "-m",
-                "uvicorn",
-                "tools.gimo_server.main:app",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                LOCAL_CORE_PORT.toString(),
-            )
-                .directory(runtime.repoRoot)
-                .also { builder ->
-                    builder.environment().clear()
-                    builder.environment().putAll(buildRuntimeEnvironment(settings, runtime))
-                    builder.redirectErrorStream(true)
-                }
-                .start()
+            ChaquopyBridge.ensureStarted(context)
 
-            serverProcess = process
-            startOutputPump(process)
+            val rovePaths = resolveRovePaths(runtime)
+            val envMap = buildRuntimeEnvironment(settings, runtime)
+            val args = mutableMapOf<String, Any>(
+                "rove_site_packages" to rovePaths.sitePackages,
+                "rove_repo_root" to rovePaths.repoRoot,
+                "rove_extra_paths" to rovePaths.extraPaths,
+                "host" to "0.0.0.0",
+                "port" to LOCAL_CORE_PORT,
+                "env" to envMap,
+            )
+
+            ChaquopyBridge.startServer(args)
+            pythonStarted = true
 
             val ready = waitForReady(timeoutMs = 60_000)
             if (!ready) {
@@ -142,25 +160,34 @@ class EmbeddedCoreRunner(
         monitorJob?.cancel()
         monitorJob = null
 
+        if (!pythonStarted) {
+            reporter.reset()
+            return
+        }
+
         if (!forceOnly) {
             requestGracefulShutdown()
         }
 
-        val process = serverProcess
-        if (process != null) {
-            if (!process.waitFor(5, TimeUnit.SECONDS)) {
-                process.destroy()
-                if (!process.waitFor(5, TimeUnit.SECONDS)) {
-                    process.destroyForcibly()
-                }
-            }
+        // Signal uvicorn + wait for the daemon thread to exit. The
+        // interpreter itself stays up (Chaquopy singleton — cannot be
+        // torn down without killing the JVM). On next start() we'll
+        // spin a fresh daemon thread for uvicorn.
+        ChaquopyBridge.stopServer()
+        val exited = ChaquopyBridge.waitForServerShutdown(timeoutSeconds = 5.0)
+        if (!exited) {
+            terminalBuffer.append(
+                LogSource.SYS,
+                "embedded GIMO Core did not shut down within 5s (leaked thread)",
+                LogLevel.WARN,
+            )
         }
-        serverProcess = null
+        pythonStarted = false
         reporter.reset()
     }
 
     suspend fun isHealthy(): Boolean = withContext(Dispatchers.IO) {
-        if (serverProcess?.isAlive != true) return@withContext false
+        if (!pythonStarted) return@withContext false
         try {
             val request = Request.Builder().url("$LOCAL_CORE_URL/health").get().build()
             healthClient.newCall(request).execute().use { it.isSuccessful }
@@ -170,13 +197,51 @@ class EmbeddedCoreRunner(
     }
 
     suspend fun isReady(): Boolean = withContext(Dispatchers.IO) {
-        if (serverProcess?.isAlive != true) return@withContext false
+        if (!pythonStarted) return@withContext false
         try {
             val request = Request.Builder().url("$LOCAL_CORE_URL/ready").get().build()
             healthClient.newCall(request).execute().use { it.isSuccessful }
         } catch (_: Exception) {
             false
         }
+    }
+
+    /**
+     * Discovers the `site-packages` directory inside the extracted rove
+     * bundle. Convention: any `pythonPathEntries` entry whose basename is
+     * `site-packages` wins. Fallback: a subdir named `site-packages` directly
+     * under `repoRoot.parentFile`. Any remaining entries become
+     * [RovePaths.extraPaths] (os.pathsep-joined for the Python side).
+     */
+    private data class RovePaths(
+        val sitePackages: String,
+        val repoRoot: String,
+        val extraPaths: String,
+    )
+
+    private fun resolveRovePaths(runtime: EmbeddedCoreRuntime): RovePaths {
+        // Split the colon-joined path we built in ShellEnvironment back into
+        // entries. Android path separator is `:` (Linux) so this is safe.
+        val entries = runtime.pythonPath.split(":").filter { it.isNotBlank() }
+        var sitePackages = ""
+        val extras = mutableListOf<String>()
+        for (entry in entries) {
+            if (sitePackages.isEmpty() && File(entry).name == "site-packages") {
+                sitePackages = entry
+            } else {
+                extras += entry
+            }
+        }
+        if (sitePackages.isEmpty()) {
+            val parent = runtime.repoRoot.parentFile
+            val fallback = parent?.let { File(it, "site-packages") }
+            if (fallback != null && fallback.isDirectory) sitePackages = fallback.absolutePath
+        }
+        return RovePaths(
+            sitePackages = sitePackages,
+            repoRoot = runtime.repoRoot.absolutePath,
+            extraPaths = extras.joinToString(":"),
+        )
     }
 
     private fun buildRuntimeEnvironment(
@@ -224,15 +289,10 @@ class EmbeddedCoreRunner(
     private fun resolveDeviceName(settings: SettingsStore.Settings): String =
         settings.deviceName.ifBlank { android.os.Build.MODEL ?: "Android host" }
 
-    private fun startOutputPump(process: Process) {
-        runnerScope.launch {
-            process.inputStream.bufferedReader().useLines { lines ->
-                lines.forEach { line ->
-                    terminalBuffer.append(LogSource.SYS, line)
-                }
-            }
-        }
-    }
+    // Chaquopy routes Python's stdout/stderr to logcat via its own JNI
+    // bridge — no custom output pump needed (subprocess.inputStream is
+    // gone along with ProcessBuilder). Server-side uvicorn logs show up
+    // under the `python.stdout` logcat tag.
 
     private suspend fun waitForReady(timeoutMs: Long): Boolean {
         val startedAt = System.currentTimeMillis()

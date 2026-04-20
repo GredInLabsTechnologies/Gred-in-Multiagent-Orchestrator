@@ -170,9 +170,31 @@ chaquopy {
         // Docs: https://chaquo.com/chaquopy/doc/current/android.html#buildpython
         buildPython(resolveHostPython())
         pip {
-            // Smoke test only — validates pip resolution + bionic wheel install.
-            // Fase B replaces this with the real GIMO Core requirements subset.
-            install("six")
+            // Fase B — pure-Python server deps only. C/Rust extensions with
+            // bionic wheels (pydantic_core, cryptography, psutil, orjson) come
+            // from the rove bundle's site-packages at runtime — Chaquopy's
+            // public wheel repo lacks bionic cross-compiles of those, so
+            // installing `pydantic` here would silently downgrade to pydantic
+            // 1.x (pure Python) and break everything downstream that assumes
+            // pydantic 2 APIs.
+            //
+            // Layering at runtime (gimo_server_entry.py):
+            //   sys.path precedence → (1) rove extracted/site-packages/
+            //                       → (2) Chaquopy chaquopy/lib-packages/
+            //                       → (3) rove extracted/repo/ (GIMO Core source)
+            // (1) wins for Rust/C modules; (2) provides the uvicorn/starlette
+            // stack that ships as pure Python wheels; (3) is the GIMO Core
+            // source tree and always imports from a single source of truth.
+            install("fastapi")
+            install("starlette")
+            install("uvicorn")  // plain: no [standard] — uvloop/httptools excluded
+            install("typing-extensions")
+            install("h11")
+            install("anyio")
+            install("sniffio")
+            install("idna")
+            install("click")
+            install("python-multipart")
         }
         // Extract all installed packages at startup so importlib sees them as
         // regular file-system modules (required for packages that introspect
