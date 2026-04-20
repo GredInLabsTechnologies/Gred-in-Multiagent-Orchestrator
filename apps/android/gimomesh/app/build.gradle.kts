@@ -195,11 +195,47 @@ chaquopy {
             install("idna")
             install("click")
             install("python-multipart")
+            // Fase C — the real tools/gimo_server/config.py does
+            // `from dotenv import load_dotenv`. Ship the pure-Python shim
+            // so the import resolves without touching requirements.txt
+            // (that file stays desktop/server-centric).
+            install("python-dotenv")
         }
         // Extract all installed packages at startup so importlib sees them as
         // regular file-system modules (required for packages that introspect
         // __file__ / __path__ — e.g. pydantic plugins, uvicorn workers).
         extractPackages.add("*")
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Fase C — sync tools/gimo_server/ into Chaquopy Python sources so the bundled
+// CPython can `import tools.gimo_server.main`. Runs before mergeDebugPythonSources
+// so the Chaquopy plugin picks up the refreshed copy. Idempotent, fast
+// (typically < 500 ms on a clean repo) because Gradle's Copy task skips
+// unchanged files.
+// -----------------------------------------------------------------------------
+val syncGimoServerSources = tasks.register<Copy>("syncGimoServerSources") {
+    description = "Copia tools/gimo_server/ a app/src/main/python/tools/gimo_server/ " +
+        "para que Chaquopy lo empaquete dentro del APK."
+    group = "gimo"
+    from("${rootDir.parentFile.parentFile.parentFile}/tools/gimo_server") {
+        include("**/*.py")
+        exclude("**/__pycache__/**")
+        exclude("**/*.pyc")
+        exclude("**/*.pyo")
+        // Tests live at the repo root under tests/, never under tools/gimo_server,
+        // so no test exclusion is needed here.
+    }
+    into("src/main/python/tools/gimo_server")
+}
+
+afterEvaluate {
+    listOf(
+        "mergeDebugPythonSources", "mergeReleasePythonSources",
+        "generateDebugPythonSourceAssets", "generateReleasePythonSourceAssets",
+    ).forEach { taskName ->
+        tasks.findByName(taskName)?.dependsOn(syncGimoServerSources)
     }
 }
 

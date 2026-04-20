@@ -1,0 +1,5 @@
+# Fase C — tools/gimo_server/ se sincroniza desde el repo root en build time
+# (ver syncGimoServerSources en app/build.gradle.kts). No se versiona aquí
+# para no duplicar source of truth. El único stub versionado es el
+# tools/__init__.py que hace que Python trate `tools` como package.
+tools/gimo_server/

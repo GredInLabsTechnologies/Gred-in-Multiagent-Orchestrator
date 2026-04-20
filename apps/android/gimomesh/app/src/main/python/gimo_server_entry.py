@@ -43,6 +43,39 @@ _stop_event = threading.Event()
 _lock = threading.RLock()
 
 
+def _coerce_java_map(m: Any) -> Dict[str, Any]:
+    """Convert a Chaquopy-proxied java.util.Map into a real Python dict.
+
+    Chaquopy wraps Kotlin Map<String, Any> as java.util.LinkedHashMap which
+    is neither iterable nor does it expose `.items()` / two-arg `.get()`.
+    We iterate keySet() (always present on java.util.Map) and fetch each
+    value via bracket syntax (proxies to Map.get(key)). Nested Kotlin Maps
+    (e.g. the `env` sub-map) are coerced recursively.
+    """
+    if m is None:
+        return {}
+    if isinstance(m, dict):
+        return m
+    out: Dict[str, Any] = {}
+    try:
+        # Java Map's keySet() returns a view that Chaquopy proxies without a
+        # Python iterator protocol. toArray() returns a Java Object[] which
+        # IS iterable via Chaquopy's array adapter.
+        if hasattr(m, "keySet"):
+            keys = list(m.keySet().toArray())
+        else:
+            keys = list(m.keys())
+        for k in keys:
+            key = str(k)
+            value = m[k]
+            if value is not None and hasattr(value, "keySet"):
+                value = _coerce_java_map(value)
+            out[key] = value
+    except Exception as exc:  # pragma: no cover — belt-and-braces
+        logger.exception("java map coercion failed: %s", exc)
+    return out
+
+
 def _prepend_sys_path(entries: list[str]) -> None:
     """Insert each entry at sys.path[0], preserving relative order."""
     for entry in reversed(entries):
@@ -98,6 +131,11 @@ def start_server(args: Dict[str, Any]) -> None:
       port:                 bind port, int.
     """
     global _server, _thread
+    # Chaquopy proxies the Kotlin Map as java.util.LinkedHashMap whose `.get`
+    # takes only 1 argument — Python's `dict.get(key, default)` doesn't map.
+    # Coerce to a real Python dict up front so the rest of the code can use
+    # Pythonic APIs.
+    args = _coerce_java_map(args)
     with _lock:
         if _thread is not None and _thread.is_alive():
             logger.info("start_server: already running")
@@ -202,6 +240,7 @@ def runtime_probe(args: Dict[str, Any]) -> Dict[str, str]:
     so the Android side can show "fastapi=X.Y / pydantic=X.Y.Z" in the UI.
     Any import failure returns an explicit {"ok": "false", "error": str}.
     """
+    args = _coerce_java_map(args)
     try:
         path_entries: list[str] = []
         site_pkgs = args.get("rove_site_packages", "")

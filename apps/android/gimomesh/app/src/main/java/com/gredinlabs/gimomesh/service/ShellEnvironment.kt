@@ -367,8 +367,15 @@ class ShellEnvironment(private val context: Context) {
         if (pythonBinary.exists()) {
             pythonBinary.setExecutable(true, false)
         }
-        android.util.Log.i("ShellEnv", "prepareEmbeddedCoreRuntime: pythonBinary=${pythonBinary.absolutePath} exists=${pythonBinary.exists()} repoRoot=${repoRoot.absolutePath} isDir=${repoRoot.isDirectory}")
-        if (!repoRoot.isDirectory) {
+        android.util.Log.i("ShellEnv", "prepareEmbeddedCoreRuntime: pythonBinary=${pythonBinary.absolutePath} exists=${pythonBinary.exists()} repoRoot=${repoRoot.absolutePath} isDir=${repoRoot.isDirectory} wheelhouse=${wheelhouseDir?.absolutePath}")
+
+        // Fase C — tools/gimo_server/ ships inside the APK via Chaquopy
+        // sources (see syncGimoServerSources gradle task). The rove bundle's
+        // `project/` subtree is now OPTIONAL; a runtime is valid as long as
+        // the wheelhouse exists (or, legacy, the project tree is present).
+        val hasWheelhouse = wheelhouseDir?.isDirectory == true
+        val hasLegacyProject = repoRoot.isDirectory
+        if (!hasWheelhouse && !hasLegacyProject) {
             return null
         }
 
