@@ -283,6 +283,11 @@ dependencies {
     // the user having to re-run the enrollment wizard.
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // WorkManager — drives the opt-in model retention housekeeping worker
+    // (Fase D2-b). PeriodicWorkRequest with 24 h interval + storage-low
+    // constraint. Default is "never delete" — the user opts in from Settings.
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
+
     // Server mode: embedded Core runtime bundle extraction
     // - apache commons-compress gives us tar readers (tar.xz layer is streamed
     //   on top of the XZ decoder from tukaani). Both are small pure-Java libs.

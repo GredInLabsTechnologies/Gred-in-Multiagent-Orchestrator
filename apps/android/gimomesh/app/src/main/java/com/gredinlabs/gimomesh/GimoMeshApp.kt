@@ -10,6 +10,7 @@ import com.gredinlabs.gimomesh.data.store.ModelStorage
 import com.gredinlabs.gimomesh.data.store.SettingsStore
 import com.gredinlabs.gimomesh.service.ChaquopyBridge
 import com.gredinlabs.gimomesh.service.HostRuntimeReporter
+import com.gredinlabs.gimomesh.service.ModelRetentionWorker
 import com.gredinlabs.gimomesh.service.TerminalBuffer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,6 +66,19 @@ class GimoMeshApp : Application() {
                 }
             } catch (t: Throwable) {
                 Log.w("GimoMeshApp", "model storage migration failed", t)
+            }
+
+            // Fase D2-b — re-apply the retention worker schedule. Needed on
+            // every boot because WorkManager schedules don't survive APK
+            // reinstall. No-op when user hasn't opted in (default 0 days).
+            try {
+                val snapshot = settingsStore.settings.first()
+                ModelRetentionWorker.applySchedule(
+                    this@GimoMeshApp,
+                    snapshot.modelRetentionDays,
+                )
+            } catch (t: Throwable) {
+                Log.w("GimoMeshApp", "retention scheduler apply failed", t)
             }
         }
 

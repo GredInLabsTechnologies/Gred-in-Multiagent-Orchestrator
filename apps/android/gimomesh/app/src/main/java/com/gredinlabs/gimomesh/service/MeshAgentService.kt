@@ -195,6 +195,11 @@ class MeshAgentService : Service() {
                                     capabilities = metricsCollector.getDeviceCapabilities(),
                                 )
                                 client.sendHeartbeat(payload)
+                                // Fase D2-b — successful heartbeat marks the
+                                // workspace as reachable. ModelRetentionWorker
+                                // uses this timestamp to decide when (if ever)
+                                // to delete unused models.
+                                settingsStore.touchWorkspaceContact()
                             } catch (e: Exception) {
                                 terminalBuffer.append(
                                     LogSource.AGENT,

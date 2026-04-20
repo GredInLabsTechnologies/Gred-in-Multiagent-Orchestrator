@@ -374,6 +374,58 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
         terminalBuffer.clear()
     }
 
+    // Fase D2-b — opt-in model retention handle exposed to the Settings
+    // screen. Valid values: 0 (never), 30, 60, 90. Applies the worker
+    // schedule atomically on the same scope so the UI can reflect the
+    // change immediately.
+    fun setModelRetentionDays(days: Int) {
+        viewModelScope.launch {
+            settingsStore.updateModelRetentionDays(days)
+            com.gredinlabs.gimomesh.service.ModelRetentionWorker.applySchedule(
+                getApplication(),
+                days,
+            )
+        }
+    }
+
+    // Fase D2-b — one-tap wipe for the "Delete downloaded models" button.
+    // Doesn't touch enrollment / settings / keystore. Returns the count
+    // of deleted files via the terminal buffer for audit trail.
+    fun deleteDownloadedModels() {
+        viewModelScope.launch {
+            val count = com.gredinlabs.gimomesh.data.store.ModelStorage
+                .deleteAllModels(getApplication())
+            val message = "deleted $count downloaded model file(s) via Settings"
+            terminalBuffer.append(
+                com.gredinlabs.gimomesh.data.model.LogSource.SYS,
+                message,
+            )
+            // Clear the stale downloadedModelPath so the wizard re-prompts.
+            settingsStore.updateDownloadedModelPath("")
+        }
+    }
+
+    // Fase D2-b — nuclear reset for the "Delete all GIMO Mesh data" button.
+    // Wipes models + DataStore enrollment + Keystore device identity. The
+    // next boot lands on the welcome wizard as a fresh install.
+    fun deleteAllData() {
+        viewModelScope.launch {
+            com.gredinlabs.gimomesh.data.store.ModelStorage.deleteAllModels(getApplication())
+            deviceIdentityStore.clear()
+            // Blank out the enrollment fields in DataStore. We intentionally
+            // don't clear UI prefs (thermal limits, theme) to avoid wiping
+            // harmless customisations.
+            settingsStore.updateCoreUrl("")
+            settingsStore.updateToken("")
+            settingsStore.updateDeviceId("")
+            settingsStore.updateDeviceName("")
+            settingsStore.updateLocalDeviceSecret("")
+            settingsStore.updateLocalCoreToken("")
+            settingsStore.updateDownloadedModelPath("")
+            settingsStore.updateActiveWorkspace("default", "Default")
+        }
+    }
+
     private fun resolveDisplayCoreUrl(settings: SettingsStore.Settings): String =
         resolveControlPlaneBaseUrl(settings)
             .removePrefix("http://")

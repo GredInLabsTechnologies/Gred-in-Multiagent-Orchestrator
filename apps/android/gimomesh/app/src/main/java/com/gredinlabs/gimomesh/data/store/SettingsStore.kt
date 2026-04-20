@@ -46,6 +46,14 @@ class SettingsStore(private val context: Context) {
         val ACTIVE_WORKSPACE_ID = stringPreferencesKey("active_workspace_id")
         val ACTIVE_WORKSPACE_NAME = stringPreferencesKey("active_workspace_name")
         val INFERENCE_AUTO_START_ALLOWED = booleanPreferencesKey("inference_auto_start_allowed")
+        // Fase D2-b — opt-in model retention policy.
+        // 0 = never delete (default). 30/60/90 = days of workspace-contact
+        // inactivity after which ModelRetentionWorker wipes the models dir.
+        val MODEL_RETENTION_DAYS = intPreferencesKey("model_retention_days")
+        // Epoch millis of the last successful heartbeat to the workspace
+        // Core. Updated by MeshAgentService on every successful heartbeat.
+        // Used by ModelRetentionWorker to compute elapsed inactivity.
+        val LAST_WORKSPACE_CONTACT_AT = longPreferencesKey("last_workspace_contact_at")
     }
 
     // Defaults
@@ -84,6 +92,11 @@ class SettingsStore(private val context: Context) {
         // KISI invariant: llama-server never auto-starts on boot/relaunch unless
         // the human has explicitly opted in (and hardware is healthy). Default OFF.
         val inferenceAutoStartAllowed: Boolean = false,
+        // Fase D2-b — opt-in model retention. 0 = never delete (default).
+        // Values 30/60/90 enable ModelRetentionWorker.
+        val modelRetentionDays: Int = 0,
+        // Epoch millis of last successful heartbeat. 0 = never contacted.
+        val lastWorkspaceContactAt: Long = 0L,
     )
 
     val settings: Flow<Settings> = context.dataStore.data.map { prefs ->
@@ -117,6 +130,8 @@ class SettingsStore(private val context: Context) {
             activeWorkspaceId = prefs[Keys.ACTIVE_WORKSPACE_ID] ?: "default",
             activeWorkspaceName = prefs[Keys.ACTIVE_WORKSPACE_NAME] ?: "Default",
             inferenceAutoStartAllowed = prefs[Keys.INFERENCE_AUTO_START_ALLOWED] ?: false,
+            modelRetentionDays = prefs[Keys.MODEL_RETENTION_DAYS] ?: 0,
+            lastWorkspaceContactAt = prefs[Keys.LAST_WORKSPACE_CONTACT_AT] ?: 0L,
         )
     }
 
@@ -206,6 +221,24 @@ class SettingsStore(private val context: Context) {
 
     suspend fun updateInferenceAutoStartAllowed(allowed: Boolean) {
         context.dataStore.edit { it[Keys.INFERENCE_AUTO_START_ALLOWED] = allowed }
+    }
+
+    /**
+     * Fase D2-b — opt-in model retention policy.
+     * Accepts 0 (never), 30, 60, or 90. Any other value is clamped to 0.
+     */
+    suspend fun updateModelRetentionDays(days: Int) {
+        val sanitized = if (days in setOf(0, 30, 60, 90)) days else 0
+        context.dataStore.edit { it[Keys.MODEL_RETENTION_DAYS] = sanitized }
+    }
+
+    /**
+     * Mark the moment of a successful heartbeat to the workspace Core.
+     * ModelRetentionWorker uses this to compute elapsed inactivity.
+     * Called from MeshAgentService on every 2xx heartbeat response.
+     */
+    suspend fun touchWorkspaceContact(atMillis: Long = System.currentTimeMillis()) {
+        context.dataStore.edit { it[Keys.LAST_WORKSPACE_CONTACT_AT] = atMillis }
     }
 
     suspend fun updateActiveWorkspace(id: String, name: String) {
