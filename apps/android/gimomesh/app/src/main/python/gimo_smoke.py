@@ -17,10 +17,23 @@ import sys
 
 
 def smoke() -> dict[str, str]:
-    """Return a dict with runtime fingerprints. Consumed by ChaquopyBridge."""
-    # `six` is the only pip dep installed in Fase A. If it imports, the
-    # Chaquopy pip pipeline is wired correctly and future deps will also work.
-    import six  # noqa: F401  — import-to-prove-it-works
+    """Return a dict with runtime fingerprints. Consumed by ChaquopyBridge.
+
+    Exercises the full server-mode stack (Fase B): fastapi → starlette →
+    anyio + uvicorn → pydantic v1 shim. If each import resolves, every
+    wheel Chaquopy's pip pipeline published is loadable on bionic, and
+    uvicorn.run() (the next step in EmbeddedCoreRunner) has a 95%+ chance
+    of booting cleanly. The remaining 5% is the network bind + the
+    tools.gimo_server import which needs the rove bundle mounted on sys.path.
+    """
+    # Import chain — ordered intentionally: a failure pinpoints the first
+    # wheel missing from the bionic build.
+    import fastapi
+    import starlette
+    import anyio
+    import uvicorn
+    import click  # uvicorn dep; first pure-Python one after the async stack
+    import typing_extensions
 
     return {
         "ok": "true",
@@ -28,7 +41,12 @@ def smoke() -> dict[str, str]:
         "platform": platform.platform(),
         "machine": platform.machine(),
         "impl": platform.python_implementation(),
-        "six_imported": "true",
+        "fastapi": getattr(fastapi, "__version__", "?"),
+        "starlette": getattr(starlette, "__version__", "?"),
+        "uvicorn": getattr(uvicorn, "__version__", "?"),
+        "anyio": getattr(anyio, "__version__", "?"),
+        "click": getattr(click, "__version__", "?"),
+        "typing_extensions": getattr(typing_extensions, "__version__", "?"),
     }
 
 

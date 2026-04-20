@@ -63,8 +63,11 @@ object ChaquopyBridge {
         val result = module.callAttr("smoke").asMap()
         val version = result[py.builtins.callAttr("str", "python_version")]?.toString() ?: "?"
         val machine = result[py.builtins.callAttr("str", "machine")]?.toString() ?: "?"
-        val six = result[py.builtins.callAttr("str", "six_imported")]?.toString() ?: "?"
-        return "cpython $version on $machine / six=$six"
+        val fastapi = result[py.builtins.callAttr("str", "fastapi")]?.toString() ?: "?"
+        val starlette = result[py.builtins.callAttr("str", "starlette")]?.toString() ?: "?"
+        val uvicorn = result[py.builtins.callAttr("str", "uvicorn")]?.toString() ?: "?"
+        val anyio = result[py.builtins.callAttr("str", "anyio")]?.toString() ?: "?"
+        return "cpython $version on $machine / fastapi=$fastapi starlette=$starlette uvicorn=$uvicorn anyio=$anyio"
     }
 
     /**
