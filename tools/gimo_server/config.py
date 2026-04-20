@@ -20,6 +20,15 @@ APP_MCP_ALLOWED_PROFILES = ("safe", "extended")
 
 
 def _get_base_dir() -> Path:
+    # Explicit override for embedded / Chaquopy / sandboxed deployments
+    # where the source tree lives inside an asset archive and the
+    # sentinel walk would land in a read-only root.
+    override = os.environ.get("ORCH_BASE_DIR", "").strip()
+    if override:
+        p = Path(override).resolve()
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
     # Caso PyInstaller: el exe vive en el directorio de instalación
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent

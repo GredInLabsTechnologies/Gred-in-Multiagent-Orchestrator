@@ -264,6 +264,16 @@ class EmbeddedCoreRunner(
             if (runtime.pythonPath.isNotBlank()) {
                 put("PYTHONPATH", runtime.pythonPath)
             }
+            // Fase C — anchor the Core's base_dir at a writable location under
+            // the app's filesDir. Without this the Core falls back to Path.cwd()
+            // which is "/" on Android (read-only) and explodes trying to
+            // create /logs, /.orch_data, etc.
+            val appData = File(context.filesDir, "core_data")
+            appData.mkdirs()
+            put("ORCH_BASE_DIR", appData.absolutePath)
+            put("ORCH_REPO_ROOT", appData.absolutePath)
+            put("ORCH_DATA_DIR", File(appData, ".orch_data").absolutePath)
+            put("ORCH_LOG_DIR", File(appData, "logs").absolutePath)
             put("ORCH_PORT", LOCAL_CORE_PORT.toString())
             put("ORCH_OPERATOR_TOKEN", settings.localCoreToken)
             put("GIMO_MESH_HOST_ENABLED", "true")

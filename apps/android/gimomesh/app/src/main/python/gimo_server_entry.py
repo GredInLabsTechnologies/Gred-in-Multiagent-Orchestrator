@@ -60,14 +60,18 @@ def _coerce_java_map(m: Any) -> Dict[str, Any]:
     try:
         # Java Map's keySet() returns a view that Chaquopy proxies without a
         # Python iterator protocol. toArray() returns a Java Object[] which
-        # IS iterable via Chaquopy's array adapter.
+        # IS iterable via Chaquopy's array adapter. Access values via the
+        # `.get(k)` method — `m[k]` is not proxied to __getitem__ for Java
+        # Map implementations in Chaquopy 17.
         if hasattr(m, "keySet"):
             keys = list(m.keySet().toArray())
+            get_value = lambda k: m.get(k)
         else:
             keys = list(m.keys())
+            get_value = lambda k: m[k]
         for k in keys:
             key = str(k)
-            value = m[k]
+            value = get_value(k)
             if value is not None and hasattr(value, "keySet"):
                 value = _coerce_java_map(value)
             out[key] = value
@@ -157,6 +161,18 @@ def start_server(args: Dict[str, Any]) -> None:
             unpacked = _unpack_wheelhouse(wheelhouse, wheelhouse_target)
             if unpacked:
                 path_entries.append(unpacked)
+                # Invalidate any already-imported copy of pydantic / pydantic_core
+                # / fastapi / starlette from Chaquopy's pip repo — the rove
+                # wheelhouse ships pydantic 2.x + pydantic_core bionic, which
+                # the Core's `from pydantic import field_validator` needs.
+                # The smoke test ran earlier and cached pydantic 1.x, so we
+                # evict it before start_server adds the wheelhouse to sys.path.
+                for _mod in list(sys.modules.keys()):
+                    if _mod.split(".")[0] in {
+                        "pydantic", "pydantic_core", "fastapi", "starlette",
+                        "anyio", "click",
+                    }:
+                        sys.modules.pop(_mod, None)
 
         site_pkgs = args.get("rove_site_packages", "")
         if site_pkgs:

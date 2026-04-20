@@ -10,14 +10,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import json as _json
 
 from tools.gimo_server.config import ACTIONS_MAX_PAYLOAD_BYTES, BASE_DIR, DEBUG, LOG_LEVEL, get_settings
-# Note: middlewares.py (module) vs middlewares/ (package) - import from the .py module
-import importlib.util as _importlib_util
-import os as _os
-_middlewares_py_path = _os.path.join(_os.path.dirname(__file__), "middlewares.py")
-_middlewares_spec = _importlib_util.spec_from_file_location("_middlewares_module", _middlewares_py_path)
-_middlewares_module = _importlib_util.module_from_spec(_middlewares_spec)
-_middlewares_spec.loader.exec_module(_middlewares_module)
-register_middlewares = _middlewares_module.register_middlewares
+# Legacy `middlewares.py` renamed to `core_middlewares.py` to eliminate the
+# collision with the `middlewares/` package that broke Chaquopy's asset
+# finder on Android (spec_from_file_location resolved to the package __init__
+# instead of the .py file because both shared a basename in one filesystem).
+from tools.gimo_server.core_middlewares import register_middlewares
 from tools.gimo_server.routers.core_router import router as core_router
 from tools.gimo_server.version import __version__
 from tools.gimo_server.services.snapshot_service import SnapshotService
